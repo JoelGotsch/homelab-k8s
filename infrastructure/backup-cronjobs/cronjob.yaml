@@ -410,9 +410,23 @@ spec:
                 secretName: restic-tier-3-password
                 defaultMode: 0400
             - name: tmp
+              # Disk-backed, and large, because HOME=/tmp and restic caches here.
+              #
+              # This was `medium: Memory, sizeLimit: 256Mi` — a 256 MiB RAM disk — which
+              # was ample while `forget` ran in dry-run and `prune` was skipped. Opening
+              # the retention gate on 2026-08-15 made prune run for the first time, and
+              # prune streams pack files through the cache: the 2026-08-16 02:15 run
+              # died on `no space left on device` writing
+              # /tmp/.cache/restic/…, after `forget` had already removed 3 snapshots.
+              # Not data loss — the backup itself completed and the removed snapshots
+              # were the ones retention selected — but the repo keeps unreferenced
+              # blocks until a prune finishes.
+              #
+              # 20Gi matches the nas-personal lane, whose prune succeeded the same night
+              # with the same restic and the same repo. Sized by what already works
+              # rather than by estimate.
               emptyDir:
-                medium: Memory
-                sizeLimit: 256Mi
+                sizeLimit: 20Gi
             - name: restic-passwd
               configMap:
                 name: restic-passwd
