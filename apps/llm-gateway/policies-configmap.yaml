@@ -1,0 +1,75 @@
+# Operator-managed allowlists mounted into the LiteLLM pod at
+# /etc/litellm/policies. Source-of-truth lives in the sibling
+# repo `llm-gateway/policies/`. Operator keeps these in sync
+# manually — Renovate cannot reason about semantic drift.
+#
+# When the sibling-repo allowlists change, render this ConfigMap
+# from there and commit. (A future Ansible task could automate
+# this, but the volume is low.)
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-gateway-policies
+  namespace: llm-gateway
+data:
+  provider-allowlist.yaml: |
+    models:
+      claude-sonnet:
+        - public
+        - non-personal
+        - code-no-secrets
+      claude-opus:
+        - public
+        - non-personal
+        - code-no-secrets
+      gpt-4o:
+        - public
+        - non-personal
+      gpt-4o-mini:
+        - public
+        - non-personal
+      mac-qwen-14b:
+        - public
+        - non-personal
+        - code-no-secrets
+        - personal
+        - secret
+      mac-deepseek-coder-lite:
+        - public
+        - non-personal
+        - code-no-secrets
+        - personal
+        - secret
+      mac-llama-8b:
+        - public
+        - non-personal
+        - code-no-secrets
+        - personal
+        - secret
+      mac-embed:
+        - public
+        - non-personal
+        - code-no-secrets
+        - personal
+        - secret
+  mcp-allowlist.yaml: |
+    tools:
+      web-search:
+        - public
+        - non-personal
+      fetch-url:
+        - public
+        - non-personal
+      repo-read:
+        - public
+        - non-personal
+        - code-no-secrets
+      calendar-read:
+        - personal
+      email-summarize:
+        - personal
+      vault-issue-cert:
+        - secret
+      argocd-sync:
+        - secret

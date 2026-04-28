@@ -1,0 +1,27 @@
+# llm-gateway — LiteLLM proxy + homelab tag-enforcement hooks.
+# Per ADR 0026 + journal 2026-04-28-mlx-litellm-mac-inference.md.
+#
+# The image is a homelab-built variant of LiteLLM (sibling
+# repo `llm-gateway/`) which pip-installs the `llm_gateway`
+# Python package — that's what makes the proxy_config's
+# `llm_gateway.hooks.*` callback paths importable.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: llm-gateway
+
+helmCharts:
+  - name: litellm-helm
+    repo: oci://ghcr.io/berriai/litellm-helm
+    version: "0.4.0"  # OPERATOR PINS via Renovate
+    releaseName: llm-gateway
+    namespace: llm-gateway
+    valuesFile: values.yaml
+
+resources:
+  - namespace.yaml
+  - policies-configmap.yaml
+  - externalsecret.yaml
+  - httproute.yaml
+  - networkpolicy.yaml
