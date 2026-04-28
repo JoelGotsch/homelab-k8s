@@ -1,0 +1,11 @@
+# Mac Studio inference host monitoring — scrape config + alerts.
+# See README.md for operator inputs (one IP placeholder).
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: monitoring
+
+resources:
+  - additional-scrape-configs.yaml
+  - prometheus-rules.yaml

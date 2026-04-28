@@ -1,0 +1,42 @@
+# Additional Prometheus scrape configs for the Mac Studio
+# inference host (ADR 0005 + ADR 0026).
+#
+# Wired into the Prometheus CR via:
+#   spec.additionalScrapeConfigs:
+#     name: prometheus-additional-scrape-configs
+#     key: prometheus-additional.yaml
+#
+# OPERATOR: replace MAC_STUDIO_INFERENCE_IP with the Mac Studio's
+# address on the inference VLAN.
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: prometheus-additional-scrape-configs
+  namespace: monitoring
+type: Opaque
+stringData:
+  prometheus-additional.yaml: |
+    - job_name: mac-studio-node
+      scrape_interval: 30s
+      scrape_timeout: 10s
+      metrics_path: /metrics
+      static_configs:
+        - targets:
+            - MAC_STUDIO_INFERENCE_IP:9100
+          labels:
+            host: mac-studio
+            role: inference
+            tier: external
+
+    - job_name: mac-studio-mlx
+      scrape_interval: 30s
+      scrape_timeout: 10s
+      metrics_path: /metrics
+      static_configs:
+        - targets:
+            - MAC_STUDIO_INFERENCE_IP:9101
+          labels:
+            host: mac-studio
+            role: inference
+            tier: external

@@ -1,0 +1,130 @@
+# Alert rules for the Mac Studio inference host.
+# Companion to additional-scrape-configs.yaml in this directory.
+#
+# Picked up by the Prometheus operator via the chart's
+# ruleSelector (default: all PrometheusRule in the monitoring
+# namespace).
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: mac-studio-rules
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/component: prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: mac-studio.exporters
+      interval: 30s
+      rules:
+        - alert: MacStudioNodeExporterDown
+          expr: up{job="mac-studio-node"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            host: mac-studio
+          annotations:
+            summary: "Mac Studio node_exporter is down"
+            description: |
+              node_exporter on the Mac Studio inference host
+              has been unreachable for >5m. Check launchd status:
+                sudo launchctl list | grep node-exporter
+              Logs: /var/log/node-exporter.{out,err}.log
+
+        - alert: MacStudioMLXExporterDown
+          expr: up{job="mac-studio-mlx"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            host: mac-studio
+          annotations:
+            summary: "Mac Studio mlx-exporter is down"
+            description: |
+              The custom mlx-exporter on the Mac Studio has
+              been unreachable for >5m. Check launchd status:
+                sudo launchctl list | grep mlx-exporter
+              Logs: /var/log/mlx-exporter.{out,err}.log
+
+    - name: mac-studio.inference
+      interval: 30s
+      rules:
+        - alert: MacStudioMLXServerDown
+          expr: mlx_server_up == 0
+          for: 5m
+          labels:
+            severity: warning
+            host: mac-studio
+            component: mlx
+          annotations:
+            summary: "Mac Studio MLX server is down"
+            description: |
+              MLX HTTP API on the Mac Studio is not responding
+              to health checks. LiteLLM routes will fail over
+              to Ollama for affected models. Investigate:
+                sudo launchctl list | grep mlx-server
+                tail /var/log/mlx-server.err.log
+
+        - alert: MacStudioOllamaDown
+          expr: ollama_server_up == 0
+          for: 5m
+          labels:
+            severity: warning
+            host: mac-studio
+            component: ollama
+          annotations:
+            summary: "Mac Studio Ollama server is down"
+            description: |
+              Ollama HTTP API on the Mac Studio is not
+              responding. Long-tail / embedding models will
+              be unavailable. Investigate:
+                sudo launchctl list | grep ollama
+                tail ~/.ollama/logs/server.log
+
+    - name: mac-studio.storage
+      interval: 60s
+      rules:
+        # node_exporter exposes filesystem stats — alert on
+        # root or /opt nearing full. Mac Studio internal SSD
+        # is the model store.
+        - alert: MacStudioFilesystemFull
+          expr: |
+            (
+              1 - (
+                node_filesystem_avail_bytes{job="mac-studio-node",mountpoint=~"/|/opt.*"}
+                / node_filesystem_size_bytes{job="mac-studio-node",mountpoint=~"/|/opt.*"}
+              )
+            ) > 0.9
+          for: 15m
+          labels:
+            severity: warning
+            host: mac-studio
+          annotations:
+            summary: "Mac Studio filesystem >90% full ({{ $labels.mountpoint }})"
+            description: |
+              Filesystem {{ $labels.mountpoint }} on the Mac
+              Studio is over 90% utilization. MLX/Ollama models
+              live under /opt — likely candidate for cleanup.
+              Run on host:
+                du -sh /opt/mlx-server/models/*
+                ollama list
+
+        # Per-model-tree size: alert if the MLX models dir
+        # exceeds 1 TiB (operator's planning ceiling per
+        # journal 2026-04-28-mlx-litellm-mac-inference.md).
+        # Adjust the threshold when the Mac Studio's actual
+        # SSD capacity + retention policy is finalized.
+        - alert: MacStudioMLXModelsDiskHigh
+          expr: mlx_models_bytes_total > 1.1e12
+          for: 30m
+          labels:
+            severity: info
+            host: mac-studio
+            component: mlx
+          annotations:
+            summary: "Mac Studio MLX models dir > 1 TiB"
+            description: |
+              The MLX models directory has grown past 1 TiB.
+              Review per-model sizes in mlx_model_bytes and
+              prune unused quantizations:
+                ls -lh /opt/mlx-server/models/
