@@ -1,0 +1,30 @@
+# cloudnative-pg operator Helm values.
+# Per ADR 0011 (CNPG over Bitnami pg-ha) + backup-and-dr.md.
+
+# Inherit Argo's managed-by annotation onto operator-created
+# resources so cluster-internal lookups work uniformly.
+config:
+  data:
+    INHERITED_ANNOTATIONS: argocd.argoproj.io/managed-by,argocd.argoproj.io/sync-wave
+    INHERITED_LABELS: app.kubernetes.io/*
+
+# PodMonitor for kube-prometheus-stack (per ADR 0021).
+monitoring:
+  podMonitorEnabled: true
+  grafanaDashboard:
+    create: false  # operator imports the upstream dashboard
+                   # explicitly under observability/grafana/
+
+# Operator runs in cnpg-system; per-app Cluster CRDs live in
+# the consuming app's namespace. The operator watches all
+# namespaces by default.
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
+# Webhook + monitoring port surface remains default; the
+# operator's own resource consumption is small.

@@ -1,0 +1,23 @@
+# CloudNativePG operator. Per ADR 0011 (CNPG over Bitnami
+# pg-ha) and backup-and-dr.md "Postgres databases (CNPG)".
+#
+# Per-app Cluster CRDs live in the consuming app's namespace
+# (e.g. apps/llm-gateway/cnpg-cluster.yaml). The operator
+# watches all namespaces. Each app's Cluster references its
+# own bucket path on MinIO-on-NAS for WAL+base backup; Restic
+# CronJob (configured separately) sweeps MinIO into tier-2/3.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+helmCharts:
+  - name: cloudnative-pg
+    repo: https://cloudnative-pg.github.io/charts
+    version: "0.23.0"  # OPERATOR PINS via Renovate
+    releaseName: cnpg
+    namespace: cnpg-system
+    valuesFile: values.yaml
+    includeCRDs: true
+
+resources:
+  - namespace.yaml

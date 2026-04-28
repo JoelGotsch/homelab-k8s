@@ -23,15 +23,24 @@ masterkeySecretName: llm-gateway-secrets
 
 # Postgres for budget/spend tracking. The chart ships its own
 # Bitnami postgresql subchart — disabled here in favor of the
-# cluster's CloudNativePG. Operator points at a CNPG cluster
-# via the database URL secret.
+# cluster's CloudNativePG (cnpg-cluster.yaml).
+#
+# CNPG auto-generates the `llm-gateway-app` Secret with keys
+# {user, password, host, port, dbname, uri}. We add that Secret
+# to environmentSecrets below; LiteLLM reads `uri` directly via
+# proxy_config.general_settings.database_url: os.environ/uri.
+#
+# We deliberately do NOT use the chart's `db.url: "$(VAR)"`
+# field — the chart-template substitution + Kubernetes env
+# expansion is two layers of indirection that has surprised us
+# before (see initial-setup.md caveats). Direct os.environ/uri
+# is one layer.
 db:
   deployStandalone: false
   useStackgresOperator: false
   useExisting: true
-  endpoint: "postgresql://llm-gateway-rw.cnpg.svc:5432/litellm"
+  endpoint: "postgresql://llm-gateway-rw.llm-gateway.svc:5432/litellm"
   database: litellm
-  url: "$(DATABASE_URL)"  # comes from environmentSecrets below
 
 # Inline LiteLLM proxy config. Mirrors
 # llm-gateway/policies/proxy_config.example.yaml — operator
@@ -83,12 +92,18 @@ proxy_config:
     set_verbose: false
   general_settings:
     master_key: os.environ/LITELLM_MASTER_KEY
-    database_url: os.environ/DATABASE_URL
+    # CNPG's app Secret exposes the full DSN under env var `uri`.
+    database_url: os.environ/uri
 
-# Pulls Anthropic/OpenAI keys, master key, DB DSN. The Secret
-# is created by the ExternalSecret in externalsecret.yaml.
+# Two Secrets envFrom'd into the pod:
+# - llm-gateway-secrets: ESO pull from OpenBao (provider keys
+#   + master key). See externalsecret.yaml.
+# - llm-gateway-app: CNPG-auto-generated from the Cluster CRD.
+#   Provides {user, password, host, port, dbname, uri}. The
+#   `uri` key is the full postgres:// DSN.
 environmentSecrets:
   - llm-gateway-secrets
+  - llm-gateway-app
 
 # Mount the rendered allowlist ConfigMap at /etc/litellm/policies.
 volumes:

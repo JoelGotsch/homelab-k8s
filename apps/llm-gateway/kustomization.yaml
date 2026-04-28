@@ -23,5 +23,7 @@ resources:
   - namespace.yaml
   - policies-configmap.yaml
   - externalsecret.yaml
+  - cnpg-cluster.yaml
+  - cnpg-s3-externalsecret.yaml
   - httproute.yaml
   - networkpolicy.yaml

@@ -1,0 +1,62 @@
+# CNPG Postgres cluster for LiteLLM's budget/spend tracking.
+# Per ADR 0026 D1 + backup-and-dr.md §Postgres databases (CNPG).
+#
+# Data classification: internal (per ADR 0003). RPO 4h, RTO 24h.
+# CNPG WAL+base covers RPO; this is well within the matrix.
+#
+# Service exposed: llm-gateway-rw.llm-gateway.svc:5432 — values.yaml
+# points the chart at this DSN through the ExternalSecret-managed
+# DATABASE_URL.
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: llm-gateway
+  namespace: llm-gateway
+spec:
+  instances: 2
+
+  # CNPG primaries opt into replica3 per ADR 0016 — instances: 2
+  # is DB-level redundancy, replica3 is disk-level redundancy
+  # for the authoritative copy. Both layers earned.
+  storage:
+    size: 5Gi
+    storageClass: longhorn-replica3
+
+  monitoring:
+    enablePodMonitor: true
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+      shared_buffers: "128MB"
+
+  bootstrap:
+    initdb:
+      database: litellm
+      owner: litellm
+
+  # Backup pipeline — WAL+base to MinIO-on-NAS. Restic CronJob
+  # (separate) replicates the bucket to tier-2/3.
+  #
+  # SEQUENCING: MinIO-on-NAS must be up before this Cluster's
+  # first sync. Pre-MinIO, comment the backup: block; the
+  # cluster will come up without backups. llm-gateway carries
+  # internal-class data (budget/spend), acceptable to bootstrap
+  # without backups. Re-enable once MinIO lands.
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://homelab-backups-cluster/cnpg/llm-gateway
+      endpointURL: http://minio.minio.svc.cluster.local:9000
+      s3Credentials:
+        accessKeyId:
+          name: llm-gateway-cnpg-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: llm-gateway-cnpg-s3
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: bzip2
+      data:
+        compression: bzip2
+    retentionPolicy: "90d"
