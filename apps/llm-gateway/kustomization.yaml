@@ -14,7 +14,7 @@ namespace: llm-gateway
 helmCharts:
   - name: litellm-helm
     repo: oci://ghcr.io/berriai/litellm-helm
-    version: "0.4.0"  # OPERATOR PINS via Renovate
+    version: "1.1.0"  # OPERATOR PINS via Renovate
     releaseName: llm-gateway
     namespace: llm-gateway
     valuesFile: values.yaml

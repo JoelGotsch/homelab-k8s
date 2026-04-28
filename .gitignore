@@ -1,7 +1,11 @@
 # Operator-rendered overrides (if any per-env values are
 # generated similarly to homelab-infra's bootstrap-templating
-# pattern). For now nothing is templated here, but reserve
-# the convention.
+# pattern). Source-of-truth is the .j2 sibling.
+#
+# Note: rendered files in homelab-k8s ARE committed (Argo
+# reads from git). Unlike homelab-infra, where bootstrap apply
+# reads from operator's local filesystem and rendered outputs
+# are gitignored.
 **/*.rendered.yaml
 
 # OS / editor cruft

@@ -14,9 +14,12 @@ image:
   tag: "0.1.0"  # OPERATOR PINS via Renovate
   pullPolicy: IfNotPresent
 
-masterkey: ""           # populated via envFrom -> ExternalSecret
+# The chart consumes a Secret with key `masterkey`. We point it
+# at our ExternalSecret-managed llm-gateway-secrets, which has
+# both the `masterkey` key (for the chart) and a
+# LITELLM_MASTER_KEY env var (for proxy_config's os.environ
+# resolution).
 masterkeySecretName: llm-gateway-secrets
-masterkeySecretKey: master-key
 
 # Postgres for budget/spend tracking. The chart ships its own
 # Bitnami postgresql subchart — disabled here in favor of the
@@ -24,11 +27,11 @@ masterkeySecretKey: master-key
 # via the database URL secret.
 db:
   deployStandalone: false
-  useStackgresCluster: false
+  useStackgresOperator: false
   useExisting: true
   endpoint: "postgresql://llm-gateway-rw.cnpg.svc:5432/litellm"
   database: litellm
-  url: ""               # populated via envFrom
+  url: "$(DATABASE_URL)"  # comes from environmentSecrets below
 
 # Inline LiteLLM proxy config. Mirrors
 # llm-gateway/policies/proxy_config.example.yaml — operator
@@ -82,16 +85,17 @@ proxy_config:
     master_key: os.environ/LITELLM_MASTER_KEY
     database_url: os.environ/DATABASE_URL
 
-envFrom:
-  - secretRef:
-      name: llm-gateway-secrets
+# Pulls Anthropic/OpenAI keys, master key, DB DSN. The Secret
+# is created by the ExternalSecret in externalsecret.yaml.
+environmentSecrets:
+  - llm-gateway-secrets
 
-# Mount the operator-managed allowlists.
-extraVolumes:
+# Mount the rendered allowlist ConfigMap at /etc/litellm/policies.
+volumes:
   - name: policies
     configMap:
       name: llm-gateway-policies
-extraVolumeMounts:
+volumeMounts:
   - name: policies
     mountPath: /etc/litellm/policies
     readOnly: true
