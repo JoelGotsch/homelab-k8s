@@ -1,0 +1,27 @@
+# cert-manager Helm values.
+
+installCRDs: true
+
+# Enable Vault/OpenBao issuer
+extraArgs:
+  - --enable-certificate-owner-ref=true
+
+resources:
+  requests: {cpu: 50m, memory: 128Mi}
+  limits: {memory: 512Mi}
+
+# ServiceMonitor for Prometheus
+prometheus:
+  enabled: true
+  servicemonitor:
+    enabled: true
+
+webhook:
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
+cainjector:
+  resources:
+    requests: {cpu: 25m, memory: 128Mi}
+    limits: {memory: 512Mi}

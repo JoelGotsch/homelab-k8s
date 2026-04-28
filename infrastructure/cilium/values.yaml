@@ -1,0 +1,110 @@
+# Cilium values — Argo-managed copy.
+# Source-of-truth for ongoing config (post-bootstrap).
+# Bootstrap-time values live in
+# homelab-infra/ansible/files/cilium-{values,overrides}.yaml
+# — they MUST match this file (or be drifted from it
+# deliberately for bootstrap-only reasons).
+#
+# Per network.md (Cilium NetPol + Hubble + Gateway API) and
+# ADR 0021 (observability).
+
+cluster:
+  name: homelab            # OPERATOR FILLS at first commit;
+                           # matches cluster_name from
+                           # homelab-infra/group_vars/all/main.yml
+  id: 1
+
+k8sServiceHost: <CLUSTER-VIP>     # OPERATOR FILLS post-cluster
+k8sServicePort: 6443
+
+kubeProxyReplacement: true
+routingMode: native
+autoDirectNodeRoutes: true
+ipv4NativeRoutingCIDR: 10.244.0.0/16
+
+ipam:
+  mode: kubernetes
+  operator:
+    clusterPoolIPv4PodCIDRList: [10.244.0.0/16]
+    clusterPoolIPv4MaskSize: 24
+
+bpf:
+  masquerade: true
+  hostLegacyRouting: false
+
+bandwidthManager:
+  enabled: true
+  bbr: true
+
+gatewayAPI:
+  enabled: true
+  enableAlpn: true
+
+ingressController:
+  enabled: false
+
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+  ui:
+    enabled: true
+  metrics:
+    enabled:
+      - dns:query;ignoreAAAA
+      - drop
+      - tcp
+      - flow
+      - icmp
+      - http
+    serviceMonitor:
+      enabled: true
+  export:
+    static:
+      enabled: true
+      filePath: /var/run/cilium/hubble/events.log
+
+encryption:
+  enabled: false  # see ADR / network.md if pod-pod encryption needed
+
+operator:
+  replicas: 2
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 512Mi}
+
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {memory: 1Gi}
+
+prometheus:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+
+# Talos-specific securityContext (caps required by current
+# Cilium-on-Talos). Verify against pinned cilium version's
+# docs on Renovate bump.
+securityContext:
+  capabilities:
+    ciliumAgent:
+      - CHOWN
+      - KILL
+      - NET_ADMIN
+      - NET_RAW
+      - IPC_LOCK
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    cleanCiliumState:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_RESOURCE
+
+cni:
+  binPath: /opt/cni/bin
+  confPath: /etc/cni/net.d
+  install: true

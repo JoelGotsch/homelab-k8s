@@ -1,0 +1,18 @@
+# Operator-rendered overrides (if any per-env values are
+# generated similarly to homelab-infra's bootstrap-templating
+# pattern). For now nothing is templated here, but reserve
+# the convention.
+**/*.rendered.yaml
+
+# OS / editor cruft
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Helm dependency caches
+**/charts/
+
+# Argo CD's local cache (if operator runs `argocd app diff`
+# locally with --local)
+.argocd-cache/

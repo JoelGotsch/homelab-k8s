@@ -1,0 +1,70 @@
+# Kyverno cluster policies — per ADR 0019 + ADR 0023.
+#
+# - require-image-digest: every container image in user
+#   namespaces must reference by digest (sha256:...), not tag.
+# - verify-image-signature: cosign signatures verified for
+#   first-party images (operator's Forgejo registry).
+#   Public-image policy is more permissive — no signature
+#   required for upstream images we don't sign.
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-image-digest
+  annotations:
+    policies.kyverno.io/category: Supply Chain
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-digest
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kyverno
+                - longhorn-system
+                - cert-manager
+                - external-secrets
+                - cilium
+                - openbao
+      validate:
+        message: "Image must be referenced by digest (sha256:...), not tag. Per ADR 0023."
+        pattern:
+          spec:
+            containers:
+              - image: "*@sha256:*"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-first-party-image-signature
+  annotations:
+    policies.kyverno.io/category: Supply Chain
+    policies.kyverno.io/severity: high
+spec:
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-cosign-on-first-party
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      verifyImages:
+        - imageReferences:
+            - "forgejo.lab/homelab/*"
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    subject: "https://forgejo.lab/homelab/*"
+                    issuer: "https://forgejo.lab"
+          mutateDigest: true
+          required: true

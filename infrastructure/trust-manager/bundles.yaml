@@ -1,0 +1,55 @@
+# homelab Root CA bundle — distributed to every namespace
+# as a ConfigMap so apps trust internal-CA-issued certs.
+#
+# Source: the `homelab-root-ca` Secret in trust-manager
+# namespace, populated either by:
+#   - Operator at first commit: paste root-ca.cert.pem (from
+#     pki/ca-ceremony.md Step 7) into the Secret stringData.
+#   - Or via ExternalSecret pulling from openbao kv/prod/pki/root-ca.
+
+apiVersion: trust.cert-manager.io/v1alpha1
+kind: Bundle
+metadata:
+  name: homelab-root-ca
+spec:
+  sources:
+    - secret:
+        name: homelab-root-ca
+        key: ca.crt
+    # Include the OpenBao bootstrap CA so cert-manager-issued
+    # certs that chain via OpenBao validate everywhere.
+    - secret:
+        name: openbao-bootstrap-ca
+        key: ca.crt
+  target:
+    configMap:
+      key: ca-bundle.pem
+    namespaceSelector:
+      matchLabels:
+        homelab.lab/inject-ca: "true"
+---
+# Operator stages this Secret with the actual root-ca.cert.pem
+# content from the PKI ceremony.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: homelab-root-ca
+  namespace: trust-manager
+type: Opaque
+stringData:
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    <OPERATOR-FILLS-FROM-pki/ca-ceremony.md-OUTPUT>
+    -----END CERTIFICATE-----
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: openbao-bootstrap-ca
+  namespace: trust-manager
+type: Opaque
+stringData:
+  ca.crt: |
+    -----BEGIN CERTIFICATE-----
+    <OPERATOR-FILLS-FROM-generate-openbao-bootstrap-tls.sh-OUTPUT>
+    -----END CERTIFICATE-----

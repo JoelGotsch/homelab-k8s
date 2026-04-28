@@ -1,0 +1,22 @@
+# Argo CD root kustomization.
+# Pointed at by homelab-infra/argocd/root-app.yaml
+# (path: bootstrap). Argo CD applies what's listed here.
+#
+# Layout:
+#   - applicationsets/<layer>.yaml — one ApplicationSet per
+#     architectural layer (infrastructure, platform,
+#     observability, apps). Each ApplicationSet uses Argo's
+#     git directories generator to fan out one Application
+#     per subdirectory of homelab-k8s/<layer>/.
+#   - bootstrap-namespaces.yaml — namespaces created at
+#     bootstrap time (referenced by sync waves below).
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - bootstrap-namespaces.yaml
+  - applicationsets/infrastructure.yaml
+  - applicationsets/platform.yaml
+  - applicationsets/observability.yaml
+  - applicationsets/apps.yaml

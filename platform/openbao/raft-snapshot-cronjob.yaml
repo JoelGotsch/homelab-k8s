@@ -1,0 +1,112 @@
+# Daily Raft snapshot to Hetzner Storage Box.
+# Per ADR 0018 D5 (daily snapshot to cold tier per ADR 0006).
+#
+# Operator stages OpenBao snapshot token via:
+#   bao policy write snapshot - <<EOF
+#     path "sys/storage/raft/snapshot" { capabilities = ["read"] }
+#   EOF
+#   bao token create -policy=snapshot -ttl=8760h -orphan
+# and stores at kv/prod/openbao/snapshot-token (loaded via
+# external-secrets into a Secret openbao-snapshot-token).
+#
+# Hetzner Storage Box credentials staged the same way at
+# kv/prod/backup/hetzner-storage-box → Secret hetzner-sb-creds.
+
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: openbao-snapshot-token
+  namespace: openbao
+spec:
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: openbao
+  target:
+    name: openbao-snapshot-token
+  data:
+    - secretKey: token
+      remoteRef:
+        key: prod/openbao/snapshot-token
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: hetzner-sb-creds
+  namespace: openbao
+spec:
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: openbao
+  target:
+    name: hetzner-sb-creds
+  data:
+    - secretKey: host
+      remoteRef:
+        key: prod/backup/hetzner-storage-box
+        property: host
+    - secretKey: user
+      remoteRef:
+        key: prod/backup/hetzner-storage-box
+        property: user
+    - secretKey: ssh_key
+      remoteRef:
+        key: prod/backup/hetzner-storage-box
+        property: ssh_key
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: openbao-raft-snapshot
+  namespace: openbao
+spec:
+  schedule: "0 3 * * *"  # 03:00 daily
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: openbao
+          containers:
+            - name: snapshot
+              image: openbao/openbao:0.10.0  # OPERATOR PINS
+              env:
+                - name: BAO_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: openbao-snapshot-token
+                      key: token
+                - name: BAO_ADDR
+                  value: https://openbao.openbao.svc:8200
+                - name: BAO_CACERT
+                  value: /vault/userconfig/openbao-tls/ca.crt
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  TS=$(date -u +%Y%m%dT%H%M%SZ)
+                  bao operator raft snapshot save /tmp/snapshot-${TS}.snap
+                  # Upload to Hetzner Storage Box via SFTP
+                  mkdir -p ~/.ssh
+                  echo "$SSH_KEY" > ~/.ssh/id_ed25519
+                  chmod 600 ~/.ssh/id_ed25519
+                  ssh-keyscan -H ${HSB_HOST} > ~/.ssh/known_hosts 2>/dev/null
+                  scp -i ~/.ssh/id_ed25519 \
+                    /tmp/snapshot-${TS}.snap \
+                    ${HSB_USER}@${HSB_HOST}:/openbao-snapshots/
+                  rm -f /tmp/snapshot-${TS}.snap
+              envFrom:
+                - secretRef:
+                    name: hetzner-sb-creds
+              volumeMounts:
+                - name: tls
+                  mountPath: /vault/userconfig/openbao-tls
+                  readOnly: true
+          volumes:
+            - name: tls
+              secret:
+                secretName: openbao-tls

@@ -1,0 +1,25 @@
+# Internal-CA ClusterIssuer using OpenBao's PKI engine.
+# OpenBao PKI engine + role 'homelab-internal-issuer' is
+# configured by 09b-argocd-bootstrap.yml (homelab-infra).
+#
+# Per identity.md: cert-manager issues leaf certs that chain
+# to the homelab Root CA via the operator-PKI intermediate.
+
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: homelab-internal-issuer
+spec:
+  vault:
+    server: https://openbao.openbao.svc:8200
+    path: pki/sign/homelab-internal-issuer
+    caBundleSecretRef:
+      name: openbao-ca-cert
+      key: ca.crt
+    auth:
+      kubernetes:
+        role: cert-manager
+        mountPath: /v1/auth/kubernetes
+        secretRef:
+          name: cert-manager-token
+          key: token

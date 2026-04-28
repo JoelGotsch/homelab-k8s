@@ -1,0 +1,11 @@
+# trust-manager values.
+
+resources:
+  requests: {cpu: 25m, memory: 64Mi}
+  limits: {memory: 256Mi}
+
+# Watch namespace for Bundle resources — `cluster-wide` is
+# the typical default; trust-manager itself is cluster-scoped.
+app:
+  trust:
+    namespace: trust-manager

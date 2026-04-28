@@ -1,0 +1,25 @@
+# Longhorn values per ADR 0016.
+
+defaultSettings:
+  defaultDataPath: /var/lib/longhorn
+  defaultReplicaCount: 2  # ADR 0016 default
+  storageMinimalAvailablePercentage: 10
+  storageOverProvisioningPercentage: 100
+  # Backup target: cluster-MinIO on NAS (warm tier per
+  # ADR 0006); operator configures via UI / settings post-
+  # bring-up.
+  backupTarget: ""
+  backupTargetCredentialSecret: ""
+  # Prometheus scrape
+  upgradeChecker: false
+
+persistence:
+  defaultClass: false  # we install non-default classes per ADR 0016
+  defaultClassReplicaCount: 2
+
+# Resource limits — Longhorn is per-node DaemonSet
+csi:
+  attacherReplicaCount: 2
+  provisionerReplicaCount: 2
+  resizerReplicaCount: 2
+  snapshotterReplicaCount: 2

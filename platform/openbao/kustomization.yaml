@@ -1,0 +1,26 @@
+# OpenBao day-2 config (post-bootstrap).
+# OpenBao itself is INSTALLED by ansible/playbooks/09b-argocd-bootstrap.yml
+# (homelab-infra). Argo takes over here for ongoing values
+# updates + day-2 resources (snapshots, ingress, etc.).
+#
+# Per ADR 0018.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Re-apply the same Helm release with values matching the
+# bootstrap install. Bootstrap-time values live in
+# homelab-infra/ansible/files/openbao-{values,overrides}.yaml
+# — operator keeps these in sync.
+helmCharts:
+  - name: openbao
+    repo: https://openbao.github.io/openbao-helm
+    version: "0.10.0"  # OPERATOR PINS via Renovate
+    releaseName: openbao
+    namespace: openbao
+    valuesFile: values.yaml
+    includeCRDs: true
+
+resources:
+  - raft-snapshot-cronjob.yaml
+  - httproute.yaml

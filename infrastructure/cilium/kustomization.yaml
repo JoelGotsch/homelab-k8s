@@ -1,0 +1,23 @@
+# Cilium runtime config — post-bootstrap.
+# Cilium itself is INSTALLED by ansible/playbooks/09b-argocd-bootstrap.yml
+# in homelab-infra (sync-wave -10 from Argo's perspective is
+# "Argo takes over an already-installed component").
+#
+# This kustomization re-applies the Helm release with values
+# matching the bootstrap install. Once Argo owns it, all
+# future changes go through git.
+#
+# Drift check: `helm get values cilium -n kube-system` should
+# match values.yaml here.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+helmCharts:
+  - name: cilium
+    repo: https://helm.cilium.io
+    version: "1.16.0"  # OPERATOR PINS via Renovate
+    releaseName: cilium
+    namespace: kube-system
+    valuesFile: values.yaml
+    includeCRDs: true

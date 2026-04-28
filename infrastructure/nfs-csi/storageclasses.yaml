@@ -1,0 +1,86 @@
+# StorageClasses per Synology NAS share, per storage.md +
+# ADR 0025. Each share has its own SC so apps' PVCs can pin
+# to the correct logical destination + classification.
+#
+# Encryption-at-rest (rclone-crypt for personal+) is layered
+# in the application pod (sidecar or fuse mount), not at the
+# CSI level. NFS mount sees ciphertext for personal-files /
+# family-shared / internal-archive; sees plaintext for
+# internal-media / public-* / cluster-backups / time-machine.
+#
+# OPERATOR FILLS the NAS-IP at first commit (matches
+# nas_storage_ip in homelab-infra/group_vars/cluster.yml).
+
+# personal-files — ciphertext at NAS; rclone-crypt at app layer
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-personal-files
+provisioner: nfs.csi.k8s.io
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  server: <NAS-IP>
+  share: /volume1/personal-files
+  mountOptions: nfsvers=4.1,hard,nconnect=8,rsize=131072,wsize=131072
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-family-shared
+provisioner: nfs.csi.k8s.io
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  server: <NAS-IP>
+  share: /volume1/family-shared
+  mountOptions: nfsvers=4.1,hard,nconnect=8,rsize=131072,wsize=131072
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-internal-archive
+provisioner: nfs.csi.k8s.io
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  server: <NAS-IP>
+  share: /volume1/internal-archive
+  mountOptions: nfsvers=4.1,hard,nconnect=8,rsize=131072,wsize=131072
+---
+# internal-media — plaintext NFS (Jellyfin transcode efficiency)
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-internal-media
+provisioner: nfs.csi.k8s.io
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  server: <NAS-IP>
+  share: /volume1/internal-media
+  mountOptions: nfsvers=4.1,hard,nconnect=8,rsize=131072,wsize=131072
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-public-static
+provisioner: nfs.csi.k8s.io
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  server: <NAS-IP>
+  share: /volume1/public-static
+  mountOptions: nfsvers=4.1,hard,nconnect=8,rsize=131072,wsize=131072
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-cluster-backups
+provisioner: nfs.csi.k8s.io
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  server: <NAS-IP>
+  share: /volume1/cluster-backups
+  mountOptions: nfsvers=4.1,hard,nconnect=8,rsize=131072,wsize=131072

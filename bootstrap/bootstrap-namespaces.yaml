@@ -1,0 +1,60 @@
+# Namespaces created at bootstrap time. ApplicationSets target
+# these via `destination.namespace` + `CreateNamespace=true`,
+# but having them as explicit resources here gives stable
+# pod-security labels + early-wave creation.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external-secrets
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openbao
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: baseline
+    # baseline (not restricted) because OpenBao Raft requires
+    # capabilities not in restricted profile (mlock for
+    # memory-pinning).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: longhorn-system
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    # Longhorn requires privileged for its CSI components.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nfs-csi
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kyverno
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: trust-manager
+  labels:
+    pod-security.kubernetes.io/enforce: restricted

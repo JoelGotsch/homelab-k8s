@@ -1,0 +1,59 @@
+# Default Gateway — apps' HTTPRoutes attach to this.
+# One Gateway listens for HTTPS on the cluster ingress IP;
+# cert-manager-issued wildcard cert covers *.lab.<homelab-domain>.
+#
+# Per network.md ingress + storage.md / identity.md app paths.
+#
+# OPERATOR FILLS the hostname template at first commit per
+# the homelab domain.
+
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: homelab-gateway
+  namespace: ingress
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: https
+      port: 443
+      protocol: HTTPS
+      hostname: "*.lab.<HOMELAB-DOMAIN>"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: homelab-wildcard-tls
+            namespace: ingress
+      allowedRoutes:
+        namespaces:
+          from: All
+    # HTTP listener for ACME http-01 challenges (cert-manager
+    # uses DNS-01 by default once DNS provider configured;
+    # http-01 listed here as fallback).
+    - name: http
+      port: 80
+      protocol: HTTP
+      hostname: "*.lab.<HOMELAB-DOMAIN>"
+      allowedRoutes:
+        namespaces:
+          from: All
+---
+# Wildcard cert for *.lab.<homelab-domain>, issued by
+# cert-manager via the homelab-internal-issuer (OpenBao PKI).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: homelab-wildcard-tls
+  namespace: ingress
+spec:
+  secretName: homelab-wildcard-tls
+  issuerRef:
+    name: homelab-internal-issuer
+    kind: ClusterIssuer
+  commonName: "lab.<HOMELAB-DOMAIN>"
+  dnsNames:
+    - "lab.<HOMELAB-DOMAIN>"
+    - "*.lab.<HOMELAB-DOMAIN>"
+  duration: 720h    # 30 days
+  renewBefore: 240h # renew at 10 days remaining

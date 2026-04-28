@@ -1,0 +1,116 @@
+# OpenBao Argo-managed values. MUST match the bootstrap-time
+# values in homelab-infra/ansible/files/openbao-values.yaml +
+# overrides.yaml (or be drifted from them deliberately for
+# bootstrap-only reasons).
+
+global:
+  enabled: true
+
+server:
+  logLevel: info
+  logFormat: json
+
+  ha:
+    enabled: true
+    replicas: 3
+    raft:
+      enabled: true
+      setNodeId: true
+      config: |
+        cluster_addr = "https://POD_IP:8201"
+        api_addr = "https://POD_IP:8200"
+
+        listener "tcp" {
+          tls_disable = 0
+          address = "[::]:8200"
+          cluster_address = "[::]:8201"
+          tls_cert_file = "/vault/userconfig/openbao-tls/tls.crt"
+          tls_key_file  = "/vault/userconfig/openbao-tls/tls.key"
+        }
+
+        storage "raft" {
+          path = "/vault/data"
+          retry_join {
+            leader_api_addr = "https://openbao-0.openbao-internal:8200"
+            leader_ca_cert_file = "/vault/userconfig/openbao-tls/ca.crt"
+          }
+          retry_join {
+            leader_api_addr = "https://openbao-1.openbao-internal:8200"
+            leader_ca_cert_file = "/vault/userconfig/openbao-tls/ca.crt"
+          }
+          retry_join {
+            leader_api_addr = "https://openbao-2.openbao-internal:8200"
+            leader_ca_cert_file = "/vault/userconfig/openbao-tls/ca.crt"
+          }
+          autopilot {
+            cleanup_dead_servers = true
+            last_contact_threshold = "10s"
+            min_quorum = 2
+            server_stabilization_time = "10s"
+          }
+        }
+
+        service_registration "kubernetes" {}
+
+        telemetry {
+          prometheus_retention_time = "30s"
+          disable_hostname = true
+        }
+
+  service:
+    enabled: true
+    type: ClusterIP
+
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 512Mi}
+
+  serviceAccount:
+    create: true
+
+  readinessProbe:
+    enabled: true
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 60
+
+  auditStorage:
+    enabled: true
+    size: 5Gi
+    storageClass: longhorn-replica2
+    accessMode: ReadWriteOnce
+
+  dataStorage:
+    enabled: true
+    size: 10Gi
+    storageClass: longhorn-replica2
+    accessMode: ReadWriteOnce
+
+  extraVolumes:
+    - type: secret
+      name: openbao-tls
+
+  affinity: |
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: openbao
+              app.kubernetes.io/instance: "{{ .Release.Name }}"
+              component: server
+          topologyKey: kubernetes.io/hostname
+
+seal:
+  shamir:
+    secretShares: 3
+    secretThreshold: 2
+
+injector:
+  enabled: false
+
+ui:
+  enabled: true
+  serviceType: ClusterIP
+
+csi:
+  enabled: false

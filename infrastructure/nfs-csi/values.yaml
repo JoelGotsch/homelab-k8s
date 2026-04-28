@@ -1,0 +1,15 @@
+# NFS CSI driver values.
+
+driver:
+  name: nfs.csi.k8s.io
+
+controller:
+  replicas: 2
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
+node:
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {memory: 256Mi}

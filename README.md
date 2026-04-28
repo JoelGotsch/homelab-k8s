@@ -1,0 +1,126 @@
+# homelab-k8s
+
+The GitOps truth. Everything Argo CD reconciles: cluster
+infrastructure, platform services, observability, and app
+deployment manifests. The app-of-apps root lives in
+`bootstrap/`.
+
+## Layout
+
+```
+bootstrap/
+  kustomization.yaml                root kustomization
+  bootstrap-namespaces.yaml         pre-created namespaces with PSA labels
+  applicationsets/
+    infrastructure.yaml             ApplicationSet — git directories generator
+    platform.yaml                   over each subdir; one Argo Application
+    observability.yaml              per dir.
+    apps.yaml
+
+infrastructure/                     sync wave -10
+  cilium/                           CNI + Hubble + Gateway API
+  cert-manager/                     issues internal TLS leafs from OpenBao PKI
+  external-secrets/                 OpenBao kv/* → Kubernetes Secrets
+  ingress/                          GatewayClass + Gateway + wildcard cert
+  longhorn/                         block storage (replica2 default)
+  nfs-csi/                          NAS shares (per-share StorageClass)
+  kyverno/                          admission policies (cosign + digest pin)
+  trust-manager/                    distributes Root CA to namespaces
+
+platform/                           sync wave 0
+  openbao/                          OpenBao day-2 + Raft snapshot CronJob
+  authentik/                        OIDC provider (skeleton)
+  forgejo/                          forge (skeleton)
+  woodpecker/                       CI engine (skeleton)
+
+observability/                      sync wave 5
+  prometheus/, alertmanager/, grafana/, loki/, tempo/,
+  falco/, crowdsec/, trivy-operator/                 (skeletons)
+
+apps/                               sync wave 10
+  vaultwarden/, nextcloud/, jellyfin/, llm-gateway/,
+  knowledge-graph/, personal-agent/, signal-bridge/,
+  whatsapp-bridge/, paperless/, immich/, frigate/,
+  windmill/, website/                                (skeletons)
+
+sets/                               kustomize overlay layer
+  base/, prod/                                       (empty — single-env homelab)
+```
+
+## Bootstrap → ongoing handoff
+
+Some components (Cilium, OpenBao) are **first installed by**
+the bootstrap Ansible playbook in
+`homelab-infra/ansible/playbooks/09b-argocd-bootstrap.yml`,
+then **owned by** Argo CD via the manifests here. The values
+files in this repo MUST match the bootstrap-time values in
+`homelab-infra/ansible/files/<chart>-{values,overrides}.yaml`,
+or be drifted from them deliberately for bootstrap-only
+reasons.
+
+After Argo takes over, all changes to those components flow
+through this repo via PR.
+
+## Operator first-commit fills
+
+Search for `<` placeholders and replace before applying:
+
+| Placeholder | Where | Source |
+|---|---|---|
+| `<REPO-URL>` | `bootstrap/applicationsets/*.yaml` | This repo's git URL (Forgejo or GitHub mirror) |
+| `<CLUSTER-VIP>` | `infrastructure/cilium/values.yaml` | Cluster API VIP — fills post-cluster |
+| `<HOMELAB-DOMAIN>` | `infrastructure/ingress/gateway.yaml`, `platform/openbao/httproute.yaml`, etc. | Operator's domain |
+| `<NAS-IP>` | `infrastructure/nfs-csi/storageclasses.yaml` | NAS IP on `storage` VLAN |
+| Root CA cert | `infrastructure/trust-manager/bundles.yaml` | `pki/ca-ceremony.md` Step 7 output |
+| OpenBao bootstrap CA | `infrastructure/cert-manager/openbao-pki-secret.yaml`, `infrastructure/external-secrets/clustersecretstore.yaml`, `infrastructure/trust-manager/bundles.yaml` | `homelab-infra/scripts/generate-openbao-bootstrap-tls.sh` output |
+
+These are NOT templated via Jinja (no Argo-side templating
+playbook yet); operator hand-fills at first commit. If
+placeholder count grows, a `00-render-static.yml`-style
+pattern similar to homelab-infra is the natural extension.
+
+## Sync waves
+
+| Wave | Layer | Notes |
+|---|---|---|
+| -10 | `infrastructure/*` | Comes up first; foundational |
+| 0 | `platform/*` | Authentik / Forgejo / OpenBao day-2 |
+| 5 | `observability/*` | After platform; parallel-able with apps |
+| 10 | `apps/*` | After everything else |
+
+Per-component overrides go via `argocd.argoproj.io/sync-wave`
+annotations on individual manifests when finer ordering needed.
+
+## What's NOT here
+
+- **Per-app deep manifests** — operator's per-app
+  initial-setup runbooks (under `homelab-docs/03-runbooks/`)
+  populate each `apps/<name>/` subdir over time.
+- **Argo CD itself** — installed via
+  `homelab-infra/argocd/install/` kustomize. Argo CD does not
+  manage itself in this layout (chicken-and-egg per ADR 0004).
+- **Bootstrap-time Helm releases** of Cilium + OpenBao —
+  initial install is via
+  `homelab-infra/ansible/playbooks/09b-argocd-bootstrap.yml`;
+  Argo takes over via the manifests here.
+- **Vector + Harbor + oauth2-proxy** dirs — removed; Vector
+  superseded by Alloy (ADR 0021), Harbor superseded by Forgejo
+  Packages (ADR 0019), oauth2-proxy unneeded since Authentik
+  exposes OIDC directly.
+
+## Related
+
+- [ADR 0004](../homelab-docs/02-decisions/0004-argocd-for-gitops.md)
+  — GitOps via Argo CD
+- [ADR 0016](../homelab-docs/02-decisions/0016-longhorn-for-cluster-storage.md)
+  — Longhorn replica policy
+- [ADR 0018](../homelab-docs/02-decisions/0018-openbao-deployment-shape.md)
+  — OpenBao Raft + Shamir
+- [ADR 0019](../homelab-docs/02-decisions/0019-forgejo-packages-as-artifact-registry.md)
+  — image signing + Kyverno admission
+- [ADR 0021](../homelab-docs/02-decisions/0021-observability-stack.md)
+- [ADR 0023](../homelab-docs/02-decisions/0023-forgejo-and-woodpecker-ci.md)
+- [ADR 0025](../homelab-docs/02-decisions/0025-nas-as-encrypted-bulk-substrate.md)
+  — NAS-as-encrypted-bulk; rclone-crypt overlays per share
+- [03-runbooks/cluster/argocd-bootstrap.md](../homelab-docs/03-runbooks/cluster/argocd-bootstrap.md)
+- [04-guides/cold-start.md](../homelab-docs/04-guides/cold-start.md)

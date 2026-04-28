@@ -1,0 +1,18 @@
+# cert-manager — issues internal TLS leaf certs from the
+# OpenBao PKI engine (configured by 09b-argocd-bootstrap.yml).
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+helmCharts:
+  - name: cert-manager
+    repo: https://charts.jetstack.io
+    version: "v1.16.1"  # OPERATOR PINS via Renovate
+    releaseName: cert-manager
+    namespace: cert-manager
+    valuesFile: values.yaml
+    includeCRDs: true
+
+resources:
+  - clusterissuer.yaml
+  - openbao-pki-secret.yaml
