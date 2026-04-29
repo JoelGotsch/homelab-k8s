@@ -1,0 +1,60 @@
+# Static PV bound to the Synology NAS `cluster-backups` share's
+# `minio/` subdirectory. Static binding (storageClassName: "")
+# rather than dynamic provisioning so the NFS path stays
+# stable across re-deploys — operators can `mount -t nfs` the
+# same path during a recovery scenario without consulting
+# kube-apiserver for a per-PV uuid.
+#
+# OPERATOR FILLS the NAS-IP at first commit (matches
+# nas_storage_ip in homelab-infra/group_vars/cluster.yml).
+#
+# Pre-req: the directory `/volume1/cluster-backups/minio/`
+# exists on the NAS and is exported by the `cluster-backups`
+# share (per nas/initial-setup.md). The k8s-nfs DSM account
+# has rw on the share (per ADR 0025 D5 / storage.md).
+#
+# Capacity: 4Ti is a soft hint to the scheduler; the actual
+# limit is the NAS share's free space. If MinIO usage starts
+# pressing this, either resize here (PV editing for
+# capacity-only is allowed) or trigger the BX40 storage tier
+# bump per backup-and-dr.md "Cost: BX20 trigger".
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: minio-on-nas
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: backup-substrate
+spec:
+  capacity:
+    storage: 4Ti
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  csi:
+    driver: nfs.csi.k8s.io
+    # Stable handle so re-deploy of the PV resource binds back
+    # to the same NFS path.
+    volumeHandle: minio-on-nas
+    volumeAttributes:
+      server: <NAS-IP>
+      share: /volume1/cluster-backups/minio
+  mountOptions:
+    - nfsvers=4.1
+    - hard
+    - nconnect=8
+    - rsize=131072
+    - wsize=131072
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: minio
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 4Ti
+  volumeName: minio-on-nas

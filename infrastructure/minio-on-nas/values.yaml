@@ -1,0 +1,102 @@
+# MinIO standalone-mode values for the cluster's backup
+# substrate. Per backup-and-dr.md §Cluster Longhorn volumes
+# (PVCs) and §Postgres databases (CNPG): MinIO sits between
+# in-cluster apps writing backups and the Restic CronJob that
+# replicates the bucket out to friend's NAS (tier-2) and
+# Hetzner Storage Box (tier-3).
+#
+# Mode: standalone (single replica). Distributed-MinIO over a
+# single NFS share is a known anti-pattern (no benefit, write
+# amplification + lock contention). Redundancy lives at the
+# Synology RAID layer per ADR 0025; off-cluster redundancy at
+# tier-2/3 per ADR 0006. MinIO itself is the staging area, not
+# the source-of-truth — the source is the consumer's snapshot.
+#
+# TLS: disabled. In-cluster traffic crosses the Cilium mesh; no
+# external exposure (the bucket is internal infra). HTTPRoute
+# is intentionally not wired.
+
+mode: standalone
+
+# Use the existing PV/PVC defined in pv.yaml — chart skips
+# its own PVC-template creation.
+persistence:
+  enabled: true
+  existingClaim: minio-data
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+# Root creds from the ExternalSecret in externalsecret.yaml.
+existingSecret: minio-root
+
+# Service exposure: ClusterIP only. The S3 API port (9000) is
+# what consumers (CNPG, Longhorn, Restic CronJob) hit; the
+# console (9001) is operator-only via kubectl port-forward —
+# no Service exposure for the console outside in-cluster.
+service:
+  type: ClusterIP
+  port: 9000
+
+consoleService:
+  type: ClusterIP
+  port: 9001
+
+# Pre-create the canonical buckets at chart-install time. App-
+# specific prefixes (cnpg/<app>, longhorn-backups, etc.) live
+# under the broad bucket — consumers use destinationPath /
+# bucket+prefix in their config.
+#
+# Lifecycle policies (e.g. 90-day expire on cnpg WAL) live in
+# the consumer's own backup config, NOT here — keeps the
+# bucket-side surface dumb.
+buckets:
+  - name: homelab-backups-cluster
+    policy: none
+    purge: false
+    versioning: false  # Restic CronJob handles version retention
+  - name: longhorn-backups
+    policy: none
+    purge: false
+    versioning: false
+  - name: loki-chunks
+    policy: none
+    purge: false
+    versioning: false  # Loki retention configured in its values
+
+# Per-app access keys (svc accounts) are NOT provisioned by
+# the chart. Operator creates them via `mc admin user svcacct
+# add` post-install (or via a separate Job we may add later)
+# and writes the resulting access_key/secret pair to OpenBao
+# at kv/cnpg/<app>/s3-creds. See README §"Per-app credentials".
+users: []
+
+# Disable the chart's metrics service auto-creation; the
+# operator-provided ServiceMonitor under observability/
+# scrapes MinIO's /minio/v2/metrics/cluster endpoint.
+metrics:
+  serviceMonitor:
+    enabled: false  # operator owns the ServiceMonitor
+
+# PSP / SCC explicitly off — PSA at the namespace level
+# already enforces restricted.
+podSecurityPolicy:
+  enabled: false
+
+securityContext:
+  enabled: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  fsGroupChangePolicy: OnRootMismatch
+
+containerSecurityContext:
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: true

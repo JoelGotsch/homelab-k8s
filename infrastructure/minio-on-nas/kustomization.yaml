@@ -1,0 +1,35 @@
+# MinIO on NAS — backup substrate.
+# Per backup-and-dr.md §Cluster Longhorn volumes (PVCs) and
+# §Postgres databases (CNPG). MinIO sits between in-cluster
+# apps writing backups and the Restic CronJob that replicates
+# the bucket out to friend's NAS (tier-2) and Hetzner Storage
+# Box (tier-3).
+#
+# Storage backend: NFS to Synology NAS `cluster-backups` share
+# under the `minio/` subdir. Standalone-mode MinIO; redundancy
+# at the NAS RAID layer per ADR 0025, off-cluster redundancy
+# at tier-2/3 per ADR 0006.
+#
+# Sequencing during cluster bring-up: this layer must be up
+# before any CNPG cluster's `backup:` block can resolve. Apps
+# carrying secret/personal-class data MUST NOT come up before
+# this is healthy. The cold-start guide (cold-start.md) lists
+# the order.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+helmCharts:
+  - name: minio
+    repo: https://charts.min.io/
+    version: "5.4.0"  # OPERATOR PINS via Renovate
+    releaseName: minio
+    namespace: minio
+    valuesFile: values.yaml
+    includeCRDs: false  # chart ships no CRDs in standalone mode
+
+resources:
+  - namespace.yaml
+  - pv.yaml
+  - externalsecret.yaml
+  - networkpolicy.yaml

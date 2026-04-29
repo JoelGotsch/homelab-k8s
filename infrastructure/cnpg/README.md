@@ -80,9 +80,14 @@ any write — gate the app's first sync on this).
 
 ## Open follow-ups
 
-- `homelab-k8s/infrastructure/minio-on-nas/` — bucket targets
-  for CNPG WAL archive (per
-  [TODO.md "MinIO-on-NAS Helm setup"](../../../homelab-docs/TODO.md)).
+- ✅ `homelab-k8s/infrastructure/minio-on-nas/` —
+  [scaffolded](../minio-on-nas/) 2026-04-29; standalone MinIO
+  on the NAS `cluster-backups` share, canonical buckets
+  (`homelab-backups-cluster`, `longhorn-backups`,
+  `loki-chunks`) pre-created. Per-app S3 service-account
+  credentials are operator-bootstrapped via `mc admin user
+  svcacct add` (pattern in
+  [minio-on-nas/README.md §Per-app credentials](../minio-on-nas/README.md)).
 - Restic CronJob for the MinIO → tier-2/3 hop. Lives under
   `homelab-k8s/infrastructure/backup-cronjobs/` (TBD).
 - Per-app `cnpg-cluster.yaml` for Vaultwarden, Nextcloud,

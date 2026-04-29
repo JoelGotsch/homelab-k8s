@@ -1,0 +1,107 @@
+# Default-deny + named-consumer allow. MinIO is internal-only;
+# no operator-ingress (operator reaches the console via
+# kubectl port-forward), no external WAN exposure.
+#
+# Consumers: CNPG (per-app cluster Postgres pods writing WAL
+# + base), Longhorn (backup target), the Restic CronJob (when
+# it lands under infrastructure/backup-cronjobs/), and Loki
+# (chunk storage backend per ADR 0021).
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: minio-default-deny
+  namespace: minio
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: minio-allow
+  namespace: minio
+spec:
+  podSelector:
+    matchLabels:
+      app: minio
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # CNPG-managed Postgres pods: each app's Cluster CRD lives
+    # in its own namespace (apps/<app>/), and the CNPG-spawned
+    # pods inherit the namespace. We allow from any
+    # namespace so per-app namespace additions don't require
+    # NetworkPolicy edits here; the egress is auth-gated by
+    # MinIO's per-app svc-account credentials anyway.
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              cnpg.io/cluster: ""
+      ports:
+        - port: 9000
+          protocol: TCP
+    # Longhorn manager pods (backup driver).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: longhorn-system
+      ports:
+        - port: 9000
+          protocol: TCP
+    # Restic CronJob namespace — TBD path. When the cronjob
+    # lands under infrastructure/backup-cronjobs/, swap to its
+    # actual namespace label.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: backup-cronjobs
+      ports:
+        - port: 9000
+          protocol: TCP
+    # Loki (object storage backend).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: loki
+      ports:
+        - port: 9000
+          protocol: TCP
+    # Monitoring (Prometheus scrape — when ServiceMonitor
+    # lands under observability/).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9000
+          protocol: TCP
+  egress:
+    # kube-DNS for service resolution.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # NAS NFS share — the storage backend. NAS lives on the
+    # `storage` VLAN.
+    #
+    # OPERATOR FILLS the NAS-IP at first commit (matches
+    # nas_storage_ip in homelab-infra/group_vars/cluster.yml).
+    - to:
+        - ipBlock:
+            cidr: <NAS-IP>/32
+      ports:
+        - port: 2049  # NFSv4
+          protocol: TCP
+        - port: 111   # rpcbind (some NAS configs still need it)
+          protocol: TCP
+        - port: 111
+          protocol: UDP
