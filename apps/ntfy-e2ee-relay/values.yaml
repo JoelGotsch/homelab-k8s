@@ -1,0 +1,30 @@
+# Helm-style values consumed by the relay Deployment manifest.
+# Plain kustomize (no Helm chart from upstream — the relay is
+# operator-owned code), so this is just operator-edited config
+# referenced in the Deployment via configMap or env-var refs.
+
+# Image — built by Woodpecker from the sibling repo
+# `ntfy-e2ee-relay/` per cold-start.md Step 13b.
+image:
+  repository: registry.homelab.internal/ntfy-e2ee-relay
+  tag: "0.1.0"  # OPERATOR PINS via Renovate
+  pullPolicy: IfNotPresent
+
+# Single replica — webhook proxy is stateless but write-once
+# per alert; multi-replica adds no value for this load profile.
+replicas: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+# Cluster-internal config. Operator overrides per-environment
+# in the relay-config ConfigMap (rendered into the Deployment
+# at sync time).
+config:
+  ntfyBaseUrl: "http://ntfy.ntfy.svc.cluster.local"
+  ntfyTopic: "homelab-alerts"
+  wireFormat: "aes-256-gcm.b64"

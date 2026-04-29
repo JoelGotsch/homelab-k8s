@@ -1,0 +1,13 @@
+# ntfy-e2ee-relay app — webhook proxy that re-encrypts
+# Falcosidekick / Alertmanager alerts to ntfy E2EE format.
+#
+# Per ADR 0024 D1 phase-2 + sibling repo ntfy-e2ee-relay/.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - externalsecret.yaml
+  - deployment.yaml
+  - networkpolicy.yaml

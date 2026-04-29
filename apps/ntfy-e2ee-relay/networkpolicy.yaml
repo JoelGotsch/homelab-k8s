@@ -1,0 +1,61 @@
+# Default-deny + named consumers + cluster-internal egress only.
+# The relay is internal-only; never exposed via Cloudflare
+# Tunnel or any other public ingress.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ntfy-e2ee-relay-default-deny
+  namespace: ntfy-e2ee-relay
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ntfy-e2ee-relay-allow
+  namespace: ntfy-e2ee-relay
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ntfy-e2ee-relay
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Falcosidekick (in monitoring namespace per ADR 0021)
+    # POSTs to /webhook.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 8000
+          protocol: TCP
+    # Operator-side smoke tests via kubectl port-forward —
+    # no NetworkPolicy match needed (port-forward bypasses
+    # NetworkPolicy by design).
+  egress:
+    # kube-DNS for ntfy service resolution.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # ntfy server (in-cluster) — the relay's only outbound
+    # destination at runtime.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ntfy
+      ports:
+        - port: 80
+          protocol: TCP
+        - port: 8080
+          protocol: TCP
