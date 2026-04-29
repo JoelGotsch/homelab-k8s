@@ -1,0 +1,58 @@
+# ntfy server config (server.yml format).
+# Upstream docs: https://docs.ntfy.sh/config/
+#
+# Per ADR 0024 D1 phase-2: ntfy is the additive convenience
+# alert path; Falcosidekick's Signal sink remains the primary.
+# Single operator topic at first install.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ntfy-config
+  namespace: ntfy
+data:
+  server.yml: |
+    # Listen address (cluster-internal; HTTPRoute fronts).
+    listen-http: ":80"
+
+    # Public-facing URL — used in browser-friendly responses
+    # and by the F-Droid app for resolving topics.
+    # OPERATOR FILLS at first commit (matches the operator's
+    # homelab domain; the server isn't actually public-facing
+    # until phase-2 Cloudflare Tunnel cuts over).
+    base-url: "https://ntfy.<HOMELAB-DOMAIN>"
+
+    # Persistence for the message DB + attachment cache.
+    cache-file: /var/cache/ntfy/cache.db
+    cache-duration: 12h
+    attachment-cache-dir: /var/cache/ntfy/attachments
+    attachment-total-size-limit: 1G
+    attachment-file-size-limit: 10M
+
+    # Auth: deny-all default. Admin user (created at first
+    # install via `ntfy user add admin --role=admin`) has
+    # full access; relay publishes via a bearer token issued
+    # to a dedicated `relay` user with publish-only ACL on
+    # the `homelab-alerts` topic.
+    auth-file: /var/lib/ntfy/auth.db
+    auth-default-access: deny-all
+
+    # Disable signup — ntfy is single-tenant for the homelab.
+    enable-signup: false
+
+    # Disable Web Push (browser subscription) — operator
+    # uses the F-Droid app, not browser. Reduces the
+    # service's external-network footprint.
+    web-push-public-key: ""
+
+    # Behind a reverse proxy (the cluster Gateway).
+    behind-proxy: true
+
+    # Logging — JSON for machine-readable, info-level for
+    # operational visibility.
+    log-format: json
+    log-level: info
+
+    # Metrics endpoint (Prometheus scrape) — wired in when
+    # observability layer rolls out.
+    enable-metrics: true

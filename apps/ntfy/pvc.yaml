@@ -1,0 +1,29 @@
+# Persistence for ntfy's SQLite message database +
+# attachment cache.
+#
+# Sizing: 5Gi handles ~years of operator-only alert volume.
+# `cache-duration: 12h` (server.yml) keeps the DB bounded in
+# practice — messages older than 12h get evicted.
+# Attachments aren't used at the homelab's alert profile
+# (alert messages are short text), so the attachment cache
+# stays empty.
+#
+# Storage class: longhorn-replica2 — message history is
+# not load-bearing (relay re-encrypts every fresh alert;
+# F-Droid app caches recently-pulled messages locally), but
+# replica2 protects against a single-node-loss data loss
+# during the brief replication window for new messages.
+# Replica1 would be a reasonable downgrade if Longhorn
+# storage gets tight.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ntfy-data
+  namespace: ntfy
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: longhorn-replica2
+  resources:
+    requests:
+      storage: 5Gi

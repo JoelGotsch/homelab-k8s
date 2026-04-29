@@ -1,0 +1,70 @@
+# Default-deny + ingress from named consumers + egress
+# kube-DNS only.
+#
+# Subscribers reach ntfy via the cluster Gateway's HTTPRoute
+# (phase 1: Tailscale-fronted; phase 2: Cloudflare-Tunnel-
+# fronted). Ingress comes from the Gateway's namespace
+# (`ingress` for Cilium Gateway).
+#
+# Publishers: the relay only. Falcosidekick / Alertmanager
+# don't talk to ntfy directly — they POST to the relay,
+# which encrypts + republishes here.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ntfy-default-deny
+  namespace: ntfy
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ntfy-allow
+  namespace: ntfy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ntfy
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Cluster Gateway (Cilium) — operator subscriptions land here.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+      ports:
+        - port: 80
+          protocol: TCP
+    # The E2EE relay — the only authorized publisher.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ntfy-e2ee-relay
+      ports:
+        - port: 80
+          protocol: TCP
+    # Monitoring (Prometheus scrape — when ServiceMonitor lands).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 80
+          protocol: TCP
+  egress:
+    # kube-DNS only.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP

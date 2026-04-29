@@ -1,0 +1,101 @@
+# Plain Deployment + Service for ntfy. No upstream Helm
+# chart — community charts exist but their versioning drifts
+# faster than the upstream binary; rolling our own here keeps
+# the trust surface tight + lets Renovate track just the
+# image tag.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ntfy
+  namespace: ntfy
+  labels:
+    app.kubernetes.io/name: ntfy
+spec:
+  replicas: 1  # SQLite-backed DB; multi-replica needs a different backend
+  strategy:
+    type: Recreate  # PVC is RWO; rolling-update would deadlock
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ntfy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ntfy
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ntfy
+          image: "binwiederhier/ntfy:v2.11.0"  # OPERATOR PINS via Renovate
+          imagePullPolicy: IfNotPresent
+          args: ["serve"]
+          ports:
+            - containerPort: 80
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/ntfy
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/ntfy
+              subPath: lib
+            - name: data
+              mountPath: /var/cache/ntfy
+              subPath: cache
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            # ntfy needs to write to the auth DB + cache DB;
+            # not compatible with readOnlyRootFilesystem
+            # without restructuring the volume layout further.
+            # Acceptable trade-off: the writable paths are
+            # bound to the PVC, NOT the rootfs; tmpfs at /tmp
+            # is the only writable rootfs path needed.
+            readOnlyRootFilesystem: false
+      volumes:
+        - name: config
+          configMap:
+            name: ntfy-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: ntfy-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ntfy
+  namespace: ntfy
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ntfy
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
