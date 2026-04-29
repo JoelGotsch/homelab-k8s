@@ -49,9 +49,8 @@ spec:
       ports:
         - port: 9000
           protocol: TCP
-    # Restic CronJob namespace — TBD path. When the cronjob
-    # lands under infrastructure/backup-cronjobs/, swap to its
-    # actual namespace label.
+    # Restic CronJob (infrastructure/backup-cronjobs/) — reads
+    # source buckets via mc mirror. Scaffolded 2026-04-29.
     - from:
         - namespaceSelector:
             matchLabels:

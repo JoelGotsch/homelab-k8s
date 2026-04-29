@@ -88,8 +88,12 @@ any write — gate the app's first sync on this).
   credentials are operator-bootstrapped via `mc admin user
   svcacct add` (pattern in
   [minio-on-nas/README.md §Per-app credentials](../minio-on-nas/README.md)).
-- Restic CronJob for the MinIO → tier-2/3 hop. Lives under
-  `homelab-k8s/infrastructure/backup-cronjobs/` (TBD).
+- ✅ Restic CronJob for the MinIO → tier-3 hop —
+  [scaffolded](../backup-cronjobs/) 2026-04-29 as
+  `restic-minio-to-hetzner`. Tier-2 sibling
+  (`restic-minio-to-friends-nas`) blocks on friend's-NAS
+  hardware ship; pattern documented in
+  [backup-cronjobs/README §Tier-2 sibling](../backup-cronjobs/README.md).
 - Per-app `cnpg-cluster.yaml` for Vaultwarden, Nextcloud,
   Langfuse — added when those apps' kustomize layers are
   scaffolded. Currently only `apps/llm-gateway/` exists.

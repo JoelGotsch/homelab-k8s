@@ -1,0 +1,28 @@
+# Staging PVC for Restic mirror+backup pipeline.
+#
+# `mc mirror` copies the MinIO bucket(s) here; Restic then
+# backs up the directory tree. PVC persists across CronJob
+# runs — `mc mirror` (default mode) compares destination
+# state to skip re-copying unchanged objects, so only new /
+# changed bucket content is transferred each run. Without
+# persistence, every run would re-mirror the entire bucket.
+#
+# Sizing: starts conservative. Operator resizes (Longhorn
+# allows online resize) as cluster backup volume grows. The
+# alert in cronjob.yaml fires if `mc mirror` cannot complete
+# within the timeout — surface for size review.
+#
+# Storage class: longhorn-replica1 — this PVC's contents are
+# disposable (re-derivable from MinIO). Replica1 keeps cluster
+# storage usage tight.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: restic-staging
+  namespace: backup-cronjobs
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: longhorn-replica1
+  resources:
+    requests:
+      storage: 50Gi

@@ -1,0 +1,71 @@
+# Default-deny + named-egress allow.
+#
+# This namespace runs scheduled jobs only — no ingress, no
+# always-on services. Egress is the only direction that
+# matters: read MinIO (in-cluster), write Hetzner Storage
+# Box over SFTP (WAN), DNS for both.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backup-cronjobs-default-deny
+  namespace: backup-cronjobs
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backup-cronjobs-allow
+  namespace: backup-cronjobs
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: backup-pipeline
+  policyTypes: [Egress]
+  egress:
+    # kube-DNS for service resolution (MinIO svc) + WAN DNS
+    # (Hetzner SB hostname).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # MinIO source bucket reads (cluster-internal).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: minio
+      ports:
+        - port: 9000
+          protocol: TCP
+    # Hetzner Storage Box SFTP target. Egress to WAN — no
+    # in-cluster destination match. The cluster's egress
+    # gateway handles the WAN hop; this rule allows the pod
+    # to *originate* the connection.
+    #
+    # Hetzner SB SSH ports: 22 (default) + 23 (legacy on some
+    # storage boxes). The actual port lives in the
+    # hetzner-sb-creds Secret (HSB_PORT). Allow both to cover
+    # operator's specific account; tighten if known.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - port: 22
+          protocol: TCP
+        - port: 23
+          protocol: TCP
