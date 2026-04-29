@@ -6,8 +6,9 @@
 #     name: prometheus-additional-scrape-configs
 #     key: prometheus-additional.yaml
 #
-# OPERATOR: replace MAC_STUDIO_INFERENCE_IP with the Mac Studio's
-# address on the inference VLAN.
+# OPERATOR: replace <MAC_STUDIO_INFERENCE_IP> with the Mac Studio's
+# address on the inference VLAN (matches mac_inference_ip in
+# homelab-infra/group_vars/all/main.yml).
 
 apiVersion: v1
 kind: Secret
@@ -23,7 +24,7 @@ stringData:
       metrics_path: /metrics
       static_configs:
         - targets:
-            - MAC_STUDIO_INFERENCE_IP:9100
+            - <MAC_STUDIO_INFERENCE_IP>:9100
           labels:
             host: mac-studio
             role: inference
@@ -35,7 +36,7 @@ stringData:
       metrics_path: /metrics
       static_configs:
         - targets:
-            - MAC_STUDIO_INFERENCE_IP:9101
+            - <MAC_STUDIO_INFERENCE_IP>:9101
           labels:
             host: mac-studio
             role: inference

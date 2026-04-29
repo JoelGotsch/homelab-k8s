@@ -73,7 +73,7 @@ spec:
     # /32 once known. Keep as a placeholder ipBlock.
     - to:
         - ipBlock:
-            cidr: MAC_STUDIO_INFERENCE_IP/32
+            cidr: <MAC_STUDIO_INFERENCE_IP>/32
       ports:
         - port: 8080
           protocol: TCP

@@ -100,6 +100,31 @@ follows the same dependency table — the cold-start steps are
 re-runnable individually per
 [cold-start.md §Re-running parts of the bring-up](../../../homelab-docs/04-guides/cold-start.md).
 
+## OpenBao paths to seed
+
+Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
+ExternalSecret in `externalsecret.yaml` projects this into
+the namespace; without it, MinIO does not start.
+
+| Path | Keys | Source |
+|---|---|---|
+| `kv/minio-on-nas/root-creds` | `rootUser`, `rootPassword` | operator-generated, persisted; rotation = re-write + restart MinIO |
+
+**First-install seed:**
+
+```sh
+ROOT_USER="minio-root-$(openssl rand -hex 4)"
+ROOT_PASSWORD="$(openssl rand -base64 32)"
+bao kv put kv/minio-on-nas/root-creds \
+  rootUser="$ROOT_USER" \
+  rootPassword="$ROOT_PASSWORD"
+```
+
+Per-app S3 service-account credentials live separately at
+`kv/cnpg/<app>/s3-creds` and are owned by the consumer
+app's README. Their bootstrap depends on MinIO being up —
+pattern is in §Per-app credentials below.
+
 ## Per-app credentials
 
 The chart pre-creates buckets but does not provision per-app

@@ -45,7 +45,7 @@ db:
 # Inline LiteLLM proxy config. Mirrors
 # llm-gateway/policies/proxy_config.example.yaml — operator
 # keeps this in sync (Renovate cannot — semantic drift).
-# MAC_STUDIO_INFERENCE_IP must be replaced with the actual
+# <MAC_STUDIO_INFERENCE_IP> must be replaced with the actual
 # inference-VLAN address.
 proxy_config:
   model_list:
@@ -68,22 +68,22 @@ proxy_config:
     - model_name: mac-qwen-14b
       litellm_params:
         model: openai/Qwen2.5-14B-Instruct-4bit
-        api_base: http://MAC_STUDIO_INFERENCE_IP:8080/v1
+        api_base: http://<MAC_STUDIO_INFERENCE_IP>:8080/v1
         api_key: dummy
     - model_name: mac-deepseek-coder-lite
       litellm_params:
         model: openai/DeepSeek-Coder-V2-Lite-Instruct-4bit
-        api_base: http://MAC_STUDIO_INFERENCE_IP:8080/v1
+        api_base: http://<MAC_STUDIO_INFERENCE_IP>:8080/v1
         api_key: dummy
     - model_name: mac-llama-8b
       litellm_params:
         model: openai/Llama-3.1-8B-Instruct-4bit
-        api_base: http://MAC_STUDIO_INFERENCE_IP:8080/v1
+        api_base: http://<MAC_STUDIO_INFERENCE_IP>:8080/v1
         api_key: dummy
     - model_name: mac-embed
       litellm_params:
         model: ollama/nomic-embed-text
-        api_base: http://MAC_STUDIO_INFERENCE_IP:11434
+        api_base: http://<MAC_STUDIO_INFERENCE_IP>:11434
   litellm_settings:
     drop_params: true
     callbacks:

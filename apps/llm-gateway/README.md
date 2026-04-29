@@ -25,10 +25,40 @@ chokepoint for LLM calls per ADR 0026.
 
 ## Operator inputs
 
-- Replace `MAC_STUDIO_INFERENCE_IP` in `values.yaml` and
-  `networkpolicy.yaml` with the inference-VLAN address.
-- Replace `<HOMELAB-DOMAIN>` in `httproute.yaml`.
-- Seed OpenBao at the paths referenced in `externalsecret.yaml`.
+Placeholders (caught by
+[homelab-k8s/scripts/check-placeholders.sh](../../scripts/check-placeholders.sh),
+gated at [cold-start.md Step 13a](../../../homelab-docs/04-guides/cold-start.md)):
+
+- `<MAC_STUDIO_INFERENCE_IP>` in `values.yaml` and
+  `networkpolicy.yaml` — inference-VLAN address (matches
+  `mac_inference_ip` in
+  `homelab-infra/group_vars/all/main.yml`).
+- `<HOMELAB-DOMAIN>` in `httproute.yaml` — operator's homelab
+  domain (matches `homelab_domain` in group_vars).
+
+## OpenBao paths to seed
+
+Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
+ExternalSecret in `externalsecret.yaml` projects these into
+the namespace; without them, the pod fails to start.
+
+| Path | Keys | Source |
+|---|---|---|
+| `kv/llm-gateway/anthropic` | `api_key` | Anthropic console — operator-issued API key (`sk-ant-...`) |
+| `kv/llm-gateway/openai` | `api_key` | OpenAI platform — operator-issued API key (`sk-...`) |
+| `kv/llm-gateway/master-key` | `value` | `openssl rand -hex 32` — generated at first install, persisted; rotation per [llm-gateway/rotate-key.md](../../../homelab-docs/03-runbooks/llm-gateway/rotate-key.md) |
+| `kv/cnpg/llm-gateway/s3-creds` | `access_key_id`, `secret_access_key` | provisioned post-MinIO-Healthy via `mc admin user svcacct add` per [minio-on-nas/README §Per-app credentials](../../infrastructure/minio-on-nas/README.md) |
+
+**First-install seed (paste before Step 13c-driven Argo
+sync):**
+
+```sh
+bao kv put kv/llm-gateway/anthropic   api_key="sk-ant-..."
+bao kv put kv/llm-gateway/openai      api_key="sk-..."
+bao kv put kv/llm-gateway/master-key  value="$(openssl rand -hex 32)"
+# kv/cnpg/llm-gateway/s3-creds — see minio-on-nas README;
+# requires MinIO up first.
+```
 
 ## Image
 
