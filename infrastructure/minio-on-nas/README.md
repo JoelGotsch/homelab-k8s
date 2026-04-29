@@ -63,64 +63,42 @@ restoring from tier-2/3.
 | `externalsecret.yaml` | Root credentials from OpenBao at `kv/data/minio-on-nas/root-creds`. |
 | `networkpolicy.yaml` | Default-deny + allow from CNPG / Longhorn / Loki / Restic CronJob namespaces; egress to NAS NFS only. |
 
-## Bootstrap (operator, first install)
+## Bootstrap
 
-Pre-reqs:
+This layer's bring-up is wired into the homelab cold-start
+sequence — **not a free-standing checklist**. Operators
+following [cold-start.md](../../../homelab-docs/04-guides/cold-start.md)
+will hit each prereq and seed step at the right moment:
 
-- NFS CSI driver up
-  ([infrastructure/nfs-csi/](../nfs-csi/)).
-- ExternalSecrets operator up
-  ([infrastructure/external-secrets/](../external-secrets/)).
-- OpenBao up + unsealed
-  ([cluster/argocd-bootstrap.md](../../../homelab-docs/03-runbooks/cluster/argocd-bootstrap.md) Step 4).
-- ClusterSecretStore `openbao` configured
-  (per ESO + OpenBao integration values).
-- The directory `/volume1/cluster-backups/minio/` exists on
-  the NAS and `cluster-backups` is exported with the `k8s-nfs`
-  account having rw (per
-  [nas/initial-setup.md](../../../homelab-docs/03-runbooks/nas/initial-setup.md)).
+| Bring-up step | What lands |
+|---|---|
+| [Step 8 — NAS bring-up](../../../homelab-docs/04-guides/cold-start.md) | `cluster-backups` share + `cluster-backups/minio/` subdir created (per [nas/initial-setup.md §Step 3](../../../homelab-docs/03-runbooks/nas/initial-setup.md)) |
+| [Step 9 — Cluster bring-up](../../../homelab-docs/04-guides/cold-start.md) | NFS CSI, ExternalSecrets operator, OpenBao up + unsealed, ClusterSecretStore `openbao` reconciled, Argo CD bootstrapped |
+| [Step 13a — Pre-rollout: render + check placeholders](../../../homelab-docs/04-guides/cold-start.md) | `<NAS-IP>` in `pv.yaml` + `networkpolicy.yaml` filled (`scripts/check-placeholders.sh` gates) |
+| [Step 13c — Pre-rollout: seed ExternalSecret OpenBao paths](../../../homelab-docs/04-guides/cold-start.md) | `kv/minio-on-nas/root-creds` populated; per-app S3 service-accounts (`kv/cnpg/<app>/s3-creds`) provisioned post-MinIO-Healthy via `mc admin user svcacct add` (snippet inline in cold-start §13c) |
 
-Steps:
+Argo CD then reconciles this layer; MinIO comes up Healthy.
 
-1. **Generate root credentials** and write to OpenBao:
+**Verify (after Argo sync):**
 
-   ```sh
-   ROOT_USER="minio-root-$(openssl rand -hex 4)"
-   ROOT_PASSWORD="$(openssl rand -base64 32)"
-   bao kv put kv/minio-on-nas/root-creds \
-     rootUser="$ROOT_USER" \
-     rootPassword="$ROOT_PASSWORD"
-   ```
+```sh
+kubectl -n minio get pods,pvc,secret
+# Expect: 1 minio pod Running, minio-data PVC Bound,
+# minio-root Secret present.
 
-2. **Fill placeholders** in `pv.yaml` and `networkpolicy.yaml`:
+kubectl -n minio logs -l app=minio | tail -20
+# Expect: 'API: http://...:9000', no errors mounting NFS.
 
-   ```sh
-   sed -i 's|<NAS-IP>|10.x.y.z|g' pv.yaml networkpolicy.yaml
-   ```
+# Bucket presence (port-forward console + login as root, or use mc):
+kubectl -n minio port-forward svc/minio 9001:9001
+# Browse https://localhost:9001 → expect 3 buckets:
+# homelab-backups-cluster, longhorn-backups, loki-chunks.
+```
 
-   (or, in the kustomize-overlay model, use a `replacements:`
-   stanza in the parent overlay — the canonical pattern is
-   under [bootstrap/](../../bootstrap/).)
-
-3. **Sync via Argo CD** (or `kubectl apply -k` for first
-   bring-up before Argo is managing this layer).
-
-4. **Verify**:
-
-   ```sh
-   kubectl -n minio get pods,pvc,secret
-   # Expect: 1 minio pod Running, minio-data PVC Bound,
-   # minio-root Secret present.
-
-   kubectl -n minio logs -l app=minio | tail -20
-   # Expect: 'API: http://...:9000', no errors mounting NFS.
-
-   # Bucket presence (port-forward console + login as root,
-   # or use mc):
-   kubectl -n minio port-forward svc/minio 9001:9001
-   # Browse https://localhost:9001 → expect 3 buckets:
-   # homelab-backups-cluster, longhorn-backups, loki-chunks.
-   ```
+Repaving / re-running this layer after the initial bring-up
+follows the same dependency table — the cold-start steps are
+re-runnable individually per
+[cold-start.md §Re-running parts of the bring-up](../../../homelab-docs/04-guides/cold-start.md).
 
 ## Per-app credentials
 
