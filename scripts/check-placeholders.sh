@@ -48,7 +48,7 @@ is_allowed() {
 # - skip backtick-wrapped (commentary).
 # - require at least one uppercase or digit (rules out things
 #   like `<value>` in comments).
-hits=$(grep -rEn --include='*.yaml' --include='*.yml' --include='*.j2' \
+hits=$(grep -rEn --include='*.yaml' --include='*.yml' --include='*.j2' --include='*.json5' \
   '<[A-Z0-9][A-Z0-9_-]+>' . \
   | grep -v '`<[A-Z0-9_-]\+>`' \
   || true)
@@ -78,7 +78,7 @@ echo "FAIL: unfilled placeholder(s) found in homelab-k8s manifests:" >&2
 echo >&2
 for token in $remaining; do
   echo "  $token:" >&2
-  grep -rEn --include='*.yaml' --include='*.yml' --include='*.j2' \
+  grep -rEn --include='*.yaml' --include='*.yml' --include='*.j2' --include='*.json5' \
     -F "$token" . | sed 's/^/    /' >&2
   echo >&2
 done
