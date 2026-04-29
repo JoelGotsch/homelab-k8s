@@ -128,7 +128,7 @@ the namespace; without them, the CronJob's pods stay
 | Path | Keys | Source |
 |---|---|---|
 | `kv/prod/restic/cluster-tier-3/password` | `value` | `openssl rand -base64 32`. **Persist to offline-recovery archive** per [ADR 0011](../../../homelab-docs/02-decisions/0011-distributed-offline-recovery.md) — loss = no decrypt of any tier-3 snapshot. |
-| `kv/prod/backup/hetzner-storage-box` | `host`, `user`, `port`, `ssh_key` | from Hetzner Robot account; SSH key is operator-generated ed25519 keypair, public half added to Storage Box console. **Reused** by openbao raft-snapshot-cronjob. |
+| `kv/prod/backup/hetzner-storage-box` | `host`, `user`, `port`, `ssh_key`, `ssh_known_host` *(optional)* | from Hetzner Robot account; SSH key is operator-generated ed25519 keypair, public half added to Storage Box console. **Reused** by openbao raft-snapshot-cronjob. The `ssh_known_host` field is the post-TOFU pinned host-key — see "Host-key pinning" below. |
 | `kv/prod/backup/minio-reader/s3-creds` | `access_key_id`, `secret_access_key` | provisioned post-MinIO-Healthy via `mc admin user svcacct add` with **read-only** policy on `homelab-backups-cluster` + `longhorn-backups` buckets. |
 
 **First-install seed (after MinIO + OpenBao are Healthy):**
@@ -221,16 +221,97 @@ Cadence: per
 [quarterly-checklist.md](../../../homelab-docs/05-security/audit/quarterly-checklist.md)
 backup-restore rotation.
 
+## Host-key pinning
+
+The cronjob's `~/.ssh/known_hosts` is generated per run.
+Two modes (auto-selected):
+
+- **Pinned** (preferred): operator captures the Hetzner SB
+  host fingerprint at first manual SSH and writes it to
+  OpenBao. Cronjob uses it.
+- **TOFU** (default at first install): cronjob runs
+  `ssh-keyscan` each invocation. Accepts whatever the
+  host presents — vulnerable to MITM at first run.
+
+### Capture + pin procedure (one-time)
+
+```sh
+# 1. From a Tier A host, SSH to the Storage Box once to
+#    populate operator's local known_hosts:
+ssh -p 23 u123456@u123456.your-storagebox.de
+# Accept the host key prompt; ssh adds the line to
+# ~/.ssh/known_hosts.
+
+# 2. Capture the line:
+KNOWN_HOST=$(ssh-keygen -F "[u123456.your-storagebox.de]:23" -f ~/.ssh/known_hosts | grep -v '^#' | head -1)
+echo "$KNOWN_HOST"
+# Expect: `[u123456.your-storagebox.de]:23 ssh-ed25519 AAAA...`
+
+# 3. Sanity-check: should be ssh-ed25519 (Hetzner's default
+#    host key type as of mid-2025; if rsa, that's fine too).
+
+# 4. Write to OpenBao:
+bao kv patch kv/prod/backup/hetzner-storage-box \
+  ssh_known_host="$KNOWN_HOST"
+
+# 5. Force-refresh ESO so the cronjob picks up the new field:
+kubectl -n backup-cronjobs annotate externalsecret \
+  hetzner-sb-creds force-sync=$(date +%s) --overwrite
+kubectl -n openbao annotate externalsecret \
+  hetzner-sb-creds force-sync=$(date +%s) --overwrite
+
+unset KNOWN_HOST
+```
+
+### Verifying the pin works
+
+Trigger an off-schedule cronjob run + watch logs:
+
+```sh
+# Manually create a Job from the CronJob template (so we
+# don't wait for 02:00 UTC):
+kubectl -n backup-cronjobs create job --from=cronjob/restic-minio-to-hetzner \
+  test-pin-$(date +%s)
+
+# Tail logs of the resulting pod:
+kubectl -n backup-cronjobs logs -f job/test-pin-<...> -c restic
+# Expect: no `ssh-keyscan` invocation; ssh connects directly.
+# Restic backup + forget proceed normally.
+```
+
+If the pin is wrong (capture typo, key rotated upstream),
+SSH fails with "Host key verification failed." Recovery:
+re-capture the current key + re-write to OpenBao.
+
+### When to re-capture
+
+- Hetzner rotates the SB host key (rare; communicated via
+  Hetzner status page).
+- Operator migrates to a different SB.
+- Operator suspects the captured value is wrong (MITM at
+  capture time, ssh-keyscan output rather than real
+  fingerprint, etc.).
+
+Annual quarterly-checklist line item: confirm the pinned
+value still matches what `ssh-keyscan` returns. If
+divergence: investigate (legitimate rotation vs MITM).
+
 ## Known caveats
 
-- **Trust-on-first-use for the Hetzner SB host key.** The
-  cronjob does `ssh-keyscan` per run, accepting whatever the
-  host presents. A MITM at first run could substitute a
-  different host. Mitigation: pin the expected fingerprint in
-  the OpenBao Secret (`ssh_known_host` field) once captured
-  on first manual SSH from a Tier A host. Tracked as a
-  follow-up — not gating tier-3 operational status, but
-  worth closing.
+- **Host-key trust path:** the cronjob picks between two
+  modes based on whether `SSH_KNOWN_HOST` is set:
+  - **Pinned** (post-TOFU, preferred): if
+    `kv/prod/backup/hetzner-storage-box` has the
+    `ssh_known_host` field set, the cronjob writes that
+    line directly to `~/.ssh/known_hosts` and SSH refuses
+    to connect to a host with a different key.
+  - **TOFU** (first-install fallback): if unset, the
+    cronjob `ssh-keyscan`s and accepts whatever the host
+    presents.
+
+  See "Host-key pinning" below for the operator capture
+  procedure. **Pinning is the recommended posture** —
+  TOFU is only for the bring-up window.
 - **Restic password loss = total tier-3 data loss.** Repo
   cannot be recreated without it. Archive copy in
   offline-recovery is mandatory; OpenBao copy alone is not

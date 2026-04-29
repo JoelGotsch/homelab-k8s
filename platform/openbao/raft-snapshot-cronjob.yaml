@@ -52,6 +52,17 @@ spec:
       remoteRef:
         key: prod/backup/hetzner-storage-box
         property: ssh_key
+    - secretKey: ssh_known_host
+      remoteRef:
+        key: prod/backup/hetzner-storage-box
+        property: ssh_known_host
+        # Optional. If set, snapshot CronJob skips ssh-keyscan
+        # and pins the expected host fingerprint (TOFU → pinned).
+        # Captured + written via:
+        #   bao kv put kv/prod/backup/hetzner-storage-box \
+        #     ssh_known_host="<known_hosts line>"
+        # Same path as backup-cronjobs's ssh_known_host —
+        # both cronjobs read from the same OpenBao path.
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -94,7 +105,17 @@ spec:
                   mkdir -p ~/.ssh
                   echo "$SSH_KEY" > ~/.ssh/id_ed25519
                   chmod 600 ~/.ssh/id_ed25519
-                  ssh-keyscan -H ${HSB_HOST} > ~/.ssh/known_hosts 2>/dev/null
+                  # Host-key trust path: pin if SSH_KNOWN_HOST
+                  # is set (post-TOFU), else ssh-keyscan
+                  # (first-install). Per ntfy/rotation.md +
+                  # 99-journal/2026-04-29-restic-tier-3-cronjob.md
+                  # D5.
+                  if [ -n "${SSH_KNOWN_HOST:-}" ]; then
+                    echo "$SSH_KNOWN_HOST" > ~/.ssh/known_hosts
+                  else
+                    ssh-keyscan -H ${HSB_HOST} > ~/.ssh/known_hosts 2>/dev/null
+                  fi
+                  chmod 600 ~/.ssh/known_hosts
                   scp -i ~/.ssh/id_ed25519 \
                     /tmp/snapshot-${TS}.snap \
                     ${HSB_USER}@${HSB_HOST}:/openbao-snapshots/

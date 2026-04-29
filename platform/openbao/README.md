@@ -35,7 +35,7 @@ that's expected on day one.
 | Path | Keys | Source |
 |---|---|---|
 | `kv/prod/openbao/snapshot-token` | `token` | `bao token create -policy=snapshot -ttl=8760h -orphan` (after applying the `snapshot` policy below). Yearly rotation. |
-| `kv/prod/backup/hetzner-storage-box` | `host`, `user`, `port`, `ssh_key` | from Hetzner Robot account; SSH key is operator-generated ed25519 keypair, public half added to Storage Box console. **Reused** by [infrastructure/backup-cronjobs/](../../infrastructure/backup-cronjobs/). |
+| `kv/prod/backup/hetzner-storage-box` | `host`, `user`, `port`, `ssh_key`, `ssh_known_host` *(optional)* | from Hetzner Robot account; SSH key is operator-generated ed25519 keypair, public half added to Storage Box console. **Reused** by [infrastructure/backup-cronjobs/](../../infrastructure/backup-cronjobs/). The `ssh_known_host` field is the post-TOFU pinned host-key — capture procedure in [backup-cronjobs/README §Host-key pinning](../../infrastructure/backup-cronjobs/README.md). |
 
 **First-install seed (after OpenBao initialized + unsealed):**
 

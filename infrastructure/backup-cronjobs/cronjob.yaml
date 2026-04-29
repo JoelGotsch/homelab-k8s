@@ -112,14 +112,25 @@ spec:
                   echo "$SSH_KEY" > /tmp/.ssh/id_ed25519
                   chmod 600 /tmp/.ssh/id_ed25519
 
-                  # Trust-on-first-use for Hetzner SB host key.
-                  # First-run posture: ssh-keyscan accepts whatever
-                  # the host presents. Mitigation: operator pins
-                  # the expected host fingerprint via the
-                  # `prod/backup/hetzner-storage-box` Secret
-                  # `ssh_known_host` field once captured (TODO).
-                  ssh-keyscan -p "${HSB_PORT:-23}" -H "$HSB_HOST" \
-                    > /tmp/.ssh/known_hosts 2>/dev/null
+                  # Host-key trust path:
+                  #
+                  # If SSH_KNOWN_HOST is set (operator captured
+                  # the fingerprint at first SSH + wrote it to
+                  # OpenBao at kv/prod/backup/hetzner-storage-box
+                  # ssh_known_host), pin it. This is the
+                  # preferred (post-TOFU) posture per
+                  # 99-journal/2026-04-29-restic-tier-3-cronjob.md
+                  # D5.
+                  #
+                  # If unset (first install / pre-pin), fall back
+                  # to ssh-keyscan. Brief TOFU window.
+                  if [ -n "${SSH_KNOWN_HOST:-}" ]; then
+                    echo "$SSH_KNOWN_HOST" > /tmp/.ssh/known_hosts
+                  else
+                    ssh-keyscan -p "${HSB_PORT:-23}" -H "$HSB_HOST" \
+                      > /tmp/.ssh/known_hosts 2>/dev/null
+                  fi
+                  chmod 600 /tmp/.ssh/known_hosts
 
                   export RESTIC_REPOSITORY="sftp:${HSB_USER}@${HSB_HOST}:/cluster-backups-tier-3"
                   export RESTIC_PASSWORD_FILE=/restic-secrets/password
