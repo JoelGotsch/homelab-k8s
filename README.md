@@ -108,6 +108,32 @@ annotations on individual manifests when finer ordering needed.
   Packages (ADR 0019), oauth2-proxy unneeded since Authentik
   exposes OIDC directly.
 
+## Development setup
+
+Local sanity checks run via `pre-commit`:
+
+```sh
+pip install pre-commit  # one-time
+pre-commit install      # one-time per checkout
+# Now every `git commit` runs the configured hooks.
+
+# Run on demand against the whole repo:
+pre-commit run --all-files
+```
+
+Hooks are in [.pre-commit-config.yaml](.pre-commit-config.yaml);
+each is a repo-local script under [scripts/](scripts/):
+
+| Script | What it checks | Mode |
+|---|---|---|
+| `check-bare-tokens.sh` | bare ALL_CAPS placeholder tokens at value-bearing keys (`cidr:`, `server:`, `endpoint:`, etc.) — must be `<UPPER_SNAKE>` form so `check-placeholders.sh` catches them | pre-commit |
+| `check-eso-readme.sh` | every kustomize layer with an ExternalSecret has the `## OpenBao paths to seed` section in its README | pre-commit |
+| `check-placeholders.sh` | unfilled `<PLACEHOLDER>` tokens — **deploy-time** (cold-start.md Step 13a), not commit-time. Run manually before `kubectl apply -k` / Argo apply. | manual |
+
+Per the operator's "script everything scriptable now" policy:
+new schema-pairing or cross-doc completeness checks land here
+as scripts, not as deferred journal items.
+
 ## Related
 
 - [ADR 0004](../homelab-docs/02-decisions/0004-argocd-for-gitops.md)

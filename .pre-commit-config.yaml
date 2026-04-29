@@ -1,0 +1,38 @@
+# pre-commit hooks for homelab-k8s.
+#
+# Install: `pip install pre-commit && pre-commit install` (one-
+# time per checkout). Then every `git commit` runs the hooks
+# below; failures abort the commit.
+#
+# Run on demand: `pre-commit run --all-files`.
+#
+# Per the operator's "script everything scriptable now" policy
+# (memory feedback_script-don-t-defer.md): all hooks here are
+# repo-local scripts, NOT third-party hooks pulled from the
+# internet. Local hooks have no supply-chain surface and CI
+# wires them later via `pre-commit run --all-files`.
+
+repos:
+  - repo: local
+    hooks:
+      # Note: check-placeholders.sh is intentionally NOT a
+      # pre-commit hook. The <PLACEHOLDER> tokens are
+      # operator-fill at cold-start.md Step 13a (deploy time),
+      # not commit time. Running as pre-commit would block
+      # every commit until operator fills values that should
+      # only be filled at deploy. Run check-placeholders.sh
+      # manually pre-Argo-apply per the bring-up sequence.
+
+      - id: check-bare-tokens
+        name: check for bare ALL_CAPS placeholder tokens at value-bearing keys
+        entry: scripts/check-bare-tokens.sh
+        language: script
+        pass_filenames: false
+        files: '\.(yaml|yml|j2)$'
+
+      - id: check-eso-readme
+        name: every ExternalSecret-using layer has '## OpenBao paths to seed' in its README
+        entry: scripts/check-eso-readme.sh
+        language: script
+        pass_filenames: false
+        files: '(externalsecret.*\.ya?ml|README\.md)$'
