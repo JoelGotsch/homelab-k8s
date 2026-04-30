@@ -1,0 +1,40 @@
+# Loki ingress for hubble-flow-exporter sidecar traffic.
+#
+# Why CiliumNetworkPolicy and not vanilla NetworkPolicy:
+#
+# The sidecar runs inside the cilium-agent pod, which is
+# hostNetwork: true. Vanilla networking.k8s.io NetworkPolicy
+# `from.podSelector` rules cannot match host-network pods —
+# their source IP is the node IP, not a pod IP. Adding the
+# rule to loki/networkpolicy.yaml would silently never match.
+#
+# CiliumNetworkPolicy can match the `host` reserved identity
+# (`fromEntities: [host]`), which is what cilium-agent traffic
+# carries when sourced from hostNetwork. This is the correct
+# identity-aware rule.
+#
+# Layer ownership: this CCNP exists because of the hubble-flow-
+# exporter sidecar. It lives in this layer (not in loki/) so
+# the dependency points the right way: deleting this layer
+# removes its own NetworkPolicy.
+
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: hubble-flow-exporter-loki-ingress
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: hubble-flow-exporter
+    app.kubernetes.io/component: networkpolicy
+    app.kubernetes.io/part-of: observability
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: loki
+  ingress:
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - port: "3100"
+              protocol: TCP

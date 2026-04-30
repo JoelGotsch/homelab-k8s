@@ -1,0 +1,21 @@
+# hubble-flow-exporter — Hubble flows → Loki via a Vector
+# sidecar in the cilium-agent DaemonSet.
+#
+# Per ADR 0021 D5 (Hubble Loki exporter as the primary
+# exfiltration signal). Sidecar shape is recorded in
+# 99-journal/2026-04-30-hubble-flow-shipping.md.
+#
+# This layer owns the OBSERVABILITY-SIDE manifests. The
+# sidecar container itself is declared in cilium values
+# (infrastructure/cilium/values.yaml) — see that file's
+# `extraContainers` block. Layer separation: cilium values
+# only declare WHERE the sidecar runs; this layer declares
+# WHAT it ships, WHERE it ships to, and HOW it's monitored.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - configmap.yaml
+  - ciliumnetworkpolicy.yaml
+  - podmonitor.yaml

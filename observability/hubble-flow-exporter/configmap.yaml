@@ -1,0 +1,110 @@
+# Vector config for the hubble-flow-exporter sidecar.
+#
+# Lives in kube-system (the cilium-agent pod's namespace) so
+# the sidecar in cilium-agent can mount it. The layer that
+# OWNS this ConfigMap is observability/hubble-flow-exporter/
+# — its content is an observability concern, even though it
+# physically resides next to the producer (cilium-agent) for
+# mount-locality reasons. Layer separation is by ownership,
+# not by namespace.
+#
+# Pipeline:
+#   /var/run/cilium/hubble/events.log (cilium-agent writes)
+#       └─> file source
+#       └─> remap (parse JSON, normalise label-bearing fields)
+#       └─> loki sink → http://loki.monitoring.svc:3100
+#       └─> prometheus_exporter sink → :9598 (PodMonitor scrapes)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hubble-flow-exporter-config
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: hubble-flow-exporter
+    app.kubernetes.io/component: vector-config
+    app.kubernetes.io/part-of: observability
+data:
+  vector.yaml: |
+    # Vector config for Hubble flow shipping. Each cilium-agent
+    # pod runs one instance as a sidecar; reads its node-local
+    # static-export file and ships to Loki.
+
+    data_dir: /var/lib/vector
+
+    # Self-API for `vector top` operator inspection. Bound to
+    # localhost only; not exposed off the pod.
+    api:
+      enabled: true
+      address: 127.0.0.1:8686
+
+    sources:
+      hubble_events:
+        type: file
+        include:
+          - /var/run/cilium/hubble/events.log
+          - /var/run/cilium/hubble/events.log.*
+        # Start from the file's tail on first read so a fresh
+        # sidecar doesn't replay historical (already-shipped
+        # by a prior incarnation) events.
+        read_from: end
+        # Stable identification across rotation: device + inode
+        # rather than checksum (Hubble lines are uniform-prefix
+        # JSON; checksum collisions are real).
+        fingerprint:
+          strategy: device_and_inode
+
+    transforms:
+      # Parse the JSON line and lift label-bearing fields to the
+      # top level. Cardinality-bounded label set (see README
+      # caveat 3): job + verdict + source_namespace + node only.
+      # destination_namespace stays as a queryable field, not a
+      # label, to keep stream count bounded at homelab scale.
+      hubble_parse:
+        type: remap
+        inputs: [hubble_events]
+        source: |
+          parsed, err = parse_json(.message)
+          if err != null {
+            # Drop unparseable lines rather than ship them as
+            # opaque text — Hubble's static export is JSON only;
+            # a non-JSON line indicates an upstream format change.
+            abort
+          }
+          . = parsed
+          .verdict = string!(.verdict || "UNKNOWN")
+          .source_namespace = string!(.source.namespace || "external")
+          .destination_namespace = string!(.destination.namespace || "external")
+          .traffic_direction = string!(.traffic_direction || "UNKNOWN")
+
+    sinks:
+      loki:
+        type: loki
+        inputs: [hubble_parse]
+        endpoint: http://loki.monitoring.svc.cluster.local:3100
+        encoding:
+          codec: json
+        # Cardinality-bounded labels. NODE_NAME from downward
+        # API. See README caveat 3 for why destination_namespace
+        # and traffic_direction are NOT labels.
+        labels:
+          job: hubble
+          verdict: "{{ verdict }}"
+          source_namespace: "{{ source_namespace }}"
+          node: "${NODE_NAME}"
+        # Hubble events are written in batched bursts; out-of-
+        # order is normal at the millisecond scale. Loki's
+        # ingester accepts when configured with
+        # unordered_writes (default in chart).
+        out_of_order_action: accept
+        # No tenant header — Loki has auth_enabled: false per
+        # loki/values.yaml D2.
+
+      # Self-metrics: Vector's pipeline counters (events_in,
+      # events_out, errors_total, lag) on :9598. PodMonitor
+      # scrapes via the named port on the sidecar.
+      vector_metrics:
+        type: prometheus_exporter
+        inputs:
+          - hubble_events
+          - hubble_parse
+        address: 0.0.0.0:9598

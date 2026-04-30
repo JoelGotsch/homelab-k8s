@@ -59,10 +59,30 @@ hubble:
       - http
     serviceMonitor:
       enabled: true
+  # Static export to a node-local file is the contract that
+  # the hubble-flow-exporter sidecar (see extraContainers
+  # below) reads from. Layer ownership: filePath here is the
+  # producer side; the consumer side lives at
+  # observability/hubble-flow-exporter/.
   export:
+    fileMaxSizeMb: 10
+    fileMaxBackups: 5
+    fileCompress: true
     static:
       enabled: true
       filePath: /var/run/cilium/hubble/events.log
+      # fieldMask bounds what gets serialised. Bumping this
+      # widens the wire surface to Loki — extend deliberately
+      # when a forensic question needs a field, not pre-emptively.
+      fieldMask:
+        - time
+        - source
+        - destination
+        - verdict
+        - drop_reason_desc
+        - traffic_direction
+        - l4
+        - l7
 
 encryption:
   enabled: false  # see ADR / network.md if pod-pod encryption needed
@@ -108,3 +128,74 @@ cni:
   binPath: /opt/cni/bin
   confPath: /etc/cni/net.d
   install: true
+
+# ===== hubble-flow-exporter sidecar =====
+#
+# Per ADR 0021 D5, Hubble flows are the primary exfiltration
+# signal and need to land in Loki for the security-forensic
+# retrospection window. Sidecar-vs-deployment shape recorded
+# in 99-journal/2026-04-30-hubble-flow-shipping.md (per-node
+# producer → per-node consumer; no hubble-relay SPOF in the
+# security-data path).
+#
+# Layer ownership: this block declares WHERE the sidecar runs.
+# WHAT it ships, WHERE to, HOW it's monitored — at
+# observability/hubble-flow-exporter/ (ConfigMap, CCNP for
+# Loki ingress from host identity, PodMonitor for self-metrics).
+extraContainers:
+  - name: hubble-flow-exporter
+    image: timberio/vector:0.43.1-distroless-libc  # OPERATOR PINS via Renovate
+    imagePullPolicy: IfNotPresent
+    args:
+      - --config-yaml
+      - /etc/hubble-flow-exporter/vector.yaml
+    env:
+      - name: NODE_NAME
+        valueFrom:
+          fieldRef:
+            fieldPath: spec.nodeName
+      - name: VECTOR_LOG
+        value: warn
+    ports:
+      - name: hubble-export
+        containerPort: 9598
+        protocol: TCP
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+    # runAsUser: 0 because cilium-agent writes events.log
+    # with mode 0600 owned by root; non-root sidecar cannot
+    # read it without a chart-level file-mode knob (not
+    # cleanly exposed). All capabilities dropped, root FS
+    # read-only — the only privileged operation is reading
+    # the flow file. See observability/hubble-flow-exporter/
+    # README caveat 1.
+    securityContext:
+      runAsUser: 0
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+    volumeMounts:
+      - name: cilium-run
+        mountPath: /var/run/cilium
+        readOnly: true
+      - name: hubble-flow-exporter-config
+        mountPath: /etc/hubble-flow-exporter
+        readOnly: true
+      - name: hubble-flow-exporter-data
+        mountPath: /var/lib/vector
+
+extraVolumes:
+  - name: hubble-flow-exporter-config
+    configMap:
+      name: hubble-flow-exporter-config
+      items:
+        - key: vector.yaml
+          path: vector.yaml
+  - name: hubble-flow-exporter-data
+    emptyDir:
+      sizeLimit: 64Mi
