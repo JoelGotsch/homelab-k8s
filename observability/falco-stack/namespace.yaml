@@ -1,0 +1,24 @@
+# Falco + Falcosidekick share the `monitoring` namespace with
+# kube-prometheus-stack (per ADR 0021 D7's Alertmanager
+# co-location).
+#
+# Note: kube-prometheus-stack typically creates the
+# `monitoring` namespace at install time. This manifest
+# guards against the install-order question (whichever Argo
+# Application syncs first creates the ns; the other sees it
+# as already-present per kubectl-apply semantics). PSA labels
+# match what kube-prometheus-stack expects.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    # ↑ Falco DaemonSet needs privileged-PSA to read
+    # /proc + load eBPF. kube-prometheus-stack's own
+    # workloads (Prometheus, Alertmanager, Grafana) run
+    # under restricted PSA via their own pod-spec
+    # securityContexts; the namespace-level setting is
+    # the floor.
+    pod-security.kubernetes.io/audit: privileged

@@ -1,0 +1,121 @@
+# Falco chart values. Per ADR 0021 D4 + D7.
+#
+# Falco runs as a DaemonSet on every node (including CP and
+# workers — operator-side decision: even CP nodes need
+# runtime detection because the cluster-API server is the
+# crown-jewel target of T3 supply-chain scenarios).
+#
+# Driver: modern_ebpf (CO-RE). Legacy eBPF deprecated
+# upstream; kmod unavailable on Talos.
+
+driver:
+  kind: modern_ebpf
+  # CO-RE eBPF probes auto-load on supported kernels (5.8+).
+  # Talos current ships 6.x; fully supported.
+
+# DaemonSet runs everywhere — including CP nodes.
+# Talos CP-tainted nodes need the toleration.
+tolerations:
+  - effect: NoSchedule
+    operator: Exists
+  - effect: NoExecute
+    operator: Exists
+
+# Privileged container — required for syscall capture.
+# Per ADR 0021 D4: detect-only; no in-kernel enforcement,
+# so the privilege is read-only-on-syscalls and bounded.
+falco:
+  json_output: true
+  # Send events to the bundled Falcosidekick service.
+  http_output:
+    enabled: true
+    url: http://falco-falcosidekick:2801/
+    # falcosidekick listens on :2801 by chart default.
+  # Detection-only; no shell-out to kill processes.
+  rules_files:
+    - /etc/falco/falco_rules.yaml          # upstream defaults (chart-bundled)
+    - /etc/falco/falco_rules.local.yaml    # chart's local overlay (empty by default)
+    - /etc/falco/k8s_audit_rules.yaml      # K8s audit-log rules per ADR 0021 D4
+    - /etc/falco/rules.d                   # operator's local overlay (mounted from rules-configmap.yaml)
+  # Tune syscall buffers for steady-state cluster load.
+  # Default 8MiB per-CPU is enough; operator increases at
+  # rule-tuning time if drops show up in self-metrics.
+
+# Mount the operator's local rule overlay configmap.
+# (Contents in rules-configmap.yaml.)
+extraVolumes:
+  - name: rules-overlay
+    configMap:
+      name: falco-rules-overlay
+      optional: true
+
+extraVolumeMounts:
+  - name: rules-overlay
+    mountPath: /etc/falco/rules.d
+    readOnly: true
+
+# K8s audit-log integration per ADR 0021 D4. Falco watches
+# the audit-log via the chart's k8saudit plugin. Talos
+# routes the audit log per the talos-bootstrap playbook.
+k8saudit:
+  enabled: true
+
+metrics:
+  enabled: true
+  # ServiceMonitor lives outside this chart values block —
+  # see servicemonitor.yaml for the chart-default-selector
+  # form.
+
+# Falcosidekick subchart. Bundled with the falco chart;
+# we configure it via the falcosidekick: stanza.
+falcosidekick:
+  enabled: true
+  webui:
+    # Web UI for browsing events. Enabled by default in
+    # chart; operator reaches via kubectl port-forward.
+    enabled: true
+  config:
+    # Webhook → ntfy-e2ee-relay. Per the audit TODO from
+    # 2026-04-29-known-caveats-and-mac-studio-runbooks.md:
+    # the relay is deployed but never receives events
+    # without this wiring.
+    webhook:
+      address: http://ntfy-e2ee-relay.ntfy-e2ee-relay.svc.cluster.local:8000/webhook
+      checkcert: false  # cluster-internal HTTP; not TLS-terminated
+      method: POST
+      # Falcosidekick sends the full event JSON with
+      # `output` as the human-readable rule message —
+      # matches the relay's _extract_message preference
+      # order (Falcosidekick `output` wins first).
+
+    # Loki output — ENABLE when observability layer's
+    # Loki lands. The relay's webhook output is the
+    # primary alert delivery; Loki is the retrospection
+    # store per ADR 0021 D4.
+    # loki:
+    #   hostport: http://loki.monitoring.svc.cluster.local:3100
+    #   tenant: homelab
+
+    # Alertmanager output — ENABLE when kube-prometheus-stack
+    # lands per ADR 0021 D7. Alertmanager → Signal for
+    # high-severity per the approval channel.
+    # alertmanager:
+    #   hostport: http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093
+
+    # Severity filtering. Per ADR 0021 D7: "ntfy default for
+    # all alerts, Signal high-severity only." With only
+    # webhook → relay enabled, all severities reach ntfy.
+    # When Alertmanager enables, route there at >= warning.
+    minimumpriority: notice
+
+    # Outputs that are explicitly NOT enabled (per
+    # ADR 0021 D7 Alternatives section): email, Slack,
+    # Discord. Documented as out-of-scope rather than
+    # silently absent.
+
+  # Falcosidekick self-metrics endpoint — scraped by the
+  # ServiceMonitor (separate manifest).
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "2801"
+    prometheus.io/path: "/metrics"

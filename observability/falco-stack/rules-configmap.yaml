@@ -1,0 +1,56 @@
+# Operator's local Falco rule overlay.
+#
+# Mounted into the Falco DaemonSet at /etc/falco/rules.d
+# (per the extraVolumes/extraVolumeMounts in values.yaml).
+# Falco loads files in /etc/falco/rules.d AFTER the upstream
+# defaults — local rules can append to or override upstream
+# rules at the same priority.
+#
+# Per ADR 0021 D4: rule-source policy is "upstream
+# falcosecurity/rules pinned by chart version + local
+# overlay committed in homelab-k8s." This ConfigMap is the
+# "local overlay" half.
+#
+# Convention:
+# - Upstream rule changes happen via Renovate-driven chart
+#   bumps (per update-policy.md). The chart's
+#   `rules_files` list pins the upstream subset Falco loads.
+# - Operator-authored rules live here. Each rule should:
+#   1. Have a unique `rule:` name (avoid collisions with
+#      upstream).
+#   2. Reference the threat-model scenario it detects
+#      (T1 / T2 / T3 / ... per
+#      05-security/threat-model/scenarios/).
+#   3. Tag with `homelab-custom: true` so the operator
+#      can suppress / promote at observability tuning
+#      time.
+#
+# At first install: empty. Operator extends as deception
+# events (per ADR 0010) + workload-specific rules emerge.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-rules-overlay
+  namespace: monitoring
+data:
+  homelab-overlay.yaml: |
+    # Operator's local Falco rule overlay.
+    # See rules-configmap.yaml for conventions.
+    #
+    # Empty at first install. Add rules below.
+
+    # Example placeholder — uncomment + adapt for the first
+    # deception canary per ADR 0010 (when the deception
+    # layer lands):
+    #
+    # - rule: Honeycred file accessed
+    #   desc: Operator's deception canary file was read by any
+    #     process. Per ADR 0010 + deception.md.
+    #   condition: >
+    #     open_read and fd.name = "/etc/homelab-honeycred.json"
+    #   output: >
+    #     Honeycred read (user=%user.name proc=%proc.cmdline
+    #     file=%fd.name)
+    #   priority: CRITICAL
+    #   tags: [homelab-custom, deception, T4]

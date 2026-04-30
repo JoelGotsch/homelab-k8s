@@ -22,8 +22,12 @@ spec:
       app.kubernetes.io/name: ntfy-e2ee-relay
   policyTypes: [Ingress, Egress]
   ingress:
-    # Falcosidekick (in monitoring namespace per ADR 0021)
-    # POSTs to /webhook.
+    # Falcosidekick (in monitoring namespace per ADR 0021;
+    # configured in observability/falco-stack/values.yaml's
+    # falcosidekick.config.webhook.address) POSTs to /webhook.
+    # Same namespace match also covers Prometheus scrape on
+    # :8000/metrics (covered by the ServiceMonitor at
+    # apps/ntfy-e2ee-relay/servicemonitor.yaml).
     - from:
         - namespaceSelector:
             matchLabels:

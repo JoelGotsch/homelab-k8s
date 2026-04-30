@@ -1,0 +1,119 @@
+# NetworkPolicies for Falco DaemonSet + Falcosidekick.
+#
+# Falco DaemonSet:
+# - No ingress (Falco listens on a localhost gRPC socket
+#   for plugins; nothing outside the pod talks to it
+#   directly).
+# - Egress to Falcosidekick (event fanout) + kube-DNS.
+#
+# Falcosidekick Deployment:
+# - Ingress from Falco (event POSTs).
+# - Ingress from monitoring's Prometheus (self-metrics
+#   scrape).
+# - Egress to ntfy-e2ee-relay (webhook output) + kube-DNS.
+# - Egress to Loki + Alertmanager when those land
+#   (added at observability-layer rollout).
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: falco-default-deny
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: falco
+  policyTypes: [Ingress, Egress]
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Falcosidekick (same ns).
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: falcosidekick
+      ports:
+        - port: 2801
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: falcosidekick-allow
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: falcosidekick
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Falco DaemonSet (event POSTs).
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: falco
+      ports:
+        - port: 2801
+          protocol: TCP
+    # Prometheus self-metrics scrape — already in
+    # monitoring ns; selector matches the kube-prometheus-
+    # stack Prometheus pod label convention.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 2801
+          protocol: TCP
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # ntfy-e2ee-relay (the webhook output target). Per the
+    # audit TODO: this is the wiring that makes the relay
+    # actually receive Falco events.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ntfy-e2ee-relay
+      ports:
+        - port: 8000
+          protocol: TCP
+    # Loki + Alertmanager outputs — uncomment when those
+    # layers land. Both same-ns (monitoring), so no
+    # namespaceSelector needed; podSelector by name.
+    # - to:
+    #     - podSelector:
+    #         matchLabels:
+    #           app.kubernetes.io/name: loki
+    #   ports:
+    #     - port: 3100
+    #       protocol: TCP
+    # - to:
+    #     - podSelector:
+    #         matchLabels:
+    #           app.kubernetes.io/name: alertmanager
+    #   ports:
+    #     - port: 9093
+    #       protocol: TCP

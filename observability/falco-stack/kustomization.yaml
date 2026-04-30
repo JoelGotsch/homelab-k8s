@@ -1,0 +1,31 @@
+# Falco + Falcosidekick — runtime HIDS per ADR 0021 D4 + D7.
+# Falco DaemonSet on all nodes (CO-RE eBPF probe; kmod
+# unavailable on Talos), Falcosidekick fans events to the
+# ntfy-e2ee-relay (per the audit TODO closure) + Loki +
+# Alertmanager when those layers land.
+#
+# Per ADR 0013 (Talos): kmod-based Falco probe is unavailable
+# on immutable node OS. Modern eBPF (CO-RE) is the only
+# option; legacy eBPF deprecated upstream.
+#
+# Rule source: upstream falcosecurity/rules pinned by chart
+# version + local overlay under rules/.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+helmCharts:
+  # Falco — DaemonSet + Falcosidekick subchart enabled inline.
+  - name: falco
+    repo: https://falcosecurity.github.io/charts
+    version: "4.20.0"  # OPERATOR PINS via Renovate
+    releaseName: falco
+    namespace: monitoring
+    valuesFile: values.yaml
+    includeCRDs: false  # falco chart ships no CRDs
+
+resources:
+  - namespace.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml
+  - rules-configmap.yaml
