@@ -1,0 +1,94 @@
+# approval-channel — Alertmanager + deception webhook receiver
+# that formats alerts and forwards to signal-bridge for delivery.
+#
+# Per ADR 0009 (approval channel) + ADR 0021 D7 + D10. Source
+# code at /workspaces/homelab/approval-channel/.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: approval-channel-config
+  namespace: approval-channel
+data:
+  # signal-bridge cluster-internal DNS. Non-sensitive.
+  APPROVAL_CHANNEL_SIGNAL_BRIDGE_URL: "http://signal-bridge.signal-bridge.svc.cluster.local:8080"
+  # HTTP timeout for signal-bridge calls. Per-call budget; signal-cli
+  # native build is fast (< 1s typical), 10s leaves headroom.
+  APPROVAL_CHANNEL_HTTP_TIMEOUT_S: "10"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: approval-channel
+  namespace: approval-channel
+  labels:
+    app.kubernetes.io/name: approval-channel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: approval-channel
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: approval-channel
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: "registry.homelab.internal/approval-channel:0.1.0"  # OPERATOR PINS via Renovate
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: approval-channel-config
+            - secretRef:
+                name: approval-channel-signal
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: approval-channel
+  namespace: approval-channel
+  labels:
+    app.kubernetes.io/name: approval-channel
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: approval-channel
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP

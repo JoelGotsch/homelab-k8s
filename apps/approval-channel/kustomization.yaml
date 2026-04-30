@@ -1,0 +1,13 @@
+# approval-channel — webhook receiver + formatter + signal-bridge
+# client. Per ADR 0009 + ADR 0021 D7 + D10. Source code at
+# /workspaces/homelab/approval-channel/.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - externalsecret.yaml
+  - deployment.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml

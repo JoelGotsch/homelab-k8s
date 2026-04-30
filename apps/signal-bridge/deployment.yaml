@@ -1,0 +1,125 @@
+# bbernhard/signal-cli-rest-api as the Signal-cli transport.
+#
+# Per ADR 0009 D1 + ADR 0021 D7: Signal is the default approval
+# transport + high-severity alert sink. signal-bridge is the
+# low-level wrapper around signal-cli; approval-channel is the
+# higher-level alert/approval router that calls into here.
+#
+# Single-replica Deployment (signal-cli is stateful — registration
+# data lives in the PVC, and concurrent processes on the same
+# data dir corrupt the SQLite store). Pod restart re-loads
+# registration from PVC; no re-verify needed.
+#
+# MODE=native uses signal-cli's GraalVM-native build for fast
+# startup (~2s vs ~30s on JVM). Required for the chart-pinned
+# `*-native` image variant.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: signal-bridge-config
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: signal-bridge
+data:
+  # Native build — see image tag in deployment below.
+  MODE: native
+  # bbernhard exposes self-metrics in Prometheus format on the
+  # same port as the API at /v1/metrics.
+  ENABLE_METRICS: "1"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: signal-bridge
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: signal-bridge
+spec:
+  replicas: 1
+  strategy:
+    # Recreate, not RollingUpdate — two pods cannot share the
+    # signal-cli data dir (SQLite locks corrupt on overlap).
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: signal-bridge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: signal-bridge
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: signal-cli-rest-api
+          image: "bbernhard/signal-cli-rest-api:0.13.13-native"  # OPERATOR PINS via Renovate
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: signal-bridge-config
+          # bbernhard's image stores data under /home/.local/share/signal-cli.
+          # The PVC mount overlays the entire .local subtree.
+          volumeMounts:
+            - name: data
+              mountPath: /home/.local/share/signal-cli
+            # Native build wants a writable /tmp.
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: signal-bridge-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: signal-bridge
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: signal-bridge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: signal-bridge
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

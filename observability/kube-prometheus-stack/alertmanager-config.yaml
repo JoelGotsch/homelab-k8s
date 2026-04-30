@@ -1,15 +1,20 @@
 # Alertmanager routing config. Per ADR 0021 D7:
 # "Alertmanager + Falcosidekick → ntfy + Signal."
 #
-# At this scaffold stage:
-# - All severities → webhook → ntfy-e2ee-relay → ntfy.
-# - Signal high-severity routing DEFERRED until the Signal-
-#   bridge sidecar lands per the approval channel
-#   (ADR 0009 + observability/signal-webhook.md).
+# Two parallel delivery paths, both active:
+# - All severities → webhook → ntfy-e2ee-relay → ntfy
+#   (cluster-hosted ntfy server; baseline notification stream).
+# - Critical severity + deception events → approval-channel
+#   → signal-bridge → operator's Signal account
+#   (per ADR 0009 + ADR 0021 D7+D10 + the signal-webhook
+#   runbook). Activated 2026-04-30 with the signal-bridge +
+#   approval-channel layers landing.
 #
-# The webhook output is parallel to Falcosidekick's webhook
-# output (configured in observability/falco-stack/values.yaml).
-# Both reach the relay; the relay encrypts + posts to ntfy.
+# The two paths fan out via `continue: true` on the relevant
+# routes so a critical alert reaches BOTH ntfy and Signal.
+# Independence is deliberate: ntfy is the default low-friction
+# stream, Signal is the high-attention stream — operator reads
+# both, but Signal carries the decisions-required subset.
 #
 # Inhibition rules:
 # - critical inhibits warning for the same alertname (avoid
@@ -33,7 +38,9 @@ spec:
     groupInterval: 5m
     repeatInterval: 12h
     routes:
-      # Security severity gets tighter grouping per ADR 0021 D7.
+      # ===== Deception fan-out (ADR 0021 D10) =====
+      # Honey-asset hits: zero-latency, dedicated route, BOTH
+      # ntfy and the approval-channel /v1/deception path.
       - matchers:
           - name: component
             value: deception
@@ -41,12 +48,18 @@ spec:
         groupWait: 0s
         groupInterval: 30s
         repeatInterval: 30m
-        # Continue evaluating subsequent routes (when Signal
-        # output lands, deception events also route there).
-        continue: true
+        continue: true     # also evaluate the deception → Signal route below
+      - matchers:
+          - name: component
+            value: deception
+        receiver: approval-channel-deception
+        groupWait: 0s
+        groupInterval: 30s
+        repeatInterval: 15m  # tighter than ntfy: deception is the operator-paging case
 
-      # Critical severity — when Signal output enables, route
-      # here. Now: same as default (ntfy-via-relay).
+      # ===== Critical-severity fan-out (ADR 0021 D7) =====
+      # Critical alerts go to BOTH ntfy and Signal via approval-
+      # channel. Two independent streams; operator reads both.
       - matchers:
           - name: severity
             value: critical
@@ -54,8 +67,14 @@ spec:
         groupWait: 5s
         groupInterval: 1m
         repeatInterval: 1h
-        # Operator un-comments when Signal-bridge sidecar is up:
-        # continue: true   # also route to Signal receiver below
+        continue: true     # also evaluate the critical → Signal route below
+      - matchers:
+          - name: severity
+            value: critical
+        receiver: approval-channel-alert
+        groupWait: 5s
+        groupInterval: 1m
+        repeatInterval: 1h
 
   receivers:
     - name: ntfy-via-relay
@@ -76,16 +95,32 @@ spec:
             # internal traffic (cluster mTLS), set tlsConfig
             # here. Today: cluster-internal HTTP.
 
-    # DEFERRED — operator un-comments + completes when the
-    # Signal-bridge sidecar is up per ADR 0009 +
-    # observability/signal-webhook.md. The Signal-bridge
-    # exposes a webhook that takes Alertmanager's payload +
-    # routes through the approval channel.
-    #
-    # - name: signal
-    #   webhookConfigs:
-    #     - url: http://signal-bridge.signal-bridge.svc.cluster.local:8000/alert
-    #       sendResolved: true
+    # approval-channel receivers (per ADR 0009 + ADR 0021 D7+D10).
+    # approval-channel formats the AM v4 webhook batch as a
+    # terse Signal-readable message and forwards via signal-
+    # bridge. Two separate receivers — one for ordinary
+    # critical-severity alerts, one for deception events —
+    # so retry / repeat-interval / formatter framing stay
+    # independent.
+    - name: approval-channel-alert
+      webhookConfigs:
+        - url: http://approval-channel.approval-channel.svc.cluster.local:8000/v1/alert
+          sendResolved: true
+          # Alertmanager retries on 5xx; approval-channel
+          # returns 502 if signal-bridge is unreachable.
+          # That gives the durability layer.
+          httpConfig: {}
+
+    - name: approval-channel-deception
+      webhookConfigs:
+        - url: http://approval-channel.approval-channel.svc.cluster.local:8000/v1/deception
+          sendResolved: true
+          # `sendResolved` for deception is debatable — a
+          # deception hit doesn't really "resolve" — but
+          # leaving it on means the operator sees the
+          # entire interaction window. Tighten if signal
+          # noise materialises.
+          httpConfig: {}
 
   inhibitRules:
     # critical inhibits warning for the same (alertname,

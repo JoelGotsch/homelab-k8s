@@ -1,0 +1,81 @@
+# Signal-bridge NetworkPolicy.
+#
+# Ingress: approval-channel only (the canonical caller for the
+#   alert + approval-routing surface per ADR 0009 + the
+#   signal-webhook runbook).
+# Egress: kube-DNS + Signal infrastructure on the public
+#   internet (signal-cli connects to the operator's
+#   provisioned Signal account; Signal-server endpoints are
+#   on AWS / Cloudflare). Egress is unrestricted at L3 here;
+#   if a richer DNS-aware egress policy is wired later
+#   (e.g. via Cilium FQDN policy), this rule narrows.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: signal-bridge
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: signal-bridge
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: signal-bridge
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # approval-channel is the only allowed caller. Anything
+    # else trying to reach signal-bridge:8080 fails fast.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: approval-channel
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: approval-channel
+      ports:
+        - port: 8080
+          protocol: TCP
+    # Prometheus self-metrics scrape — kps's Prometheus runs
+    # in monitoring.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    # kube-DNS for Signal hostname resolution.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Signal infrastructure — public internet on 443 + 80
+    # (signal-cli uses HTTPS to *.signal.org for chat-msg
+    # and AWS S3 for attachments). Allowed broadly here;
+    # FQDN-aware narrowing belongs in CiliumNetworkPolicy.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8        # cluster + LAN
+              - 172.16.0.0/12     # docker-default ranges
+              - 192.168.0.0/16    # home LAN
+              - 169.254.0.0/16    # link-local
+              - 100.64.0.0/10     # Tailscale CGNAT range
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 80
+          protocol: TCP

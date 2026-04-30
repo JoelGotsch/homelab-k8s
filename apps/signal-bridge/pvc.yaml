@@ -1,0 +1,32 @@
+# Signal-cli durable state.
+#
+# bbernhard/signal-cli-rest-api stores registration data,
+# session state, and the local message database under
+# /home/.local/share/signal-cli/. Loss of this PVC means
+# re-registering the Signal account (operator action;
+# requires SMS to the registered phone).
+#
+# Backup path: Longhorn replica2 snapshot → restic tier-3
+# (per ADR 0006 + infrastructure/backup-cronjobs/). The
+# offline-recovery archive (ADR 0011) is the second copy.
+#
+# Sizing: registration + session state is a few MiB; the
+# message database grows with received Signal messages.
+# For an alert-only sender (no inbound conversations), 2 GiB
+# is comfortable. Bump if the operator starts using Signal-
+# cli for two-way conversations.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: signal-bridge-data
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: signal-bridge
+    app.kubernetes.io/component: data
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: longhorn-replica2
+  resources:
+    requests:
+      storage: 2Gi

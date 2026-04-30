@@ -1,0 +1,17 @@
+# Dedicated namespace for the approval-channel router service.
+#
+# Per ADR 0009: approval-channel is the canonical receiver for
+# Alertmanager + Falcosidekick + Langfuse alert webhooks (today)
+# and the agent-approval state machine (future). It calls into
+# apps/signal-bridge/ for transport.
+#
+# PSA: restricted. The approval-channel app runs as non-root
+# with read-only root FS, no privileged access.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: approval-channel
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

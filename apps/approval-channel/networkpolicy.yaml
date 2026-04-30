@@ -1,0 +1,63 @@
+# approval-channel NetworkPolicy.
+#
+# Ingress: Alertmanager + Prometheus self-metrics scrape.
+# Egress: kube-DNS + signal-bridge (the only allowed outbound).
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: approval-channel
+  namespace: approval-channel
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: approval-channel
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Alertmanager (kube-prometheus-stack) calls /v1/alert + /v1/deception.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alertmanager
+      ports:
+        - port: 8000
+          protocol: TCP
+    # Prometheus scrapes /metrics.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 8000
+          protocol: TCP
+  egress:
+    # kube-DNS for signal-bridge service resolution.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # signal-bridge in its own ns.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: signal-bridge
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: signal-bridge
+      ports:
+        - port: 8080
+          protocol: TCP

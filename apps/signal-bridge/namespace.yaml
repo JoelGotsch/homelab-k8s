@@ -1,0 +1,17 @@
+# Dedicated namespace for the Signal-cli transport layer.
+#
+# Per ADR 0021 D7 + ADR 0009: signal-bridge is the low-level
+# component that owns the signal-cli daemon + its registration
+# state. Higher-level routing/formatting/audit lives at
+# apps/approval-channel/.
+#
+# PSA: baseline. Signal-cli runs as a long-lived non-root
+# daemon; no privileged access required.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: signal-bridge
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
