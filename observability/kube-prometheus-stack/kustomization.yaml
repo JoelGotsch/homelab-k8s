@@ -1,0 +1,31 @@
+# kube-prometheus-stack — Prometheus + Alertmanager + Grafana
+# + node-exporter + kube-state-metrics. Per ADR 0021 D7 + D8.
+#
+# Activates the ServiceMonitors + PrometheusRules already
+# scaffolded across the cluster (ntfy-e2ee-relay, ntfy server,
+# backup-cronjobs, falco-stack — all labeled
+# `release: kube-prometheus-stack` for chart-default discovery).
+#
+# Companion to observability/falco-stack/ — Alertmanager has
+# its own webhook receiver pointing at ntfy-e2ee-relay,
+# parallel to Falcosidekick's webhook output. Both end up at
+# the relay; the relay encrypts + posts to the ntfy server.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+helmCharts:
+  - name: kube-prometheus-stack
+    repo: https://prometheus-community.github.io/helm-charts
+    version: "65.5.1"  # OPERATOR PINS via Renovate
+    releaseName: kube-prometheus-stack
+    namespace: monitoring
+    valuesFile: values.yaml
+    includeCRDs: true  # CRDs (Prometheus, Alertmanager, ServiceMonitor, PrometheusRule, etc.)
+
+resources:
+  - namespace.yaml
+  - externalsecret.yaml
+  - alertmanager-config.yaml
+  - networkpolicy.yaml
+  - httproute.yaml

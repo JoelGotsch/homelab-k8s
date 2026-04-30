@@ -1,0 +1,160 @@
+# kube-prometheus-stack values. Per ADR 0021 D7 + D8.
+#
+# Major shape: Prometheus 30d retention on Longhorn-encrypted
+# PVC; Alertmanager routes via the AlertmanagerConfig CRD in
+# alertmanager-config.yaml; Grafana with admin password from
+# OpenBao via ESO; OIDC against Authentik when that lands.
+
+# ---------- Prometheus ----------
+prometheus:
+  prometheusSpec:
+    # ServiceMonitors + PrometheusRules across the cluster
+    # use `release: kube-prometheus-stack` as the discovery
+    # label (chart-default). Don't restrict by namespace —
+    # match all.
+    serviceMonitorSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    serviceMonitorNamespaceSelector: {}  # all namespaces
+    podMonitorSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    podMonitorNamespaceSelector: {}
+    ruleSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    ruleNamespaceSelector: {}
+
+    # Retention per ADR 0021 D8 hot tier: 30d local TSDB.
+    retention: 30d
+    retentionSize: 45GiB  # leave headroom inside the 50Gi PVC
+
+    # Storage: Longhorn-encrypted per ADR 0016 D5.
+    # The longhorn-replica2 storage class encrypts at-rest
+    # via Longhorn's per-volume key sourced from OpenBao+ESO
+    # (set up at infrastructure/longhorn/ values).
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: longhorn-replica2
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 50Gi
+
+    # Resources — homelab scale. Operator tunes after first
+    # week of real cardinality.
+    resources:
+      requests:
+        cpu: 200m
+        memory: 1Gi
+      limits:
+        memory: 4Gi
+
+    # Ingest the additional-scrape-configs Secret if present
+    # (per observability/prometheus/external-hosts/).
+    additionalScrapeConfigsSecret:
+      enabled: true
+      name: prometheus-additional-scrape-configs
+      key: prometheus-additional.yaml
+
+# ---------- Alertmanager ----------
+alertmanager:
+  alertmanagerSpec:
+    # Route config lives in the AlertmanagerConfig CRD
+    # (alertmanager-config.yaml) — webhook → relay for all
+    # severities; Signal high-severity deferred.
+    alertmanagerConfigSelector:
+      matchLabels:
+        release: kube-prometheus-stack
+    alertmanagerConfigNamespaceSelector: {}
+
+    # Storage — Alertmanager state (silences, notification
+    # log) needs to survive restarts.
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: longhorn-replica2
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 5Gi
+
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 256Mi
+
+  # The chart-shipped default config is replaced by our
+  # AlertmanagerConfig CRD via alertmanagerConfigSelector
+  # above. Set `enabled: false` here to avoid the chart's
+  # default ConfigMap overriding.
+  config: null
+
+# ---------- Grafana ----------
+grafana:
+  enabled: true
+
+  # Admin password from OpenBao via ESO (externalsecret.yaml).
+  admin:
+    existingSecret: kube-prometheus-stack-grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+
+  persistence:
+    enabled: true
+    storageClassName: longhorn-replica2
+    accessModes: [ReadWriteOnce]
+    size: 10Gi
+
+  # OIDC against Authentik — DEFERRED until Authentik lands.
+  # Operator un-comments + completes the ESO entry for
+  # client-secret when that happens.
+  #
+  # grafana.ini:
+  #   auth.generic_oauth:
+  #     enabled: true
+  #     name: Authentik
+  #     client_id: grafana
+  #     client_secret: $__file{/etc/secrets/oauth/client_secret}
+  #     scopes: openid profile email
+  #     auth_url: https://auth.lab.<HOMELAB-DOMAIN>/application/o/authorize/
+  #     token_url: https://auth.lab.<HOMELAB-DOMAIN>/application/o/token/
+  #     api_url: https://auth.lab.<HOMELAB-DOMAIN>/application/o/userinfo/
+  #     allow_sign_up: true
+  #     role_attribute_path: contains(groups[*], 'grafana-admin') && 'Admin' || 'Viewer'
+
+  # Default dashboards bundled by the chart cover the cluster
+  # baseline (kube-state-metrics, node-exporter, kubelet, etc.).
+  # Operator-authored dashboards live in
+  # observability/grafana/dashboards/ as ConfigMaps with the
+  # chart's sidecar discovery label `grafana_dashboard: "1"`.
+  # Empty at first install.
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+# ---------- node-exporter (DaemonSet) ----------
+nodeExporter:
+  enabled: true
+  # Talos: hostNetwork + hostPID required for /proc /sys access.
+  # Chart defaults handle this.
+
+# ---------- kube-state-metrics ----------
+kubeStateMetrics:
+  enabled: true
+
+# ---------- prometheus-operator ----------
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi

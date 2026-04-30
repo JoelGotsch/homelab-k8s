@@ -1,0 +1,113 @@
+# Alertmanager routing config. Per ADR 0021 D7:
+# "Alertmanager + Falcosidekick → ntfy + Signal."
+#
+# At this scaffold stage:
+# - All severities → webhook → ntfy-e2ee-relay → ntfy.
+# - Signal high-severity routing DEFERRED until the Signal-
+#   bridge sidecar lands per the approval channel
+#   (ADR 0009 + observability/signal-webhook.md).
+#
+# The webhook output is parallel to Falcosidekick's webhook
+# output (configured in observability/falco-stack/values.yaml).
+# Both reach the relay; the relay encrypts + posts to ntfy.
+#
+# Inhibition rules:
+# - critical inhibits warning for the same alertname (avoid
+#   double-paging when both fire).
+# - "InstanceDown" inhibits anything else for that instance
+#   (the host being unreachable explains why every other
+#   alert is firing).
+
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: kube-prometheus-stack
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  route:
+    receiver: ntfy-via-relay
+    groupBy: [alertname, namespace, severity]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 12h
+    routes:
+      # Security severity gets tighter grouping per ADR 0021 D7.
+      - matchers:
+          - name: component
+            value: deception
+        receiver: ntfy-via-relay
+        groupWait: 0s
+        groupInterval: 30s
+        repeatInterval: 30m
+        # Continue evaluating subsequent routes (when Signal
+        # output lands, deception events also route there).
+        continue: true
+
+      # Critical severity — when Signal output enables, route
+      # here. Now: same as default (ntfy-via-relay).
+      - matchers:
+          - name: severity
+            value: critical
+        receiver: ntfy-via-relay
+        groupWait: 5s
+        groupInterval: 1m
+        repeatInterval: 1h
+        # Operator un-comments when Signal-bridge sidecar is up:
+        # continue: true   # also route to Signal receiver below
+
+  receivers:
+    - name: ntfy-via-relay
+      webhookConfigs:
+        - url: http://ntfy-e2ee-relay.ntfy-e2ee-relay.svc.cluster.local:8000/webhook
+          # Alertmanager webhook output sends a JSON body with
+          # `alerts[]` containing summary + description.
+          # The relay's _extract_message in
+          # ntfy-e2ee-relay/ntfy_relay/server.py prefers this
+          # shape — Alertmanager v4 alerts[].annotations.summary
+          # is the second branch after Falcosidekick's `output`.
+          sendResolved: true
+          # Alertmanager retries internally on transient
+          # failures; the relay returns 502 → Alertmanager
+          # backs off + retries. Acceptable.
+          httpConfig:
+            # If the relay ever moves to TLS-terminated
+            # internal traffic (cluster mTLS), set tlsConfig
+            # here. Today: cluster-internal HTTP.
+
+    # DEFERRED — operator un-comments + completes when the
+    # Signal-bridge sidecar is up per ADR 0009 +
+    # observability/signal-webhook.md. The Signal-bridge
+    # exposes a webhook that takes Alertmanager's payload +
+    # routes through the approval channel.
+    #
+    # - name: signal
+    #   webhookConfigs:
+    #     - url: http://signal-bridge.signal-bridge.svc.cluster.local:8000/alert
+    #       sendResolved: true
+
+  inhibitRules:
+    # critical inhibits warning for the same (alertname,
+    # namespace) — avoid double-paging.
+    - sourceMatch:
+        - name: severity
+          value: critical
+      targetMatch:
+        - name: severity
+          value: warning
+      equal: [alertname, namespace]
+
+    # InstanceDown / NodeNotReady inhibit other alerts for
+    # that instance — the instance being down explains the
+    # secondaries.
+    - sourceMatch:
+        - name: alertname
+          value: InstanceDown
+      targetMatch: []
+      equal: [instance]
+    - sourceMatch:
+        - name: alertname
+          value: NodeNotReady
+      targetMatch: []
+      equal: [node]

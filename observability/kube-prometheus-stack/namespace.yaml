@@ -1,0 +1,18 @@
+# `monitoring` ns — shared with falco-stack per ADR 0021 D7's
+# co-location pattern. PSA `privileged` (the floor; falco's
+# DaemonSet needs it). Each kube-prometheus-stack workload
+# enforces restricted via per-pod securityContext.
+#
+# Note: this namespace is also created by
+# observability/falco-stack/namespace.yaml. Whichever Argo
+# Application syncs first wins on labels (kubectl-apply
+# semantics — last-applied annotation tracks the merge).
+# Both manifests use the same labels; no conflict.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
