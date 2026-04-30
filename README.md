@@ -96,9 +96,17 @@ annotations on individual manifests when finer ordering needed.
 - **Per-app deep manifests** — operator's per-app
   initial-setup runbooks (under `homelab-docs/03-runbooks/`)
   populate each `apps/<name>/` subdir over time.
-- **Argo CD itself** — installed via
-  `homelab-infra/argocd/install/` kustomize. Argo CD does not
-  manage itself in this layout (chicken-and-egg per ADR 0004).
+- **Argo CD bootstrap-time install** — `homelab-infra/argocd/install/`
+  kustomize, applied once by the Ansible playbook. Per
+  [ADR 0027](../homelab-docs/02-decisions/0027-argocd-self-managing.md)
+  (supersedes ADR 0004 D4): post-bootstrap, Argo manages itself
+  via the `argocd-self` Application at
+  [`bootstrap/argocd-self.yaml`](bootstrap/argocd-self.yaml),
+  which targets [`bootstrap/argocd/`](bootstrap/argocd/) and
+  applies upstream Argo CD manifests via Server-Side Apply.
+  Routine upgrades are GitOps PRs (bump the version pin in
+  `bootstrap/argocd/kustomization.yaml`); recovery is "re-run
+  bootstrap" — the same procedure as fresh install.
 - **Bootstrap-time Helm releases** of Cilium + OpenBao —
   initial install is via
   `homelab-infra/ansible/playbooks/09b-argocd-bootstrap.yml`;

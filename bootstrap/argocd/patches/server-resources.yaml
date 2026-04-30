@@ -1,0 +1,18 @@
+# Server resource limits — modest for the 3 CP / 3 worker
+# topology per ADR 0015.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-server
+spec:
+  template:
+    spec:
+      containers:
+        - name: argocd-server
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi

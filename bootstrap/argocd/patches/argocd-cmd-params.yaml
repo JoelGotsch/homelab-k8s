@@ -1,0 +1,23 @@
+# Argo CD command-line parameters.
+# MUST match homelab-infra/argocd/install/patches/argocd-cmd-params.yaml
+# at first commit (otherwise Argo flips behaviour the moment it
+# self-syncs). Drift is detectable by check-values-drift.sh
+# extension (TBD).
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+data:
+  # Reduce reconcile interval at small scale.
+  controller.repo.server.timeout.seconds: "60"
+  timeout.reconciliation: "180s"
+
+  # Don't expose Argo CD over HTTP redirects (we'll wire
+  # ingress + TLS via Gateway API).
+  server.insecure: "false"
+
+  # Logs in JSON for Loki ingestion (per ADR 0021).
+  server.log.format: "json"
+  controller.log.format: "json"
+  reposerver.log.format: "json"

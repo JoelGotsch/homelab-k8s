@@ -10,12 +10,18 @@
 #     per subdirectory of homelab-k8s/<layer>/.
 #   - bootstrap-namespaces.yaml — namespaces created at
 #     bootstrap time (referenced by sync waves below).
+#   - argocd-self.yaml — Argo CD self-management Application
+#     per ADR 0027 (supersedes ADR 0004's "does not manage
+#     itself" framing). Targets `argocd/` (this directory's
+#     sibling) which applies upstream Argo CD manifests +
+#     patches via ServerSideApply.
 
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
   - bootstrap-namespaces.yaml
+  - argocd-self.yaml
   - applicationsets/infrastructure.yaml
   - applicationsets/platform.yaml
   - applicationsets/observability.yaml

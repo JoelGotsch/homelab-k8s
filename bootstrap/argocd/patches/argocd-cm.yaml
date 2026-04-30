@@ -1,0 +1,22 @@
+# Argo CD main config.
+# MUST match homelab-infra/argocd/install/patches/argocd-cm.yaml.j2
+# rendered output at first commit.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+data:
+  url: "https://argocd.<HOMELAB_INTERNAL_DOMAIN>"
+
+  resource.exclusions: |
+    - apiGroups:
+      - cilium.io
+      kinds:
+      - CiliumIdentity
+      clusters:
+      - "*"
+
+  # ssh.knownHosts: filled post-Forgejo-bring-up.
+  # ssh.knownHosts: |
+  #   forgejo.lab,<IP> ssh-ed25519 AAAA...

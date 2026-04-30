@@ -1,0 +1,61 @@
+# Argo CD self-managing layer. Per ADR 0027 (supersedes ADR 0004's
+# "Argo CD does not manage itself" framing).
+#
+# Argo CD applies this Kustomize layer through its own root-app
+# reconciliation. ServerSideApply is required when Argo manages
+# itself — set globally on the root-app
+# (homelab-infra/argocd/root-app.yaml.j2). This layer therefore
+# runs through SSA without per-resource opt-in.
+#
+# Bootstrap-time install (homelab-infra/argocd/install/) uses
+# the SAME upstream `install.yaml` at the SAME version, with the
+# SAME patches. Once Argo is up + the root-app syncs, Argo takes
+# ownership of itself and routine upgrades become a version-pin
+# bump in this file (PR + Argo reconcile), not an ansible re-run.
+#
+# Version pin is an OPERATOR placeholder — must match the version
+# in homelab-infra/ansible/inventory/group_vars/all.yml
+# (argocd_version) at first commit. After bootstrap, this file is
+# the source of truth and the ansible side becomes bootstrap-only.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: argocd
+
+resources:
+  - https://raw.githubusercontent.com/argoproj/argo-cd/<ARGOCD_VERSION>/manifests/install.yaml
+
+patches:
+  - path: patches/argocd-cmd-params.yaml
+    target:
+      kind: ConfigMap
+      name: argocd-cmd-params-cm
+
+  - path: patches/argocd-cm.yaml
+    target:
+      kind: ConfigMap
+      name: argocd-cm
+
+  - path: patches/server-resources.yaml
+    target:
+      kind: Deployment
+      name: argocd-server
+
+  - path: patches/repo-server-resources.yaml
+    target:
+      kind: Deployment
+      name: argocd-repo-server
+
+  - path: patches/application-controller-resources.yaml
+    target:
+      kind: StatefulSet
+      name: argocd-application-controller
+
+  # OIDC patch is operator-un-commented when Authentik is up + the
+  # argocd OIDC client is created. Until then, Argo CD admin
+  # password lands as a Secret at first install.
+  # - path: patches/oidc-config.yaml
+  #   target:
+  #     kind: ConfigMap
+  #     name: argocd-cm
