@@ -1,0 +1,62 @@
+# CNPG Postgres cluster for the CrowdSec LAPI.
+# Per ADR 0021 D6 ("Shared LAPI lives in-cluster, backed by
+# Postgres on Longhorn") + decision A in
+# 99-journal/2026-04-30-crowdsec-cluster-side.md (CNPG over
+# chart-default Postgres, matches the codebase pattern).
+#
+# Data classification: internal (per ADR 0003) — banned-IP
+# decisions + audit metadata. RPO 4h, RTO 24h. CNPG WAL+base
+# covers RPO; well within the matrix.
+#
+# Service exposed: crowdsec-lapi-rw.crowdsec.svc:5432 — the
+# CrowdSec helm chart points at this DSN through the
+# crowdsec-lapi-db Secret.
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: crowdsec-lapi
+  namespace: crowdsec
+spec:
+  instances: 2
+
+  storage:
+    size: 5Gi
+    storageClass: longhorn-replica3
+
+  monitoring:
+    enablePodMonitor: true
+
+  postgresql:
+    parameters:
+      max_connections: "50"
+      shared_buffers: "64MB"
+
+  bootstrap:
+    initdb:
+      database: crowdsec
+      owner: crowdsec
+
+  # Backup: WAL+base to MinIO-on-NAS. Restic CronJob (separate)
+  # replicates the bucket to tier-2/3 per ADR 0006.
+  #
+  # SEQUENCING: MinIO-on-NAS must be Healthy before this
+  # Cluster's first sync. Pre-MinIO, comment the backup: block;
+  # CrowdSec carries internal-class data, acceptable to
+  # bootstrap without backups. Re-enable once MinIO lands.
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://homelab-backups-cluster/cnpg/crowdsec
+      endpointURL: http://minio.minio.svc.cluster.local:9000
+      s3Credentials:
+        accessKeyId:
+          name: crowdsec-cnpg-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: crowdsec-cnpg-s3
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: bzip2
+      data:
+        compression: bzip2
+    retentionPolicy: "90d"

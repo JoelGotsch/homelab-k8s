@@ -1,0 +1,28 @@
+# Cluster-wide deny from the crowdsec-banned CIDRGroup to
+# every cluster endpoint. Per ADR 0021 D6 + decision B
+# (Cilium-native bouncer).
+#
+# Cilium evaluates CCNPs at L3/L4 — banning happens BEFORE
+# the connection reaches any pod's userspace. Faster + applies
+# uniformly to all traffic types, not just HTTP.
+#
+# This policy DENIES (default-deny semantics): traffic from
+# CIDRs in the `crowdsec-banned` CIDRGroup is rejected at the
+# CNI layer for all destinations.
+
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: crowdsec-banned-deny
+  labels:
+    app.kubernetes.io/name: crowdsec
+    app.kubernetes.io/component: bouncer
+spec:
+  # Match all endpoints — every pod is a candidate destination
+  # to be protected.
+  endpointSelector: {}
+  # Per CCNP semantics: an `ingressDeny` rule overrides any
+  # `ingress` allow rule. We're explicit about the deny here.
+  ingressDeny:
+    - fromCIDRSet:
+        - cidrGroupRef: crowdsec-banned

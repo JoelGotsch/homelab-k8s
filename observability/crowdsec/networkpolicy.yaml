@@ -1,0 +1,202 @@
+# NetworkPolicies for the CrowdSec layer.
+#
+# - LAPI ingress: agent (same ns) + cidrgroup-sync CronJob (same ns)
+#                 + Prometheus self-metrics + community Console
+#                   bidirectional API (egress to api.crowdsec.net).
+# - LAPI egress: kube-DNS + CNPG (same ns) + community Console.
+# - Agent ingress: Prometheus.
+# - Agent egress: kube-DNS + LAPI (same ns) + Loki (monitoring) +
+#                 community Hub fetch (api.crowdsec.net).
+# - CronJob ingress: none.
+# - CronJob egress: kube-DNS + LAPI + kube-API.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: crowdsec-lapi
+  namespace: crowdsec
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: lapi
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Agent in same ns.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: agent
+      ports:
+        - port: 8080
+          protocol: TCP
+    # CronJob in same ns.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: cidrgroup-sync
+      ports:
+        - port: 8080
+          protocol: TCP
+    # Prometheus scrape.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 6060
+          protocol: TCP
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # CNPG Postgres in same ns.
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: crowdsec-lapi
+      ports:
+        - port: 5432
+          protocol: TCP
+    # CrowdSec Console (community blocklist + telemetry).
+    # api.crowdsec.net is public; broad egress allowed —
+    # narrow via Cilium FQDN policy as a follow-up.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+      ports:
+        - port: 443
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: crowdsec-agent
+  namespace: crowdsec
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: agent
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Prometheus scrape.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 6060
+          protocol: TCP
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # LAPI (same ns).
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: lapi
+      ports:
+        - port: 8080
+          protocol: TCP
+    # Loki (acquisition source per decision E).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: loki
+      ports:
+        - port: 3100
+          protocol: TCP
+    # CrowdSec Hub (parser/scenario fetch from
+    # hub.crowdsec.net). Same broad-egress shape as LAPI.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+              - 100.64.0.0/10
+      ports:
+        - port: 443
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: crowdsec-cidrgroup-sync
+  namespace: crowdsec
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: cidrgroup-sync
+  policyTypes: [Ingress, Egress]
+  ingress: []   # no inbound; CronJob is initiator-only
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # LAPI (read decisions list).
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: lapi
+      ports:
+        - port: 8080
+          protocol: TCP
+    # kube-API for `kubectl apply` of the CIDRGroup CR.
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              component: kube-apiserver
+      ports:
+        - port: 6443
+          protocol: TCP
+        - port: 443
+          protocol: TCP

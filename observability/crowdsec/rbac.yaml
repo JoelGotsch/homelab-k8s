@@ -1,0 +1,39 @@
+# RBAC for the cidrgroup-sync CronJob. Cluster-scoped because
+# CiliumCIDRGroup is a cluster-scoped CRD.
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: crowdsec-cidrgroup-sync
+  namespace: crowdsec
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: crowdsec-cidrgroup-sync
+rules:
+  # Read + replace the CrowdSec CIDR group only — narrow
+  # write surface. resourceNames pin the single named object
+  # we're allowed to mutate.
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumcidrgroups"]
+    resourceNames: ["crowdsec-banned"]
+    verbs: ["get", "update", "patch"]
+  # Permission to LIST is needed because kubectl apply checks
+  # for the resource's existence; can't pin resourceNames on list.
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumcidrgroups"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: crowdsec-cidrgroup-sync
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: crowdsec-cidrgroup-sync
+subjects:
+  - kind: ServiceAccount
+    name: crowdsec-cidrgroup-sync
+    namespace: crowdsec

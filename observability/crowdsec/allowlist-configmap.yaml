@@ -1,0 +1,61 @@
+# Operator-managed allowlist for CrowdSec.
+#
+# Per ADR 0021 D6 + decision F: declarative ConfigMap rendered
+# into the chart's whitelist module path. Edit + commit + Argo
+# sync to update.
+#
+# Schema (CrowdSec parser whitelist):
+#   name: <free-form name>
+#   reason: <why; shows in cscli decisions output>
+#   ip: [single IPv4/IPv6, ...]
+#   cidr: [<CIDR>, ...]
+#   expression: [<filter expression>, ...]   # advanced
+#
+# These IPs/CIDRs cause the agent to short-circuit any scenario
+# bucket that would otherwise have detected them — they will
+# never appear in LAPI's decision list, so the cilium-sync
+# CronJob will never push a CCNP entry for them.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crowdsec-allowlist
+  namespace: crowdsec
+  labels:
+    app.kubernetes.io/name: crowdsec
+    app.kubernetes.io/component: allowlist
+data:
+  whitelists.yaml: |
+    name: homelab-operator-allowlist
+    description: |
+      Operator-maintained allowlist; edit + commit + Argo sync.
+      RFC1918 is included by default — internal traffic should
+      never be banned.
+    ip:
+      # Add operator's static external IPs here when known.
+      # - 203.0.113.42
+
+    cidr:
+      # RFC1918 — internal traffic should never trigger.
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      # Tailscale CGNAT — operator-internal traffic via TS
+      # subnet routes per ADR 0024.
+      - 100.64.0.0/10
+      # Loopback — sanity.
+      - 127.0.0.0/8
+      - ::1/128
+      # Cluster pod CIDR — pod-to-pod traffic per Cilium
+      # values.yaml.
+      - 10.244.0.0/16
+      # Cloudflare egress IPs — when the website ingress
+      # routes via Cloudflare Tunnel, the source IP at
+      # cluster ingress is Cloudflare's. Banning these
+      # cuts off ALL Cloudflare-fronted traffic. Operator
+      # un-comments + populates from
+      # https://www.cloudflare.com/ips/ when public ingress
+      # lands.
+      # - 173.245.48.0/20
+      # - 103.21.244.0/22
+      # ... (operator pulls the current list at first wire-up)

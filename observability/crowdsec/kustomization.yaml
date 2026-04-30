@@ -1,0 +1,41 @@
+# CrowdSec — edge IP-reputation + behavioural detection.
+# Per ADR 0021 D6.
+#
+# Cluster-side only this commit; router-side (OpenWrt CrowdSec
+# package, shared LAPI access via Tailscale) tracked separately
+# in TODO.md "CrowdSec — router-side remaining scope" with
+# named prereqs (OpenWrt UCI export + Tailscale subnet
+# exposure for LAPI).
+#
+# Components:
+# - CrowdSec helm release (LAPI + agent in one chart)
+# - CNPG Postgres cluster as the LAPI database (decision A)
+# - CiliumCIDRGroup + CCNP for Cilium-native bouncer (decision B)
+# - cidrgroup-sync CronJob bridging LAPI decisions → CIDR group
+# - Loki-based acquisition (decision E)
+# - ConfigMap-driven operator allowlist (decision F)
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+helmCharts:
+  - name: crowdsec
+    repo: https://crowdsecurity.github.io/helm-charts
+    version: "0.13.5"  # OPERATOR PINS via Renovate
+    releaseName: crowdsec
+    namespace: crowdsec
+    valuesFile: values.yaml
+    includeCRDs: false
+
+resources:
+  - namespace.yaml
+  - cnpg-cluster.yaml
+  - cnpg-s3-externalsecret.yaml
+  - externalsecret.yaml
+  - allowlist-configmap.yaml
+  - ciliumcidrgroup-bootstrap.yaml
+  - ciliumnetworkpolicy.yaml
+  - cidrgroup-sync-cronjob.yaml
+  - rbac.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml

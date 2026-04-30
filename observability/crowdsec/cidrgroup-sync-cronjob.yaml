@@ -1,0 +1,151 @@
+# cidrgroup-sync CronJob — polls LAPI's decision list every
+# 5 minutes and rewrites the `crowdsec-banned` CiliumCIDRGroup
+# with the current ban list.
+#
+# Per ADR 0021 D6 + decision B (Cilium-native bouncer). This
+# is the bridge between CrowdSec's LAPI and Cilium's CCNP
+# enforcement. The CCNP itself (ciliumnetworkpolicy.yaml)
+# stays static — it always references the cidrGroup; the cron
+# changes the cidrGroup's content.
+#
+# Design notes:
+# - 5-minute cycle is fine because CrowdSec ban TTLs are 4h+
+#   default; a 5-minute lag on adding a ban is small relative
+#   to the ban duration. See decision E in the journal for
+#   why latency at this layer isn't load-bearing.
+# - Script is a ConfigMap-mounted shell file; image is
+#   alpine/k8s (kubectl + curl + jq pre-installed,
+#   Renovate-pinnable).
+# - `kubectl apply` of the rewritten CIDRGroup is idempotent;
+#   no-op when the ban list hasn't changed.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: crowdsec-cidrgroup-sync-script
+  namespace: crowdsec
+data:
+  sync.sh: |
+    #!/bin/sh
+    # Pull the current decision list from LAPI and rewrite the
+    # `crowdsec-banned` CiliumCIDRGroup. Idempotent: same input
+    # → same applied YAML → kubectl reports "unchanged".
+    set -eu
+
+    LAPI_URL="${LAPI_URL:-http://crowdsec-service.crowdsec.svc.cluster.local:8080}"
+    BOUNCER_KEY="${BOUNCER_API_KEY:?BOUNCER_API_KEY env required}"
+
+    # Decisions API: returns array of {duration, scope, type, value, ...}
+    # We want type=ban, scope=Ip|Range. Extract the `value` (IP or
+    # CIDR) field.
+    decisions_json=$(curl --silent --fail --show-error \
+      -H "X-Api-Key: $BOUNCER_KEY" \
+      "$LAPI_URL/v1/decisions?type=ban")
+
+    # `decisions_json` is `null` when there are no decisions —
+    # jq's `select` would error on a literal null. Normalise
+    # to an empty array.
+    decisions_json=$(printf '%s' "$decisions_json" | jq 'if . == null then [] else . end')
+
+    # Extract IP / CIDR values; sort + dedupe; emit each as
+    # a YAML list element nested under externalCIDRs.
+    cidr_lines=$(printf '%s' "$decisions_json" \
+      | jq -r '.[] | select(.scope == "Ip" or .scope == "Range") | .value' \
+      | sort -u \
+      | sed 's/^/    - /')
+
+    # Render the CIDRGroup spec. If the ban list is empty,
+    # externalCIDRs becomes []; CRD accepts both shapes.
+    if [ -z "$cidr_lines" ]; then
+      external_cidrs="  externalCIDRs: []"
+    else
+      external_cidrs=$(printf '  externalCIDRs:\n%s' "$cidr_lines")
+    fi
+
+    cat <<EOF | kubectl apply -f -
+    apiVersion: cilium.io/v2alpha1
+    kind: CiliumCIDRGroup
+    metadata:
+      name: crowdsec-banned
+      labels:
+        app.kubernetes.io/name: crowdsec
+        app.kubernetes.io/component: cidrgroup
+        app.kubernetes.io/managed-by: cidrgroup-sync
+    spec:
+    $external_cidrs
+    EOF
+
+    # Print a one-line summary for audit (Alloy ships stdout
+    # to Loki).
+    count=$(printf '%s\n' "$cidr_lines" | grep -c '^' || true)
+    echo "cidrgroup-sync: applied $count CIDRs at $(date -Iseconds)"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: crowdsec-cidrgroup-sync
+  namespace: crowdsec
+  labels:
+    app.kubernetes.io/name: crowdsec
+    app.kubernetes.io/component: cidrgroup-sync
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  startingDeadlineSeconds: 60
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: crowdsec
+            app.kubernetes.io/component: cidrgroup-sync
+        spec:
+          serviceAccountName: crowdsec-cidrgroup-sync
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: sync
+              image: "alpine/k8s:1.31.0"  # OPERATOR PINS via Renovate
+              imagePullPolicy: IfNotPresent
+              command: [/bin/sh, /scripts/sync.sh]
+              env:
+                - name: BOUNCER_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: crowdsec-cilium-bouncer
+                      key: BOUNCER_API_KEY
+                - name: LAPI_URL
+                  value: "http://crowdsec-service.crowdsec.svc.cluster.local:8080"
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+          volumes:
+            - name: script
+              configMap:
+                name: crowdsec-cidrgroup-sync-script
+                defaultMode: 0o555
+                items:
+                  - key: sync.sh
+                    path: sync.sh

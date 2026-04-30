@@ -1,0 +1,15 @@
+# Dedicated namespace for CrowdSec LAPI + agent + the CIDRGroup
+# sync CronJob. Per ADR 0021 D6.
+#
+# PSA: baseline. The agent + LAPI run as non-root + readonly FS;
+# the sync CronJob needs cluster-scoped Cilium CRD write
+# permissions but only via RBAC, not pod-level privilege.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crowdsec
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

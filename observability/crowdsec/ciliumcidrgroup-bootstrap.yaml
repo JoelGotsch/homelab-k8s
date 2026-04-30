@@ -1,0 +1,29 @@
+# Bootstrap CiliumCIDRGroup — empty at first install. The
+# cidrgroup-sync CronJob populates this from LAPI's decision
+# list every 5 minutes.
+#
+# Per ADR 0021 D6 + decision B (Cilium-native bouncer via
+# CCNP-driven from CIDRGroup). The CCNP at
+# ciliumnetworkpolicy.yaml references this group; updating
+# the group's CIDRs is what actually changes who's blocked.
+#
+# CRD shape: `cilium.io/v2alpha1` (beta in 1.16+). Pinned to
+# the major-version for the chart in
+# homelab-k8s/infrastructure/cilium/. If a future Cilium
+# bump moves the group to `v2`, update both this file and
+# the sync CronJob's apply call.
+
+apiVersion: cilium.io/v2alpha1
+kind: CiliumCIDRGroup
+metadata:
+  name: crowdsec-banned
+  labels:
+    app.kubernetes.io/name: crowdsec
+    app.kubernetes.io/component: cidrgroup
+spec:
+  # Empty at bootstrap — the cidrgroup-sync CronJob populates.
+  # Operator must NOT manually edit this list (it'll be
+  # overwritten on the next CronJob tick); use the allowlist
+  # ConfigMap to exclude known-good IPs from being banned in
+  # the first place.
+  externalCIDRs: []
