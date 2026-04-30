@@ -1,0 +1,130 @@
+# PrometheusRules for the backup-cronjobs layer.
+# Two alerts:
+#
+# 1. Restic-staging PVC fill — surfaces sizing problems before
+#    `mc mirror` runs out of space + the cronjob errors out.
+# 2. Backup CronJob failed — surfaces a job that finished with
+#    a non-zero status, so failures don't sit unnoticed in
+#    failedJobsHistoryLimit until quarterly review.
+#
+# Per ADR 0021 + the Restic-tier-3 journal entry's deferred
+# observability follow-ups (now closed by this manifest).
+#
+# Notification path: kube-prometheus-stack's Alertmanager
+# routes by `severity`. `critical` → Signal + ntfy (per
+# observability/signal-webhook.md when wired). `warning` →
+# ntfy only.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: backup-cronjobs
+  namespace: backup-cronjobs
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: backup-cronjobs.staging-pvc
+      interval: 1m
+      rules:
+        - alert: ResticStagingPVCNearFull
+          # Alert when used > 80% of capacity for 10+ minutes.
+          # The PVC is sized at 50Gi default per pvc.yaml;
+          # operator's tunable up via Longhorn online resize.
+          expr: |
+            (
+              kubelet_volume_stats_used_bytes{namespace="backup-cronjobs",persistentvolumeclaim="restic-staging"}
+              /
+              kubelet_volume_stats_capacity_bytes{namespace="backup-cronjobs",persistentvolumeclaim="restic-staging"}
+            ) > 0.80
+          for: 10m
+          labels:
+            severity: warning
+            component: backup-cronjobs
+          annotations:
+            summary: Restic staging PVC > 80% full
+            description: |
+              `restic-staging` PVC in the `backup-cronjobs`
+              namespace is over 80% full ({{ $value | humanizePercentage }}).
+              Source-bucket growth has outpaced the configured
+              size; resize the PVC (Longhorn supports online
+              resize) or reduce `mc mirror` source set in
+              cronjob.yaml.
+            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+
+        - alert: ResticStagingPVCCritical
+          # Critical at 95% — almost-out-of-space; next mirror
+          # likely fails.
+          expr: |
+            (
+              kubelet_volume_stats_used_bytes{namespace="backup-cronjobs",persistentvolumeclaim="restic-staging"}
+              /
+              kubelet_volume_stats_capacity_bytes{namespace="backup-cronjobs",persistentvolumeclaim="restic-staging"}
+            ) > 0.95
+          for: 5m
+          labels:
+            severity: critical
+            component: backup-cronjobs
+          annotations:
+            summary: Restic staging PVC > 95% full
+            description: |
+              `restic-staging` PVC at {{ $value | humanizePercentage }}.
+              Next `mc mirror` run likely fails.
+              Resize NOW per
+              backup-cronjobs/README.md.
+            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+
+    - name: backup-cronjobs.job-failed
+      interval: 1m
+      rules:
+        - alert: BackupCronJobFailed
+          # `kube_job_status_failed` (from kube-state-metrics)
+          # increments per failed completion. A non-zero value
+          # for >1m = the most recent run failed and isn't
+          # being retried by backoffLimit.
+          expr: |
+            kube_job_status_failed{namespace="backup-cronjobs"} > 0
+          for: 1m
+          labels:
+            severity: warning
+            component: backup-cronjobs
+          annotations:
+            summary: Backup CronJob {{ $labels.job_name }} failed
+            description: |
+              CronJob `{{ $labels.job_name }}` in namespace
+              `backup-cronjobs` reports a failed Job. Inspect:
+                kubectl -n backup-cronjobs get jobs --sort-by=.status.startTime | tail -10
+                kubectl -n backup-cronjobs logs job/{{ $labels.job_name }} --all-containers
+              Common causes: Hetzner SB unreachable, SSH host-key
+              mismatch (post-rotation), MinIO source bucket
+              empty (cnpg cluster down), Restic password rotation
+              skipped a step.
+            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+
+        - alert: BackupCronJobMissing24h
+          # If no successful Job has finished within the last
+          # 24h (cronjob runs daily), something's wrong even
+          # if no explicit failure metric fires (e.g., the
+          # CronJob is paused, or the schedule didn't trigger).
+          expr: |
+            (
+              time() - max by (namespace) (
+                kube_job_status_completion_time{namespace="backup-cronjobs"}
+              )
+            ) > 86400
+          for: 5m
+          labels:
+            severity: critical
+            component: backup-cronjobs
+          annotations:
+            summary: No successful backup-cronjobs Job in 24h
+            description: |
+              The most recent successful Job in
+              `backup-cronjobs` finished
+              {{ $value | humanizeDuration }} ago (> 24h).
+              CronJob may be paused / suspended, the schedule
+              didn't trigger, or every recent run failed.
+              Inspect:
+                kubectl -n backup-cronjobs get cronjobs
+                kubectl -n backup-cronjobs get jobs --sort-by=.status.startTime
+            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md

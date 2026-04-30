@@ -11,3 +11,4 @@ resources:
   - externalsecret.yaml
   - deployment.yaml
   - networkpolicy.yaml
+  - servicemonitor.yaml

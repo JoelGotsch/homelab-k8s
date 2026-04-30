@@ -12,3 +12,4 @@ resources:
   - externalsecret.yaml
   - cronjob.yaml
   - networkpolicy.yaml
+  - prometheusrule.yaml
