@@ -120,10 +120,21 @@ bao kv put kv/minio-on-nas/root-creds \
   rootPassword="$ROOT_PASSWORD"
 ```
 
-Per-app S3 service-account credentials live separately at
-`kv/cnpg/<app>/s3-creds` and are owned by the consumer
-app's README. Their bootstrap depends on MinIO being up —
-pattern is in §Per-app credentials below.
+Per-app S3 service-account credentials live separately, each
+owned by the consumer app's README. Their bootstrap depends
+on MinIO being up — pattern is in §Per-app credentials below.
+
+Currently provisioned per-app paths (extend as new
+S3-consuming layers land):
+
+- `kv/cnpg/<app>/s3-creds` — per-app CNPG WAL+base
+  destination (one entry per app with a Postgres cluster).
+- `kv/backup/minio-reader/s3-creds` — read-only svc-account
+  for the Restic cronjob (per
+  [infrastructure/backup-cronjobs/README](../backup-cronjobs/README.md)).
+- `kv/loki/s3-creds` — Loki chunk storage scoped to the
+  `loki-chunks` bucket (per
+  [observability/loki/README](../../observability/loki/README.md)).
 
 ## Per-app credentials
 

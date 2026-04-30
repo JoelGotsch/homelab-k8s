@@ -1,0 +1,148 @@
+# Alloy DaemonSet values. Per ADR 0021 D6.
+#
+# Scrapes:
+# - Pod logs from /var/log/pods (Kubernetes-discovered)
+# - Journald from each node (system + Talos audit-log)
+#
+# Ships to Loki via the loki.write component.
+
+# DaemonSet — one Alloy pod per node, including CP nodes
+# (so the audit-log path is captured everywhere).
+controller:
+  type: daemonset
+  tolerations:
+    - effect: NoSchedule
+      operator: Exists
+    - effect: NoExecute
+      operator: Exists
+
+alloy:
+  # Alloy config — flow-language (River syntax). Inline here
+  # rather than a separate file because the config is
+  # compact + the values.yaml is the single GitOps source.
+  configMap:
+    create: true
+    content: |-
+      // ---------- Discovery ----------
+
+      // Discover Kubernetes pods on this node.
+      discovery.kubernetes "pods" {
+        role = "pod"
+        selectors {
+          role  = "pod"
+          field = "spec.nodeName=" + sys.env("HOSTNAME")
+        }
+      }
+
+      // Standard k8s pod-log relabeling: namespace + pod +
+      // container labels become Loki stream labels.
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_component"]
+          target_label  = "component"
+        }
+      }
+
+      // ---------- Pod log source ----------
+
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pods.output
+        forward_to = [loki.process.pods.receiver]
+      }
+
+      // Drop noisy logs we don't need at retention scale.
+      loki.process "pods" {
+        forward_to = [loki.write.default.receiver]
+
+        // Drop k8s probe-noise (kubelet healthcheck pings)
+        // — high volume, low signal.
+        stage.match {
+          selector = "{container=~\".*\"} |~ \"GET /healthz\""
+          action   = "drop"
+        }
+      }
+
+      // ---------- Journald source (system + Talos audit) ----------
+
+      loki.source.journal "system" {
+        path        = "/var/log/journal"
+        max_age     = "24h"
+        forward_to  = [loki.write.default.receiver]
+        relabel_rules = loki.relabel.journal.rules
+
+        labels = {
+          job  = "journald",
+          host = sys.env("HOSTNAME"),
+        }
+      }
+
+      loki.relabel "journal" {
+        forward_to = []
+        rule {
+          source_labels = ["__journal__systemd_unit"]
+          target_label  = "unit"
+        }
+        rule {
+          source_labels = ["__journal__hostname"]
+          target_label  = "host"
+        }
+      }
+
+      // ---------- Loki client ----------
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+        }
+        // No authentication — single-tenant cluster,
+        // NetworkPolicy gates ingress.
+      }
+
+  # Alloy needs to read /var/log/pods on each node.
+  mounts:
+    varlog: true       # /var/log
+    dockercontainers: false
+
+  # Self-metrics — scraped by the chart-default-selector
+  # ServiceMonitor (separate manifest).
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+  securityContext:
+    runAsUser: 0  # journald requires root read on /var/log/journal
+    privileged: false
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+
+# Disable the chart's default ServiceMonitor — we ship our
+# own with the right label.
+serviceMonitor:
+  enabled: false
+
+# Disable the chart's CRDs subchart if it tries — we don't
+# need them for log-shipping use case.
+crds:
+  create: false

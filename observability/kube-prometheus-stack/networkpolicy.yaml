@@ -205,14 +205,14 @@ spec:
       ports:
         - port: 9093
           protocol: TCP
-    # Loki data source — uncomment when Loki layer lands.
-    # - to:
-    #     - podSelector:
-    #         matchLabels:
-    #           app.kubernetes.io/name: loki
-    #   ports:
-    #     - port: 3100
-    #       protocol: TCP
+    # Loki data source — enabled 2026-04-30 with Loki layer.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: loki
+      ports:
+        - port: 3100
+          protocol: TCP
     # Authentik OIDC — uncomment when Authentik lands.
     # - to:
     #     - namespaceSelector:

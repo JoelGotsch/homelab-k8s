@@ -1,0 +1,23 @@
+# Loki — log aggregation per ADR 0021 D6 + D8.
+#
+# Monolithic mode (single binary, single replica) — homelab
+# log volume doesn't justify the simple-scalable / distributed
+# topologies. Chunks land in MinIO at the `loki-chunks` bucket
+# (already pre-created by infrastructure/minio-on-nas/).
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+helmCharts:
+  - name: loki
+    repo: https://grafana.github.io/helm-charts
+    version: "6.16.0"  # OPERATOR PINS via Renovate
+    releaseName: loki
+    namespace: monitoring
+    valuesFile: values.yaml
+    includeCRDs: false
+
+resources:
+  - externalsecret.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml

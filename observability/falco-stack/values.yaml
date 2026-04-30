@@ -88,19 +88,28 @@ falcosidekick:
       # matches the relay's _extract_message preference
       # order (Falcosidekick `output` wins first).
 
-    # Loki output — ENABLE when observability layer's
-    # Loki lands. The relay's webhook output is the
-    # primary alert delivery; Loki is the retrospection
-    # store per ADR 0021 D4.
-    # loki:
-    #   hostport: http://loki.monitoring.svc.cluster.local:3100
-    #   tenant: homelab
+    # Loki output — full event stream goes here for
+    # retrospection per ADR 0021 D4. Webhook (above) is the
+    # primary alert-delivery; Loki is the searchable
+    # historical store. Enabled 2026-04-30 with the Loki
+    # layer landing (observability/loki/).
+    loki:
+      hostport: http://loki.monitoring.svc.cluster.local:3100
+      # No `tenant` — Loki runs `auth_enabled: false`
+      # (single-tenant cluster per observability/loki/).
+      # Adding a tenant injects X-Scope-OrgID and Loki
+      # would reject as "no org id."
+      checkcert: false  # cluster-internal HTTP
 
-    # Alertmanager output — ENABLE when kube-prometheus-stack
-    # lands per ADR 0021 D7. Alertmanager → Signal for
-    # high-severity per the approval channel.
-    # alertmanager:
-    #   hostport: http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093
+    # Alertmanager output — enabled 2026-04-30 with
+    # kube-prometheus-stack landing. Per ADR 0021 D7,
+    # Alertmanager-routed events go to ntfy + (deferred)
+    # Signal. Falcosidekick → Alertmanager + Falcosidekick →
+    # webhook → relay are PARALLEL paths; the operator's
+    # phone receives via the relay+ntfy chain regardless of
+    # which Falcosidekick output fires.
+    alertmanager:
+      hostport: http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093
 
     # Severity filtering. Per ADR 0021 D7: "ntfy default for
     # all alerts, Signal high-severity only." With only
