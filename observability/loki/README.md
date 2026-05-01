@@ -89,12 +89,14 @@ kubectl -n monitoring rollout restart statefulset loki
    `minio.minio.svc.cluster.local:9000`). The bytes-in-flight
    stay within Cilium-mesh.
 
-4. **90d default retention** — operator extends per stream
-   for security-forensic logs (Falco, audit) per ADR 0021
-   D8 1y target. The `retention_stream` block in
-   `values.yaml` is commented-with-TODO; operator
-   un-comments + adds the relevant selectors when policy
-   matters.
+4. **90d default retention with 1y overrides for security-
+   forensic streams** — Falco events (`{job="falcosidekick"}`),
+   Hubble flows (`{job="hubble"}`), and audit-log units
+   (`{unit=~".*audit.*"}`) extended to 1y per ADR 0021 D8.
+   Operator adds further per-stream overrides in
+   `values.yaml`'s `retention_stream` block as new
+   security-forensic sources land (e.g., a future
+   OpenBao-audit stream).
 
 5. **Compactor retention deletes are async.** Setting
    `retention_period: 90d` doesn't immediately delete

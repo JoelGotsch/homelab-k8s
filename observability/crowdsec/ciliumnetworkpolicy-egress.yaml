@@ -1,0 +1,102 @@
+# FQDN-aware egress for crowdsec-agent + crowdsec-lapi.
+#
+# Closes the deferred caveat 9 in
+# 99-journal/2026-04-30-crowdsec-cluster-side.md ("Hub fetches
+# at startup ... NetworkPolicy allows broad 443 egress; FQDN
+# policy via Cilium is the upgrade path").
+#
+# Cilium FQDN policies require visibility into DNS responses
+# from the pods they govern. The first egress rule in each
+# policy here is a DNS rule (`toEndpoints: kube-dns` with
+# `rules.dns: matchPattern`) that lets Cilium's L7 proxy
+# observe the queries + populate the FQDN cache. Subsequent
+# `toFQDNs` rules then permit egress to the resolved IPs.
+#
+# Trade-off vs the previous broad-IP-block egress in vanilla
+# NetworkPolicy:
+# - Tighter (blocks anything except the named hostnames)
+# - Slightly more brittle (Cilium FQDN cache must be
+#   populated before the first egress; first-DNS-then-connect
+#   is the standard sequence; cache TTLs are honored)
+# - Cilium-specific (vanilla NetPol can't match on hostnames)
+#
+# IMPORTANT: this CCNP COMPOSES with the vanilla NetworkPolicy
+# at networkpolicy.yaml. The vanilla side gates internal
+# (kube-DNS, LAPI, Loki, CNPG) traffic; this side gates the
+# external HTTPS egress. Both must allow for traffic to flow.
+
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: crowdsec-agent-fqdn-egress
+  namespace: crowdsec
+  labels:
+    app.kubernetes.io/name: crowdsec
+    app.kubernetes.io/component: agent
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: agent
+  egress:
+    # DNS via kube-DNS, with L7 inspection so the FQDN cache
+    # populates from observed responses. matchPattern is
+    # narrow to crowdsec.net subdomains — operator extends if
+    # the agent ever queries other public hostnames.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*.crowdsec.net"
+              - matchName: "hub.crowdsec.net"
+    # FQDN allow for the Hub (parser/scenario fetch).
+    - toFQDNs:
+        - matchName: "hub.crowdsec.net"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: crowdsec-lapi-fqdn-egress
+  namespace: crowdsec
+  labels:
+    app.kubernetes.io/name: crowdsec
+    app.kubernetes.io/component: lapi
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: lapi
+  egress:
+    # DNS via kube-DNS, scoped to crowdsec.net subdomains.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*.crowdsec.net"
+              - matchName: "api.crowdsec.net"
+              - matchName: "app.crowdsec.net"
+    # FQDN allow for Console + community blocklist.
+    # api.crowdsec.net — telemetry + decisions API
+    # app.crowdsec.net — Console UI auth flow + blocklist
+    #                    subscription
+    - toFQDNs:
+        - matchName: "api.crowdsec.net"
+        - matchName: "app.crowdsec.net"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

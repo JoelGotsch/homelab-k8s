@@ -1,0 +1,134 @@
+# CrowdSec ban-rate + LAPI-health alerts.
+#
+# Closes the deferred caveat 8 in
+# 99-journal/2026-04-30-crowdsec-cluster-side.md ("No alerting
+# on ban events themselves — wire a PrometheusRule on
+# cs_lapi_decisions_total + route via Alertmanager →
+# approval-channel as a follow-up").
+#
+# Metric names match CrowdSec's standard /metrics exposition.
+# Operator verifies at first deploy via:
+#   kubectl -n crowdsec port-forward svc/crowdsec-service 6060
+#   curl localhost:6060/metrics | grep ^cs_
+# and tunes the queries if a chart bump renames metrics.
+#
+# Routing:
+# - severity: warning  → ntfy only (per kps alertmanager-config)
+# - severity: critical → fan-out to ntfy AND approval-channel
+#                        (Signal via signal-bridge per the
+#                        kps critical route)
+# - component: crowdsec is operator-side filter only; not
+#   matched by AM routes today
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: crowdsec-decisions
+  namespace: crowdsec
+  labels:
+    app.kubernetes.io/name: crowdsec
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: crowdsec-decisions
+      interval: 1m
+      rules:
+        # Sustained high ban rate — suggests active attack OR
+        # noisy scenarios firing on legitimate traffic. Either
+        # warrants operator attention.
+        #
+        # Threshold: 0.5/s sustained for 10m = ~300 bans in
+        # 10 minutes. Well above normal baseline; tune if
+        # operator workload makes 0.5/s normal.
+        - alert: CrowdSecHighBanRate
+          expr: |
+            sum(rate(cs_lapi_decisions_total{type="ban"}[5m])) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+            component: crowdsec
+          annotations:
+            summary: "CrowdSec issuing bans at >0.5/s sustained for 10m"
+            description: |
+              Either an active attack/scan is in progress, or a
+              recently-added scenario is over-firing on legitimate
+              traffic. Triage:
+                kubectl -n crowdsec exec deploy/crowdsec-agent -- \
+                  cscli decisions list --limit 50
+              If false-positive: add the offending IP/CIDR to
+              the allowlist ConfigMap, commit, Argo reconciles.
+              If attack: verify CIDRGroup is propagating
+              (`kubectl get ciliumcidrgroup crowdsec-banned -o yaml`)
+              + check sync-cronjob logs.
+            runbook_url: "https://github.com/<homelab-docs>/03-runbooks/observability/rule-tuning.md"
+
+        # No decisions recorded in a long window — could mean
+        # the agent isn't firing scenarios (Loki acquisition
+        # broken, parser broken) OR genuinely quiet. The 24h
+        # window is conservative; tighten if operator wants
+        # earlier detection of broken-acquisition.
+        - alert: CrowdSecNoDecisionsRecent
+          expr: |
+            sum(increase(cs_lapi_decisions_total[24h])) == 0
+          for: 1h
+          labels:
+            severity: warning
+            component: crowdsec
+          annotations:
+            summary: "CrowdSec has recorded no decisions in 24h"
+            description: |
+              Possible causes: agent not connected to LAPI,
+              Loki acquisition broken (no log lines reaching the
+              agent), parser broken (lines arrive but don't
+              extract fields), scenarios not firing on the
+              traffic shape. Diagnose:
+                kubectl -n crowdsec logs deploy/crowdsec-agent --tail 100
+                kubectl -n crowdsec exec deploy/crowdsec-agent -- \
+                  cscli metrics
+
+        # LAPI unreachable — bouncer (sync CronJob) can't
+        # fetch decisions, so bans stop propagating to the
+        # CCNP. CIDRGroup keeps the existing entries (CCNP is
+        # durable) but new bans don't reach Cilium. Critical
+        # because security signal is degrading silently.
+        - alert: CrowdSecLAPIDown
+          expr: |
+            up{namespace="crowdsec", service="crowdsec-lapi"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            component: crowdsec
+          annotations:
+            summary: "CrowdSec LAPI is unreachable for >5min"
+            description: |
+              The cidrgroup-sync CronJob can no longer fetch
+              decisions; new bans will not reach the CCNP.
+              Existing bans (already in CIDRGroup) stay
+              enforced. Check LAPI pod state:
+                kubectl -n crowdsec get pods -l app.kubernetes.io/component=lapi
+                kubectl -n crowdsec describe pod <lapi-pod>
+              + CNPG cluster health (LAPI's database):
+                kubectl -n crowdsec get cluster crowdsec-lapi
+
+        # CIDRGroup sync CronJob has not run successfully
+        # recently. The CronJob fires every 5min; missing
+        # 3 consecutive runs (15min+) suggests RBAC,
+        # network, or LAPI auth issue.
+        - alert: CrowdSecCIDRGroupSyncStale
+          expr: |
+            time() - kube_cronjob_status_last_successful_time{namespace="crowdsec", cronjob="crowdsec-cidrgroup-sync"} > 1200
+          for: 5m
+          labels:
+            severity: warning
+            component: crowdsec
+          annotations:
+            summary: "CrowdSec CIDRGroup sync hasn't succeeded in >20min"
+            description: |
+              Bans are no longer propagating to CCNP enforcement
+              even though LAPI may be issuing them. Check the
+              latest Job's logs:
+                kubectl -n crowdsec logs job/<latest-crowdsec-cidrgroup-sync-pod>
+              Common causes: LAPI bouncer-key rotated without
+              reseeding OpenBao; LAPI ingress NetworkPolicy
+              misconfig; kube-API auth issue with the
+              service-account.

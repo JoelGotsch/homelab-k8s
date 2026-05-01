@@ -62,10 +62,12 @@ every 5 minutes from LAPI's decision list by the CronJob).
 | `allowlist-configmap.yaml` | Operator-managed whitelist (RFC1918 + Tailscale + cluster pod CIDR + Cloudflare egress placeholder). |
 | `ciliumcidrgroup-bootstrap.yaml` | Empty `crowdsec-banned` CIDRGroup; CronJob populates. |
 | `ciliumnetworkpolicy.yaml` | CCNP ingressDeny from `crowdsec-banned` CIDRGroup to all endpoints. |
+| `ciliumnetworkpolicy-egress.yaml` | CCNP for FQDN-narrowed egress: agent → `hub.crowdsec.net`; LAPI → `api.crowdsec.net` + `app.crowdsec.net`. Replaces the previous broad `0.0.0.0/0:443` allow in vanilla NetPol. |
 | `cidrgroup-sync-cronjob.yaml` | Every 5 min: curl LAPI → jq decisions → render CIDRGroup YAML → kubectl apply. Image: alpine/k8s. |
 | `rbac.yaml` | ServiceAccount + ClusterRole + ClusterRoleBinding scoped to `crowdsec-banned` CIDRGroup only. |
-| `networkpolicy.yaml` | Vanilla NetPols for LAPI + agent + sync (ingress allow-lists per role). |
+| `networkpolicy.yaml` | Vanilla NetPols for LAPI + agent + sync (internal allow-lists per role; external 443 egress moved to `ciliumnetworkpolicy-egress.yaml`). |
 | `servicemonitor.yaml` | Prometheus scrape of LAPI + agent on :6060. |
+| `prometheusrule.yaml` | Alerts on `cs_lapi_decisions_total`: high ban rate, no-decisions-in-24h, LAPI down, CIDRGroup-sync stale. |
 
 ## OpenBao paths to seed
 

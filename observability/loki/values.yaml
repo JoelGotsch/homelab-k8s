@@ -44,17 +44,34 @@ loki:
         idle_conn_timeout: 90s
 
   limits_config:
-    retention_period: 2160h  # 90 days
-    # Per-stream retention overrides — uncomment to give
-    # specific streams (e.g., security-forensic logs) 1y
-    # per ADR 0021 D8:
-    # retention_stream:
-    #   - selector: '{component="falco"}'
-    #     priority: 1
-    #     period: 8760h  # 1y
-    #   - selector: '{component="audit"}'
-    #     priority: 2
-    #     period: 8760h
+    retention_period: 2160h  # 90 days default
+    # Per-stream retention overrides for security-forensic
+    # streams per ADR 0021 D8 (forensic discovery window
+    # spans weeks-to-months for supply-chain compromises).
+    # Higher priority wins on overlap; selector is LogQL-shaped.
+    retention_stream:
+      # Falco runtime-security events — Falcosidekick ships
+      # these to Loki via its `loki:` output (per
+      # observability/falco-stack/values.yaml).
+      - selector: '{job="falcosidekick"}'
+        priority: 1
+        period: 8760h  # 1y
+      # Hubble network flows — security-forensic per ADR 0021
+      # D5 ("primary exfiltration signal"). Shipped by the
+      # hubble-flow-exporter Vector sidecar in cilium-agent
+      # (label `job=hubble` per observability/hubble-flow-
+      # exporter/configmap.yaml loki sink labels).
+      - selector: '{job="hubble"}'
+        priority: 1
+        period: 8760h
+      # K8s audit-log via journald (Talos audit path) — Alloy's
+      # journald source labels these with `unit=kube-apiserver-
+      # audit` per ADR 0021 D6. Wildcard match catches related
+      # audit units (e.g., kube-controller-manager-audit if
+      # Talos audit-log routing widens later).
+      - selector: '{unit=~".*audit.*"}'
+        priority: 1
+        period: 8760h
     ingestion_rate_mb: 10
     ingestion_burst_size_mb: 20
     max_query_series: 5000

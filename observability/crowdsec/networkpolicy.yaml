@@ -70,21 +70,14 @@ spec:
       ports:
         - port: 5432
           protocol: TCP
-    # CrowdSec Console (community blocklist + telemetry).
-    # api.crowdsec.net is public; broad egress allowed —
-    # narrow via Cilium FQDN policy as a follow-up.
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8
-              - 172.16.0.0/12
-              - 192.168.0.0/16
-              - 169.254.0.0/16
-              - 100.64.0.0/10
-      ports:
-        - port: 443
-          protocol: TCP
+    # CrowdSec Console (community blocklist + telemetry):
+    # narrowed to specific FQDNs via the companion
+    # CiliumNetworkPolicy in ciliumnetworkpolicy-egress.yaml
+    # (toFQDNs: api.crowdsec.net, app.crowdsec.net). The
+    # vanilla NetworkPolicy intentionally has NO 443-egress
+    # rule for LAPI — Cilium's FQDN-based allow is the
+    # gate. Vanilla cannot match on hostname; this is the
+    # canonical "use CCNP for L7-aware egress" pattern.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -141,20 +134,11 @@ spec:
       ports:
         - port: 3100
           protocol: TCP
-    # CrowdSec Hub (parser/scenario fetch from
-    # hub.crowdsec.net). Same broad-egress shape as LAPI.
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8
-              - 172.16.0.0/12
-              - 192.168.0.0/16
-              - 169.254.0.0/16
-              - 100.64.0.0/10
-      ports:
-        - port: 443
-          protocol: TCP
+    # CrowdSec Hub (parser/scenario fetch): narrowed to the
+    # specific FQDN via the companion CiliumNetworkPolicy in
+    # ciliumnetworkpolicy-egress.yaml (toFQDNs:
+    # hub.crowdsec.net). Vanilla NetworkPolicy cannot match
+    # on hostname; the L7-aware gate lives in the CCNP.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

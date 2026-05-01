@@ -35,7 +35,9 @@ resources:
   - allowlist-configmap.yaml
   - ciliumcidrgroup-bootstrap.yaml
   - ciliumnetworkpolicy.yaml
+  - ciliumnetworkpolicy-egress.yaml
   - cidrgroup-sync-cronjob.yaml
   - rbac.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml
+  - prometheusrule.yaml
