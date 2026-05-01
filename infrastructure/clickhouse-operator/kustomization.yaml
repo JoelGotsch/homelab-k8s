@@ -1,0 +1,31 @@
+# Altinity ClickHouse Operator — manages ClickHouse clusters
+# declaratively via the ClickHouseInstallation (chi) CR.
+#
+# Per ADR 0028 (Langfuse deployment shape): this operator is
+# the chosen ClickHouse host for the Langfuse layer. Same
+# operator-pattern as CNPG (operator at infrastructure layer +
+# per-app CR in the consumer's own layer).
+#
+# Selected over the official ClickHouse Operator (Jan 2026,
+# v1alpha1) on maturity grounds: Altinity is GA + 8 years
+# production-deployed; tens of thousands of installations.
+# Reconsider-trigger named in ADR 0028 for when official
+# reaches v1 + features Langfuse needs.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: clickhouse-operator
+
+helmCharts:
+  - name: altinity-clickhouse-operator
+    repo: https://docs.altinity.com/clickhouse-operator/
+    version: "0.26.3"  # OPERATOR PINS via Renovate
+    releaseName: clickhouse-operator
+    namespace: clickhouse-operator
+    valuesFile: values.yaml
+    includeCRDs: true
+
+resources:
+  - namespace.yaml
+  - networkpolicy.yaml

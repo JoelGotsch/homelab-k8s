@@ -71,6 +71,12 @@ buckets:
     policy: none
     purge: false
     versioning: false  # Tempo retention per ADR 0021 D8 (14d hot, 30d warm)
+  - name: langfuse-blobs
+    policy: none
+    purge: false
+    versioning: false  # Langfuse stores large trace payloads (LLM
+                        # input/output text, attachments) here.
+                        # Per ADR 0021 D8 + ADR 0028.
 
 # Per-app access keys (svc accounts) are NOT provisioned by
 # the chart. Operator creates them via `mc admin user svcacct

@@ -1,0 +1,39 @@
+# Langfuse — LLM-specific tracing + experiment + evaluation +
+# prompt-versioning. Per ADR 0021 D3 + ADR 0028.
+#
+# Stack:
+# - Langfuse web + worker (helm chart)
+# - ClickHouse via Altinity operator (chi CR in this layer;
+#   operator at infrastructure/clickhouse-operator/)
+# - Postgres via CNPG (Cluster CR in this layer)
+# - Redis (chart-managed; small)
+# - Blob store: MinIO `langfuse-blobs` bucket
+#
+# Workloads emit OTLP via standard OpenTelemetry SDK to the
+# OTel Collector agent (per ADR 0028 D3 — instrumentation is
+# OTel-as-the-protocol, not Langfuse-specific SDK).
+#
+# OTel Collector gateway exporter to Langfuse lives at
+# observability/otel-collector/values-gateway.yaml.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: langfuse
+
+helmCharts:
+  - name: langfuse
+    repo: https://langfuse.github.io/langfuse-k8s
+    version: "1.6.0"  # OPERATOR PINS via Renovate
+    releaseName: langfuse
+    namespace: langfuse
+    valuesFile: values.yaml
+    includeCRDs: false
+
+resources:
+  - namespace.yaml
+  - cnpg-cluster.yaml
+  - clickhouseinstallation.yaml
+  - externalsecret.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml

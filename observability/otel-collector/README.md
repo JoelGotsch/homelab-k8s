@@ -43,6 +43,13 @@ commented-with-TODO until that layer lands).
 | `values-agent.yaml` | `mode: daemonset`; OTLP receivers; export → gateway via cluster DNS. |
 | `networkpolicy.yaml` | Per-tier NetPols: gateway ingress from agents + Prometheus, egress to Tempo + DNS; agent ingress from any-namespace workloads + Prometheus, egress to gateway + DNS. |
 | `servicemonitor.yaml` | Per-tier metrics scrape on `:8888`. |
+| `externalsecret.yaml` | Pulls `kv/langfuse/otel-ingest` (Langfuse project public/secret key pair) into `monitoring/langfuse-otel-ingest` Secret. Gateway pod consumes via `extraEnvsFrom` for the `basicauth/langfuse` extension. |
+
+## OpenBao paths to seed
+
+| Path | Field | Notes |
+|---|---|---|
+| `kv/data/langfuse/otel-ingest` | `public_key`, `secret_key` | Langfuse project-scoped API key pair generated via Langfuse UI → Project → Settings → API Keys (label e.g. "otel-collector gateway"). Same path is owned by the [`observability/langfuse/`](../langfuse/) layer (operator seeds during langfuse first-install ceremony); this layer's ESO ExternalSecret pulls from it. Until Langfuse is up + the key pair is seeded, the gateway pod's `basicauth/langfuse` extension fails to start; gateway crash-loops with auth-not-configured during the bring-up gap (Langfuse layer must land first). |
 
 ## How workloads emit traces
 

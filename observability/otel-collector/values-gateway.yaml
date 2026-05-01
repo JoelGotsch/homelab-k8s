@@ -14,6 +14,13 @@ image:
 
 replicaCount: 2  # HA on the gateway tier; agents fail-soft to either
 
+# Inject Langfuse OTel-ingest credentials from the
+# langfuse-otel-ingest Secret (ESO-managed; ExternalSecret
+# in this layer pulls from kv/langfuse/otel-ingest).
+extraEnvsFrom:
+  - secretRef:
+      name: langfuse-otel-ingest
+
 # OpenTelemetry Collector configuration. Receives OTLP from
 # agents, processes (batch + memory_limiter), exports to Tempo
 # (and Langfuse when that lands).
@@ -43,18 +50,28 @@ config:
       endpoint: tempo.monitoring.svc.cluster.local:4317
       tls:
         insecure: true   # cluster-internal HTTP
-    # Langfuse OTLP — un-commented when Langfuse lands.
-    # otlphttp/langfuse:
-    #   endpoint: http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/otel
-    #   headers:
-    #     Authorization: ${LANGFUSE_AUTH_HEADER}  # ESO-projected
+    # Langfuse OTLP — receives spans at /api/public/otel.
+    # Per ADR 0028: workloads emit OTel-standard spans
+    # (NOT the Langfuse-specific SDK); Langfuse maps GenAI
+    # semantic conventions (gen_ai.*) to its data model.
+    # Auth via basicauth extension; creds ESO-projected from
+    # kv/langfuse/otel-ingest at first install.
+    otlphttp/langfuse:
+      endpoint: http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/otel
+      auth:
+        authenticator: basicauth/langfuse
+  extensions:
+    basicauth/langfuse:
+      client_auth:
+        username: ${env:LANGFUSE_OTEL_PUBLIC_KEY}
+        password: ${env:LANGFUSE_OTEL_SECRET_KEY}
   service:
+    extensions: [basicauth/langfuse]
     pipelines:
       traces:
         receivers: [otlp]
         processors: [memory_limiter, batch]
-        exporters: [otlp/tempo]
-        # When Langfuse lands, fan out: exporters: [otlp/tempo, otlphttp/langfuse]
+        exporters: [otlp/tempo, otlphttp/langfuse]
     telemetry:
       metrics:
         address: 0.0.0.0:8888

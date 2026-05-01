@@ -29,5 +29,6 @@ helmCharts:
     includeCRDs: false
 
 resources:
+  - externalsecret.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml

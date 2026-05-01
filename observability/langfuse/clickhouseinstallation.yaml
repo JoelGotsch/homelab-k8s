@@ -1,0 +1,97 @@
+# Single-replica ClickHouse instance backing Langfuse's OLAP
+# trace-event analytics. Per ADR 0028.
+#
+# Operator: Altinity ClickHouse Operator at
+# infrastructure/clickhouse-operator/. The CR here is what
+# the operator reconciles into ClickHouse pods + Services.
+#
+# Sizing: single-replica + single-shard. Langfuse at homelab
+# scale (~hundreds of MB of trace events; not the millions/sec
+# Langfuse SaaS handles) doesn't need multi-shard or
+# replication. Scale-trigger: if ClickHouse query latency
+# becomes user-visible OR if storage approaches 100 GB,
+# add a replica + Keeper.
+#
+# Storage: 50 GB longhorn-replica2 — generous for the
+# expected workload but cheap insurance. ClickHouse
+# compression on trace-event data is good (typically 5-10x).
+#
+# User credentials come from the langfuse-clickhouse-creds
+# Secret (ESO-managed; OpenBao kv/langfuse/clickhouse).
+
+apiVersion: clickhouse.altinity.com/v1
+kind: ClickHouseInstallation
+metadata:
+  name: langfuse
+  namespace: langfuse
+  labels:
+    app.kubernetes.io/name: clickhouse
+    app.kubernetes.io/instance: langfuse
+    app.kubernetes.io/part-of: langfuse
+spec:
+  configuration:
+    users:
+      # User-password reference via the ESO-managed Secret.
+      # Operator template-substitutes ${...} from the secret
+      # value at reconcile time.
+      langfuse/password_sha256_hex:
+        valueFrom:
+          secretKeyRef:
+            name: langfuse-clickhouse-creds
+            key: password_sha256_hex
+      langfuse/networks/ip:
+        - "::/0"   # Cluster-internal NetworkPolicy gates access
+      langfuse/profile: default
+      langfuse/quota: default
+    clusters:
+      - name: langfuse
+        layout:
+          shardsCount: 1
+          replicasCount: 1
+  defaults:
+    templates:
+      podTemplate: clickhouse-pod
+      dataVolumeClaimTemplate: data-volume
+      logVolumeClaimTemplate: log-volume
+  templates:
+    podTemplates:
+      - name: clickhouse-pod
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+            fsGroup: 101
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: clickhouse
+              image: clickhouse/clickhouse-server:24.8.4.13   # OPERATOR PINS via Renovate
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 1Gi
+                limits:
+                  memory: 4Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+                # Cannot be readOnlyRootFilesystem: true here — ClickHouse
+                # writes config + temporary files to the rootfs at startup.
+                # Volume mounts cover /var/lib/clickhouse + /var/log/clickhouse.
+    volumeClaimTemplates:
+      - name: data-volume
+        spec:
+          accessModes: [ReadWriteOnce]
+          storageClassName: longhorn-replica2
+          resources:
+            requests:
+              storage: 50Gi
+      - name: log-volume
+        spec:
+          accessModes: [ReadWriteOnce]
+          storageClassName: longhorn-replica2
+          resources:
+            requests:
+              storage: 5Gi

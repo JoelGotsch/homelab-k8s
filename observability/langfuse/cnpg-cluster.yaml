@@ -1,0 +1,55 @@
+# CNPG Postgres cluster for Langfuse application data
+# (projects, datasets, users, prompts, scores, traces metadata).
+#
+# Same shape as observability/crowdsec/cnpg-cluster.yaml +
+# apps/llm-gateway/cnpg-cluster.yaml. Per ADR 0028.
+#
+# Service exposed: langfuse-pg-rw.langfuse.svc:5432.
+# Langfuse helm values point at this DSN through the
+# langfuse-postgres-creds Secret.
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: langfuse-pg
+  namespace: langfuse
+spec:
+  instances: 2
+
+  storage:
+    size: 10Gi
+    storageClass: longhorn-replica3
+
+  monitoring:
+    enablePodMonitor: true
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+      shared_buffers: "128MB"
+
+  bootstrap:
+    initdb:
+      database: langfuse
+      owner: langfuse
+
+  # Backup: WAL+base to MinIO-on-NAS. Restic CronJob mirrors
+  # to tier-2/3 per ADR 0006. Langfuse traces are personal-class
+  # data per ADR 0003 (LLM input/output text); backup-encrypt
+  # via barmanObjectStore + restic-tier-3 password.
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://homelab-backups-cluster/cnpg/langfuse
+      endpointURL: http://minio.minio.svc.cluster.local:9000
+      s3Credentials:
+        accessKeyId:
+          name: langfuse-cnpg-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: langfuse-cnpg-s3
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: bzip2
+      data:
+        compression: bzip2
+    retentionPolicy: "30d"

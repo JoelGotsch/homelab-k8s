@@ -67,6 +67,20 @@ spec:
           protocol: TCP
         - port: 4318
           protocol: TCP
+    # Langfuse web (OTLP HTTP at /api/public/otel) in
+    # langfuse ns. Per ADR 0028; LLM-specific tracing fans
+    # out alongside Tempo.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: langfuse
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: langfuse
+              app.kubernetes.io/component: web
+      ports:
+        - port: 3000
+          protocol: TCP
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

@@ -1,0 +1,53 @@
+# Altinity ClickHouse Operator chart values.
+# Per ADR 0028.
+
+# Operator runs cluster-wide (watches ClickHouseInstallation
+# CRs in any namespace). Same pattern as CNPG.
+operator:
+  image:
+    repository: altinity/clickhouse-operator
+    tag: "0.26.3"  # OPERATOR PINS via Renovate
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+# metrics-exporter sidecar — ships ClickHouse cluster metrics
+# to Prometheus. ServiceMonitor wired separately if needed;
+# operator itself runs in clickhouse-operator ns and per-app
+# ServiceMonitor lives in the consumer's layer.
+metrics:
+  image:
+    repository: altinity/metrics-exporter
+    tag: "0.26.3"
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+# RBAC — cluster-wide watch on chi/chk CRs. Required for the
+# operator to reconcile ClickHouseInstallation in any
+# namespace.
+rbac:
+  create: true
+  scope: namespace_clusterwide
+
+# Pod security — operator + metrics-exporter both run as
+# non-root.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: true

@@ -1,0 +1,13 @@
+# Dedicated namespace for Langfuse + its ClickHouse + CNPG +
+# Redis dependencies.
+#
+# PSA: baseline. Web/worker run as non-root; ClickHouse via
+# the Altinity operator runs non-root by default.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: langfuse
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

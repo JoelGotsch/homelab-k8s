@@ -1,0 +1,68 @@
+# NetworkPolicy for the Altinity ClickHouse Operator.
+#
+# Ingress: Prometheus self-metrics scrape (operator + metrics-
+#   exporter both expose).
+# Egress: kube-API (operator watches CRs cluster-wide) +
+#   kube-DNS + ClickHouse pods in any namespace (managed CHIs).
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: clickhouse-operator
+  namespace: clickhouse-operator
+spec:
+  podSelector:
+    matchLabels:
+      app: clickhouse-operator
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Prometheus self-metrics scrape from monitoring ns.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 8888
+          protocol: TCP
+        - port: 9999
+          protocol: TCP
+  egress:
+    # kube-DNS for service resolution.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # kube-API for watching ClickHouseInstallation CRs.
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              component: kube-apiserver
+      ports:
+        - port: 6443
+          protocol: TCP
+        - port: 443
+          protocol: TCP
+    # ClickHouse pods in any namespace — operator-managed
+    # instances. Selects on Altinity's chart-default label.
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              clickhouse.altinity.com/chi: ""
+      ports:
+        - port: 8123
+          protocol: TCP   # HTTP interface
+        - port: 9000
+          protocol: TCP   # Native client interface

@@ -1,0 +1,13 @@
+# Dedicated namespace for the Altinity ClickHouse Operator.
+#
+# The operator watches ClickHouseInstallation CRs cluster-wide
+# but its own pods + RBAC live here.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: clickhouse-operator
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

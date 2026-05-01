@@ -1,0 +1,175 @@
+# NetworkPolicies for the Langfuse layer.
+#
+# Three pod groups:
+# 1. langfuse-web + langfuse-worker — application
+# 2. langfuse-pg-* — CNPG Postgres pods
+# 3. chi-langfuse-langfuse-* — Altinity-managed ClickHouse pods
+# 4. langfuse-redis-* — chart-managed Redis
+#
+# Plus inbound from OTel Collector gateway (OTLP receiver) +
+# Cilium Gateway (HTTPRoute, when ingress lands).
+
+# === Langfuse web + worker ===
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: langfuse-app
+  namespace: langfuse
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [web, worker]
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # OTel Collector gateway pushes OTLP to Langfuse's
+    # /api/public/otel endpoint on the web pod.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opentelemetry-collector
+              app.kubernetes.io/component: gateway
+      ports:
+        - port: 3000
+          protocol: TCP
+    # Cilium Gateway HTTPRoute (operator-side ingress; lands
+    # when langfuse.<HOMELAB_INTERNAL_DOMAIN> HTTPRoute is
+    # wired). Permits any pod with the gateway-class label.
+    # Operator-narrows when Gateway API ingress is concrete.
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: cilium
+      ports:
+        - port: 3000
+          protocol: TCP
+    # Prometheus self-metrics scrape.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 3000
+          protocol: TCP
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # CNPG Postgres in same ns.
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: langfuse-pg
+      ports:
+        - port: 5432
+          protocol: TCP
+    # ClickHouse in same ns (Altinity-managed).
+    - to:
+        - podSelector:
+            matchLabels:
+              clickhouse.altinity.com/chi: langfuse
+      ports:
+        - port: 8123
+          protocol: TCP   # HTTP interface
+        - port: 9000
+          protocol: TCP   # Native interface
+    # Redis in same ns.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - port: 6379
+          protocol: TCP
+    # MinIO blob storage (langfuse-blobs bucket).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: minio
+      ports:
+        - port: 9000
+          protocol: TCP
+---
+# === ClickHouse ingress allow-list ===
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: langfuse-clickhouse
+  namespace: langfuse
+spec:
+  podSelector:
+    matchLabels:
+      clickhouse.altinity.com/chi: langfuse
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Langfuse web + worker.
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [web, worker]
+      ports:
+        - port: 8123
+          protocol: TCP
+        - port: 9000
+          protocol: TCP
+    # Altinity operator + metrics-exporter for management +
+    # metrics scrape.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: clickhouse-operator
+      ports:
+        - port: 8123
+          protocol: TCP
+        - port: 9000
+          protocol: TCP
+        - port: 9363
+          protocol: TCP   # ClickHouse self-metrics
+    # Prometheus scrape (via metrics-exporter sidecar in
+    # ClickHouse pod, exposed by Altinity).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 9363
+          protocol: TCP
+  egress:
+    # kube-DNS + S3 (ClickHouse may push backups directly,
+    # though our backup story is CNPG-side; conservative
+    # allow).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP

@@ -1,0 +1,145 @@
+# Langfuse v3 Helm values. Per ADR 0028.
+#
+# Wires Langfuse against EXTERNAL ClickHouse + Postgres:
+# - ClickHouse: managed by Altinity operator via the
+#   ClickHouseInstallation CR (clickhouseinstallation.yaml).
+#   Endpoint: clickhouse-langfuse.langfuse.svc.cluster.local
+# - Postgres: managed by CNPG via the Cluster CR
+#   (cnpg-cluster.yaml). Endpoint: langfuse-pg-rw.langfuse.svc:5432
+# - Redis: chart-managed (small, ephemeral; not load-bearing
+#   for durability).
+# - Blob storage: MinIO `langfuse-blobs` bucket (pre-created
+#   by infrastructure/minio-on-nas/).
+
+# Langfuse web (UI + API) + worker (async ingestion).
+langfuse:
+  # Operator-fillable per the homelab convention.
+  nextauth:
+    url: "https://langfuse.<HOMELAB_INTERNAL_DOMAIN>"
+    secret:
+      existingSecret: langfuse-app-secrets
+      key: NEXTAUTH_SECRET
+
+  salt:
+    existingSecret: langfuse-app-secrets
+    key: SALT
+
+  encryptionKey:
+    existingSecret: langfuse-app-secrets
+    key: ENCRYPTION_KEY
+
+  # Telemetry to Langfuse Inc. — disabled per principle #2
+  # (security over convenience; no anonymous telemetry to
+  # external services in our trust boundary).
+  telemetry:
+    enabled: false
+
+  # Web (UI) replicas + resources.
+  web:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+
+  # Worker (async ingestion + eval runs) replicas + resources.
+  worker:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+
+# === External ClickHouse ===
+clickhouse:
+  # Tells the chart NOT to deploy its own ClickHouse subchart.
+  deploy: false
+
+  host: "clickhouse-langfuse.langfuse.svc.cluster.local"
+  port: 8123
+  user: "langfuse"
+  database: "langfuse"
+  password:
+    existingSecret: langfuse-clickhouse-creds
+    key: password
+
+# === External Postgres (CNPG-managed) ===
+postgresql:
+  deploy: false
+  host: "langfuse-pg-rw.langfuse.svc.cluster.local"
+  port: 5432
+  database: "langfuse"
+  username: "langfuse"
+  # CNPG creates the user-credentials Secret automatically;
+  # we point at it via existingSecret. CNPG's secret name is
+  # `<cluster-name>-app` by default.
+  existingSecret: "langfuse-pg-app"
+  existingSecretPasswordKey: "password"
+  existingSecretUserKey: "username"
+
+# === Redis (chart-managed) ===
+redis:
+  deploy: true
+  primary:
+    persistence:
+      enabled: true
+      size: 1Gi
+      storageClass: longhorn-replica2
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+
+# === S3 blob storage (MinIO langfuse-blobs) ===
+# Langfuse ships traces' large payloads (LLM I/O text,
+# attachments) to S3 instead of bloating ClickHouse / Postgres.
+s3:
+  # Event uploads (raw trace data before ClickHouse ingest).
+  eventUpload:
+    bucket: "langfuse-blobs"
+    region: "auto"
+    endpoint: "http://minio.minio.svc.cluster.local:9000"
+    forcePathStyle: true
+    accessKeyId:
+      existingSecret: langfuse-app-secrets
+      key: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+    secretAccessKey:
+      existingSecret: langfuse-app-secrets
+      key: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+  # Media uploads (attachment files).
+  mediaUpload:
+    bucket: "langfuse-blobs"
+    region: "auto"
+    endpoint: "http://minio.minio.svc.cluster.local:9000"
+    forcePathStyle: true
+    accessKeyId:
+      existingSecret: langfuse-app-secrets
+      key: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+    secretAccessKey:
+      existingSecret: langfuse-app-secrets
+      key: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+
+# Self-metrics — chart-default ServiceMonitor uses a different
+# label selector; we ship our own at servicemonitor.yaml.
+serviceMonitor:
+  enabled: false
+
+# Pod security posture matches the rest of observability/.
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: true
