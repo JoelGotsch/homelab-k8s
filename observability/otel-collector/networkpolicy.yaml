@@ -1,0 +1,123 @@
+# OTel Collector NetworkPolicies.
+#
+# Two policies — gateway and agent — selecting on the chart's
+# `app.kubernetes.io/component` labels (gateway / agent).
+#
+# Gateway:
+#   Ingress: from agents (4317/4318); from Prometheus (metrics).
+#   Egress: kube-DNS + Tempo (4317).
+#
+# Agent (DaemonSet, one per node):
+#   Ingress: from workloads in any namespace (workloads emit
+#     OTLP via the local node's agent). Prometheus scrape too.
+#   Egress: kube-DNS + gateway (4317).
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: otel-collector-gateway
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opentelemetry-collector
+      app.kubernetes.io/component: gateway
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # OTel agents (DaemonSet) push OTLP to gateway.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opentelemetry-collector
+              app.kubernetes.io/component: agent
+      ports:
+        - port: 4317
+          protocol: TCP
+        - port: 4318
+          protocol: TCP
+    # Prometheus self-metrics scrape.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 8888
+          protocol: TCP
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Tempo (OTLP gRPC + HTTP) in same ns.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tempo
+      ports:
+        - port: 4317
+          protocol: TCP
+        - port: 4318
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: otel-collector-agent
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opentelemetry-collector
+      app.kubernetes.io/component: agent
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Workloads in any namespace can push OTLP to the local
+    # agent. Wildcard namespaceSelector — operator narrows
+    # if a specific workload-set should be the only emitter.
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: 4317
+          protocol: TCP
+        - port: 4318
+          protocol: TCP
+    # Prometheus self-metrics scrape.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 8888
+          protocol: TCP
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Gateway in same ns.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opentelemetry-collector
+              app.kubernetes.io/component: gateway
+      ports:
+        - port: 4317
+          protocol: TCP

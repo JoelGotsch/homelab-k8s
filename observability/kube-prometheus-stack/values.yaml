@@ -150,11 +150,23 @@ grafana:
         # cluster per observability/loki/). No headers
         # needed. Adding a tenant would inject
         # X-Scope-OrgID and Loki would reject as "no org id."
-    # When Tempo lands per ADR 0021 D6:
-    # - name: Tempo
-    #   type: tempo
-    #   url: http://tempo.monitoring.svc.cluster.local:3100
-    #   isDefault: false
+    - name: Tempo
+      type: tempo
+      access: proxy
+      url: http://tempo.monitoring.svc.cluster.local:3200
+      isDefault: false
+      jsonData:
+        httpMethod: GET
+        # Future: trace-to-logs derivedFields linking spans
+        # to Loki via shared trace-id label. Empty until
+        # workloads emit instrumented spans + logs.
+        tracesToLogsV2:
+          datasourceUid: loki
+          spanStartTimeShift: -1m
+          spanEndTimeShift: 1m
+          tags: [namespace, service.name, pod]
+          filterByTraceID: true
+          filterBySpanID: false
 
   resources:
     requests:

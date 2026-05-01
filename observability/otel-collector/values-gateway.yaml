@@ -1,0 +1,108 @@
+# OTel Collector — gateway Deployment.
+# Per ADR 0021 D3: "OTel Collector DaemonSet+Deployment pair
+# (agent mode on each node + gateway mode centrally)."
+#
+# This is the gateway. It receives OTLP from the per-node
+# DaemonSet agents (values-agent.yaml) and forwards to Tempo
+# today, plus Langfuse later (commented-with-TODO).
+
+mode: deployment
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+  tag: 0.111.0   # OPERATOR PINS via Renovate
+
+replicaCount: 2  # HA on the gateway tier; agents fail-soft to either
+
+# OpenTelemetry Collector configuration. Receives OTLP from
+# agents, processes (batch + memory_limiter), exports to Tempo
+# (and Langfuse when that lands).
+config:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+  processors:
+    # Memory_limiter prevents the collector from OOMing under
+    # spike load by dropping data when memory pressure rises.
+    memory_limiter:
+      check_interval: 1s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+    # Batch processor amortizes export overhead. 200ms timeout
+    # is the standard balance between latency + throughput.
+    batch:
+      timeout: 200ms
+      send_batch_size: 8192
+  exporters:
+    # Tempo receives OTLP gRPC on 4317.
+    otlp/tempo:
+      endpoint: tempo.monitoring.svc.cluster.local:4317
+      tls:
+        insecure: true   # cluster-internal HTTP
+    # Langfuse OTLP — un-commented when Langfuse lands.
+    # otlphttp/langfuse:
+    #   endpoint: http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/otel
+    #   headers:
+    #     Authorization: ${LANGFUSE_AUTH_HEADER}  # ESO-projected
+  service:
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: [otlp/tempo]
+        # When Langfuse lands, fan out: exporters: [otlp/tempo, otlphttp/langfuse]
+    telemetry:
+      metrics:
+        address: 0.0.0.0:8888
+
+# Self-metrics scrape — chart's bundled ServiceMonitor doesn't
+# match our release-label convention; ship our own at
+# servicemonitor.yaml.
+serviceMonitor:
+  enabled: false
+
+# Ports exposed by the chart's Service. Match what the agent
+# DaemonSet sends to.
+ports:
+  otlp:
+    enabled: true
+    containerPort: 4317
+    servicePort: 4317
+    protocol: TCP
+  otlp-http:
+    enabled: true
+    containerPort: 4318
+    servicePort: 4318
+    protocol: TCP
+  metrics:
+    enabled: true
+    containerPort: 8888
+    servicePort: 8888
+    protocol: TCP
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: true
+
+# Disable chart-default NetworkPolicy; we ship explicit ones
+# in networkpolicy.yaml.
+networkPolicy:
+  enabled: false

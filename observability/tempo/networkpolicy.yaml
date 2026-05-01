@@ -1,0 +1,66 @@
+# Tempo NetworkPolicy.
+#
+# Ingress: OTel Collector gateway (OTLP push) + Grafana (data
+#   source queries) + Prometheus (self-metrics scrape).
+# Egress: kube-DNS + MinIO (chunk storage).
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tempo-allow
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tempo
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # OTel Collector gateway in same ns.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opentelemetry-collector
+              app.kubernetes.io/component: gateway
+      ports:
+        - port: 4317   # OTLP gRPC
+          protocol: TCP
+        - port: 4318   # OTLP HTTP
+          protocol: TCP
+    # Grafana (data source queries).
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: grafana
+      ports:
+        - port: 3200   # Tempo HTTP query API
+          protocol: TCP
+    # Prometheus (self-metrics scrape).
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 3200
+          protocol: TCP
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # MinIO chunk storage (tempo-blocks bucket).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: minio
+      ports:
+        - port: 9000
+          protocol: TCP

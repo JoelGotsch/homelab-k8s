@@ -1,0 +1,33 @@
+# OpenTelemetry Collector — DaemonSet (agent) + Deployment
+# (gateway) pair per ADR 0021 D3.
+#
+# Two helm releases from the same chart with `mode: daemonset`
+# and `mode: deployment` respectively. Workloads emit OTLP to
+# the local agent (per-node DaemonSet); agents batch + forward
+# to the gateway (Deployment); gateway exports to Tempo today
+# and Langfuse when that lands.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: monitoring
+
+helmCharts:
+  - name: opentelemetry-collector
+    repo: https://open-telemetry.github.io/opentelemetry-helm-charts
+    version: "0.108.0"  # OPERATOR PINS via Renovate
+    releaseName: opentelemetry-collector-gateway
+    namespace: monitoring
+    valuesFile: values-gateway.yaml
+    includeCRDs: false
+  - name: opentelemetry-collector
+    repo: https://open-telemetry.github.io/opentelemetry-helm-charts
+    version: "0.108.0"
+    releaseName: opentelemetry-collector-agent
+    namespace: monitoring
+    valuesFile: values-agent.yaml
+    includeCRDs: false
+
+resources:
+  - networkpolicy.yaml
+  - servicemonitor.yaml

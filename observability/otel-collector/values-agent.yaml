@@ -1,0 +1,91 @@
+# OTel Collector — per-node DaemonSet agent.
+# Per ADR 0021 D3: "agent mode on each node + gateway mode
+# centrally."
+#
+# Agents receive OTLP from local workloads (lower latency
+# than going straight to the gateway), batch, and forward to
+# the gateway Deployment. Workloads target the local agent at
+# its node-local IP (DaemonSet hostNetwork: false but agents
+# expose ClusterIP via headless service; or via the standard
+# pattern: workloads emit to opentelemetry-collector-agent.
+# monitoring.svc and ride node-local affinity).
+
+mode: daemonset
+
+image:
+  repository: otel/opentelemetry-collector-contrib
+  tag: 0.111.0   # OPERATOR PINS via Renovate
+
+config:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+  processors:
+    memory_limiter:
+      check_interval: 1s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+    batch:
+      timeout: 200ms
+      send_batch_size: 8192
+  exporters:
+    # Forward to the gateway via cluster DNS. Gateway's
+    # 2-replica Deployment + Service load-balances.
+    otlp/gateway:
+      endpoint: opentelemetry-collector-gateway.monitoring.svc.cluster.local:4317
+      tls:
+        insecure: true   # cluster-internal HTTP
+  service:
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, batch]
+        exporters: [otlp/gateway]
+    telemetry:
+      metrics:
+        address: 0.0.0.0:8888
+
+serviceMonitor:
+  enabled: false
+
+ports:
+  otlp:
+    enabled: true
+    containerPort: 4317
+    servicePort: 4317
+    protocol: TCP
+  otlp-http:
+    enabled: true
+    containerPort: 4318
+    servicePort: 4318
+    protocol: TCP
+  metrics:
+    enabled: true
+    containerPort: 8888
+    servicePort: 8888
+    protocol: TCP
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: true
+
+networkPolicy:
+  enabled: false
