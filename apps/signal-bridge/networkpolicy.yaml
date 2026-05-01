@@ -3,12 +3,11 @@
 # Ingress: approval-channel only (the canonical caller for the
 #   alert + approval-routing surface per ADR 0009 + the
 #   signal-webhook runbook).
-# Egress: kube-DNS + Signal infrastructure on the public
-#   internet (signal-cli connects to the operator's
-#   provisioned Signal account; Signal-server endpoints are
-#   on AWS / Cloudflare). Egress is unrestricted at L3 here;
-#   if a richer DNS-aware egress policy is wired later
-#   (e.g. via Cilium FQDN policy), this rule narrows.
+# Egress: kube-DNS for hostname resolution. External 443 egress
+#   to Signal infrastructure is FQDN-narrowed via the companion
+#   CiliumNetworkPolicy at ciliumnetworkpolicy-egress.yaml
+#   (toFQDNs: *.signal.org). Vanilla NetworkPolicy can't match
+#   on hostname; the L7-aware gate lives in the CCNP.
 
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -61,21 +60,8 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # Signal infrastructure — public internet on 443 + 80
-    # (signal-cli uses HTTPS to *.signal.org for chat-msg
-    # and AWS S3 for attachments). Allowed broadly here;
-    # FQDN-aware narrowing belongs in CiliumNetworkPolicy.
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8        # cluster + LAN
-              - 172.16.0.0/12     # docker-default ranges
-              - 192.168.0.0/16    # home LAN
-              - 169.254.0.0/16    # link-local
-              - 100.64.0.0/10     # Tailscale CGNAT range
-      ports:
-        - port: 443
-          protocol: TCP
-        - port: 80
-          protocol: TCP
+    # External Signal-infrastructure egress is gated by the
+    # companion CiliumNetworkPolicy in
+    # ciliumnetworkpolicy-egress.yaml (toFQDNs: *.signal.org).
+    # Vanilla NetPol cannot match on hostname; the L7-aware
+    # gate lives in the CCNP.

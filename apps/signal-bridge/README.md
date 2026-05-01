@@ -32,7 +32,8 @@ failure-mode independence over minimum-component-count):
 | `namespace.yaml` | `signal-bridge` ns; PSA baseline (signal-cli is non-root). |
 | `pvc.yaml` | 2 GiB Longhorn-replica2 PVC for signal-cli registration + session data. |
 | `deployment.yaml` | Single-replica Recreate-strategy Deployment (PVC-RWX-of-one + SQLite-locks); ConfigMap with `MODE=native` + `ENABLE_METRICS=1`; Service on 8080. |
-| `networkpolicy.yaml` | Ingress: approval-channel + Prometheus only. Egress: kube-DNS + public internet 443/80 (Signal infrastructure). |
+| `networkpolicy.yaml` | Ingress: approval-channel + Prometheus only. Egress: kube-DNS only (external Signal-infrastructure egress moved to `ciliumnetworkpolicy-egress.yaml`). |
+| `ciliumnetworkpolicy-egress.yaml` | CCNP for FQDN-narrowed egress: `toFQDNs: *.signal.org`. Replaces the previous broad `0.0.0.0/0:443,80` allow in vanilla NetPol. |
 | `servicemonitor.yaml` | Scrape `/v1/metrics` (Prometheus format, exposed when `ENABLE_METRICS=1`). |
 
 ## First-install operator action: register signal-cli
@@ -95,10 +96,11 @@ holds the recipient list (operator's other phone, etc.).
    trust model is the same as for any community image
    (per ADR 0019 — Trivy + cosign on first-party images;
    for community images, pin + read release notes).
-4. **Egress NetworkPolicy is broad.** Ingress to
-   `0.0.0.0/0:443,80` minus RFC1918 + Tailscale CGNAT.
-   Signal endpoints are not stable enough for IP allowlist;
-   FQDN policy via Cilium is the upgrade path.
+4. **External egress narrowed via CCNP `toFQDNs: *.signal.org`**
+   (in `ciliumnetworkpolicy-egress.yaml`). Vanilla NetworkPolicy
+   gates internal traffic only. Cold-start brittleness: Cilium's
+   FQDN cache must populate from observed DNS responses before
+   the first connection succeeds (~ms in steady state).
 5. **No Helm chart upstream.** Manifests are hand-rolled.
    The trade-off is no upstream values-schema risk on
    bumps; the cost is operator-side maintenance of all the

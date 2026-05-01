@@ -196,6 +196,15 @@ extraVolumes:
       items:
         - key: vector.yaml
           path: vector.yaml
+  # hostPath (not emptyDir) so Vector's disk buffer survives
+  # sidecar restarts and pod rescheduling. Per the
+  # 2026-05-01-observability-followups journal closure of
+  # the "in-memory buffer only" caveat in
+  # 2026-04-30-hubble-flow-shipping.md. The cilium-agent pod
+  # is a DaemonSet; the hostPath is per-node and survives
+  # pod eviction (the next pod scheduled to the same node
+  # picks up the buffer).
   - name: hubble-flow-exporter-data
-    emptyDir:
-      sizeLimit: 64Mi
+    hostPath:
+      path: /var/lib/vector/hubble-flow-exporter
+      type: DirectoryOrCreate

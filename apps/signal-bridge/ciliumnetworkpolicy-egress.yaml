@@ -1,0 +1,65 @@
+# FQDN-aware egress for signal-bridge.
+#
+# Closes caveat 4 in
+# 99-journal/2026-04-30-signal-bridge-and-approval-channel.md
+# ("Egress NetworkPolicy is broad ... 0.0.0.0/0:443,80 minus
+# RFC1918 + Tailscale CGNAT. Signal endpoints are not stable
+# enough for IP allowlist; FQDN policy via Cilium is the
+# upgrade path.")
+#
+# signal-cli contacts:
+#   *.signal.org              — chat servers (chat.signal.org),
+#                               CDN (cdn.signal.org, cdn2, cdn3),
+#                               contact-discovery (cdsi.signal.org),
+#                               registration storage
+#                               (storage.signal.org)
+# `matchPattern: "*.signal.org"` covers the primary endpoints
+# without enumerating each.
+#
+# Cilium FQDN policies require visibility into DNS responses.
+# The first egress rule here is a DNS rule with `rules.dns:
+# matchPattern` that lets Cilium's L7 proxy observe queries +
+# populate the FQDN cache. Subsequent `toFQDNs` rules permit
+# egress to the resolved IPs.
+#
+# IMPORTANT: this CCNP COMPOSES with the vanilla NetworkPolicy
+# at networkpolicy.yaml. The vanilla side gates internal
+# (kube-DNS) traffic; this side gates external HTTPS egress.
+# Both must allow for traffic to flow.
+
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: signal-bridge-fqdn-egress
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: signal-bridge
+    app.kubernetes.io/component: egress-policy
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: signal-bridge
+  egress:
+    # DNS via kube-DNS, with L7 inspection so Cilium populates
+    # the FQDN cache from observed responses. matchPattern is
+    # narrow to signal.org subdomains.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*.signal.org"
+              - matchName: "signal.org"
+    # FQDN allow for Signal infrastructure.
+    - toFQDNs:
+        - matchPattern: "*.signal.org"
+        - matchName: "signal.org"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

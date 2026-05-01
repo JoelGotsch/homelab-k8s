@@ -20,4 +20,5 @@ resources:
   - pvc.yaml
   - deployment.yaml
   - networkpolicy.yaml
+  - ciliumnetworkpolicy-egress.yaml
   - servicemonitor.yaml

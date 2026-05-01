@@ -98,6 +98,27 @@ data:
         out_of_order_action: accept
         # No tenant header — Loki has auth_enabled: false per
         # loki/values.yaml D2.
+        # Disk-backed sink buffer — survives sidecar restarts
+        # and pod rescheduling. The data_dir lives on the host
+        # at /var/lib/vector/hubble-flow-exporter (hostPath in
+        # cilium values' extraVolumes). 256 MiB caps disk usage
+        # per node.
+        #
+        # `when_full: block` — back-pressure to the source.
+        # Vector's only alternative is `drop_newest` which
+        # silently drops new events at the buffer boundary;
+        # `block` stalls the source instead, which means the
+        # underlying Cilium static-export file (capped at 50 MiB
+        # via fileMaxSizeMb 10 × fileMaxBackups 5) acts as the
+        # next-tier buffer. Events on rotated-out files are
+        # eventually lost, but the durable-on-disk window is
+        # ~256 MiB (Vector buffer) + ~50 MiB (Cilium rotation
+        # window) before drops, vs ~500 events with the prior
+        # in-memory-only design.
+        buffer:
+          type: disk
+          max_size: 268435456   # 256 MiB
+          when_full: block
 
       # Self-metrics: Vector's pipeline counters (events_in,
       # events_out, errors_total, lag) on :9598. PodMonitor

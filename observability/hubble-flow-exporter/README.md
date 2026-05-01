@@ -88,12 +88,15 @@ coordination needed.
    from labels too; Loki streams scale with the *product* of
    label cardinalities.
 
-4. **Vector buffers in memory only.** If Loki is unreachable
-   longer than the default `max_events: 500` buffer × event
-   throughput, lines drop. Acceptable at homelab volume.
-   Disk-buffer (`buffer.type: disk`) is the upgrade path; it
-   needs a hostPath volume on the cilium-agent pod which is a
-   change to cilium values.
+4. **Vector uses a disk-backed buffer (256 MiB) on a hostPath
+   volume at `/var/lib/vector/hubble-flow-exporter` per node.**
+   `when_full: block` back-pressures the source (Cilium's
+   static-export file) on prolonged Loki outages; the file
+   itself buffers another ~50 MiB before rotation drops
+   events. Total durable-on-disk window: ~256 MiB (Vector) +
+   ~50 MiB (Cilium rotation) before any drops happen.
+   Hostpath survives sidecar restarts and pod rescheduling
+   on the same node.
 
 5. **Static export file rotation.** Cilium's `hubble.export`
    chart options bound the file (`fileMaxSizeMb`,
