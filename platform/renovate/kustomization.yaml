@@ -1,0 +1,20 @@
+# Self-hosted Renovate — runs against Forgejo only.
+# Per ADR 0023 (Forgejo as source of truth) +
+# update-policy.md (Renovate as the dependency-update bot).
+#
+# Status: ships dormant. The CronJob has spec.suspend=true
+# and waits for operator action post-Forgejo bring-up. See
+# README §Post-Forgejo activation.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: renovate
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - externalsecret.yaml
+  - cronjob.yaml
+  - networkpolicy.yaml

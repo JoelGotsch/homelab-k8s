@@ -1,0 +1,54 @@
+# Renovate global config (mounted at /usr/src/app/config.js).
+# Per-repo configs (in each repo's renovate.json5) extend the
+# central preset at homelab-infra/renovate-presets/default.json5
+# and run on top of this global config.
+#
+# Status: ships dormant. CronJob suspend=true until operator
+# completes the post-Forgejo activation procedure documented
+# in this layer's README.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: renovate-config
+  namespace: renovate
+  labels:
+    app.kubernetes.io/name: renovate
+    app.kubernetes.io/component: config
+data:
+  config.js: |
+    // Renovate config — Gitea/Forgejo platform.
+    // Per ADR 0023 (Forgejo as source of truth) +
+    // homelab-infra/renovate-presets/default.json5 (per-repo
+    // configs extend the central preset).
+    module.exports = {
+      platform: 'gitea',
+      endpoint: '<FORGEJO_BASE_URL>/api/v1',
+      gitAuthor: 'Renovate Bot <<RENOVATE_BOT_EMAIL>>',
+      // Username MUST match the bot user created in Forgejo.
+      username: 'renovate-bot',
+      // Discover every repo the bot has visibility to in the
+      // configured org. autodiscoverFilter scopes to a single
+      // org so a misplaced collaborator-add doesn't pull a
+      // foreign repo into the run.
+      autodiscover: true,
+      autodiscoverFilter: ['<FORGEJO_ORG>/*'],
+      // Don't error out on repos without a renovate.json5 —
+      // log + skip. Lets new repos land before their config.
+      onboarding: false,
+      requireConfig: 'optional',
+      // Operational tunables — most behaviour comes from the
+      // central preset that per-repo configs extend.
+      logLevel: 'info',
+      logFormat: 'json',  // for Loki ingestion per ADR 0021
+      // Bound the run; if a registry is slow, fail fast and
+      // retry next schedule.
+      prHourlyLimit: 4,
+      prConcurrentLimit: 8,
+      // Persist Renovate's per-repo cache across runs to skip
+      // re-discovery work. Cache lives in the emptyDir mount
+      // (lost between pod restarts; that's fine — Renovate
+      // gracefully rebuilds).
+      cacheDir: '/tmp/renovate/cache',
+      baseDir: '/tmp/renovate/base',
+    };

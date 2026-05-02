@@ -1,0 +1,129 @@
+# NetworkPolicies for the renovate runner.
+#
+# - Ingress: NONE. CronJob runs no service.
+# - Egress (vanilla NetworkPolicy): kube-DNS + Forgejo
+#   (in-cluster Service).
+# - Egress (CCNP, FQDN-aware): the common upstream
+#   registry hosts Renovate consults to discover latest
+#   versions. Operator extends the FQDN list when a new
+#   manifest source surfaces (e.g., a new Helm chart repo).
+#
+# Threat model: the bot's Forgejo PAT is the only secret in
+# this layer. NetworkPolicy bounds where the runner can
+# send it. Vanilla policy gates cluster-internal traffic;
+# CCNP narrows external egress to known registries by
+# hostname (Renovate's request shape is HTTPS GET).
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: renovate-runner
+  namespace: renovate
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: renovate
+      app.kubernetes.io/component: runner
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Forgejo API in-cluster. Forgejo Service lives in the
+    # `forgejo` namespace per platform/forgejo/. Port 3000
+    # is the Forgejo default; operator confirms when
+    # forgejo layer scaffolds.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: forgejo
+      ports:
+        - port: 3000
+          protocol: TCP
+        - port: 443
+          protocol: TCP
+---
+# CCNP: external-registry egress narrowed to known
+# hostnames. Vanilla NetworkPolicy can't match on FQDN;
+# Cilium's FQDN-aware policy is the canonical pattern
+# (per crowdsec/ciliumnetworkpolicy-egress.yaml).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: renovate-runner-egress-fqdn
+  namespace: renovate
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: renovate
+      app.kubernetes.io/component: runner
+  egress:
+    # kube-DNS — Cilium needs to see the DNS query to
+    # populate its FQDN→IP cache for the toFQDNs rules
+    # below.
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # Common registries Renovate consults.
+    # OPERATOR EXTENDS this list when a new manifest source
+    # surfaces (chart repo URL, alternate registry, etc.).
+    # Add the hostname as a `matchName` line.
+    - toFQDNs:
+        # Container registries
+        - matchName: "registry-1.docker.io"
+        - matchName: "auth.docker.io"
+        - matchName: "production.cloudflare.docker.com"
+        - matchName: "ghcr.io"
+        - matchName: "pkg-containers.githubusercontent.com"
+        - matchName: "registry.k8s.io"
+        - matchName: "quay.io"
+        - matchName: "cdn03.quay.io"
+        - matchName: "gcr.io"
+        # Helm chart repos referenced by homelab-k8s
+        - matchName: "charts.bitnami.com"
+        - matchName: "grafana.github.io"
+        - matchName: "openbao.github.io"
+        - matchName: "helm.cilium.io"
+        - matchName: "argoproj.github.io"
+        - matchName: "external-secrets.io"
+        - matchName: "charts.crowdsec.net"
+        - matchName: "charts.jetstack.io"
+        - matchName: "kubernetes.github.io"
+        - matchName: "kyverno.github.io"
+        - matchName: "renovatebot.github.io"
+        - matchName: "operator.victoriametrics.com"
+        - matchName: "longhorn.io"
+        # Language-package registries (first-party Python
+        # apps' deps)
+        - matchName: "pypi.org"
+        - matchName: "files.pythonhosted.org"
+        # GitHub (release notes, source archives for
+        # github-tags / github-releases datasources)
+        - matchName: "api.github.com"
+        - matchName: "objects.githubusercontent.com"
+        - matchName: "codeload.github.com"
+        - matchName: "github.com"
+        - matchName: "raw.githubusercontent.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
