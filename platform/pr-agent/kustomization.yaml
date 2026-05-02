@@ -1,0 +1,18 @@
+# Qodo PR-Agent — LLM-powered PR review bot, webhook-mode.
+# Per ADR 0029.
+#
+# No upstream Helm chart for the gitea_app target; plain
+# Deployment + Service + ConfigMap + ExternalSecret. Image is
+# operator-built from qodo-ai/pr-agent's `gitea_app` Dockerfile
+# target and pushed to registry.homelab.internal — see README
+# §"Image build" for the recipe.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - externalsecret.yaml
+  - deployment.yaml
+  - networkpolicy.yaml

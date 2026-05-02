@@ -1,0 +1,97 @@
+# PR-Agent webhook server (Deployment + Service).
+# Per ADR 0029 D2 + D4.
+#
+# Image is built from qodo-ai/pr-agent's `gitea_app` Dockerfile
+# target — no upstream-published image for that target as of
+# release tracking. Recipe in README §"Image build". Renovate
+# pins via the `<digest>`-shaped tag once a build lands in
+# registry.homelab.internal.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pr-agent
+  namespace: pr-agent
+  labels:
+    app.kubernetes.io/name: pr-agent
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pr-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pr-agent
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pr-agent
+          # OPERATOR PINS via Renovate. See README §"Image build"
+          # for the build recipe; tag is `gitea_app-<upstream-tag>`.
+          image: "registry.homelab.internal/pr-agent:gitea_app-0.34"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: pr-agent-config
+            - secretRef:
+                name: pr-agent-forgejo
+            - secretRef:
+                name: pr-agent-webhook
+            - secretRef:
+                name: pr-agent-llm-gateway
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pr-agent
+  namespace: pr-agent
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: pr-agent
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

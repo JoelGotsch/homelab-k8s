@@ -1,0 +1,57 @@
+# NetworkPolicy for PR-Agent.
+# Per ADR 0029 D4: cluster-internal only.
+#
+# Ingress: webhooks from Forgejo (the only legitimate caller).
+# Egress: kube-DNS + Forgejo (API callbacks for diff fetch +
+#   review-comment posting) + LiteLLM gateway (LLM calls).
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pr-agent
+  namespace: pr-agent
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: pr-agent
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: forgejo
+      ports:
+        - port: 3000
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Forgejo API — fetch diff + post review comments.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: forgejo
+      ports:
+        - port: 3000
+          protocol: TCP
+    # LiteLLM gateway — the only egress for LLM calls (ADR 0007
+    # chokepoint + ADR 0026 per-app virtual key). No 0.0.0.0/0
+    # rule means PR-Agent CANNOT reach Anthropic / OpenAI / etc.
+    # directly; gateway is the enforcement point.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: llm-gateway
+      ports:
+        - port: 4000
+          protocol: TCP

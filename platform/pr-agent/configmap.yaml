@@ -1,0 +1,58 @@
+# Non-secret PR-Agent configuration. Secrets (Forgejo PAT,
+# webhook secret, gateway virtual-key) come via ExternalSecret.
+#
+# Per ADR 0029 D3: LiteLLM provider, gateway-pointed.
+# Per ADR 0026 D6: per-app virtual key.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pr-agent-config
+  namespace: pr-agent
+data:
+  # Provider selection — Forgejo speaks the Gitea API.
+  CONFIG__GIT_PROVIDER: "gitea"
+
+  # Forgejo base URL. OPERATOR FILLS <HOMELAB-DOMAIN>.
+  # PR-Agent's Gitea provider uses the Forgejo HTTP API directly.
+  GITEA__URL: "https://forgejo.lab.<HOMELAB-DOMAIN>"
+
+  # LLM backend — point LiteLLM client at the in-cluster gateway.
+  # Per ADR 0026 D6 the gateway issues per-app virtual keys; the
+  # `OPENAI__KEY` env (from ExternalSecret) carries this consumer's
+  # key. The gateway's provider-allowlist gates which models this
+  # virtual key may invoke.
+  CONFIG__OPENAI__API_BASE: "http://llm-gateway.llm-gateway.svc.cluster.local:4000"
+
+  # Self-hosted-only model name. OPERATOR PINS to a model
+  # exposed by the LLM gateway's policy for the `pr-agent`
+  # virtual key. Conventional shape: a Mac Studio MLX model
+  # (per ADR 0026 D2) or an Ollama fallback. Format follows
+  # LiteLLM's `<provider>/<model>` convention; for an OpenAI-
+  # compatible gateway endpoint that maps through the gateway's
+  # routing the prefix is `openai/`.
+  CONFIG__MODEL: "openai/<PR_AGENT_SELF_HOSTED_MODEL>"
+  CONFIG__FALLBACK_MODELS: "[]"
+
+  # Auto-review on opened/reopened PRs. Slash-commands
+  # (`/review`, `/improve`, `/ask`) remain available in PR
+  # comments per ADR 0029 D2.
+  CONFIG__GITEA_APP__HANDLE_PR_ACTIONS: '["opened","reopened","ready_for_review"]'
+  CONFIG__GITEA_APP__PR_COMMANDS: |-
+    [
+      "/describe",
+      "/review --pr_reviewer.num_code_suggestions=4",
+      "/improve --pr_code_suggestions.commitable_code_suggestions=false"
+    ]
+
+  # Token-budget guard for slow self-hosted models — keep prompt
+  # bounded; PR-Agent will summarise / chunk diffs over this.
+  # OPERATOR TUNES once first runs land in Langfuse traces
+  # (ADR 0028). Default conservative.
+  CONFIG__MAX_MODEL_TOKENS: "32000"
+
+  # Webhook server bind. PR-Agent's gitea_app target listens
+  # on 3000 by default; pin explicitly so the Service + probes
+  # match.
+  HOST: "0.0.0.0"
+  PORT: "3000"
