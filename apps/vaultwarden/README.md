@@ -32,7 +32,7 @@ via Cloudflare Tunnel + WAF.
 | `kustomization.yaml` | guerzon/vaultwarden helm chart 0.32.0; resource list below. |
 | `values.yaml` | Single-replica + external CNPG Postgres + Longhorn-replica3 PVC for attachments; ADMIN_TOKEN as Argon2 hash from ESO; OIDC ships disabled; closed registration; logging JSON. |
 | `cnpg-cluster.yaml` | 2-instance CNPG `vaultwarden-pg` on `longhorn-replica3`; barman → MinIO; **90d retention** (operator daily-driver credentials warrant longer recovery window). |
-| `externalsecret.yaml` | 5 ExternalSecrets: admin (Argon2 token), oidc (dormant), smtp (operator-fillable), postgres (CNPG-issued), cnpg-s3 (barman backup). |
+| `externalsecret.yaml` | 4 ExternalSecrets: admin (Argon2 token), oidc (dormant), smtp (operator-fillable), cnpg-s3 (barman backup). DATABASE_URL projected directly from CNPG's auto-created `vaultwarden-pg-app` Secret — no separate `vaultwarden-postgres-creds` ESO. |
 | `httproute.yaml` | Cilium HTTPRoute for `vaultwarden.lab.<HOMELAB-DOMAIN>`; Tailscale-only at first commit. |
 | `networkpolicy.yaml` | Vanilla NP: ingress Cilium Gateway + Prometheus; egress kube-DNS + CNPG + Authentik. CCNP: SMTP egress (FQDN-aware; placeholder). |
 | `servicemonitor.yaml` | Prometheus scrape on `/metrics`. |
@@ -44,10 +44,16 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 | Path | Field(s) | Source |
 |---|---|---|
 | `kv/data/vaultwarden/admin` | `admin_token_argon2` | Argon2 hash of operator-chosen admin password. **NOT plaintext.** Generated locally per the snippet below. Plaintext lives in operator's memory + Vaultwarden vault. |
-| `kv/data/vaultwarden/postgres` | `password` | CNPG-issued; copied from `vaultwarden-pg-app` Secret. |
 | `kv/data/vaultwarden/oidc` | `client_id`, `client_secret`, `issuer` | Provisioned via `provision-authentik-oidc-client.sh` post-Authentik-bring-up. |
 | `kv/data/vaultwarden/smtp` | `host`, `username`, `password` | Operator-typed SMTP relay creds (only required if email invites are wanted). Ships empty — Vaultwarden refuses to send when fields are empty. |
 | `kv/data/cnpg/vaultwarden/s3-creds` | `access_key_id`, `secret_access_key` | MinIO svc-account scoped to `homelab-backups-cluster/cnpg/vaultwarden/`. Standard CNPG-app pattern. |
+
+(The Postgres password itself is **not** stored in OpenBao —
+CNPG auto-creates `vaultwarden-pg-app` Secret with the full
+DATABASE_URL; values.yaml's `extraEnv` references it directly.
+This avoids duplicating the credential between two secret
+stores + makes CNPG's password-rotation transparent to
+Vaultwarden.)
 
 **First-install seed:**
 
@@ -73,12 +79,11 @@ homelab-infra/scripts/provision-authentik-oidc-client.sh \
     --scopes "openid email profile" \
     --kv-path kv/vaultwarden/oidc
 
-# 3. CNPG-issued postgres password.
-bao kv put kv/vaultwarden/postgres \
-    password="$(kubectl -n vaultwarden get secret vaultwarden-pg-app \
-        -o jsonpath='{.data.password}' | base64 -d)"
+# (Postgres password not in OpenBao — Vaultwarden reads
+# DATABASE_URL directly from CNPG's auto-created
+# `vaultwarden-pg-app` Secret. See note above the seed table.)
 
-# 4. CNPG s3-creds — provisioned + seeded after MinIO Healthy.
+# 3. CNPG s3-creds — provisioned + seeded after MinIO Healthy.
 homelab-infra/scripts/provision-minio-svcacct.sh \
     --alias minio \
     --kv-path kv/cnpg/vaultwarden/s3-creds \
@@ -88,7 +93,7 @@ homelab-infra/scripts/provision-minio-svcacct.sh \
         "arn:aws:s3:::homelab-backups-cluster/cnpg/vaultwarden" \
     --label vaultwarden-cnpg
 
-# 5. SMTP — only if family invites need email. Operator-typed:
+# 4. SMTP — only if family invites need email. Operator-typed:
 # bao kv put kv/vaultwarden/smtp \
 #     host="smtp.<provider>" \
 #     username="<smtp-user>" \

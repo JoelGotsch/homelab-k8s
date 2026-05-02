@@ -26,14 +26,15 @@ image:
   tag: "1.33.0"
   pullPolicy: IfNotPresent
 
-# External CNPG Postgres. DATABASE_URL projected via
-# extraEnv from vaultwarden-postgres-creds Secret + the
-# CNPG cluster's hostname.
+# External CNPG Postgres. CNPG auto-creates the
+# `vaultwarden-pg-app` Secret at cluster bootstrap with these
+# keys: dbname, host, password, pgpass, port, uri, user,
+# username. We project DATABASE_URL directly from the `uri`
+# field — no env-substitution dance, and credential rotations
+# (when CNPG rolls them) propagate automatically on next pod
+# restart.
 database:
   type: postgresql
-  # The chart's `database` block doesn't directly expose a
-  # connection URL builder; we project DATABASE_URL via env
-  # below.
 
 # Attachments + sends storage — small volume on Longhorn-
 # replica3. Vaultwarden's encrypted-at-rest model means
@@ -45,15 +46,12 @@ storage:
   accessModes:
     - ReadWriteOnce
 
-# Project DATABASE_URL from CNPG password + cluster service.
 extraEnv:
-  - name: VW_PG_PASSWORD
+  - name: DATABASE_URL
     valueFrom:
       secretKeyRef:
-        name: vaultwarden-postgres-creds
-        key: password
-  - name: DATABASE_URL
-    value: "postgresql://vaultwarden:$(VW_PG_PASSWORD)@vaultwarden-pg-rw.vaultwarden.svc.cluster.local:5432/vaultwarden"
+        name: vaultwarden-pg-app
+        key: uri
 
 # Don't expose the chart's bundled Service externally — the
 # Cilium HTTPRoute owns ingress.
