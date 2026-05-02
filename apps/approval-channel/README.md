@@ -37,6 +37,7 @@ independent.
 |---|---|---|
 | `kv/data/approval-channel/signal` | `sender` | E.164 number registered in signal-bridge — same number as the operator action documented in [`apps/signal-bridge/README.md`](../signal-bridge/README.md). |
 | `kv/data/approval-channel/signal` | `recipients` | Comma-separated E.164 numbers. Operator's phone(s). |
+| `kv/data/approval-channel/inbound-auth-token` | `token` | Bearer-token-style secret for the `/v1/*` POST endpoints. Generate at first install: `openssl rand -hex 32`. AM-side mirror Secret in monitoring ns is `am-inbound-tokens` (key `approval-channel`); created by the kube-prometheus-stack ESO ExternalSecret. |
 
 Seed during cold-start Step 13c (per
 [`04-guides/cold-start.md`](../../../homelab-docs/04-guides/cold-start.md)).

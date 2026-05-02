@@ -87,13 +87,18 @@ spec:
           # shape — Alertmanager v4 alerts[].annotations.summary
           # is the second branch after Falcosidekick's `output`.
           sendResolved: true
-          # Alertmanager retries internally on transient
-          # failures; the relay returns 502 → Alertmanager
-          # backs off + retries. Acceptable.
+          # Bearer-token defense-in-depth alongside NetPol
+          # gating. Per the 2026-05-02 audit follow-up #4:
+          # the relay's `_verify_inbound_token` rejects
+          # missing / wrong-token requests with 401. Mirror
+          # Secret `am-inbound-tokens` lives in monitoring ns
+          # via `inbound-tokens-externalsecret.yaml`.
           httpConfig:
-            # If the relay ever moves to TLS-terminated
-            # internal traffic (cluster mTLS), set tlsConfig
-            # here. Today: cluster-internal HTTP.
+            authorization:
+              type: Bearer
+              credentials:
+                name: am-inbound-tokens
+                key: ntfy-e2ee-relay
 
     # approval-channel receivers (per ADR 0009 + ADR 0021 D7+D10).
     # approval-channel formats the AM v4 webhook batch as a
@@ -109,7 +114,13 @@ spec:
           # Alertmanager retries on 5xx; approval-channel
           # returns 502 if signal-bridge is unreachable.
           # That gives the durability layer.
-          httpConfig: {}
+          # Bearer-token defense-in-depth (audit follow-up #4).
+          httpConfig:
+            authorization:
+              type: Bearer
+              credentials:
+                name: am-inbound-tokens
+                key: approval-channel
 
     - name: approval-channel-deception
       webhookConfigs:
@@ -120,7 +131,13 @@ spec:
           # leaving it on means the operator sees the
           # entire interaction window. Tighten if signal
           # noise materialises.
-          httpConfig: {}
+          # Bearer-token defense-in-depth (audit follow-up #4).
+          httpConfig:
+            authorization:
+              type: Bearer
+              credentials:
+                name: am-inbound-tokens
+                key: approval-channel
 
   inhibitRules:
     # critical inhibits warning for the same (alertname,

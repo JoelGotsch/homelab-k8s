@@ -52,6 +52,8 @@ spec:
                 name: approval-channel-config
             - secretRef:
                 name: approval-channel-signal
+            - secretRef:
+                name: approval-channel-inbound-auth
           livenessProbe:
             httpGet:
               path: /healthz

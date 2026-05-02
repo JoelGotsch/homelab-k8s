@@ -29,6 +29,7 @@ the namespace; without them, the pod fails to start.
 |---|---|---|
 | `kv/ntfy/topic-key` | `value` | `openssl rand 32 \| base64 -w0` — generate at first install. **Operator records the same key in the F-Droid app config** (Tier C device per [ADR 0024 D1](../../../homelab-docs/02-decisions/0024-external-access-for-internal-services.md)). |
 | `kv/ntfy/publish-auth` | `header` | _(optional)_ Bearer / Basic auth header value if the cluster-hosted ntfy server requires topic auth. Empty / missing = relay publishes anonymously. |
+| `kv/ntfy-e2ee-relay/inbound-auth-token` | `token` | Bearer-token-style secret for the `/webhook` endpoint. Generate at first install: `openssl rand -hex 32`. AM-side mirror Secret in monitoring ns is `am-inbound-tokens` (key `ntfy-e2ee-relay`); created by the kube-prometheus-stack ESO ExternalSecret. **Note:** the Falcosidekick → ntfy-relay direct webhook path is NOT currently authenticated (see [known-caveats.md §ntfy-e2ee-relay](../../../homelab-docs/04-guides/known-caveats.md)). |
 
 **First-install seed:**
 
