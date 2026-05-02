@@ -1,0 +1,68 @@
+# CNPG Postgres for Immich. Same shape as Forgejo / Authentik /
+# Nextcloud, with one difference: Immich requires the
+# **vectorchord** extension (CLIP embeddings + face vectors) so
+# the imageName below points at the cnpg-pgvector-vectorchord
+# build rather than the stock cloudnative-pg image. The image
+# also includes pgvector + pgvecto.rs so it can restore from
+# pre-v1.133 backups.
+#
+# See: https://github.com/corentingiraud/cnpg-pgvector-vectorchord
+# + https://docs.immich.app/administration/postgres-standalone/
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: immich-pg
+  namespace: immich
+spec:
+  instances: 2
+
+  # OPERATOR PINS via Renovate. The image must include
+  # vectorchord (loaded via shared_preload_libraries below).
+  imageName: ghcr.io/corentingiraud/cnpg-pgvector-vectorchord:17-vchord-0.4.3
+
+  storage:
+    size: 20Gi
+    storageClass: longhorn-replica3
+
+  monitoring:
+    enablePodMonitor: true
+
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: "256MB"
+      # Required by vectorchord per upstream Immich docs —
+      # without this, the extension fails to register and
+      # Immich's startup health-check rejects the DB.
+      shared_preload_libraries: "vchord.so"
+
+  bootstrap:
+    initdb:
+      database: immich
+      owner: immich
+      # Install required extensions on the freshly created DB.
+      # vectorchord depends on pgvector >=0.7,<0.9 — both ship
+      # in the image; CNPG runs CREATE EXTENSION at bootstrap.
+      postInitTemplateSQL:
+        - CREATE EXTENSION IF NOT EXISTS vector;
+        - CREATE EXTENSION IF NOT EXISTS vchord CASCADE;
+
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://homelab-backups-cluster/cnpg/immich
+      endpointURL: http://minio.minio.svc.cluster.local:9000
+      s3Credentials:
+        accessKeyId:
+          name: immich-cnpg-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: immich-cnpg-s3
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: bzip2
+      data:
+        compression: bzip2
+    # Photos are personal data, classification `personal` per
+    # ADR 0003. 90d retention to match Nextcloud / Authentik.
+    retentionPolicy: "90d"

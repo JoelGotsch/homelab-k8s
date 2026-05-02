@@ -1,0 +1,37 @@
+# Immich — self-hosted photo library. Replaces PhotoPrism /
+# Synology Photos per ADR 0025 D4. Runbook for the migration:
+# `03-runbooks/immich/migrate-from-photoprism.md`. Day-to-day
+# usage: `04-guides/photo-management-with-immich.md`.
+#
+# Helm chart: official immich-app/immich-charts (OCI). Bundled
+# Redis kept (chart default); Postgres EXTERNAL via CNPG cluster
+# defined in cnpg-cluster.yaml. Library backend is the NAS share
+# `personal-photos` mounted RWX via NFS-CSI (encrypted-at-NAS via
+# rclone-crypt overlay per ADR 0025 D3 — see README).
+#
+# Public sharing of albums goes through `apps/immich-public-proxy/`
+# behind Cloudflare Tunnel per ADR 0024 D1; Immich itself stays
+# Tailscale-only.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: immich
+
+helmCharts:
+  - name: immich
+    repo: oci://ghcr.io/immich-app/immich-charts
+    version: "0.11.1"  # OPERATOR PINS via Renovate
+    releaseName: immich
+    namespace: immich
+    valuesFile: values.yaml
+    includeCRDs: true
+
+resources:
+  - namespace.yaml
+  - cnpg-cluster.yaml
+  - nfs-pv.yaml
+  - externalsecret.yaml
+  - httproute.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml

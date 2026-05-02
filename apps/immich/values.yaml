@@ -1,0 +1,173 @@
+# Immich helm values (immich-app/immich-charts).
+# Per ADR 0024 (Tailscale-only Phase 1 + CF Tunnel via
+# immich-public-proxy for public album sharing) +
+# ADR 0025 D4 (Immich replaces Synology Photos / PhotoPrism;
+# `personal-photos` share encrypted at NAS via rclone-crypt
+# overlay per D3) + identity.md (Authentik OIDC).
+#
+# Postgres: EXTERNAL — bundled subchart disabled; uses the
+# CNPG cluster from cnpg-cluster.yaml (vectorchord-enabled
+# image, required for Immich smart-search + facial-recognition
+# vector storage as of v1.133+).
+#
+# Redis: bundled (chart default; Immich's job queue is
+# ephemeral, no need to externalise).
+#
+# Migration from NAS-Docker PhotoPrism per
+# 03-runbooks/immich/migrate-from-photoprism.md.
+
+image:
+  repository: ghcr.io/immich-app/immich-server
+  # OPERATOR PINS via Renovate. Pin server + ml + microservices
+  # to the same Immich version — they share the DB schema.
+  tag: "v1.135.0"
+  pullPolicy: IfNotPresent
+
+# Disable the bundled Postgres subchart — we use external CNPG
+# (see cnpg-cluster.yaml). Bundled Redis stays enabled (chart
+# default true).
+postgresql:
+  enabled: false
+
+# Server (HTTP API + web frontend).
+server:
+  enabled: true
+  persistence:
+    library:
+      type: pvc
+      existingClaim: immich-library
+      mountPath: /usr/src/app/upload
+      readOnly: false
+
+# Microservices (background job worker — ingest, thumbnail,
+# transcode, smart-search indexing, face detection).
+microservices:
+  enabled: true
+  persistence:
+    library:
+      type: pvc
+      existingClaim: immich-library
+      mountPath: /usr/src/app/upload
+      readOnly: false
+
+# Machine-learning (CLIP smart search + ArcFace facial
+# recognition). Workers do this entirely on-cluster — per
+# ADR 0026 photos are `personal` data and never leave the lab.
+machine-learning:
+  enabled: true
+  image:
+    repository: ghcr.io/immich-app/immich-machine-learning
+    tag: "v1.135.0"
+  persistence:
+    cache:
+      enabled: true
+      size: 10Gi
+      storageClass: longhorn-replica2
+      accessMode: ReadWriteOnce
+  # Sized for ~100k-asset library on the operator's hardware.
+  # CLIP inference + face embedding share this budget; larger
+  # libraries may benefit from raising the limit and pinning
+  # to a node with GPU later (no cluster GPU today).
+  resources:
+    requests:
+      cpu: 200m
+      memory: 1Gi
+    limits:
+      memory: 4Gi
+
+# Immich env. DB_* + REDIS_* + OAUTH_* projected from
+# Secrets created by cnpg-cluster.yaml + externalsecret.yaml.
+env:
+  # CNPG-issued user creds — Secret name comes from CNPG's
+  # role-binding on the immich-pg cluster.
+  DB_HOSTNAME:
+    valueFrom:
+      secretKeyRef:
+        name: immich-pg-app
+        key: host
+  DB_USERNAME:
+    valueFrom:
+      secretKeyRef:
+        name: immich-pg-app
+        key: username
+  DB_PASSWORD:
+    valueFrom:
+      secretKeyRef:
+        name: immich-pg-app
+        key: password
+  DB_DATABASE_NAME:
+    valueFrom:
+      secretKeyRef:
+        name: immich-pg-app
+        key: dbname
+
+  # Redis bundled by the chart — points at the chart's Service.
+  REDIS_HOSTNAME: "immich-redis-master"
+
+  # Vectorchord required for v1.133+ smart-search; CNPG image
+  # ships it. Tells Immich's startup probe which vector
+  # extension to load.
+  DB_VECTOR_EXTENSION: "vectorchord"
+
+# OAuth (Authentik OIDC). Projected to the server pod via
+# extraEnv since these aren't in the chart's `env` schema as
+# first-class keys.
+extraEnv:
+  - name: OAUTH_ENABLED
+    value: "true"
+  - name: OAUTH_ISSUER_URL
+    valueFrom:
+      secretKeyRef:
+        name: immich-oidc
+        key: issuer
+  - name: OAUTH_CLIENT_ID
+    valueFrom:
+      secretKeyRef:
+        name: immich-oidc
+        key: client_id
+  - name: OAUTH_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: immich-oidc
+        key: client_secret
+  - name: OAUTH_AUTO_REGISTER
+    value: "true"
+  - name: OAUTH_BUTTON_TEXT
+    value: "Login with Authentik"
+
+# Don't expose Service externally — Cilium HTTPRoute owns
+# ingress (httproute.yaml).
+service:
+  type: ClusterIP
+
+ingress:
+  enabled: false
+
+# Pod-level security: non-root, dropped caps. Immich images
+# run as user 1000 by default.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  # readOnlyRootFilesystem: false — Immich writes thumbnails
+  # and transcode-cache under /usr/src/app/upload (the PVC),
+  # but server + microservices also write to /tmp.
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: [ALL]
+
+# Resource budget for server + microservices. Sized for
+# ~100k photos library, 2-3 simultaneous mobile-backup
+# uploads, ML jobs running in the background.
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    memory: 4Gi

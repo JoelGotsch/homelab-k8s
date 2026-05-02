@@ -1,0 +1,64 @@
+# Static PV for Immich's library backend. Backed by the NAS
+# `personal-photos` share — `personal` data classification per
+# ADR 0003, encrypted at rest at the NAS via rclone-crypt overlay
+# per ADR 0025 D3 (cluster-side encryption — NAS sees only
+# ciphertext).
+#
+# Mount mode: ReadWriteMany. Immich's server + microservices
+# pods both read and write under this mount (originals, library,
+# thumbnails, encoded videos, profile, DB backups all live
+# under /usr/src/app/upload).
+#
+# OPERATOR FILLS:
+#   <NAS_IP>                  matches infrastructure/minio-on-nas/ +
+#                             apps/jellyfin/nfs-pv.yaml + nas/initial-setup
+#   <NAS_PERSONAL_PHOTOS>     ciphertext NFS share path for the
+#                             personal-photos backend, e.g.,
+#                             /volume1/personal-photos-cipher
+#
+# IMPORTANT: This PV mounts the **ciphertext** share. The
+# rclone-crypt sidecar / init-container that decrypts on read
+# and encrypts on write (ADR 0025 D3 pattern) is NOT in this
+# scaffold — see README §"Bring-up wiring" for the activation
+# steps. Without the overlay, the Immich pods see encrypted
+# files and behave incorrectly. **Do not Argo-sync this layer
+# until the overlay is wired.**
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: immich-library
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: library
+spec:
+  capacity:
+    storage: 4Ti
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  csi:
+    driver: nfs.csi.k8s.io
+    volumeHandle: immich-library
+    volumeAttributes:
+      server: <NAS_IP>
+      share: <NAS_PERSONAL_PHOTOS>
+  mountOptions:
+    - nfsvers=4.1
+    - hard
+    - nconnect=8
+    - rsize=131072
+    - wsize=131072
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-library
+  namespace: immich
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 4Ti
+  volumeName: immich-library

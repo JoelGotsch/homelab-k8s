@@ -1,0 +1,138 @@
+# NetworkPolicies for Immich.
+#
+# Pod fan-out:
+#   - immich-server         (HTTP API + web frontend, port 2283)
+#   - immich-microservices  (background jobs — no HTTP)
+#   - immich-machine-learning (port 3003 internal)
+#   - immich-redis-master   (chart-bundled redis)
+#   - immich-pg-rw / -ro    (CNPG)
+#
+# Same-namespace traffic is allowed broadly; cross-namespace is
+# narrow per the established homelab pattern.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: immich-allow-same-ns
+  namespace: immich
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: immich-server
+  namespace: immich
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: immich-server
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Cilium Gateway envoy.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+      ports:
+        - port: 2283
+          protocol: TCP
+    # Prometheus scrape.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 2283
+          protocol: TCP
+    # immich-public-proxy (when that layer lands per ADR 0024 D1
+    # for `photos.<HOMELAB-DOMAIN>` public album sharing).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: immich-public-proxy
+      ports:
+        - port: 2283
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Authentik OIDC.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: authentik
+      ports:
+        - port: 9000
+          protocol: TCP
+---
+# CCNP for NFS egress to NAS + reverse-geocoding for Map view.
+# Microservices does the OCR / face-detection / smart-search
+# indexing too, but those run on-cluster (ML pod is in-namespace).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: immich-egress
+  namespace: immich
+spec:
+  endpointSelector: {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # NFS to NAS for the personal-photos library.
+    - toCIDR:
+        - "<NAS_IP>/32"
+      toPorts:
+        - ports:
+            - port: "2049"
+              protocol: TCP
+            - port: "111"
+              protocol: TCP
+    # MinIO (cluster-internal — for CNPG WAL).
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": minio
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+    # Reverse geocoding source — Immich downloads the offline
+    # GeoNames cities500 db on first start. Operator extends if
+    # other Immich-side fetches show up in logs.
+    - toFQDNs:
+        - matchName: "download.geonames.org"
+        - matchName: "github.com"
+        - matchName: "objects.githubusercontent.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
