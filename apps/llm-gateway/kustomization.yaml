@@ -27,3 +27,4 @@ resources:
   - cnpg-s3-externalsecret.yaml
   - httproute.yaml
   - networkpolicy.yaml
+  - presidio-deployment.yaml

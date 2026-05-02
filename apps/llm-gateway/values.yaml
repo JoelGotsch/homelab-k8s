@@ -90,6 +90,51 @@ proxy_config:
       - llm_gateway.hooks.pre_call.handler
       - llm_gateway.hooks.post_call.handler
     set_verbose: false
+  # Presidio guardrail — defense-in-depth on top of ADR 0007
+  # D2's classification gate (the existing pre_call hook). The
+  # classification gate is the structural enforcement
+  # ("personal-tagged calls cannot leave the local Mac
+  # Studio"); Presidio catches operator-side mistakes that
+  # slip past tagging — e.g., a public-tagged prompt that
+  # nevertheless contains a credit-card number or API key.
+  # Per 99-journal/2026-05-02-presidio-litellm-integration.md.
+  guardrails:
+    - guardrail_name: presidio-pii-mask
+      litellm_params:
+        guardrail: presidio
+        # `pre_call` mode: scan prompt before sending to the
+        # model. `presidio_filter_scope: both` also scans
+        # model output (catches LLM-hallucinated PII).
+        mode: pre_call
+        presidio_filter_scope: both
+        # Per-entity confidence thresholds. Higher = stricter
+        # detection. 0.7 is upstream's "balanced" default;
+        # tune per-class as false-positives surface.
+        presidio_score_thresholds:
+          ALL: 0.7
+          CREDIT_CARD: 0.8
+          IBAN_CODE: 0.8
+          US_SSN: 0.85
+          API_KEY: 0.7
+          EMAIL_ADDRESS: 0.6
+          IP_ADDRESS: 0.5    # noisy at homelab scale (lots
+                             # of legitimate cluster IPs in
+                             # prompts); operator tunes if
+                             # false-positives surface
+        # Per-entity actions. MASK replaces with placeholder;
+        # BLOCK rejects the request entirely (prompt never
+        # reaches the model). Financial + secret-shaped
+        # entities block; everything else masks.
+        pii_entities_config:
+          CREDIT_CARD: BLOCK
+          IBAN_CODE: BLOCK
+          US_SSN: BLOCK
+          API_KEY: BLOCK
+          EMAIL_ADDRESS: MASK
+          PHONE_NUMBER: MASK
+          PERSON: MASK
+          LOCATION: MASK
+          IP_ADDRESS: MASK
   general_settings:
     master_key: os.environ/LITELLM_MASTER_KEY
     # CNPG's app Secret exposes the full DSN under env var `uri`.
@@ -104,6 +149,18 @@ proxy_config:
 environmentSecrets:
   - llm-gateway-secrets
   - llm-gateway-app
+
+# Presidio service URLs — LiteLLM reads these to know where
+# the analyzer + anonymizer live. Per
+# litellm-docs/proxy/guardrails/pii_masking_v2: env names
+# are PRESIDIO_ANALYZER_API_BASE + PRESIDIO_ANONYMIZER_API_BASE.
+# Both Services are in the same namespace as LiteLLM (per
+# presidio-deployment.yaml).
+env:
+  - name: PRESIDIO_ANALYZER_API_BASE
+    value: http://presidio-analyzer.llm-gateway.svc.cluster.local:3000
+  - name: PRESIDIO_ANONYMIZER_API_BASE
+    value: http://presidio-anonymizer.llm-gateway.svc.cluster.local:3000
 
 # Mount the rendered allowlist ConfigMap at /etc/litellm/policies.
 volumes:

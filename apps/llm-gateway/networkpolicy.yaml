@@ -69,6 +69,25 @@ spec:
       ports:
         - port: 5432
           protocol: TCP
+    # Presidio analyzer + anonymizer (same ns; PII guardrail
+    # before LLM dispatch). Per
+    # 99-journal/2026-05-02-presidio-litellm-integration.md.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: llm-gateway
+              app.kubernetes.io/component: pii-detection
+      ports:
+        - port: 3000
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: llm-gateway
+              app.kubernetes.io/component: pii-redaction
+      ports:
+        - port: 3000
+          protocol: TCP
     # Mac Studio inference VLAN — operator inserts the actual
     # /32 once known. Keep as a placeholder ipBlock.
     - to:
@@ -92,4 +111,72 @@ spec:
               - 192.168.0.0/16
       ports:
         - port: 443
+          protocol: TCP
+---
+# Presidio analyzer — ingress from LiteLLM only; egress
+# kube-DNS only (NLP model loaded in-image; no external
+# pulls at runtime).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: presidio-analyzer
+  namespace: llm-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: presidio-analyzer
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: litellm
+      ports:
+        - port: 3000
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# Presidio anonymizer — same posture.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: presidio-anonymizer
+  namespace: llm-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: presidio-anonymizer
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: litellm
+      ports:
+        - port: 3000
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
           protocol: TCP

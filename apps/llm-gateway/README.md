@@ -21,7 +21,16 @@ chokepoint for LLM calls per ADR 0026.
 - `httproute.yaml` — internal-only HTTPRoute on the homelab
   Cilium gateway.
 - `networkpolicy.yaml` — default-deny + explicit allows
-  (kube-DNS, OpenBao, CNPG, Mac Studio MLX/Ollama, WAN:443).
+  (kube-DNS, OpenBao, CNPG, Presidio, Mac Studio MLX/Ollama,
+  WAN:443). Plus 2 NPs locking down the Presidio Services
+  (ingress from LiteLLM only; egress kube-DNS only).
+- `presidio-deployment.yaml` — Microsoft Presidio analyzer +
+  anonymizer (Deployments + ClusterIP Services). PII
+  detection + redaction guardrail wired into LiteLLM via
+  `values.yaml`'s `litellm_settings.guardrails:` block.
+  Defense-in-depth on top of ADR 0007 D2's structural
+  classification gate; per
+  [99-journal/2026-05-02-presidio-litellm-integration.md](../../../homelab-docs/99-journal/2026-05-02-presidio-litellm-integration.md).
 
 ## Operator inputs
 
