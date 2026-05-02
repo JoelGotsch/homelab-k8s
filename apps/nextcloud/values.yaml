@@ -1,0 +1,145 @@
+# Nextcloud helm values (nextcloud/nextcloud official chart).
+# Per ADR 0024 D5 + identity.md.
+#
+# Tailscale-only ingress at first commit (Nextcloud is the
+# Synology Drive + Radicale replacement; calendar/contacts/
+# files are non-E2EE so don't qualify for Cloudflare TLS
+# termination per ADR 0024 D4).
+
+# Single replica + external CNPG + bundled Redis + NFS-backed
+# data PVC.
+replicaCount: 1
+
+image:
+  repository: nextcloud
+  # OPERATOR PINS via Renovate.
+  tag: "30-fpm-alpine"
+  pullPolicy: IfNotPresent
+
+# Use external CNPG. Chart's bundled Postgres dependency off.
+internalDatabase:
+  enabled: false
+externalDatabase:
+  enabled: true
+  type: postgresql
+  host: nextcloud-pg-rw.nextcloud.svc.cluster.local
+  database: nextcloud
+  user: nextcloud
+  existingSecret:
+    enabled: true
+    secretName: nextcloud-postgres-creds
+    passwordKey: password
+
+# Bundled Redis for sessions + file-locking. Persistence on
+# Longhorn-replica2.
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      storageClass: longhorn-replica2
+      size: 5Gi
+
+# Cron sidecar for Nextcloud's background jobs (file scans,
+# preview generation, federated calendar sync, etc.). Chart
+# default but explicit here.
+cronjob:
+  enabled: true
+
+# Primary file storage on NFS-backed PVC.
+persistence:
+  enabled: true
+  existingClaim: nextcloud-data
+  # Subpaths used by the chart for various app data:
+  subPath:
+    config: /config
+    data: /data
+    customApps: /custom_apps
+    themes: /themes
+    tmp: /tmp
+
+nextcloud:
+  host: "nextcloud.lab.<HOMELAB-DOMAIN>"
+  existingSecret:
+    enabled: true
+    secretName: nextcloud-admin
+    usernameKey: NEXTCLOUD_ADMIN_USER
+    passwordKey: NEXTCLOUD_ADMIN_PASSWORD
+
+  # Trusted reverse-proxy + domain config so URLs render
+  # correctly behind Cilium Gateway.
+  trustedDomains:
+    - "nextcloud.lab.<HOMELAB-DOMAIN>"
+
+  # Rendered config injected via the chart's configs section.
+  # Operator extends with per-deployment options (default
+  # background job, locale, etc.) post-first-install.
+  configs:
+    proxy.config.php: |-
+      <?php
+      $CONFIG = array(
+        'trusted_proxies' => ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'],
+        'overwriteprotocol' => 'https',
+        'default_phone_region' => 'DE',
+      );
+
+  # OIDC env (for the user_oidc app — operator installs +
+  # configures via occ post-Authentik). The chart doesn't
+  # natively wire OIDC; instead, projection of the OIDC
+  # Secret as env vars makes the values available to occ
+  # commands run in the cron pod.
+  extraEnv:
+    - name: OIDC_CLIENT_ID
+      valueFrom:
+        secretKeyRef:
+          name: nextcloud-oidc
+          key: client_id
+    - name: OIDC_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: nextcloud-oidc
+          key: client_secret
+    - name: OIDC_ISSUER
+      valueFrom:
+        secretKeyRef:
+          name: nextcloud-oidc
+          key: issuer
+
+# Don't expose Service externally — Cilium HTTPRoute owns
+# ingress.
+service:
+  type: ClusterIP
+ingress:
+  enabled: false
+
+# Pod-level security: non-root, dropped caps. Nextcloud-
+# fpm-alpine runs as user 82 (www-data) by default; override
+# carefully — chart manages fsGroup correctly.
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 33
+  runAsGroup: 33
+  fsGroup: 33
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  # readOnlyRootFilesystem: false — Nextcloud writes to /var
+  # at runtime (PHP session, cache, etc.). The data dir is
+  # already on NFS PVC; cache writes live in /var on rootfs.
+  # Switch to true if cache can be redirected to a separate
+  # emptyDir.
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: [ALL]
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    memory: 2Gi

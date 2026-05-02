@@ -1,0 +1,46 @@
+# CNPG Postgres for Nextcloud. Same shape as Forgejo +
+# Authentik. Per ADR 0006 backup chain.
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: nextcloud-pg
+  namespace: nextcloud
+spec:
+  instances: 2
+
+  storage:
+    size: 10Gi
+    storageClass: longhorn-replica3
+
+  monitoring:
+    enablePodMonitor: true
+
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: "128MB"
+
+  bootstrap:
+    initdb:
+      database: nextcloud
+      owner: nextcloud
+
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://homelab-backups-cluster/cnpg/nextcloud
+      endpointURL: http://minio.minio.svc.cluster.local:9000
+      s3Credentials:
+        accessKeyId:
+          name: nextcloud-cnpg-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: nextcloud-cnpg-s3
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: bzip2
+      data:
+        compression: bzip2
+    # Family + operator personal data; longer retention than
+    # the 30d default, similar to Authentik.
+    retentionPolicy: "90d"

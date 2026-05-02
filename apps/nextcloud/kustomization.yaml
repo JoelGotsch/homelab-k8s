@@ -1,0 +1,25 @@
+# Nextcloud — Synology Drive + Radicale replacement per
+# ADR 0025 D4 + ADR 0024 D5 (Tailscale-only).
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: nextcloud
+
+helmCharts:
+  - name: nextcloud
+    repo: https://nextcloud.github.io/helm/
+    version: "5.5.0"  # OPERATOR PINS via Renovate
+    releaseName: nextcloud
+    namespace: nextcloud
+    valuesFile: values.yaml
+    includeCRDs: true
+
+resources:
+  - namespace.yaml
+  - cnpg-cluster.yaml
+  - nfs-pv.yaml
+  - externalsecret.yaml
+  - httproute.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml

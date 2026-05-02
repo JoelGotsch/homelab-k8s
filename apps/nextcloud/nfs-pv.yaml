@@ -1,0 +1,54 @@
+# Static PV for Nextcloud's primary file storage. Backed by
+# the NAS NFS share — file uploads + sync data live here +
+# benefit from Synology snapshot-replication for tier-2/3
+# backup per ADR 0006.
+#
+# Per ADR 0025 D5 (NAS as bulk-storage substrate) — Nextcloud
+# files don't fit the cluster-Longhorn cap; NFS-CSI is the
+# right shape.
+#
+# OPERATOR FILLS:
+#   <NAS-IP>             matches infrastructure/minio-on-nas/
+#   <NAS_NEXTCLOUD_SHARE> Synology share path, e.g.,
+#                        /volume1/nextcloud-data
+# Pre-req: directory exists on NAS, exported to k8s-nfs DSM
+# account.
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nextcloud-data
+  labels:
+    app.kubernetes.io/name: nextcloud
+    app.kubernetes.io/component: data
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  csi:
+    driver: nfs.csi.k8s.io
+    volumeHandle: nextcloud-data
+    volumeAttributes:
+      server: <NAS-IP>
+      share: <NAS_NEXTCLOUD_SHARE>
+  mountOptions:
+    - nfsvers=4.1
+    - hard
+    - nconnect=8
+    - rsize=131072
+    - wsize=131072
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nextcloud-data
+  namespace: nextcloud
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 1Ti
+  volumeName: nextcloud-data

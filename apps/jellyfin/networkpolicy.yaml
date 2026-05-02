@@ -1,0 +1,105 @@
+# NetworkPolicies for Jellyfin.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: jellyfin
+  namespace: jellyfin
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: jellyfin
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Cilium Gateway envoy.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+      ports:
+        - port: 8096
+          protocol: TCP
+        - port: 8920
+          protocol: TCP   # HTTPS upstream (rarely used in
+                          # this topology)
+    # Prometheus scrape (Jellyfin doesn't ship native metrics;
+    # community plugin exposes them).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 8096
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Authentik OIDC (when SSO plugin installed).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: authentik
+      ports:
+        - port: 9000
+          protocol: TCP
+---
+# CCNP for NFS egress to NAS + plugin-fetch (Jellyfin pulls
+# plugins from its repository at first install; subsequent
+# updates).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: jellyfin-egress
+  namespace: jellyfin
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: jellyfin
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # NFS to NAS.
+    - toCIDR:
+        - "<NAS-IP>/32"
+      toPorts:
+        - ports:
+            - port: "2049"
+              protocol: TCP
+            - port: "111"
+              protocol: TCP
+    # Jellyfin plugin repo + metadata sources (TheTVDB,
+    # TheMovieDB, MusicBrainz). Operator extends if plugins
+    # demand more.
+    - toFQDNs:
+        - matchName: "repo.jellyfin.org"
+        - matchName: "api.themoviedb.org"
+        - matchName: "image.tmdb.org"
+        - matchName: "thetvdb.com"
+        - matchName: "api.thetvdb.com"
+        - matchName: "musicbrainz.org"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

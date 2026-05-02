@@ -1,0 +1,101 @@
+# Jellyfin helm values (jellyfin/jellyfin community chart).
+# Per ADR 0024 D1 (CF Tunnel for E2EE / "internal-media" class)
+# + identity.md (Authentik OIDC + Nitrokey for operator).
+#
+# Single-replica + Longhorn for config + NFS-CSI for media
+# library. Cilium HTTPRoute Tailscale-only at first commit;
+# CF Tunnel migration documented for when that layer lands.
+#
+# Migration target from NAS-Docker Jellyfin per
+# 03-runbooks/migration/nas.md + 03-runbooks/jellyfin/migrate-from-nas-docker.md.
+
+replicaCount: 1
+
+image:
+  repository: jellyfin/jellyfin
+  # OPERATOR PINS via Renovate.
+  tag: "10.10.0"
+  pullPolicy: IfNotPresent
+
+# Config + cache + DB on Longhorn-replica2 (single-replica
+# Jellyfin; resilience via snapshot, not multi-replica).
+persistence:
+  config:
+    enabled: true
+    storageClassName: longhorn-replica2
+    size: 50Gi
+    accessModes:
+      - ReadWriteOnce
+  # Media library mount — references the NFS PVC declared
+  # in nfs-pv.yaml. ReadOnlyMany; Jellyfin doesn't write back.
+  media:
+    enabled: true
+    type: pvc
+    existingClaim: jellyfin-media
+    mountPath: /media
+    readOnly: true
+
+# Don't expose Service externally — Cilium HTTPRoute owns
+# ingress.
+service:
+  type: ClusterIP
+  port: 8096
+
+ingress:
+  enabled: false
+
+# Hardware acceleration: VAAPI on Intel iGPU (operator
+# decides at deploy whether the cluster nodes have iGPUs +
+# whether to expose `/dev/dri/renderD128` via a device-plugin
+# DaemonSet). Off by default; enable per
+# `jellyfin/migrate-from-nas-docker.md` Step "VAAPI setup".
+podOptions:
+  hostNetwork: false
+
+# Pod-level security: non-root, dropped caps. Jellyfin image
+# runs as user 1000 by default.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  # readOnlyRootFilesystem: false — Jellyfin writes
+  # transcode-cache to /tmp + plugin downloads to /config
+  # which is its own PVC. Rootfs writes are minimal but
+  # exist. Set to true only after a transcode-cache redirect
+  # to emptyDir.
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: [ALL]
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    # Transcode bursts can exceed 4Gi for 4K → 1080p; tune
+    # if family-streaming usage outgrows.
+    memory: 4Gi
+
+# OIDC env (for the LDAP/SSO plugin once installed).
+extraEnv:
+  - name: OIDC_CLIENT_ID
+    valueFrom:
+      secretKeyRef:
+        name: jellyfin-oidc
+        key: client_id
+  - name: OIDC_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: jellyfin-oidc
+        key: client_secret
+  - name: OIDC_ISSUER
+    valueFrom:
+      secretKeyRef:
+        name: jellyfin-oidc
+        key: issuer

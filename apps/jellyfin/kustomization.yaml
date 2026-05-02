@@ -1,0 +1,26 @@
+# Jellyfin — family-shared media streaming. Per ADR 0024 D1
+# (Cloudflare Tunnel for E2EE / `internal-media` services).
+#
+# Helm chart: jellyfin/jellyfin community chart.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: jellyfin
+
+helmCharts:
+  - name: jellyfin
+    repo: https://jellyfin.github.io/jellyfin-helm
+    version: "2.5.0"  # OPERATOR PINS via Renovate
+    releaseName: jellyfin
+    namespace: jellyfin
+    valuesFile: values.yaml
+    includeCRDs: true
+
+resources:
+  - namespace.yaml
+  - nfs-pv.yaml
+  - externalsecret.yaml
+  - httproute.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml

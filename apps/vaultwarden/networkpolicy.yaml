@@ -1,0 +1,113 @@
+# NetworkPolicies for Vaultwarden.
+#
+# - Ingress: Cilium Gateway envoy (HTTPRoute) + Prometheus
+#   scrape + (future) cloudflare-tunnel ingress when that
+#   layer lands.
+# - Egress: kube-DNS + Authentik (for OIDC discovery + token
+#   validation) + (when SMTP enabled) external SMTP relay.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vaultwarden
+  namespace: vaultwarden
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vaultwarden
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Cilium Gateway envoy.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+      ports:
+        - port: 80
+          protocol: TCP
+        - port: 3012  # Vaultwarden websocket port (1.30+
+                      # serves websocket on the main port,
+                      # but older clients still connect to
+                      # 3012 — keep allowed for compat).
+          protocol: TCP
+    # Prometheus scrape.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 80
+          protocol: TCP
+    # (Future) cloudflare-tunnel namespace — uncomment when
+    # that layer exists. Until then, operator + family reach
+    # Vaultwarden via Tailscale → Cilium Gateway above.
+    # - from:
+    #     - namespaceSelector:
+    #         matchLabels:
+    #           kubernetes.io/metadata.name: cloudflare-tunnel
+    #   ports:
+    #     - port: 80
+    #       protocol: TCP
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Authentik for OIDC discovery + token validation.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: authentik
+      ports:
+        - port: 9000
+          protocol: TCP
+---
+# CCNP for SMTP egress — vanilla NetworkPolicy can't match
+# off-cluster IPs by hostname. SMTP relay is operator-typed
+# (e.g., smtp.fastmail.com); maintained as toFQDNs.
+# Ships dormant — Vaultwarden won't send SMTP until the
+# vaultwarden-smtp Secret has populated fields.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: vaultwarden-smtp-egress
+  namespace: vaultwarden
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: vaultwarden
+  egress:
+    # kube-DNS for FQDN resolution.
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # SMTP relay — OPERATOR FILLS the actual provider's
+    # FQDN(s) when SMTP is activated.
+    - toFQDNs:
+        - matchName: "smtp.example.invalid"   # placeholder
+      toPorts:
+        - ports:
+            - port: "587"
+              protocol: TCP
+            - port: "465"
+              protocol: TCP

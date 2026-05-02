@@ -1,0 +1,59 @@
+# Static PV for Jellyfin's media library. Backed by the
+# NAS NFS share where the existing media collection already
+# lives (operator's pre-cluster Jellyfin reads from this
+# same share).
+#
+# Mount mode: ReadOnlyMany. Jellyfin reads media but doesn't
+# write back; the operator-managed copy / write path is via
+# direct SMB / NFS from the operator's laptop, not via the
+# cluster Jellyfin. This protects the library from
+# accidental cluster-side mutation.
+#
+# OPERATOR FILLS:
+#   <NAS-IP>             matches infrastructure/minio-on-nas/
+#   <NAS_MEDIA_SHARE>    Synology share path, e.g.,
+#                        /volume1/media
+#
+# Jellyfin's CONFIG (database, users, watch state, metadata
+# cache) lives separately on Longhorn — this NFS PV is
+# media-only.
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: jellyfin-media
+  labels:
+    app.kubernetes.io/name: jellyfin
+    app.kubernetes.io/component: media
+spec:
+  capacity:
+    storage: 4Ti
+  accessModes: [ReadOnlyMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  csi:
+    driver: nfs.csi.k8s.io
+    volumeHandle: jellyfin-media
+    volumeAttributes:
+      server: <NAS-IP>
+      share: <NAS_MEDIA_SHARE>
+  mountOptions:
+    - nfsvers=4.1
+    - hard
+    - nconnect=8
+    - rsize=131072
+    - wsize=131072
+    - ro
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellyfin-media
+  namespace: jellyfin
+spec:
+  accessModes: [ReadOnlyMany]
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 4Ti
+  volumeName: jellyfin-media

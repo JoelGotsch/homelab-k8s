@@ -1,0 +1,20 @@
+# Jellyfin doesn't ship native Prometheus metrics. Community
+# plugin "jellyfin-plugin-metrics" exposes them on the same
+# port. Operator installs post-bring-up; ServiceMonitor here
+# is ready to scrape once the plugin is active.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: jellyfin
+  namespace: jellyfin
+  labels:
+    app.kubernetes.io/name: jellyfin
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jellyfin
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 60s
