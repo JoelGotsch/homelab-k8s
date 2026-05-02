@@ -39,44 +39,36 @@ The layer ships dormant — Argo applies the manifests but the
 CronJob's `spec.suspend: true` keeps it idle. After Forgejo +
 Woodpecker are Healthy at cold-start Step 13:
 
-### 1. Create the bot account in Forgejo
-
-Web UI → Site Administration → User Accounts → Create User
-Account:
-
-- **Username**: `renovate-bot`
-- **Email**: `<RENOVATE_BOT_EMAIL>` (matches `gitAuthor` in
-  `configmap.yaml`)
-- **Password**: from `openssl rand -hex 32`; not stored
-  anywhere — the bot authenticates via PAT.
-- **Active**: yes; **Admin**: no.
-
-### 2. Add the bot to the org
-
-Site Administration → Organizations → `<FORGEJO_ORG>` → Teams
-→ Add member → `renovate-bot`. Team permission: **Read**
-(autodiscover only needs read; per-repo PR creation works via
-the bot's PAT, not via team write).
-
-For repos where Renovate must open PRs, add `renovate-bot` as
-a repo collaborator with **Write** permission. Alternative:
-make the team **Write** if every repo in the org should be
-PR-able.
-
-### 3. Generate the PAT
-
-As `renovate-bot` (login → User Settings → Applications →
-Generate New Token):
-
-- **Token name**: `renovate-runner-cluster`
-- **Selected scopes**: `read:repository`, `write:repository`,
-  `write:issue`.
-
-### 4. Seed OpenBao
+### 1-4. Bot account + org membership + PAT + OpenBao seed (scripted)
 
 ```sh
-bao kv put kv/platform/renovate/forgejo-token token=<paste-PAT>
+FORGEJO_URL=https://forgejo.lab.<HOMELAB-DOMAIN> \
+FORGEJO_TOKEN="$(bao kv get -field=admin_pat kv/forgejo/admin)" \
+homelab-infra/scripts/provision-forgejo-bot-pat.sh \
+    --bot-username renovate-bot \
+    --bot-email "<RENOVATE_BOT_EMAIL>" \
+    --kv-path kv/platform/renovate/forgejo-token \
+    --org-name "<FORGEJO_ORG>" \
+    --org-team Owners \
+    --token-name renovate-runner-cluster \
+    --scopes "read:repository,write:repository,write:issue"
 ```
+
+The script creates the user, adds them to the org team,
+issues the PAT, and seeds OpenBao — replacing the four-step
+UI ceremony.
+
+**Manual fallback** (if the script can't reach Forgejo, e.g.,
+during a partial outage):
+
+- Web UI → Site Administration → User Accounts → Create User
+  (`renovate-bot`, `<RENOVATE_BOT_EMAIL>`, random password)
+- Site Administration → Organizations → `<FORGEJO_ORG>` →
+  Teams → add `renovate-bot` to a team
+- Login as `renovate-bot` → User Settings → Applications →
+  Generate New Token (scopes: read:repository, write:repository,
+  write:issue)
+- `bao kv put kv/platform/renovate/forgejo-token token=<paste>`
 
 ### 5. Flip suspend
 

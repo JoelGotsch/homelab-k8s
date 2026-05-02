@@ -62,11 +62,24 @@ bao kv put kv/forgejo/postgres \
     password="$(kubectl -n forgejo get secret forgejo-pg-app \
         -o jsonpath='{.data.password}' | base64 -d)"
 
-# Authentik OIDC — operator-typed (after creating the client in
-# the Authentik admin UI).
-bao kv put kv/forgejo/oidc \
-    client_id="<paste-from-authentik>" \
-    client_secret="<paste-from-authentik>"
+# Authentik OIDC — provisioned via API helper (creates the
+# OAuth2 provider + application in Authentik + seeds OpenBao
+# in one shot). Operator must have $AUTHENTIK_TOKEN set
+# (admin API token from User Settings → Tokens after first
+# login).
+AUTHENTIK_URL=https://auth.lab.<HOMELAB-DOMAIN> \
+AUTHENTIK_TOKEN="$(bao kv get -field=api_token kv/authentik/admin)" \
+homelab-infra/scripts/provision-authentik-oidc-client.sh \
+    --app-name forgejo \
+    --redirect-uri \
+      "https://forgejo.lab.<HOMELAB-DOMAIN>/user/oauth2/authentik/callback" \
+    --kv-path kv/forgejo/oidc
+
+# Manual fallback (if the script doesn't fit, e.g., custom
+# scope mappings):
+# bao kv put kv/forgejo/oidc \
+#     client_id="<paste-from-authentik>" \
+#     client_secret="<paste-from-authentik>"
 
 # CNPG s3-creds — provisioned + seeded after MinIO Healthy.
 homelab-infra/scripts/provision-minio-svcacct.sh \

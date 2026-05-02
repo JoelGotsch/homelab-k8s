@@ -115,9 +115,18 @@ homelab-infra/scripts/provision-minio-svcacct.sh \
         "arn:aws:s3:::homelab-backups-cluster/cnpg/langfuse" \
     --label langfuse-cnpg
 
-# OTel-ingest project keys are generated INSIDE Langfuse
-# (web UI → Project Settings → API Keys) after first web-pod
-# start. Operator seeds them post-bring-up:
+# OTel-ingest project keys — provisioned via API helper after
+# Langfuse web pod is Healthy. Replaces the UI ceremony
+# (Project Settings → API Keys → Create).
+LANGFUSE_URL=https://langfuse.lab.<HOMELAB-DOMAIN> \
+LANGFUSE_ADMIN_EMAIL="<operator-langfuse-admin-email>" \
+LANGFUSE_ADMIN_PASSWORD="$(bao kv get -field=admin_password \
+    kv/langfuse/admin)" \
+homelab-infra/scripts/provision-langfuse-otel-ingest-keys.sh \
+    --kv-path kv/langfuse/otel-ingest
+
+# Manual fallback (if Langfuse API is unavailable, e.g.,
+# during partial outage):
 # bao kv put kv/langfuse/otel-ingest \
 #     public_key="pk-lf-..." secret_key="sk-lf-..."
 ```

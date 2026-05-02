@@ -38,15 +38,14 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 the relay's first publish attempt):
 
 ```sh
-# 1. Admin password — generate + seed + read back for the
-#    pod-side bootstrap step. `--print` keeps the password
-#    visible for the kubectl-exec dance below.
+# 1. Admin password — generate + seed + bootstrap admin user
+#    via kubectl-exec. The admin user creation itself stays
+#    manual because it's a one-off with shell-side password
+#    handling; everything else below is scripted.
 homelab-infra/scripts/seed-random-secret.sh \
     --print --format base64 --size 32 \
     kv/ntfy/admin-password value
 ADMIN_PW="$(bao kv get -field=value kv/ntfy/admin-password)"
-
-# Wait for pod ready, then exec into it:
 kubectl -n ntfy exec -it deploy/ntfy -- sh -c "
   ntfy user add --role=admin admin <<EOF
 $ADMIN_PW
@@ -55,51 +54,33 @@ EOF
 "
 unset ADMIN_PW
 
-# 2. Relay user + publish-only ACL on the homelab-alerts topic.
-kubectl -n ntfy exec -it deploy/ntfy -- sh -c "
-  ntfy user add --role=user relay <<EOF
-$(openssl rand -base64 24)
-\$(REPEAT)
-EOF
-  ntfy access relay homelab-alerts wo
-"
-# (relay user's password is irrelevant — auth is via token)
+# 2. Relay user + write-only ACL + token (scripted).
+homelab-infra/scripts/provision-ntfy-relay-token.sh \
+    --user relay \
+    --topic homelab-alerts \
+    --acl-perm wo \
+    --kv-path kv/ntfy/relay-token \
+    --also-publish-auth-path kv/ntfy/publish-auth \
+    --token-label e2ee-relay
 
-# 3. Issue a long-lived bearer token for the relay user.
-RELAY_TOKEN=$(kubectl -n ntfy exec -it deploy/ntfy -- \
-  ntfy token add --label "e2ee-relay" relay 2>/dev/null \
-  | grep -oE 'tk_[A-Za-z0-9]+' | head -1)
-echo "$RELAY_TOKEN"  # captures into operator's clipboard
-
-bao kv put kv/ntfy/relay-token value="$RELAY_TOKEN"
-bao kv put kv/ntfy/publish-auth header="Bearer $RELAY_TOKEN"
-unset RELAY_TOKEN
-
-# 4. Subscriber-side: operator generates a SECOND token for
-#    F-Droid / mobile use (so revoking one doesn't break the
-#    other). This token gets a read-only ACL.
-kubectl -n ntfy exec -it deploy/ntfy -- sh -c "
-  ntfy user add --role=user operator-mobile <<EOF
-$(openssl rand -base64 24)
-\$(REPEAT)
-EOF
-  ntfy access operator-mobile homelab-alerts ro
-"
-SUB_TOKEN=$(kubectl -n ntfy exec -it deploy/ntfy -- \
-  ntfy token add --label "operator-fdroid" operator-mobile 2>/dev/null \
-  | grep -oE 'tk_[A-Za-z0-9]+' | head -1)
-echo "$SUB_TOKEN"
-# Operator types this into the F-Droid app's "Default access
-# token" field (Settings → Default server) along with the
-# topic key from kv/ntfy/topic-key.
-unset SUB_TOKEN
+# 3. Operator-mobile user + read-only ACL + token (scripted).
+homelab-infra/scripts/provision-ntfy-relay-token.sh \
+    --user operator-mobile \
+    --topic homelab-alerts \
+    --acl-perm ro \
+    --kv-path kv/ntfy/operator-mobile-token \
+    --token-label operator-fdroid
+# Operator pulls the printed token into the F-Droid app's
+# "Default access token" field along with the topic key from
+# kv/ntfy/topic-key.
 ```
 
-The bootstrap dance is ugly because ntfy's user/token
-operations are CLI-only inside the pod. Worth automating
-once a real pattern emerges (>1 ntfy server in the homelab,
-or quarterly token rotation). For now, run-once at first
-install.
+The admin-password step still uses kubectl-exec because the
+admin role grants ntfy CLI access on the pod (effectively
+the operator's break-glass into ntfy itself). The other two
+users are scripted via `provision-ntfy-relay-token.sh`,
+which wraps the same kubectl-exec ceremony with idempotency,
+ACL setup, and OpenBao seeding.
 
 ## Bring-up wiring
 

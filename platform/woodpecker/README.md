@@ -48,12 +48,23 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 homelab-infra/scripts/seed-random-secret.sh \
     kv/woodpecker/agent-secret token
 
-# OAuth client — operator-typed (after creating the Forgejo
-# OAuth2 application). The "Redirect URI" in Forgejo's app
-# config is https://woodpecker.lab.<HOMELAB-DOMAIN>/authorize.
-bao kv put kv/woodpecker/oauth \
-    client_id="<paste-from-forgejo>" \
-    client_secret="<paste-from-forgejo>"
+# OAuth client — provisioned via API helper (creates the
+# Forgejo OAuth2 app + seeds OpenBao in one shot). Operator
+# must have $FORGEJO_TOKEN set (admin PAT from Forgejo's
+# Settings → Applications → Tokens after first login).
+FORGEJO_URL=https://forgejo.lab.<HOMELAB-DOMAIN> \
+FORGEJO_TOKEN="$(bao kv get -field=admin_pat kv/forgejo/admin)" \
+homelab-infra/scripts/provision-forgejo-oauth-app.sh \
+    --app-name Woodpecker \
+    --redirect-uri \
+      "https://woodpecker.lab.<HOMELAB-DOMAIN>/authorize" \
+    --kv-path kv/woodpecker/oauth
+
+# Manual fallback (Settings → Applications → OAuth2 →
+# Create new):
+# bao kv put kv/woodpecker/oauth \
+#     client_id="<paste-from-forgejo>" \
+#     client_secret="<paste-from-forgejo>"
 ```
 
 ## Bring-up wiring
