@@ -76,6 +76,8 @@ every 5 minutes from LAPI's decision list by the CronJob).
 | `kv/data/crowdsec/console` | `enroll_key` | One-time operator action: register at app.crowdsec.net, enroll the cluster, paste the token. Enables community blocklist subscription. |
 | `kv/data/crowdsec/lapi` | `postgres_password` | CNPG-issued password from the cluster's own creds Secret. Operator copies at first install — it's not auto-projected by CNPG, intentionally (separation of secrets). |
 | `kv/data/crowdsec/bouncers` | `cilium_bouncer_key` | Generate a random 32-byte hex string (`openssl rand -hex 32`) at first install; the chart's `lapi.bouncers:` pre-creates the bouncer with this key on first start. |
+| `kv/data/crowdsec/bouncers` | `openwrt_bouncer_key` | **Only when OpenWrt router-side is enabled.** Operator pre-creates the bouncer in cluster LAPI via `cscli bouncers add openwrt-bouncer -k <KEY>`; same key seeded here. Per [`03-runbooks/network/crowdsec-router-side-bring-up.md`](../../../homelab-docs/03-runbooks/network/crowdsec-router-side-bring-up.md). |
+| `kv/data/crowdsec/machines` | `openwrt_machine_password` | **Only when OpenWrt router-side is enabled.** Operator pre-creates the machine in cluster LAPI via `cscli machines add openwrt --auto`; the auto-generated password is seeded here. The OpenWrt agent uses this to authenticate when shipping detections back. |
 | `kv/data/cnpg/crowdsec/s3-creds` | `access_key_id`, `secret_access_key` | MinIO svc-account scoped to `homelab-backups-cluster/cnpg/crowdsec/`. Standard CNPG-app pattern. |
 
 **First-install seed:**

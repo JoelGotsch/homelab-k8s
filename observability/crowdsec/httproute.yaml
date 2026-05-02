@@ -1,0 +1,38 @@
+# LAPI HTTPRoute for OpenWrt CrowdSec router-side.
+#
+# Per 99-journal/2026-05-02-crowdsec-router-side.md:
+# Tailscale-only ingress (matches the rest of internal
+# services per ADR 0024 D3) on `crowdsec.lab.<HOMELAB-DOMAIN>`.
+# OpenWrt's CrowdSec agent + bouncer reach this hostname over
+# Tailscale (Flint 3 is on the tailnet) and authenticate to
+# the cluster LAPI via the operator-seeded machine-token +
+# bouncer-key.
+#
+# This is the **interim** path. Phase-2 (when the Tailscale
+# subnet-router pod lands per ADR 0024 amendment) lets the
+# router reach `crowdsec-service.crowdsec.svc:8080` directly
+# via the advertised cluster-service CIDR; this HTTPRoute
+# becomes redundant at that point but stays harmless.
+#
+# OPERATOR FILLS <HOMELAB-DOMAIN>.
+
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: crowdsec-lapi
+  namespace: crowdsec
+spec:
+  parentRefs:
+    - name: homelab-gateway
+      namespace: ingress
+      sectionName: https
+  hostnames:
+    - "crowdsec.lab.<HOMELAB-DOMAIN>"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: crowdsec-service
+          port: 8080

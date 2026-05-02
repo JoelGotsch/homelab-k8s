@@ -48,6 +48,17 @@ spec:
       ports:
         - port: 6060
           protocol: TCP
+    # Cilium Gateway envoy — OpenWrt agent + bouncer reach
+    # LAPI via Tailscale → HTTPRoute on
+    # crowdsec.lab.<HOMELAB-DOMAIN> (per
+    # 99-journal/2026-05-02-crowdsec-router-side.md).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+      ports:
+        - port: 8080
+          protocol: TCP
   egress:
     # kube-DNS.
     - to:

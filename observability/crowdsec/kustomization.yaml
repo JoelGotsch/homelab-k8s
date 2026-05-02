@@ -41,3 +41,4 @@ resources:
   - networkpolicy.yaml
   - servicemonitor.yaml
   - prometheusrule.yaml
+  - httproute.yaml
