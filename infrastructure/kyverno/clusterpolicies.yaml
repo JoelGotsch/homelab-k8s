@@ -1,45 +1,72 @@
-# Kyverno cluster policies — per ADR 0019 + ADR 0023.
+# Kyverno cluster policies — per ADR 0019 D3 + ADR 0023.
 #
-# - require-image-digest: every container image in user
-#   namespaces must reference by digest (sha256:...), not tag.
-# - verify-image-signature: cosign signatures verified for
-#   first-party images (operator's Forgejo registry).
-#   Public-image policy is more permissive — no signature
-#   required for upstream images we don't sign.
+# Two-tier policy structure (matches ADR 0019 D3's framing
+# "first-party signed + digest-pinned, third-party with
+# exception list"):
+#
+# 1. ENFORCE on FIRST-PARTY images:
+#    - require-first-party-image-digest (Enforce)
+#    - verify-first-party-image-signature (Enforce)
+#    First-party = forgejo.lab/homelab/* or
+#    registry.homelab.internal/* (operator-built images).
+#    These MUST be digest-pinned + cosign-signed.
+#
+# 2. AUDIT on THIRD-PARTY images:
+#    - audit-third-party-image-digest (Audit)
+#    Visibility without blocking. Generates PolicyReport
+#    entries that surface "this chart still uses :tag"
+#    findings without breaking helm releases. Operator
+#    promotes individual third-party images to enforce-
+#    digest via an exception list as the ecosystem matures.
+#
+# Why this shape (vs the prior broad-Enforce-with-exclude
+# pattern, refined 2026-05-02 audit follow-up): chart-
+# managed workloads (cilium, kps, loki, alloy, falco,
+# langfuse, etc.) pull upstream images via tag
+# (e.g. `quay.io/grafana/loki:3.x.x`). Enforcing digest on
+# those would break every chart deploy. First-party-only
+# Enforce + third-party Audit is the canonical "supply-
+# chain enforcement at the admission gate without breaking
+# upstream chart adoption" shape.
 
+# === First-party: digest required (Enforce) ===
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
-  name: require-image-digest
+  name: require-first-party-image-digest
   annotations:
     policies.kyverno.io/category: Supply Chain
     policies.kyverno.io/severity: high
+    policies.kyverno.io/description: |
+      First-party images (forgejo.lab/homelab/* and
+      registry.homelab.internal/*) MUST be referenced by
+      digest, not tag. Per ADR 0019 D3.
 spec:
   validationFailureAction: Enforce
   background: true
   rules:
-    - name: require-digest
+    - name: require-digest-on-first-party
       match:
         any:
           - resources:
               kinds: [Pod]
-      exclude:
+      preconditions:
         any:
-          - resources:
-              namespaces:
-                - kube-system
-                - kyverno
-                - longhorn-system
-                - cert-manager
-                - external-secrets
-                - cilium
-                - openbao
+          - key: "{{ images.containers.*.registry }}"
+            operator: AnyIn
+            value:
+              - "forgejo.lab"
+              - "registry.homelab.internal"
       validate:
-        message: "Image must be referenced by digest (sha256:...), not tag. Per ADR 0023."
+        message: |
+          First-party image must be referenced by digest
+          (sha256:...), not tag. Per ADR 0019 D3.
         pattern:
           spec:
             containers:
               - image: "*@sha256:*"
+
+# === First-party: cosign signature required (Enforce) ===
 ---
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
@@ -48,6 +75,10 @@ metadata:
   annotations:
     policies.kyverno.io/category: Supply Chain
     policies.kyverno.io/severity: high
+    policies.kyverno.io/description: |
+      First-party images (signed in Woodpecker CI per
+      ADR 0019 D3) must carry a verifiable cosign
+      signature. Keyless via Forgejo OIDC issuer.
 spec:
   validationFailureAction: Enforce
   webhookTimeoutSeconds: 30
@@ -60,6 +91,7 @@ spec:
       verifyImages:
         - imageReferences:
             - "forgejo.lab/homelab/*"
+            - "registry.homelab.internal/*"
           attestors:
             - count: 1
               entries:
@@ -68,3 +100,46 @@ spec:
                     issuer: "https://forgejo.lab"
           mutateDigest: true
           required: true
+
+# === Third-party: digest-pinning visibility (Audit only) ===
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: audit-third-party-image-digest
+  annotations:
+    policies.kyverno.io/category: Supply Chain
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: |
+      Audit (non-blocking) Pod images that are NOT
+      digest-pinned. Generates PolicyReport entries visible
+      via `kubectl get policyreport -A`. Operator promotes
+      individual third-party images to digest-required as
+      the ecosystem matures.
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: audit-digest-pinning
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              # System namespaces have their own upgrade
+              # cadence (kubelet pulls, Talos system
+              # extensions); excluding reduces audit noise.
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+      validate:
+        message: |
+          Image SHOULD be referenced by digest (sha256:...).
+          Audit-only — operator review via PolicyReport.
+        pattern:
+          spec:
+            containers:
+              - image: "*@sha256:*"
