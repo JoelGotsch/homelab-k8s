@@ -1,0 +1,175 @@
+# NetworkPolicies for the Authentik layer.
+#
+# - Server ingress: Cilium Gateway envoy (HTTPRoute) +
+#   Prometheus scrape + every in-cluster OIDC consumer
+#   (Forgejo, Woodpecker, Vaultwarden, Grafana, Langfuse,
+#   etc.) hitting the OIDC discovery + token endpoints.
+# - Server egress: kube-DNS + CNPG + Redis (same ns) +
+#   OpenBao (ESO).
+# - Worker egress: kube-DNS + CNPG + Redis (same ns) +
+#   OpenBao + outbound to OIDC clients (for token refresh
+#   + outpost reconciliation).
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: authentik-server
+  namespace: authentik
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: authentik
+      app.kubernetes.io/component: server
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Cilium Gateway envoy.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+      ports:
+        - port: 9000
+          protocol: TCP
+        - port: 9443
+          protocol: TCP
+    # Prometheus scrape.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 9300   # default authentik metrics port
+          protocol: TCP
+    # In-cluster OIDC consumers — every namespace whose pods
+    # call the OIDC discovery + token endpoints. Listing each
+    # ns explicitly so a future namespace doesn't accidentally
+    # gain unauthenticated-discovery access.
+    - from:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  - forgejo
+                  - woodpecker
+                  - vaultwarden
+                  - monitoring        # Grafana
+                  - langfuse
+                  - llm-gateway
+                  - nextcloud
+                  - jellyfin
+                  - argocd            # OIDC integration too
+      ports:
+        - port: 9000
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # CNPG Postgres (same ns).
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: authentik-pg
+      ports:
+        - port: 5432
+          protocol: TCP
+    # Bundled Redis (same ns).
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - port: 6379
+          protocol: TCP
+    # OpenBao for ESO refreshes.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openbao
+      ports:
+        - port: 8200
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: authentik-worker
+  namespace: authentik
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: authentik
+      app.kubernetes.io/component: worker
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: authentik-pg
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - port: 6379
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openbao
+      ports:
+        - port: 8200
+          protocol: TCP
+    # Outpost / OIDC client reconciliation: worker may push
+    # tokens to in-cluster OIDC clients during apply. Allow
+    # 9000+9443 to the same OIDC-consumer namespaces as the
+    # server's ingress rules above.
+    - to:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  - forgejo
+                  - woodpecker
+                  - vaultwarden
+                  - monitoring
+                  - langfuse
+                  - llm-gateway
+                  - nextcloud
+                  - jellyfin
+                  - argocd
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 80
+          protocol: TCP

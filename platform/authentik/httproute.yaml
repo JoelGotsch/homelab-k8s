@@ -1,0 +1,26 @@
+# Authentik UI exposed via Cilium Gateway API HTTPRoute.
+# Tailscale-only per ADR 0024 D3 — Authentik is the entry
+# point for all internal services; never publicly exposed.
+#
+# OPERATOR FILLS <HOMELAB-DOMAIN>.
+
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: authentik
+  namespace: authentik
+spec:
+  parentRefs:
+    - name: homelab-gateway
+      namespace: ingress
+      sectionName: https
+  hostnames:
+    - "auth.lab.<HOMELAB-DOMAIN>"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: authentik-server
+          port: 80

@@ -1,0 +1,212 @@
+# Authentik IdP helm values — server + worker + bundled Redis,
+# external CNPG Postgres, Tailscale-only HTTPRoute via Cilium
+# Gateway.
+#
+# Per identity.md (Authentik enforces WebAuthn as primary
+# factor for internal services) + ADR 0024 D3 (Tailscale-only
+# for internal services).
+
+# Operator-fillable cluster domain — Authentik bakes its
+# absolute URLs into emails + OIDC issuer URIs.
+global:
+  env:
+    - name: AUTHENTIK_LOG_LEVEL
+      value: info
+    # Required by Authentik: canonical hostname for
+    # links/emails/issuer URIs.
+    - name: AUTHENTIK_HOST
+      value: "https://auth.lab.<HOMELAB-DOMAIN>"
+    # Disable Authentik's anonymous error reporting +
+    # update telemetry — keep operator data in the cluster
+    # per principle #2.
+    - name: AUTHENTIK_DISABLE_UPDATE_CHECK
+      value: "true"
+    - name: AUTHENTIK_ERROR_REPORTING__ENABLED
+      value: "false"
+    - name: AUTHENTIK_DISABLE_STARTUP_ANALYTICS
+      value: "true"
+    # JSON logging for Loki ingestion per ADR 0021.
+    - name: AUTHENTIK_LOG_FORMAT
+      value: json
+
+  # Project the SECRET_KEY into the standard env var the
+  # chart expects.
+  envFrom:
+    - secretRef:
+        name: authentik-secret-key
+
+# Use external CNPG Postgres + bundled Redis (default).
+# Authentik chart's bundled Postgres dependency is disabled
+# in favour of the cluster-pattern CNPG.
+postgresql:
+  enabled: false
+
+# Bundled Redis: keep on. Authentik's task queue + cache
+# layer is Redis-bound; a separate Redis layer would add
+# ops surface for negligible architectural gain at homelab
+# scale. Persistence on by default (small footprint).
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      storageClass: longhorn-replica2
+      size: 5Gi
+
+# Server replica count — single replica matches the
+# Forgejo posture (HA via backup, not clustering).
+authentik:
+  # Project the bootstrap creds into Authentik's expected
+  # env vars at first-install only. After the first admin
+  # flow completes, these are inert.
+  bootstrap_password: ""   # populated via env from Secret
+  bootstrap_token: ""      # populated via env from Secret
+  bootstrap_email: ""      # populated via env from Secret
+
+  # External CNPG. Username, host, name, port via plain
+  # values; password via env from Secret below.
+  postgresql:
+    host: authentik-pg-rw.authentik.svc.cluster.local
+    name: authentik
+    user: authentik
+    port: 5432
+
+  # Bundled Redis from chart.
+  redis:
+    host: "{{ .Release.Name }}-redis-master"
+    password: ""
+
+  log_level: info
+
+  # Don't expose impersonation by default.
+  impersonation: false
+
+  # Email — leave disabled at first install. Operator wires
+  # SMTP later if needed (e.g., self-service password reset
+  # for family-shared accounts; not on day-1 path).
+  email:
+    host: ""
+    port: 587
+    use_tls: false
+    use_ssl: false
+    timeout: 30
+    from: ""
+
+# Server pod settings.
+server:
+  replicas: 1
+
+  # Project bootstrap + db password as env vars.
+  envFrom:
+    - secretRef:
+        name: authentik-bootstrap
+    - secretRef:
+        name: authentik-postgres-creds
+  env:
+    - name: AUTHENTIK_BOOTSTRAP_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: authentik-bootstrap
+          key: bootstrap_password
+    - name: AUTHENTIK_BOOTSTRAP_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: authentik-bootstrap
+          key: bootstrap_token
+    - name: AUTHENTIK_BOOTSTRAP_EMAIL
+      valueFrom:
+        secretKeyRef:
+          name: authentik-bootstrap
+          key: bootstrap_email
+    - name: AUTHENTIK_POSTGRESQL__PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: authentik-postgres-creds
+          key: password
+    - name: AUTHENTIK_SECRET_KEY
+      valueFrom:
+        secretKeyRef:
+          name: authentik-secret-key
+          key: secret_key
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+
+  service:
+    type: ClusterIP
+
+  # No chart-managed ingress — we use Cilium HTTPRoute below.
+  ingress:
+    enabled: false
+
+# Worker pod (background tasks: outpost provisioning, sending
+# notifications, etc.).
+worker:
+  replicas: 1
+
+  envFrom:
+    - secretRef:
+        name: authentik-postgres-creds
+  env:
+    - name: AUTHENTIK_POSTGRESQL__PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: authentik-postgres-creds
+          key: password
+    - name: AUTHENTIK_SECRET_KEY
+      valueFrom:
+        secretKeyRef:
+          name: authentik-secret-key
+          key: secret_key
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+
+# Service-monitor handled separately in servicemonitor.yaml
+# (chart's own implementation requires the `metrics` port to
+# be exposed; the ServiceMonitor in this layer references it
+# explicitly).
+prometheus:
+  serviceMonitor:
+    enabled: false
+  rules:
+    enabled: false

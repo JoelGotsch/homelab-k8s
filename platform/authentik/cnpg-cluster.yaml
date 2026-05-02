@@ -1,0 +1,52 @@
+# CNPG Postgres cluster for Authentik. Same shape as
+# platform/forgejo/cnpg-cluster.yaml — barman → MinIO → Restic
+# tier-3 per ADR 0006. Authentik's user/application/credential
+# data is the operator-identity backend; loss = full
+# re-enrolment of every service.
+#
+# Service exposed: authentik-pg-rw.authentik.svc:5432.
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: authentik-pg
+  namespace: authentik
+spec:
+  instances: 2
+
+  storage:
+    size: 10Gi
+    storageClass: longhorn-replica3
+
+  monitoring:
+    enablePodMonitor: true
+
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: "128MB"
+
+  bootstrap:
+    initdb:
+      database: authentik
+      owner: authentik
+
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://homelab-backups-cluster/cnpg/authentik
+      endpointURL: http://minio.minio.svc.cluster.local:9000
+      s3Credentials:
+        accessKeyId:
+          name: authentik-cnpg-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: authentik-cnpg-s3
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: bzip2
+      data:
+        compression: bzip2
+    # Authentik is `secret`-classified — operator-identity
+    # data. Longer retention than the standard 30d to ride
+    # out a longer-window-recovery scenario.
+    retentionPolicy: "90d"

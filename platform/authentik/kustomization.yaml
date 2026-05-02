@@ -1,0 +1,26 @@
+# Authentik IdP — operator-identity store + OIDC provider for
+# all internal services per identity.md + ADR 0024 D3.
+#
+# Helm chart: goauthentik/authentik.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: authentik
+
+helmCharts:
+  - name: authentik
+    repo: https://charts.goauthentik.io
+    version: "2026.2.0"  # OPERATOR PINS via Renovate
+    releaseName: authentik
+    namespace: authentik
+    valuesFile: values.yaml
+    includeCRDs: true
+
+resources:
+  - namespace.yaml
+  - cnpg-cluster.yaml
+  - externalsecret.yaml
+  - httproute.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml
