@@ -48,6 +48,16 @@ spec:
             - name: data
               mountPath: /var/cache/ntfy
               subPath: cache
+            # /tmp is the only writable rootfs path the ntfy
+            # binary touches (per upstream Docker Compose
+            # hardening guidance — `read_only: true` + tmpfs:
+            # /tmp). Auth DB + message cache + attachment
+            # cache are all PVC-backed above; /tmp holds only
+            # transient scratch (e.g. attachment-upload temp
+            # files even though the homelab profile rarely
+            # uses attachments).
+            - name: tmp
+              mountPath: /tmp
           livenessProbe:
             httpGet:
               path: /v1/health
@@ -70,13 +80,13 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: [ALL]
-            # ntfy needs to write to the auth DB + cache DB;
-            # not compatible with readOnlyRootFilesystem
-            # without restructuring the volume layout further.
-            # Acceptable trade-off: the writable paths are
-            # bound to the PVC, NOT the rootfs; tmpfs at /tmp
-            # is the only writable rootfs path needed.
-            readOnlyRootFilesystem: false
+            # Auth DB (/var/lib/ntfy) + message/attachment
+            # cache (/var/cache/ntfy) are PVC-backed; /tmp is
+            # an emptyDir tmpfs (see volumeMounts above). No
+            # other rootfs writes needed by the ntfy binary
+            # at this config (web push disabled, behind-proxy
+            # mode, no plugin loading).
+            readOnlyRootFilesystem: true
       volumes:
         - name: config
           configMap:
@@ -84,6 +94,10 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: ntfy-data
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
 ---
 apiVersion: v1
 kind: Service

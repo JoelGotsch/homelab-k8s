@@ -21,7 +21,7 @@ config + DNS change; this manifest doesn't change).
 | `pvc.yaml` | 5Gi Longhorn-replica2 PVC for SQLite DB + attachment cache. |
 | `configmap.yaml` | `server.yml` (auth deny-all default, single-topic, cache-duration 12h, behind-proxy true, metrics on). |
 | `externalsecret.yaml` | admin password + relay bearer token from OpenBao at `kv/ntfy/{admin-password,relay-token}`. |
-| `deployment.yaml` | Single replica (SQLite-backed); `Recreate` strategy (RWO PVC); ntfy upstream image. |
+| `deployment.yaml` | Single replica (SQLite-backed); `Recreate` strategy (RWO PVC); ntfy upstream image. Hardened: non-root, `readOnlyRootFilesystem: true`, all caps dropped, `/tmp` on a 64Mi tmpfs emptyDir (only writable rootfs path the binary needs; DB + cache are PVC-backed). |
 | `httproute.yaml` | Cilium Gateway HTTPRoute on `ntfy.lab.<HOMELAB-DOMAIN>`. Tailscale-fronted phase 1; Cloudflare Tunnel phase 2. |
 | `networkpolicy.yaml` | Default-deny + ingress from `ingress` (Gateway) + `ntfy-e2ee-relay` (publishers) + `monitoring` (scrape); egress kube-DNS only. |
 
@@ -159,6 +159,18 @@ sources.
   annual + manual per ADR 0024 D1; relay-token rotation
   follows the same cadence. Both procedures fold into a
   future `ntfy/rotation.md` runbook.
+- **`/tmp` is a 64Mi memory-backed emptyDir.** Required
+  because `readOnlyRootFilesystem: true` denies all rootfs
+  writes and the ntfy binary uses `/tmp` for transient
+  scratch (attachment-upload temp files, internal Go
+  runtime scratch). 64Mi is well above the homelab's
+  alert profile (text-only messages); if attachment uploads
+  ever become large or frequent, raise `sizeLimit` or move
+  to a disk-backed emptyDir. Auth DB (`/var/lib/ntfy`),
+  message cache + attachment cache (`/var/cache/ntfy`) stay
+  PVC-backed — they're persistent state, not rootfs scratch.
+  Closes the D7 follow-up from
+  [99-journal/2026-04-29-ntfy-server.md](../../../homelab-docs/99-journal/2026-04-29-ntfy-server.md).
 
 ## Related
 
