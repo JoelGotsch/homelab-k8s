@@ -1,0 +1,16 @@
+# Cloudflare Tunnel — outbound-connect daemon that exposes
+# selected internal Services to public hostnames via
+# Cloudflare's edge. Per ADR 0024 D1.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: cloudflare-tunnel
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - externalsecret.yaml
+  - deployment.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml

@@ -1,0 +1,76 @@
+# cloudflared local-config. Per ADR 0024 D1 — Cloudflare
+# Tunnel for the qualifying services (E2EE-encrypted or
+# `internal-media`-classified content where Cloudflare TLS
+# termination is acceptable).
+#
+# Local config (declarative ConfigMap) is preferred over
+# remote management (Cloudflare-side dashboard config) per
+# the homelab principle "everything is in git" — config
+# drift in the dashboard would be invisible to Argo.
+#
+# OPERATOR FILLS:
+#   <CF_TUNNEL_UUID>  the tunnel UUID from
+#                     `cloudflared tunnel create homelab`
+#                     (matches the UUID in the
+#                     credentials JSON at
+#                     kv/cloudflare/tunnel/credentials_json)
+#   <HOMELAB-DOMAIN>  the public domain whose subdomains
+#                     will route through the tunnel
+#
+# Hostnames here are PUBLIC names (no `.lab` infix). Each
+# routes to a cluster-internal Service.
+#
+# When adding a new service to the tunnel:
+#   1. Append an `ingress:` rule below
+#   2. Add a CNAME in Cloudflare DNS:
+#      <subdomain>.<HOMELAB-DOMAIN> →
+#      <CF_TUNNEL_UUID>.cfargotunnel.com
+#   3. Update the consuming app's NetworkPolicy to allow
+#      ingress from the cloudflare-tunnel namespace
+#   4. Commit + push; cloudflared rolls the new config
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared-config
+  namespace: cloudflare-tunnel
+  labels:
+    app.kubernetes.io/name: cloudflared
+data:
+  config.yaml: |
+    tunnel: <CF_TUNNEL_UUID>
+    credentials-file: /etc/cloudflared/credentials.json
+
+    # Metrics endpoint for Prometheus scrape.
+    metrics: 0.0.0.0:2000
+
+    # Tunnel-level retry behaviour.
+    no-autoupdate: true
+    protocol: http2
+
+    ingress:
+      # ─── Vaultwarden ──────────────────────────────────
+      # E2EE — operator's vault is zero-knowledge encrypted
+      # client-side per ADR 0024 D1 + identity.md. Cloudflare
+      # sees only ciphertext for vault contents.
+      - hostname: vaultwarden.<HOMELAB-DOMAIN>
+        service: http://vaultwarden-http.vaultwarden.svc.cluster.local:80
+
+      # ─── Jellyfin ─────────────────────────────────────
+      # `internal-media` classification — non-personal
+      # publishable assets. Cloudflare seeing media in
+      # transit is acceptable per ADR 0024 D1.
+      - hostname: jellyfin.<HOMELAB-DOMAIN>
+        service: http://jellyfin.jellyfin.svc.cluster.local:8096
+
+      # ─── ntfy-e2ee-relay (when ready) ─────────────────
+      # AES-256-GCM payload encryption — Cloudflare sees
+      # only ciphertext. Uncomment when the relay layer is
+      # bring-up-ready per ADR 0024 D1.
+      # - hostname: ntfy.<HOMELAB-DOMAIN>
+      #   service: http://ntfy-e2ee-relay.ntfy-e2ee-relay.svc.cluster.local:80
+
+      # ─── Catch-all (required) ─────────────────────────
+      # cloudflared rejects requests for un-mapped
+      # hostnames with HTTP 404. Required as the LAST rule.
+      - service: http_status:404

@@ -1,0 +1,95 @@
+# NetworkPolicies for cloudflared.
+#
+# Ingress: ONLY Prometheus scrape on metrics port. cloudflared
+# is an outbound-connect-only daemon; no cluster workload
+# reaches it inbound.
+#
+# Egress: kube-DNS + Cloudflare's edge (regional anycast IPs;
+# resolved via the cloudflared-internal logic, but reaches
+# Cloudflare's published edge ranges) + the upstream Services
+# named in configmap.yaml. The Cloudflare-edge egress is
+# unrestricted-by-FQDN because cloudflared connects to many
+# regional endpoints (region1.argotunnel.com, region2.*, etc.)
+# + the QUIC connections rotate. CCNP toFQDNs would be
+# brittle here.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cloudflared
+  namespace: cloudflare-tunnel
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Prometheus scrape on metrics port.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 2000
+          protocol: TCP
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Cloudflare edge — outbound HTTPS + QUIC. cloudflared
+    # uses HTTP/2 over TCP/443 by default (set in config.yaml
+    # via `protocol: http2`); falls back to QUIC over UDP/443
+    # if HTTP/2 fails. Both ports allowed for resilience.
+    # toEntities: world is the bounded form — cloudflared
+    # must reach Cloudflare's edge which is a published but
+    # geographically-rotating IP set.
+    - toEntities: ["world"]
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 443
+          protocol: UDP
+        - port: 7844     # cloudflared registration port
+          protocol: TCP
+        - port: 7844
+          protocol: UDP
+    # Upstream Services routed by config.yaml's ingress
+    # rules. Each one needs an explicit allow.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: vaultwarden
+      ports:
+        - port: 80
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: jellyfin
+      ports:
+        - port: 8096
+          protocol: TCP
+    # When new tunnel-routed services land:
+    #  1. Add an `ingress:` rule in configmap.yaml
+    #  2. Add an egress rule here matching the upstream ns + port
+    #  3. Add an ingress allow in the upstream service's NP
+    # - to:
+    #     - namespaceSelector:
+    #         matchLabels:
+    #           kubernetes.io/metadata.name: ntfy-e2ee-relay
+    #   ports:
+    #     - port: 80
+    #       protocol: TCP

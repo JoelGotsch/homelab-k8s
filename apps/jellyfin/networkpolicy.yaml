@@ -34,6 +34,16 @@ spec:
       ports:
         - port: 8096
           protocol: TCP
+    # cloudflare-tunnel namespace (Phase 2 public ingress
+    # per ADR 0024 D1; jellyfin's `internal-media` class
+    # qualifies for CF TLS termination).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cloudflare-tunnel
+      ports:
+        - port: 8096
+          protocol: TCP
   egress:
     - to:
         - namespaceSelector:

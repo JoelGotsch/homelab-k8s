@@ -1,8 +1,7 @@
 # NetworkPolicies for Vaultwarden.
 #
 # - Ingress: Cilium Gateway envoy (HTTPRoute) + Prometheus
-#   scrape + (future) cloudflare-tunnel ingress when that
-#   layer lands.
+#   scrape + cloudflare-tunnel ingress (Phase 2 public).
 # - Egress: kube-DNS + Authentik (for OIDC discovery + token
 #   validation) + (when SMTP enabled) external SMTP relay.
 
@@ -36,16 +35,15 @@ spec:
       ports:
         - port: 80
           protocol: TCP
-    # (Future) cloudflare-tunnel namespace — uncomment when
-    # that layer exists. Until then, operator + family reach
-    # Vaultwarden via Tailscale → Cilium Gateway above.
-    # - from:
-    #     - namespaceSelector:
-    #         matchLabels:
-    #           kubernetes.io/metadata.name: cloudflare-tunnel
-    #   ports:
-    #     - port: 80
-    #       protocol: TCP
+    # cloudflare-tunnel namespace (Phase 2 public ingress
+    # per ADR 0024 D1).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cloudflare-tunnel
+      ports:
+        - port: 80
+          protocol: TCP
   egress:
     # kube-DNS.
     - to:
