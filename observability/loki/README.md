@@ -31,6 +31,24 @@ provisioned via `mc admin user svcacct add`).
 **First-install seed (after MinIO + this layer's Argo sync):**
 
 ```sh
+# Scripted (recommended): one-liner via the homelab-infra
+# helper. Creates the svcacct + seeds OpenBao atomically.
+homelab-infra/scripts/provision-minio-svcacct.sh \
+    --alias minio \
+    --kv-path kv/loki/s3-creds \
+    --resource-prefix arn:aws:s3:::loki-chunks \
+    --resource-prefix arn:aws:s3:::loki-chunks/* \
+    --label loki
+
+# Force-refresh ESO; restart Loki pod:
+kubectl -n monitoring annotate externalsecret loki-s3-creds \
+  force-sync=$(date +%s) --overwrite
+kubectl -n monitoring rollout restart statefulset loki
+```
+
+Manual fallback (if the script doesn't fit your case):
+
+```sh
 # Inside an mc-configured shell with MinIO root creds:
 mc admin user svcacct add minio root \
   --policy <(cat <<'EOF'
@@ -51,11 +69,6 @@ EOF
 bao kv put kv/loki/s3-creds \
   access_key_id="<access_key>" \
   secret_access_key="<secret_key>"
-
-# Force-refresh ESO; restart Loki pod:
-kubectl -n monitoring annotate externalsecret loki-s3-creds \
-  force-sync=$(date +%s) --overwrite
-kubectl -n monitoring rollout restart statefulset loki
 ```
 
 ## Bring-up wiring

@@ -43,6 +43,21 @@ log lines.
 |---|---|---|
 | `kv/data/tempo/s3-creds` | `access_key_id`, `secret_access_key` | MinIO svc-account scoped to `tempo-blocks`. Standard CNPG-app pattern (operator runs `mc admin user svcacct add` after MinIO Healthy; cold-start.md Step 13c). |
 
+**First-install seed (after MinIO + this layer's Argo sync):**
+
+```sh
+homelab-infra/scripts/provision-minio-svcacct.sh \
+    --alias minio \
+    --kv-path kv/tempo/s3-creds \
+    --resource-prefix arn:aws:s3:::tempo-blocks \
+    --resource-prefix arn:aws:s3:::tempo-blocks/* \
+    --label tempo
+
+kubectl -n monitoring annotate externalsecret tempo-s3-creds \
+  force-sync=$(date +%s) --overwrite
+kubectl -n monitoring rollout restart statefulset tempo
+```
+
 ## Bring-up wiring
 
 | Bring-up step | What lands |

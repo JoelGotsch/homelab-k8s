@@ -134,13 +134,17 @@ the namespace; without them, the CronJob's pods stay
 **First-install seed (after MinIO + OpenBao are Healthy):**
 
 ```sh
-# Restic repo password — also write to offline-recovery archive
-RESTIC_PW="$(openssl rand -base64 32)"
-bao kv put kv/prod/restic/cluster-tier-3/password value="$RESTIC_PW"
-echo "$RESTIC_PW" >> ~/staging/offline-recovery-archive/restic-passwords.txt
-# (commit-and-encrypt the archive per offline-recovery/rotation.md)
+# Restic repo password — generate + seed + print so operator
+# can persist to offline-recovery archive (loss = no decrypt
+# of any tier-3 snapshot per ADR 0011).
+homelab-infra/scripts/seed-random-secret.sh \
+    --print --format base64 --size 32 \
+    kv/prod/restic/cluster-tier-3/password value
+# Operator manually persists the printed value to the archive
+# per offline-recovery/rotation.md, then clears scrollback.
 
-# Hetzner SB SSH key (one-time, if not already present from openbao raft)
+# Hetzner SB SSH key — operator-generated keypair (host-side
+# correlation matters; not pure randomness). Keep manual:
 ssh-keygen -t ed25519 -f /tmp/hetzner-sb -N ''
 # Add /tmp/hetzner-sb.pub to Hetzner Robot → Storage Box → SSH Keys
 bao kv put kv/prod/backup/hetzner-storage-box \
@@ -150,7 +154,22 @@ bao kv put kv/prod/backup/hetzner-storage-box \
   ssh_key="$(cat /tmp/hetzner-sb)"
 shred -u /tmp/hetzner-sb /tmp/hetzner-sb.pub
 
-# MinIO read-only svc account (after MinIO Healthy)
+# MinIO read-only svc account — provisioned + seeded:
+homelab-infra/scripts/provision-minio-svcacct.sh \
+    --alias minio \
+    --kv-path kv/prod/backup/minio-reader/s3-creds \
+    --policy-actions "s3:GetObject,s3:ListBucket" \
+    --resource-prefix arn:aws:s3:::homelab-backups-cluster \
+    --resource-prefix arn:aws:s3:::homelab-backups-cluster/* \
+    --resource-prefix arn:aws:s3:::longhorn-backups \
+    --resource-prefix arn:aws:s3:::longhorn-backups/* \
+    --label backup-minio-reader
+```
+
+Manual fallback for the MinIO svcacct (e.g., if `--policy-actions`
+doesn't fit):
+
+```sh
 mc alias set minio http://minio.minio.svc.cluster.local:9000 \
   "$ROOT_USER" "$ROOT_PASSWORD"
 mc admin user svcacct add minio root \
@@ -170,7 +189,6 @@ mc admin user svcacct add minio root \
 }
 EOF
 )
-# Capture printed access_key + secret_key:
 bao kv put kv/prod/backup/minio-reader/s3-creds \
   access_key_id="<access_key>" \
   secret_access_key="<secret_key>"

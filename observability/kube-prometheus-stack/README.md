@@ -40,13 +40,25 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 **First-install seed:**
 
 ```sh
-ADMIN_PW=$(openssl rand -base64 32)
-bao kv put kv/grafana/admin user="admin" password="$ADMIN_PW"
-unset ADMIN_PW
+# Scripted (recommended) — --print so operator can read the
+# generated password once for first login. Clear scrollback
+# after.
+homelab-infra/scripts/seed-random-secret.sh \
+    --print --format base64 --size 32 \
+    kv/grafana/admin password
+bao kv patch kv/grafana/admin user="admin"
 
 # After Argo sync:
 # Open https://grafana.lab.<HOMELAB-DOMAIN> via Tailscale.
-# Login: admin / <password from above>.
+# Login: admin / <password printed above>.
+```
+
+Manual fallback:
+
+```sh
+ADMIN_PW=$(openssl rand -base64 32)
+bao kv put kv/grafana/admin user="admin" password="$ADMIN_PW"
+unset ADMIN_PW
 ```
 
 When Authentik OIDC integration enables (Authentik must be

@@ -72,6 +72,56 @@ to keep workloads backend-agnostic.
 | `kv/data/langfuse/s3` | `access_key_id`, `secret_access_key` | MinIO svc-account scoped to `langfuse-blobs` bucket. |
 | `kv/data/cnpg/langfuse/s3-creds` | `access_key_id`, `secret_access_key` | MinIO svc-account scoped to `homelab-backups-cluster/cnpg/langfuse/`. Standard CNPG-app pattern. |
 
+**First-install seed:**
+
+```sh
+# ClickHouse password + sha256_hex (atomic — script ensures
+# the hash matches the password, removing the typo bug magnet
+# flagged in caveat 2):
+homelab-infra/scripts/seed-password-with-hash.sh \
+    kv/langfuse/clickhouse
+
+# App secrets (NextAuth + salt + encryption_key — all random):
+homelab-infra/scripts/seed-random-secret.sh \
+    --format base64 --size 32 \
+    kv/langfuse/app nextauth_secret
+homelab-infra/scripts/seed-random-secret.sh \
+    --format base64 --size 32 \
+    kv/langfuse/app salt
+homelab-infra/scripts/seed-random-secret.sh \
+    --format hex --size 32 \
+    kv/langfuse/app encryption_key
+bao kv patch kv/langfuse/app telemetry_enabled="false"
+
+# CNPG-issued postgres password (operator copies from the
+# CNPG-managed Secret):
+bao kv put kv/langfuse/postgres \
+    password="$(kubectl -n langfuse get secret langfuse-pg-app \
+        -o jsonpath='{.data.password}' | base64 -d)"
+
+# MinIO svcaccts — provisioned + seeded:
+homelab-infra/scripts/provision-minio-svcacct.sh \
+    --alias minio \
+    --kv-path kv/langfuse/s3 \
+    --resource-prefix arn:aws:s3:::langfuse-blobs \
+    --resource-prefix arn:aws:s3:::langfuse-blobs/* \
+    --label langfuse-blobs
+homelab-infra/scripts/provision-minio-svcacct.sh \
+    --alias minio \
+    --kv-path kv/cnpg/langfuse/s3-creds \
+    --resource-prefix \
+        "arn:aws:s3:::homelab-backups-cluster/cnpg/langfuse/*" \
+    --resource-prefix \
+        "arn:aws:s3:::homelab-backups-cluster/cnpg/langfuse" \
+    --label langfuse-cnpg
+
+# OTel-ingest project keys are generated INSIDE Langfuse
+# (web UI → Project Settings → API Keys) after first web-pod
+# start. Operator seeds them post-bring-up:
+# bao kv put kv/langfuse/otel-ingest \
+#     public_key="pk-lf-..." secret_key="sk-lf-..."
+```
+
 ## Bring-up wiring
 
 | Bring-up step | What lands |

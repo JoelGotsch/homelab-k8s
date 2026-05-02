@@ -41,6 +41,21 @@ independent.
 
 Seed during cold-start Step 13c (per
 [`04-guides/cold-start.md`](../../../homelab-docs/04-guides/cold-start.md)).
+The bearer token is generated + seeded via the helper:
+
+```sh
+homelab-infra/scripts/seed-random-secret.sh \
+    kv/approval-channel/inbound-auth-token token
+```
+
+The Signal sender/recipients fields are operator-typed (E.164
+numbers, not random), so seed those manually:
+
+```sh
+bao kv put kv/approval-channel/signal \
+    sender="+49..." \
+    recipients="+49...,+49..."
+```
 
 ## Bring-up wiring
 

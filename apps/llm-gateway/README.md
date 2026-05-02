@@ -53,11 +53,23 @@ the namespace; without them, the pod fails to start.
 sync):**
 
 ```sh
-bao kv put kv/llm-gateway/anthropic   api_key="sk-ant-..."
-bao kv put kv/llm-gateway/openai      api_key="sk-..."
-bao kv put kv/llm-gateway/master-key  value="$(openssl rand -hex 32)"
-# kv/cnpg/llm-gateway/s3-creds — see minio-on-nas README;
-# requires MinIO up first.
+# Provider keys — operator-typed (issued by Anthropic / OpenAI):
+bao kv put kv/llm-gateway/anthropic api_key="sk-ant-..."
+bao kv put kv/llm-gateway/openai    api_key="sk-..."
+
+# Master key — generated + seeded:
+homelab-infra/scripts/seed-random-secret.sh \
+    kv/llm-gateway/master-key value
+
+# CNPG s3-creds — after MinIO Healthy:
+homelab-infra/scripts/provision-minio-svcacct.sh \
+    --alias minio \
+    --kv-path kv/cnpg/llm-gateway/s3-creds \
+    --resource-prefix \
+        "arn:aws:s3:::homelab-backups-cluster/cnpg/llm-gateway/*" \
+    --resource-prefix \
+        "arn:aws:s3:::homelab-backups-cluster/cnpg/llm-gateway" \
+    --label llm-gateway-cnpg
 ```
 
 ## Image

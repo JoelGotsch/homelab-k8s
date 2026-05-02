@@ -34,25 +34,36 @@ the namespace; without them, the pod fails to start.
 **First-install seed:**
 
 ```sh
-# Topic key — generate, store in OpenBao, and capture for
-# F-Droid app config:
-KEY_B64=$(openssl rand 32 | base64 -w0)
-bao kv put kv/ntfy/topic-key value="$KEY_B64"
+# Topic key — generate + seed + print for F-Droid app config.
+# The --print flag is the load-bearing bit: operator types
+# this value into the F-Droid app's "Decrypt with key" setting.
+# Clear scrollback after typing.
+homelab-infra/scripts/seed-random-secret.sh \
+    --print --format base64 --size 32 \
+    kv/ntfy/topic-key value
+# (... operator types into phone, clears scrollback ...)
 
-# Save for F-Droid app config (operator pastes into the app's
-# topic settings under "Decrypt with key"). DO NOT email or
-# Signal-send the key — operator types it into the phone
-# directly from a sticky.
-echo "$KEY_B64" > /tmp/ntfy-key-for-fdroid.txt
-# (... operator types into phone, then ...)
-shred -u /tmp/ntfy-key-for-fdroid.txt
+# Inbound-auth-token — generate + seed; not needed visibly.
+homelab-infra/scripts/seed-random-secret.sh \
+    kv/ntfy-e2ee-relay/inbound-auth-token token
 
 # Optional: ntfy publish-auth (only if the cluster-hosted ntfy
 # requires auth for publishing — see the ntfy server's own
-# config):
+# config). Operator-typed value (not random):
 bao kv put kv/ntfy/publish-auth \
   header="Bearer tk_xxxxxxxxxxxxxx"
+```
 
+Manual fallback for the topic key (if the script doesn't
+suit, e.g., the operator wants to control the byte count
+exactly):
+
+```sh
+KEY_B64=$(openssl rand 32 | base64 -w0)
+bao kv put kv/ntfy/topic-key value="$KEY_B64"
+echo "$KEY_B64" > /tmp/ntfy-key-for-fdroid.txt
+# (... operator types into phone, then ...)
+shred -u /tmp/ntfy-key-for-fdroid.txt
 unset KEY_B64
 ```
 

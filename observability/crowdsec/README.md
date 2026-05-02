@@ -78,6 +78,32 @@ every 5 minutes from LAPI's decision list by the CronJob).
 | `kv/data/crowdsec/bouncers` | `cilium_bouncer_key` | Generate a random 32-byte hex string (`openssl rand -hex 32`) at first install; the chart's `lapi.bouncers:` pre-creates the bouncer with this key on first start. |
 | `kv/data/cnpg/crowdsec/s3-creds` | `access_key_id`, `secret_access_key` | MinIO svc-account scoped to `homelab-backups-cluster/cnpg/crowdsec/`. Standard CNPG-app pattern. |
 
+**First-install seed:**
+
+```sh
+# Bouncer key — generated + seeded:
+homelab-infra/scripts/seed-random-secret.sh \
+    kv/crowdsec/bouncers cilium_bouncer_key
+
+# CNPG s3-creds — provisioned + seeded after MinIO Healthy:
+homelab-infra/scripts/provision-minio-svcacct.sh \
+    --alias minio \
+    --kv-path kv/cnpg/crowdsec/s3-creds \
+    --resource-prefix \
+        "arn:aws:s3:::homelab-backups-cluster/cnpg/crowdsec/*" \
+    --resource-prefix \
+        "arn:aws:s3:::homelab-backups-cluster/cnpg/crowdsec" \
+    --label crowdsec-cnpg
+
+# Console enroll_key + postgres_password are operator-typed
+# (one from app.crowdsec.net web UI, one copied from CNPG's
+# auto-issued Secret) — seed manually:
+bao kv put kv/crowdsec/console enroll_key="<paste-from-app.crowdsec.net>"
+bao kv put kv/crowdsec/lapi \
+    postgres_password="$(kubectl -n crowdsec get secret \
+        crowdsec-lapi-app -o jsonpath='{.data.password}' | base64 -d)"
+```
+
 ## Bring-up wiring
 
 | Bring-up step | What lands |

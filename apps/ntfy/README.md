@@ -38,10 +38,13 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 the relay's first publish attempt):
 
 ```sh
-# 1. Admin password — generate, store, then bootstrap admin
-#    user inside the pod.
-ADMIN_PW=$(openssl rand -base64 32)
-bao kv put kv/ntfy/admin-password value="$ADMIN_PW"
+# 1. Admin password — generate + seed + read back for the
+#    pod-side bootstrap step. `--print` keeps the password
+#    visible for the kubectl-exec dance below.
+homelab-infra/scripts/seed-random-secret.sh \
+    --print --format base64 --size 32 \
+    kv/ntfy/admin-password value
+ADMIN_PW="$(bao kv get -field=value kv/ntfy/admin-password)"
 
 # Wait for pod ready, then exec into it:
 kubectl -n ntfy exec -it deploy/ntfy -- sh -c "
