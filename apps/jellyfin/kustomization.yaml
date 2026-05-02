@@ -19,6 +19,7 @@ helmCharts:
 
 resources:
   - namespace.yaml
+  - priorityclass.yaml
   - nfs-pv.yaml
   - externalsecret.yaml
   - httproute.yaml

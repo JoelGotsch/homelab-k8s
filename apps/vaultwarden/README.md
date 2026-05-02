@@ -7,10 +7,14 @@ D1 (Cloudflare Tunnel for E2EE-encrypted services) +
 §Vaultwarden ("1.33.0+ pin; admin panel behind OIDC; CF
 Tunnel + WAF in front").
 
-Single-replica Vaultwarden + SQLite on Longhorn (personal-
-vault scale doesn't justify CNPG; resilience via Longhorn
-snapshot + Restic tier-3). Migration target from NAS-Docker
-Vaultwarden per
+Single-replica Vaultwarden + external CNPG Postgres
+(operator's call 2026-05-02; switched from SQLite for
+backup-consistency uniformity — Longhorn-snapshot of running
+SQLite can capture mid-transaction state, while CNPG's
+WAL-shipping captures every committed transaction. Same
+restore-drill semantics as every other CNPG-using app).
+Attachments + sends still on a small Longhorn-replica3 PVC.
+Migration target from NAS-Docker Vaultwarden per
 [`migration/nas.md`](../../../homelab-docs/03-runbooks/migration/nas.md).
 
 **Phase 1** (today): Tailscale-only HTTPRoute on
@@ -26,10 +30,11 @@ via Cloudflare Tunnel + WAF.
 |---|---|
 | `namespace.yaml` | `vaultwarden` ns; PSA restricted. |
 | `kustomization.yaml` | guerzon/vaultwarden helm chart 0.32.0; resource list below. |
-| `values.yaml` | Single-replica + SQLite on Longhorn-replica3; ADMIN_TOKEN as Argon2 hash from ESO; OIDC ships disabled (operator flips post-Authentik client provisioning); WebSocket on; closed registration; logging JSON; readonly rootfs. |
-| `externalsecret.yaml` | 3 ExternalSecrets: admin (Argon2-hashed token), oidc (Authentik client), smtp (operator-fillable). |
+| `values.yaml` | Single-replica + external CNPG Postgres + Longhorn-replica3 PVC for attachments; ADMIN_TOKEN as Argon2 hash from ESO; OIDC ships disabled; closed registration; logging JSON. |
+| `cnpg-cluster.yaml` | 2-instance CNPG `vaultwarden-pg` on `longhorn-replica3`; barman → MinIO; **90d retention** (operator daily-driver credentials warrant longer recovery window). |
+| `externalsecret.yaml` | 5 ExternalSecrets: admin (Argon2 token), oidc (dormant), smtp (operator-fillable), postgres (CNPG-issued), cnpg-s3 (barman backup). |
 | `httproute.yaml` | Cilium HTTPRoute for `vaultwarden.lab.<HOMELAB-DOMAIN>`; Tailscale-only at first commit. |
-| `networkpolicy.yaml` | Vanilla NP: ingress from Cilium Gateway + Prometheus; egress kube-DNS + Authentik. CCNP: SMTP egress (FQDN-aware; ships placeholder). |
+| `networkpolicy.yaml` | Vanilla NP: ingress Cilium Gateway + Prometheus; egress kube-DNS + CNPG + Authentik. CCNP: SMTP egress (FQDN-aware; placeholder). |
 | `servicemonitor.yaml` | Prometheus scrape on `/metrics`. |
 
 ## OpenBao paths to seed
@@ -39,8 +44,10 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 | Path | Field(s) | Source |
 |---|---|---|
 | `kv/data/vaultwarden/admin` | `admin_token_argon2` | Argon2 hash of operator-chosen admin password. **NOT plaintext.** Generated locally per the snippet below. Plaintext lives in operator's memory + Vaultwarden vault. |
+| `kv/data/vaultwarden/postgres` | `password` | CNPG-issued; copied from `vaultwarden-pg-app` Secret. |
 | `kv/data/vaultwarden/oidc` | `client_id`, `client_secret`, `issuer` | Provisioned via `provision-authentik-oidc-client.sh` post-Authentik-bring-up. |
 | `kv/data/vaultwarden/smtp` | `host`, `username`, `password` | Operator-typed SMTP relay creds (only required if email invites are wanted). Ships empty — Vaultwarden refuses to send when fields are empty. |
+| `kv/data/cnpg/vaultwarden/s3-creds` | `access_key_id`, `secret_access_key` | MinIO svc-account scoped to `homelab-backups-cluster/cnpg/vaultwarden/`. Standard CNPG-app pattern. |
 
 **First-install seed:**
 
@@ -66,7 +73,22 @@ homelab-infra/scripts/provision-authentik-oidc-client.sh \
     --scopes "openid email profile" \
     --kv-path kv/vaultwarden/oidc
 
-# 3. SMTP — only if family invites need email. Operator-typed:
+# 3. CNPG-issued postgres password.
+bao kv put kv/vaultwarden/postgres \
+    password="$(kubectl -n vaultwarden get secret vaultwarden-pg-app \
+        -o jsonpath='{.data.password}' | base64 -d)"
+
+# 4. CNPG s3-creds — provisioned + seeded after MinIO Healthy.
+homelab-infra/scripts/provision-minio-svcacct.sh \
+    --alias minio \
+    --kv-path kv/cnpg/vaultwarden/s3-creds \
+    --resource-prefix \
+        "arn:aws:s3:::homelab-backups-cluster/cnpg/vaultwarden/*" \
+    --resource-prefix \
+        "arn:aws:s3:::homelab-backups-cluster/cnpg/vaultwarden" \
+    --label vaultwarden-cnpg
+
+# 5. SMTP — only if family invites need email. Operator-typed:
 # bao kv put kv/vaultwarden/smtp \
 #     host="smtp.<provider>" \
 #     username="<smtp-user>" \
@@ -139,18 +161,13 @@ Per [`migration/nas.md`](../../../homelab-docs/03-runbooks/migration/nas.md)
    replaced with the actual SMTP relay. Vaultwarden refuses
    to send when fields are empty (safe default).
 
-7. **SQLite on Longhorn, not CNPG.** Personal-vault scale
-   (~hundreds of items) doesn't justify CNPG complexity.
-   Recovery via Longhorn snapshot + Restic tier-3.
-   Switch to Postgres (Vaultwarden supports it via
-   `DATABASE_URL`) if the database grows past ~50MB or
-   query latency surfaces.
-
-8. **WebSocket port 3012 in NetworkPolicy** for backwards
-   compat with older Bitwarden clients. Vaultwarden 1.30+
-   serves websocket on the main port; the 3012 ingress rule
-   can be removed once all operator/family clients are
-   updated.
+7. **External CNPG Postgres** (operator's call 2026-05-02;
+   not SQLite). Backup uniformity with the rest of the
+   cluster: continuous WAL shipping → MinIO → Restic
+   tier-2/3; same restore-drill semantics as every other
+   CNPG-using app. Trade-off: 2 extra CNPG instances + a
+   barmanObjectStore for personal-vault data; accepted as
+   the price of consistent backup posture.
 
 ## Related
 

@@ -1,0 +1,30 @@
+# Low-priority class for non-critical workloads (Jellyfin
+# today; future entertainment-class apps if any). Under
+# cluster resource pressure, kubelet evicts workloads
+# carrying this class FIRST — keeping operator-critical
+# services (OpenBao, CNPG, Authentik, Vaultwarden, etc.)
+# scheduling-resilient.
+#
+# Negative `value` puts this class below the default 0
+# (system-cluster-critical and system-node-critical are at
+# 2 billion; default user pods at 0; this class at -100).
+#
+# `globalDefault: false` — must be opted-in via
+# priorityClassName. Default 0 stays the cluster default.
+#
+# Operator decision 2026-05-02: Jellyfin "won't be used much
+# but if so shouldn't be bound much by resource limits;
+# priority is lowest compared to all other cluster processes."
+
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: homelab-low
+spec:
+  value: -100
+  globalDefault: false
+  description: >-
+    Low-priority workloads — evicted first under node
+    resource pressure. Used for entertainment + non-critical
+    services that can tolerate brief downtime to free
+    capacity for operator-critical workloads.

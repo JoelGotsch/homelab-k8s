@@ -25,11 +25,6 @@ spec:
       ports:
         - port: 80
           protocol: TCP
-        - port: 3012  # Vaultwarden websocket port (1.30+
-                      # serves websocket on the main port,
-                      # but older clients still connect to
-                      # 3012 — keep allowed for compat).
-          protocol: TCP
     # Prometheus scrape.
     - from:
         - namespaceSelector:
@@ -64,6 +59,14 @@ spec:
         - port: 53
           protocol: UDP
         - port: 53
+          protocol: TCP
+    # CNPG Postgres (same ns).
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: vaultwarden-pg
+      ports:
+        - port: 5432
           protocol: TCP
     # Authentik for OIDC discovery + token validation.
     - to:

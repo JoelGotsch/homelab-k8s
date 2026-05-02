@@ -17,7 +17,8 @@ CF Tunnel migration documented for when that layer lands.
 |---|---|
 | `namespace.yaml` | `jellyfin` ns; PSA restricted. |
 | `kustomization.yaml` | jellyfin/jellyfin helm 2.5.0; resource list below. |
-| `values.yaml` | Single-replica + Longhorn config PVC + media-NFS-PVC ReadOnly; OIDC env wired (operator activates LDAP/SSO plugin post-Authentik). |
+| `values.yaml` | Single-replica + Longhorn config PVC + media-NFS-PVC ReadOnly; `priorityClassName: homelab-low`; nodeAffinity to workers only (control-plane excluded); `/dev/dri` hostPath-mounted for AMD Radeon VAAPI; sized for 2 simultaneous 4K streams (8Gi limit). |
+| `priorityclass.yaml` | `homelab-low` PriorityClass (value -100); Jellyfin yields capacity to operator-critical workloads under node pressure. |
 | `nfs-pv.yaml` | Static PV+PVC `jellyfin-media` (4Ti soft cap, ReadOnlyMany) backed by NAS share `<NAS_MEDIA_SHARE>`. |
 | `externalsecret.yaml` | OIDC client (ships dormant). |
 | `httproute.yaml` | Cilium HTTPRoute on `jellyfin.lab.<HOMELAB-DOMAIN>`; Tailscale-only at first commit. |
@@ -97,12 +98,74 @@ family member:
 - Operator sets per-user library access + parental controls
 - Family member's clients (Jellyfin Mobile, web) work
 
-### 4. (Optional) VAAPI hardware acceleration
+### 4. VAAPI activation (AMD Radeon Vega — workers only)
 
-If cluster nodes have Intel iGPUs: enable a device-plugin
-DaemonSet to expose `/dev/dri/renderD128` to the Jellyfin
-pod, then enable hw-accel in Dashboard → Playback. Per
-`jellyfin/migrate-from-nas-docker.md` (TBD) §VAAPI setup.
+The Jellyfin pod is already (a) scheduled to worker nodes
+only via nodeAffinity, and (b) hostPath-mounting `/dev/dri`
+from the host. After first-run wizard:
+
+1. Dashboard → Playback → Hardware Acceleration:
+   - **Hardware acceleration**: `Video Acceleration API (VAAPI)`
+   - **VA-API Device**: `/dev/dri/renderD128`
+2. Save. Verify: stream a 4K H.265 source; check Dashboard
+   → Logs for `vaapi_h265` or `vaapi_hevc` codec lines.
+
+**AMD Vega VCN 2.x coverage** on cluster-node-4/5/6:
+- H.264 / H.265 / HEVC 10-bit decode: yes
+- Encode: **software only** (no UVE on this generation)
+- HDR → SDR tone-mapping: software only
+
+So VAAPI offloads ~50% of transcode CPU (decode side);
+encode stays on the 8C/16T Ryzen — easy on workers.
+
+**5700U caveat** (cluster-node-6 only): older VCN; per the
+[2026-04-27 NAS journal](../../../homelab-docs/99-journal/2026-04-27-nas-trust-and-storage-redesign.md)
+"should be tested before declaring 'Jellyfin on cluster' the
+answer to streaming stutter." If 5700U misbehaves: add a
+node anti-affinity excluding it.
+
+**Render group GID**: hardcoded to 105 in values.yaml's
+`supplementalGroups`. Validate at first deploy:
+```sh
+kubectl debug node/<worker-node-name> --image=alpine \
+  -- ls -ln /dev/dri/renderD128
+```
+If GID differs (some Linux distros use 109 or 44), update
+`supplementalGroups` in values.yaml.
+
+### 5. Friend access (dual-mode auth)
+
+Vaultwarden + Nextcloud are operator + family only via
+Authentik. **Jellyfin runs dual-mode** to allow friends
+without granting them access to the rest of the homelab:
+
+| User class | Auth path | Access scope |
+|---|---|---|
+| **Operator + family** | Authentik OIDC + WebAuthn → SSO plugin auto-creates Jellyfin user | All libraries (or per-library ACL) |
+| **Friends** | Jellyfin-native account (operator creates in Dashboard → Users) | Per-friend library ACL — typically only `public-media` library |
+
+This works because:
+- Authentik is **Tailscale-only** per ADR 0024 D3; friends
+  can't reach `auth.lab.<DOMAIN>` without Tailscale → can't
+  OIDC-login.
+- The SSO plugin only intercepts logins flagged for OIDC;
+  native logins pass through unchanged.
+- Per-user library access in Jellyfin gates which libraries
+  each friend sees.
+
+**To onboard a friend** (post-bring-up):
+1. Dashboard → Users → Add User
+2. Name + password; AuthenticationProvider = `Default`
+3. Library Access → only `public-media` (whatever the
+   operator considers safe for non-family)
+4. Send credentials via Signal (one-time). Friend logs in
+   via the public Jellyfin URL once
+   `infrastructure/cloudflare-tunnel/` lands; until then
+   via Tailscale-with-shared-friend-account
+   (operator-managed).
+
+Friends never touch Authentik, never reach Vaultwarden /
+Nextcloud / Forgejo, never appear in the OIDC user list.
 
 ## Caveats
 
@@ -122,7 +185,9 @@ pod, then enable hw-accel in Dashboard → Playback. Per
    driven (jellyfin-plugin-ldapauth or community SSO
    plugins). Operator installs the plugin post-bring-up;
    the env vars are pre-wired so plugin config is a few
-   clicks vs typing values.
+   clicks vs typing values. **Friends use native Jellyfin
+   accounts** (not OIDC) — see §"Friend access (dual-mode
+   auth)" above.
 
 4. **`readOnlyRootFilesystem: false`.** Jellyfin writes
    transcode-cache to `/tmp` and plugin downloads to
@@ -134,8 +199,29 @@ pod, then enable hw-accel in Dashboard → Playback. Per
    interruption. Resilience via Longhorn snapshot + Restic
    tier-3 (config/DB) + NAS-side backup (media library).
 
-6. **Memory limit 4Gi.** 4K → 1080p transcodes burst toward
-   3-4Gi. Tune up if family streams 4K HDR concurrently.
+6. **Memory limit 8Gi**, sized for 2 simultaneous 4K streams
+   (per operator's 2026-05-02 decision). Budget: Jellyfin
+   baseline ~500MB + 2 × FFmpeg transcode pipelines ~3GB +
+   HDR→SDR tone-mapping buffers ~2GB + library scan / thumb
+   gen ~500MB + ~2GB headroom. CPU is the more likely
+   bottleneck than memory at 2× concurrent.
+
+7. **Lowest-priority workload** (`homelab-low` PriorityClass).
+   Under node resource pressure, kubelet evicts Jellyfin
+   first — keeping operator-critical services
+   (OpenBao, CNPG, Authentik, Vaultwarden, etc.) scheduling-
+   resilient. Operator decision: "Jellyfin won't be used
+   much but if so shouldn't be bound much by resource limits
+   (large limit), priority is lowest compared to all other
+   cluster processes."
+
+8. **Worker-only scheduling.** nodeAffinity excludes
+   control-plane nodes — Jellyfin needs the AMD Radeon
+   Vega iGPU on worker nodes for VAAPI hardware decode.
+   Control-plane nodes have iGPUs too (Ryzen 7 7730U) but
+   the affinity intentionally restricts Jellyfin to workers
+   to keep control-plane resources free for k8s control
+   itself.
 
 7. **Plugin-fetch egress is FQDN-curated** (TheTVDB, TMDB,
    MusicBrainz, Jellyfin plugin repo). New plugin → unlisted

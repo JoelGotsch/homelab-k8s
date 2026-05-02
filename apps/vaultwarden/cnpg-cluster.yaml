@@ -1,0 +1,67 @@
+# CNPG Postgres cluster for Vaultwarden. Replaces the
+# initial SQLite-on-Longhorn design — operator's call
+# 2026-05-02: Postgres gives better backup consistency
+# (continuous WAL shipping vs SQLite-snapshot risk under
+# concurrent writes) and uniform restore-drill semantics
+# with every other CNPG-using app.
+#
+# Same shape as Forgejo + Authentik + Nextcloud. Per ADR
+# 0006 backup chain.
+#
+# Service exposed: vaultwarden-pg-rw.vaultwarden.svc:5432.
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: vaultwarden-pg
+  namespace: vaultwarden
+spec:
+  instances: 2
+
+  storage:
+    # Personal-vault scale: hundreds of items, dozens of
+    # users. 5Gi is generous; resize if usage grows.
+    size: 5Gi
+    storageClass: longhorn-replica3
+
+  monitoring:
+    enablePodMonitor: true
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+      shared_buffers: "128MB"
+
+  bootstrap:
+    initdb:
+      database: vaultwarden
+      owner: vaultwarden
+
+  # Backup: WAL+base to MinIO-on-NAS. Restic CronJob mirrors
+  # to tier-2/3 per ADR 0006. Vaultwarden's vault items are
+  # zero-knowledge encrypted (operator's master password
+  # PBKDF2-derives the encryption key client-side; server
+  # sees ciphertext only) — backup-encrypt via barmanObjectStore
+  # + restic-tier-3 password is defence-in-depth, not strictly
+  # required for the data classification.
+  #
+  # Longer retention than the 30d default — vaultwarden
+  # contains the operator's daily-driver credentials; recovery
+  # from a problem discovered weeks later is the load-bearing
+  # use case for retention.
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://homelab-backups-cluster/cnpg/vaultwarden
+      endpointURL: http://minio.minio.svc.cluster.local:9000
+      s3Credentials:
+        accessKeyId:
+          name: vaultwarden-cnpg-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: vaultwarden-cnpg-s3
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: bzip2
+      data:
+        compression: bzip2
+    retentionPolicy: "90d"

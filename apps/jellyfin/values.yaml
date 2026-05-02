@@ -11,6 +11,32 @@
 
 replicaCount: 1
 
+# Lowest-priority workload — evicted first under cluster
+# resource pressure (operator decision 2026-05-02).
+# See priorityclass.yaml.
+priorityClassName: homelab-low
+
+# Worker-only scheduling. Jellyfin needs the AMD Radeon
+# iGPU on the worker nodes (/dev/dri/renderD128) for
+# hardware-accelerated decode (VAAPI on Vega 8 / VCN 2.x);
+# control-plane nodes don't need to run it. The worker
+# nodes per hardware.md:
+#   cluster-node-4, cluster-node-5: AMD Ryzen 7 5800U
+#                                   (Vega 8 iGPU, VCN 2.x)
+#   cluster-node-6: AMD Ryzen 7 5700U (Vega 8, VCN 2.0 —
+#                   older; per 99-journal/
+#                   2026-04-27-nas-trust-and-storage-redesign.md
+#                   "should be tested before declaring
+#                   'Jellyfin on cluster' the answer to
+#                   streaming stutter").
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node-role.kubernetes.io/control-plane
+              operator: DoesNotExist
+
 image:
   repository: jellyfin/jellyfin
   # OPERATOR PINS via Renovate.
@@ -44,13 +70,42 @@ service:
 ingress:
   enabled: false
 
-# Hardware acceleration: VAAPI on Intel iGPU (operator
-# decides at deploy whether the cluster nodes have iGPUs +
-# whether to expose `/dev/dri/renderD128` via a device-plugin
-# DaemonSet). Off by default; enable per
-# `jellyfin/migrate-from-nas-docker.md` Step "VAAPI setup".
+# Hardware acceleration: VAAPI on the AMD Radeon Vega iGPU
+# present on every worker node per hardware.md.
+#
+# AMD Vega VCN 2.x decode coverage:
+# - H.264 decode: yes
+# - H.265 decode: yes
+# - H.265 10-bit (HDR source) decode: yes
+# - encode: SOFTWARE ONLY (no hardware encoder on this
+#   silicon generation — meaningful CPU savings still come
+#   from offloading decode while encoding stays on CPU).
+# - HDR → SDR tone-mapping: software only (heavy)
+#
+# `/dev/dri/renderD128` is hostPath-mounted directly (AMD
+# k8s-device-plugin is ROCm-only; for video acceleration
+# the standard pattern is hostPath + render-group GID).
+# Talos's render group GID is 105 (validate at first deploy
+# via `ls -ln /dev/dri/renderD128` from a debug pod;
+# adjust supplementalGroups below if different).
+#
+# At Jellyfin first-run wizard: Dashboard → Playback →
+# Hardware Acceleration → "Video Acceleration API (VAAPI)"
+# + VA-API Device = `/dev/dri/renderD128`. Operator
+# verifies via Dashboard → Logs that transcode jobs use
+# `vaapi_h264` / `vaapi_hevc` decoders.
 podOptions:
   hostNetwork: false
+
+extraVolumes:
+  - name: dri
+    hostPath:
+      path: /dev/dri
+      type: Directory
+
+extraVolumeMounts:
+  - name: dri
+    mountPath: /dev/dri
 
 # Pod-level security: non-root, dropped caps. Jellyfin image
 # runs as user 1000 by default.
@@ -59,6 +114,12 @@ podSecurityContext:
   runAsUser: 1000
   runAsGroup: 1000
   fsGroup: 1000
+  # Talos render group GID — gives the pod's user access to
+  # /dev/dri/renderD128 without running as root. Validate
+  # at first deploy: `kubectl debug node/<worker> -- ls -ln
+  # /dev/dri/renderD128` shows the actual GID; adjust below
+  # if Talos's group differs from this default.
+  supplementalGroups: [105]
   seccompProfile:
     type: RuntimeDefault
 
@@ -74,13 +135,21 @@ securityContext:
     drop: [ALL]
 
 resources:
+  # Sized for 2 simultaneous 4K streams per operator's
+  # 2026-05-02 decision. Memory budget breakdown:
+  # - Jellyfin baseline: ~500MB
+  # - 2 transcode pipelines (FFmpeg buffers + scaler): ~3GB
+  # - HDR → SDR tone-mapping buffers (software): ~2GB
+  # - Library scan / thumbnail concurrent: ~500MB
+  # - Headroom: ~2GB
+  # CPU: 200m request keeps it lightly bound at idle; the
+  # 8C/16T Ryzen 5800U/5700U workers have ample headroom for
+  # the 6-8 cores worst-case 2 × 4K transcode burns.
   requests:
-    cpu: 100m
-    memory: 256Mi
+    cpu: 200m
+    memory: 512Mi
   limits:
-    # Transcode bursts can exceed 4Gi for 4K → 1080p; tune
-    # if family-streaming usage outgrows.
-    memory: 4Gi
+    memory: 8Gi
 
 # OIDC env (for the LDAP/SSO plugin once installed).
 extraEnv:

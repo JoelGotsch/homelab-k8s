@@ -6,9 +6,16 @@
 #   lands; Tailscale-only at first commit)
 # - Tailscale-only HTTPRoute as the operator-admin path
 
-# Single replica + SQLite on Longhorn — personal-vault scale
-# doesn't justify CNPG. Resilience via Longhorn snapshot +
-# Restic tier-3.
+# Single-replica Vaultwarden + external CNPG Postgres
+# (operator's call 2026-05-02; switched from SQLite for
+# backup-consistency uniformity — Longhorn-snapshot of a
+# running SQLite can capture mid-transaction state,
+# whereas CNPG WAL-shipping captures every committed
+# transaction. Same restore-drill as every other
+# CNPG-using app).
+#
+# Attachments + sends still use a small Longhorn PVC since
+# they're file-based not DB-stored.
 replicaCount: 1
 
 image:
@@ -19,16 +26,34 @@ image:
   tag: "1.33.0"
   pullPolicy: IfNotPresent
 
-# SQLite default; chart's persistence handles the volume.
+# External CNPG Postgres. DATABASE_URL projected via
+# extraEnv from vaultwarden-postgres-creds Secret + the
+# CNPG cluster's hostname.
 database:
-  type: sqlite
+  type: postgresql
+  # The chart's `database` block doesn't directly expose a
+  # connection URL builder; we project DATABASE_URL via env
+  # below.
 
+# Attachments + sends storage — small volume on Longhorn-
+# replica3. Vaultwarden's encrypted-at-rest model means
+# attachments are zero-knowledge ciphertext to the server.
 storage:
   enabled: true
   storageClassName: longhorn-replica3
   size: 5Gi
   accessModes:
     - ReadWriteOnce
+
+# Project DATABASE_URL from CNPG password + cluster service.
+extraEnv:
+  - name: VW_PG_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: vaultwarden-postgres-creds
+        key: password
+  - name: DATABASE_URL
+    value: "postgresql://vaultwarden:$(VW_PG_PASSWORD)@vaultwarden-pg-rw.vaultwarden.svc.cluster.local:5432/vaultwarden"
 
 # Don't expose the chart's bundled Service externally — the
 # Cilium HTTPRoute owns ingress.
