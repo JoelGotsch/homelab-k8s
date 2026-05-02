@@ -109,22 +109,30 @@ grafana:
     accessModes: [ReadWriteOnce]
     size: 10Gi
 
-  # OIDC against Authentik — DEFERRED until Authentik lands.
-  # Operator un-comments + completes the ESO entry for
-  # client-secret when that happens.
+  # OIDC against Authentik. Activated per the operator's
+  # post-Authentik step — the values below are present at
+  # first commit, but Grafana stops at "OAuth disabled" until
+  # ESO populates the grafana-oidc Secret (operator runs
+  # provision-authentik-oidc-client.sh + commits this file
+  # with `enabled: true`).
   #
-  # grafana.ini:
-  #   auth.generic_oauth:
-  #     enabled: true
-  #     name: Authentik
-  #     client_id: grafana
-  #     client_secret: $__file{/etc/secrets/oauth/client_secret}
-  #     scopes: openid profile email
-  #     auth_url: https://auth.lab.<HOMELAB-DOMAIN>/application/o/authorize/
-  #     token_url: https://auth.lab.<HOMELAB-DOMAIN>/application/o/token/
-  #     api_url: https://auth.lab.<HOMELAB-DOMAIN>/application/o/userinfo/
-  #     allow_sign_up: true
-  #     role_attribute_path: contains(groups[*], 'grafana-admin') && 'Admin' || 'Viewer'
+  # The OIDC_CLIENT_ID / OIDC_CLIENT_SECRET env vars come from
+  # the grafana-oidc Secret; grafana.ini references them via
+  # $__env{} substitution. OPERATOR FILLS <HOMELAB-DOMAIN>.
+  envFromSecrets:
+    - name: grafana-oidc
+  grafana.ini:
+    auth.generic_oauth:
+      enabled: false   # operator flips to true post-Authentik
+      name: Authentik
+      client_id: ${OIDC_CLIENT_ID}
+      client_secret: ${OIDC_CLIENT_SECRET}
+      scopes: openid profile email
+      auth_url: https://auth.lab.<HOMELAB-DOMAIN>/application/o/authorize/
+      token_url: https://auth.lab.<HOMELAB-DOMAIN>/application/o/token/
+      api_url: https://auth.lab.<HOMELAB-DOMAIN>/application/o/userinfo/
+      allow_sign_up: true
+      role_attribute_path: contains(groups[*], 'grafana-admin') && 'Admin' || 'Viewer'
 
   # Default dashboards bundled by the chart cover the cluster
   # baseline (kube-state-metrics, node-exporter, kubelet, etc.).

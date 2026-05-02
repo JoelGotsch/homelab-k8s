@@ -168,9 +168,21 @@ homelab-infra/scripts/provision-langfuse-otel-ingest-keys.sh \
    `langfuse.<HOMELAB_INTERNAL_DOMAIN>` per ADR 0024
    (Tailscale-only access). Until then, port-forward to the
    `langfuse-web` Service for UI access.
-7. **Authentik OIDC integration deferred** — Langfuse helm
-   values' `auth.oidc.*` block is not configured. Lands when
-   Authentik is up + the `langfuse` OIDC client is created.
+7. **Authentik OIDC ships dormant.** The `langfuse-oidc`
+   ExternalSecret is in place; values.yaml wires NextAuth's
+   `AUTH_CUSTOM_*` env. Until operator provisions the
+   OIDC client in Authentik, the Secret has empty fields +
+   the OIDC provider stays inactive. Activation:
+   ```sh
+   AUTHENTIK_URL=https://auth.lab.<HOMELAB-DOMAIN> \
+   AUTHENTIK_TOKEN="$(bao kv get -field=api_token kv/authentik/admin)" \
+   homelab-infra/scripts/provision-authentik-oidc-client.sh \
+       --app-name langfuse \
+       --redirect-uri \
+         "https://langfuse.lab.<HOMELAB-DOMAIN>/api/auth/callback/custom" \
+       --kv-path kv/langfuse/oidc
+   ```
+   Default email/password auth keeps working throughout.
    Until then, default email/password auth (admin user
    created via `langfuse user create` at first install).
 

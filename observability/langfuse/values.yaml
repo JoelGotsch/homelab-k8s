@@ -43,6 +43,23 @@ langfuse:
         memory: 256Mi
       limits:
         memory: 1Gi
+    # OIDC env from the langfuse-oidc Secret (ESO-projected).
+    # Operator provisions the OIDC client in Authentik via
+    # `provision-authentik-oidc-client.sh` post-bring-up;
+    # until then the Secret has empty fields + Langfuse's
+    # NextAuth provider stays inactive.
+    extraEnvFrom:
+      - secretRef:
+          name: langfuse-oidc
+    extraEnv:
+      # Tell Langfuse's NextAuth which provider to register.
+      # `custom` matches the AUTH_CUSTOM_* env vars from the
+      # langfuse-oidc Secret. The provider becomes active only
+      # when CLIENT_ID + CLIENT_SECRET are non-empty.
+      - name: AUTH_CUSTOM_NAME
+        value: "Authentik"
+      - name: AUTH_CUSTOM_SCOPE
+        value: "openid email profile"
 
   # Worker (async ingestion + eval runs) replicas + resources.
   worker:

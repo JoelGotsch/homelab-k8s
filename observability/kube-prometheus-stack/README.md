@@ -61,15 +61,33 @@ bao kv put kv/grafana/admin user="admin" password="$ADMIN_PW"
 unset ADMIN_PW
 ```
 
-When Authentik OIDC integration enables (Authentik must be
-up first):
+**Authentik OIDC** (after Authentik is up):
 
 | Path | Keys | Source |
 |---|---|---|
-| `kv/grafana/oauth/client-secret` | `value` | from Authentik provider → "Grafana" application → client secret |
+| `kv/grafana/oidc` | `client_id`, `client_secret`, `issuer` | Provisioned via `provision-authentik-oidc-client.sh` (see snippet below). |
 
-Operator un-comments the `grafana.ini.auth.generic_oauth`
-block in `values.yaml` + adds the corresponding ESO mount.
+Activation:
+
+```sh
+# Create the Grafana OIDC client in Authentik + seed OpenBao.
+AUTHENTIK_URL=https://auth.lab.<HOMELAB-DOMAIN> \
+AUTHENTIK_TOKEN="$(bao kv get -field=api_token kv/authentik/admin)" \
+homelab-infra/scripts/provision-authentik-oidc-client.sh \
+    --app-name grafana \
+    --redirect-uri \
+      "https://grafana.lab.<HOMELAB-DOMAIN>/login/generic_oauth" \
+    --scopes "openid email profile groups" \
+    --kv-path kv/grafana/oidc
+
+# Flip values.yaml's grafana.ini.auth.generic_oauth.enabled
+# from false → true; commit + push; Argo reconciles.
+```
+
+Until activation: the `grafana-oidc` ESO emits an empty
+Secret; Grafana's `auth.generic_oauth.enabled: false` keeps
+the OIDC path inert. Admin login (Grafana-native admin user)
+keeps working throughout.
 
 ## Bring-up wiring
 
