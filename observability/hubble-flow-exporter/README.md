@@ -42,6 +42,7 @@ Field selection upstream is governed by
 | `configmap.yaml` | Vector pipeline config (`vector.yaml` data key). Lives in `kube-system` so the sidecar can mount it; OWNED by this layer. |
 | `ciliumnetworkpolicy.yaml` | Loki ingress allow for `fromEntities: [host]` — needed because vanilla NetworkPolicy can't select host-network pods. |
 | `podmonitor.yaml` | Prometheus scrape of the sidecar's `:9598` self-metrics via the named `hubble-export` container port. |
+| `prometheusrule.yaml` | Buffer-fullness + event-drop + source-stall alerts. Closes the audit follow-up "no actionable threshold alert on Vector pipeline lag." |
 
 ## Bring-up wiring
 

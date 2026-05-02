@@ -19,3 +19,4 @@ resources:
   - configmap.yaml
   - ciliumnetworkpolicy.yaml
   - podmonitor.yaml
+  - prometheusrule.yaml
