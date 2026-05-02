@@ -1,0 +1,44 @@
+# Per ADR 0023 D5: ResourceQuota + LimitRange on the
+# ci-woodpecker namespace. Bounds runaway pipeline steps from
+# eating the cluster's capacity.
+#
+# Numbers tuned for homelab scale (4 concurrent workflows ×
+# 2 steps each = ~8 step Pods at once). Resize as the
+# operator's pipeline mix grows.
+
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ci-woodpecker
+  namespace: ci-woodpecker
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: "16Gi"
+    limits.cpu: "16"
+    limits.memory: "32Gi"
+    pods: "20"
+    persistentvolumeclaims: "20"
+    requests.storage: "200Gi"
+---
+# LimitRange: per-Pod defaults if a step doesn't set its own
+# resources. Forces every step to declare requests/limits
+# (or accept these defaults), preventing zero-bound steps
+# from squeezing other workloads.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: ci-woodpecker
+  namespace: ci-woodpecker
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: 500m
+        memory: 1Gi
+      defaultRequest:
+        cpu: 100m
+        memory: 256Mi
+      max:
+        cpu: "4"
+        memory: "8Gi"

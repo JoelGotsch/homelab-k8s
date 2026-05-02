@@ -1,0 +1,222 @@
+# Forgejo helm values — single-replica, external CNPG Postgres,
+# NFS-backed LFS + Packages, Authentik OIDC, Tailscale-only
+# HTTPRoute via Cilium Gateway.
+#
+# Per ADR 0023 D1 + D11 + D12 (single-replica; HA via backup,
+# not clustering; storage split across Longhorn + NFS).
+# Per ADR 0019 D1 + D7 (Forgejo Packages as artifact registry,
+# storage on NAS).
+# Per ADR 0024 (Tailscale-only ingress for source-of-truth).
+# Per identity.md (Authentik OIDC for login).
+
+# Single replica — Forgejo at this scale doesn't HA-cluster
+# cleanly (its own docs note this). Resilience comes from the
+# CNPG Postgres + Longhorn snapshot + Restic tier-3 chain.
+replicaCount: 1
+
+strategy:
+  type: Recreate
+
+image:
+  # OPERATOR PINS via Renovate.
+  tag: "10.0.0"
+  rootless: true
+  pullPolicy: IfNotPresent
+
+# Forgejo's app data (config, repos, runtime state) on
+# Longhorn — same shape as the rest of the cluster's stateful
+# workloads. Git data is cluster-replicated; NAS is for the
+# WORM-shape LFS + Packages content.
+persistence:
+  enabled: true
+  storageClass: longhorn-replica3
+  size: 100Gi
+  accessModes:
+    - ReadWriteOnce
+
+# Use the externally-managed CNPG cluster instead of the
+# bundled Postgres dependency. CNPG service exposed at
+# forgejo-pg-rw.forgejo.svc:5432 per cnpg-cluster.yaml.
+postgresql:
+  enabled: false
+postgresql-ha:
+  enabled: false
+
+# Disable bundled Redis — Forgejo single-replica without HA
+# can run without Redis cache (uses in-process). Re-enable if
+# session count / queue depth surface as a bottleneck.
+redis:
+  enabled: false
+redis-cluster:
+  enabled: false
+
+# Service: ClusterIP only. Cilium Gateway HTTPRoute exposes
+# externally; no LoadBalancer needed at the Service level.
+service:
+  http:
+    type: ClusterIP
+    port: 3000
+  ssh:
+    type: ClusterIP
+    port: 22
+    # SSH-over-Tailscale: operator clones via Tailscale's
+    # tailnet IP; we don't expose SSH publicly. The cluster
+    # Gateway is HTTP/HTTPS only; SSH egress to Forgejo's
+    # cluster IP is via Tailscale-routed traffic landing on
+    # the Gateway-LB IP for HTTPS, and a separate Service
+    # for SSH. Operator can also use HTTPS git push instead
+    # of SSH — both work.
+
+# OPERATOR FILLS <HOMELAB-DOMAIN>. Forgejo's full URLs in
+# emails, OAuth callbacks, and the UI's clone URLs derive
+# from this.
+gitea:
+  admin:
+    existingSecret: forgejo-admin
+    email: "<FORGEJO_ADMIN_EMAIL>"
+    username: forgejo-admin
+
+  # Mount external CNPG Postgres + ESO-projected security keys.
+  database:
+    builtIn:
+      postgresql:
+        enabled: false
+
+  config:
+    APP_NAME: "Forgejo — homelab"
+    RUN_MODE: prod
+
+    server:
+      DOMAIN: "forgejo.lab.<HOMELAB-DOMAIN>"
+      ROOT_URL: "https://forgejo.lab.<HOMELAB-DOMAIN>/"
+      HTTP_PORT: "3000"
+      SSH_DOMAIN: "forgejo.lab.<HOMELAB-DOMAIN>"
+      SSH_PORT: "22"
+      DISABLE_SSH: "false"
+      START_SSH_SERVER: "true"
+      LFS_START_SERVER: "true"
+      OFFLINE_MODE: "true"   # don't fetch external Gravatars
+
+    database:
+      DB_TYPE: postgres
+      HOST: forgejo-pg-rw.forgejo.svc.cluster.local:5432
+      NAME: forgejo
+      USER: forgejo
+      # Password injected via security.envFrom Secret reference
+      # (forgejo-postgres-creds → DB_PASSWD env var below).
+      LOG_SQL: "false"
+
+    log:
+      MODE: console
+      LEVEL: info
+      ROUTER: console
+      ENABLE_ACCESS_LOG: "true"
+      ACCESS_LOG_TEMPLATE: '{"time":"{{.Ctx.Request.Time}}","method":"{{.Ctx.Request.Method}}","url":"{{.Ctx.Request.URL.RequestURI}}","status":{{.ResponseWriter.Status}},"size":{{.ResponseWriter.Size}}}'
+
+    service:
+      DISABLE_REGISTRATION: "true"
+      ALLOW_ONLY_INTERNAL_REGISTRATION: "false"
+      REQUIRE_SIGNIN_VIEW: "true"
+      ENABLE_NOTIFY_MAIL: "false"
+
+    # OIDC via Authentik per identity.md.
+    # Forgejo discovers OAuth2 clients from the database;
+    # operator configures via the admin UI on first login,
+    # or via CLI: `forgejo admin auth add-oauth ...`.
+    # The client_id + client_secret live at kv/forgejo/oidc
+    # (ESO-projected).
+
+    # LFS storage on NFS-backed PVC mounted at /data/lfs.
+    lfs:
+      STORAGE_TYPE: local
+      PATH: /data/lfs
+
+    # Packages storage on NFS-backed PVC mounted at /data/packages.
+    packages:
+      STORAGE_TYPE: local
+      PATH: /data/packages
+      ENABLED: "true"
+
+    # Disable mail — operator-internal forge; notifications
+    # via Forgejo UI + future Woodpecker → Signal bridge.
+    mailer:
+      ENABLED: "false"
+
+    # Disable webhooks-to-external by default; Woodpecker is
+    # the only consumer at first install, lives in-cluster.
+    webhook:
+      ALLOWED_HOST_LIST: "private,external"
+
+    # Cron for routine maintenance tasks. Forgejo's bundled
+    # crons (repo health, archive cleanup, etc.) run with
+    # operator-tunable schedules.
+    cron:
+      ENABLED: "true"
+
+  # Mount the LFS + Packages NFS PVCs at the paths above.
+  additionalVolumes:
+    - name: lfs
+      persistentVolumeClaim:
+        claimName: forgejo-lfs
+    - name: packages
+      persistentVolumeClaim:
+        claimName: forgejo-packages
+
+  additionalVolumeMounts:
+    - name: lfs
+      mountPath: /data/lfs
+    - name: packages
+      mountPath: /data/packages
+
+# Forgejo uses INI keys from env vars: FORGEJO__<section>__<KEY>.
+# We project security-keys + DB_PASSWD via envFrom on the
+# main container.
+extraEnvVars:
+  - name: FORGEJO__database__PASSWD
+    valueFrom:
+      secretKeyRef:
+        name: forgejo-postgres-creds
+        key: password
+  - name: FORGEJO__security__SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: forgejo-security-keys
+        key: secret_key
+  - name: FORGEJO__security__INTERNAL_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: forgejo-security-keys
+        key: internal_token
+  - name: FORGEJO__oauth2__JWT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: forgejo-security-keys
+        key: jwt_secret
+  - name: FORGEJO__server__LFS_JWT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: forgejo-security-keys
+        key: lfs_jwt_secret
+
+# Pod-level security: non-root, readOnlyRootFilesystem true
+# (Forgejo writes only to mounted volumes), drop all caps.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    memory: 2Gi

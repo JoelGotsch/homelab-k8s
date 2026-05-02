@@ -1,0 +1,144 @@
+# Woodpecker CI helm values — server + agent (Kubernetes
+# backend). Per ADR 0023 D2 + D5 + D6 + D8.
+#
+# Server: receives Forgejo webhooks, schedules pipelines,
+# delegates step execution to the agent.
+# Agent: runs in cluster; for each pipeline step, spawns a
+# Pod in the ci-woodpecker namespace using the configured
+# ServiceAccount + RBAC (NOT in the woodpecker ns — keep
+# control plane and step Pods isolated).
+# Step Pod: ephemeral, runs the step's container image,
+# read-only rootfs, non-root, dropped caps. Lifecycle
+# managed by the agent via kube-API.
+
+server:
+  enabled: true
+
+  image:
+    # OPERATOR PINS via Renovate.
+    tag: "v3.4.0"
+    pullPolicy: IfNotPresent
+
+  env:
+    WOODPECKER_HOST: "https://woodpecker.lab.<HOMELAB-DOMAIN>"
+    WOODPECKER_OPEN: "false"  # closed registration; OAuth required
+    WOODPECKER_ADMIN: "<operator-username>"
+    # Forgejo integration (the only forge driver enabled).
+    WOODPECKER_FORGEJO: "true"
+    WOODPECKER_FORGEJO_URL: "https://forgejo.lab.<HOMELAB-DOMAIN>"
+    # OAuth client_id + secret come from the ExternalSecret
+    # (woodpecker-oauth) via envFrom below.
+    WOODPECKER_LOG_LEVEL: "info"
+    # JSON logs for Loki ingestion per ADR 0021.
+    WOODPECKER_LOG_FORMAT: "json"
+    # Disable webhooks-to-public; Forgejo + Woodpecker are
+    # in-cluster.
+    WOODPECKER_WEBHOOK_HOST: "https://woodpecker.lab.<HOMELAB-DOMAIN>"
+    # Database: SQLite on Longhorn for the server's job state.
+    # Forgejo's CNPG handles the source-of-truth metadata;
+    # Woodpecker's DB is just pipeline-execution state — recovery
+    # via Longhorn snapshot + Restic tier-3 is sufficient.
+    WOODPECKER_DATABASE_DRIVER: "sqlite3"
+    WOODPECKER_DATABASE_DATASOURCE: "/var/lib/woodpecker/woodpecker.db"
+
+  envFrom:
+    - secretRef:
+        name: woodpecker-agent-secret
+    - secretRef:
+        name: woodpecker-oauth
+
+  persistentVolume:
+    enabled: true
+    storageClass: longhorn-replica2
+    size: 10Gi
+    accessModes:
+      - ReadWriteOnce
+
+  service:
+    type: ClusterIP
+    port: 80
+    grpcPort: 9000
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+
+agent:
+  enabled: true
+
+  image:
+    tag: "v3.4.0"
+    pullPolicy: IfNotPresent
+
+  # One agent replica is fine at homelab scale (concurrency
+  # bound is below).
+  replicaCount: 1
+
+  env:
+    WOODPECKER_SERVER: "woodpecker-server.woodpecker.svc.cluster.local:9000"
+    # Step pods spawn HERE (not in the woodpecker ns).
+    WOODPECKER_BACKEND: "kubernetes"
+    WOODPECKER_BACKEND_K8S_NAMESPACE: "ci-woodpecker"
+    # Pin the ServiceAccount that step pods run as. The agent
+    # uses its own SA (kube-API to create/delete pods); step
+    # pods use the ci-woodpecker SA below (no kube-API access).
+    WOODPECKER_BACKEND_K8S_POD_LABELS: ""
+    WOODPECKER_BACKEND_K8S_POD_ANNOTATIONS: ""
+    # Default storage class for any step volumes (clone, cache).
+    WOODPECKER_BACKEND_K8S_STORAGE_CLASS: "longhorn-replica2"
+    WOODPECKER_BACKEND_K8S_VOLUME_SIZE: "10G"
+    WOODPECKER_BACKEND_K8S_STORAGE_RWX: "false"
+    # Step pod security defaults — restricted PSA.
+    WOODPECKER_BACKEND_K8S_POD_NODE_SELECTOR: ""
+    WOODPECKER_BACKEND_K8S_SECCTX_NONROOT: "true"
+    # How many pipeline steps the agent runs in parallel.
+    # Bound to keep node pressure manageable at homelab scale.
+    WOODPECKER_MAX_WORKFLOWS: "4"
+    WOODPECKER_LOG_LEVEL: "info"
+    WOODPECKER_LOG_FORMAT: "json"
+
+  envFrom:
+    - secretRef:
+        name: woodpecker-agent-secret
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+
+  serviceAccount:
+    create: true
+    name: woodpecker-agent

@@ -1,0 +1,26 @@
+# Two namespaces:
+#
+# - `woodpecker`: server + agent (the CI control plane).
+# - `ci-woodpecker`: where step Pods spawn for each pipeline
+#   step. Per ADR 0023 D5: separate ns + ResourceQuota +
+#   LimitRange + restrictive NetworkPolicy + ServiceAccount
+#   with no kube-API access.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: woodpecker
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ci-woodpecker
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    # Tag for Cilium policies that match traffic from the
+    # CI ns specifically.
+    layer: ci

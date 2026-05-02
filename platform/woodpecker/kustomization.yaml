@@ -1,0 +1,29 @@
+# Woodpecker CI — server + agent + step-Pod runner namespace.
+# Per ADR 0023 D2 + D5 + D6 + D8 + D9.
+#
+# Helm chart: woodpeckerci/woodpecker.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# NOTE: namespace: not set globally because resources span
+# `woodpecker` and `ci-woodpecker` namespaces. Each manifest
+# declares its own metadata.namespace.
+
+helmCharts:
+  - name: woodpecker
+    repo: https://woodpecker-ci.org/
+    version: "3.4.0"  # OPERATOR PINS via Renovate
+    releaseName: woodpecker
+    namespace: woodpecker
+    valuesFile: values.yaml
+    includeCRDs: true
+
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - quota.yaml
+  - externalsecret.yaml
+  - httproute.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml

@@ -1,0 +1,135 @@
+# NetworkPolicies for the Forgejo layer.
+#
+# - Forgejo ingress: Cilium Gateway envoy (HTTPRoute) +
+#   Prometheus scrape + in-cluster consumers (Woodpecker
+#   server + agent for OAuth + git-fetch, Renovate for API).
+# - Forgejo egress: kube-DNS + CNPG Postgres (same ns) +
+#   OpenBao (for ESO-managed secrets) + NFS server (NAS) +
+#   Authentik (OIDC discovery + token validation).
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: forgejo
+  namespace: forgejo
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: forgejo
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Cilium Gateway envoy — HTTP(S) ingress for the UI.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+      ports:
+        - port: 3000
+          protocol: TCP
+        - port: 22
+          protocol: TCP
+    # Prometheus scrape.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 3000
+          protocol: TCP
+    # Woodpecker server + agent (OAuth + git-fetch).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: woodpecker
+      ports:
+        - port: 3000
+          protocol: TCP
+        - port: 22
+          protocol: TCP
+    # Woodpecker CI runner pods clone repos via HTTP.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ci-woodpecker
+      ports:
+        - port: 3000
+          protocol: TCP
+    # Renovate runner — autodiscover + PR creation.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: renovate
+      ports:
+        - port: 3000
+          protocol: TCP
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # CNPG Postgres (same ns).
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: forgejo-pg
+      ports:
+        - port: 5432
+          protocol: TCP
+    # OpenBao for ESO secret refreshes (ESO operator runs in
+    # external-secrets ns; the actual fetch is from the
+    # operator pod, not Forgejo's pod — but allow Forgejo
+    # to reach OpenBao directly in case of operator-debug
+    # `bao` use from inside the pod).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openbao
+      ports:
+        - port: 8200
+          protocol: TCP
+    # Authentik OIDC discovery + token endpoint.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: authentik
+      ports:
+        - port: 9000
+          protocol: TCP
+        - port: 9443
+          protocol: TCP
+---
+# CCNP for NAS NFS egress — vanilla NetworkPolicy can't
+# match traffic to off-cluster IPs by hostname; use Cilium's
+# toCIDR (NAS IP is operator-fillable) for L4 allow.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: forgejo-nfs-egress
+  namespace: forgejo
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: forgejo
+  egress:
+    # NAS NFS — operator fills <NAS-IP>. Same pattern as
+    # infrastructure/minio-on-nas/ for off-cluster NFS targets.
+    - toCIDR:
+        - "<NAS-IP>/32"
+      toPorts:
+        - ports:
+            - port: "2049"
+              protocol: TCP
+            - port: "111"
+              protocol: TCP

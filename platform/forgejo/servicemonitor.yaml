@@ -1,0 +1,23 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: forgejo
+  namespace: forgejo
+  labels:
+    app.kubernetes.io/name: forgejo
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: forgejo
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 60s
+      # Forgejo's /metrics requires a token (set via
+      # FORGEJO__metrics__TOKEN). For homelab single-tenant
+      # cluster with NetworkPolicy gating ingress to
+      # Prometheus only, the token check is redundant; we
+      # leave metrics unauthenticated by NOT setting the
+      # token in values.yaml. NetworkPolicy is the gate.
+      honorLabels: false

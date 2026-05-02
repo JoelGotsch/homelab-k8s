@@ -1,0 +1,67 @@
+# CNPG Postgres cluster for Forgejo. Per ADR 0023 D1 (Forgejo
+# is the source of truth) + the cluster's standard CNPG
+# pattern (langfuse, llm-gateway, crowdsec all use this shape).
+#
+# Forgejo's helm chart can deploy a bundled Postgres dependency,
+# but routing through CNPG gives us:
+# - Continuous WAL backup → MinIO-on-NAS (consistent with the
+#   rest of the cluster's backup story per ADR 0006).
+# - Restic CronJob mirrors WAL+base to tier-2/3 per
+#   backup-and-dr.md.
+# - Same operator-runbook surface as every other CNPG-using
+#   service (no Forgejo-specific Postgres ops).
+#
+# Service exposed: forgejo-pg-rw.forgejo.svc:5432.
+# Forgejo helm values point at this DSN through the
+# forgejo-postgres-creds Secret.
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: forgejo-pg
+  namespace: forgejo
+spec:
+  instances: 2
+
+  storage:
+    # Forgejo's data churn is bounded — git data lives on
+    # Longhorn (handled by the helm chart's PVC); only relational
+    # metadata (users, issues, PRs, hooks) goes through Postgres.
+    # 10Gi is generous at homelab scale; expand later if needed.
+    size: 10Gi
+    storageClass: longhorn-replica3
+
+  monitoring:
+    enablePodMonitor: true
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+      shared_buffers: "128MB"
+
+  bootstrap:
+    initdb:
+      database: forgejo
+      owner: forgejo
+
+  # Backup: WAL+base to MinIO-on-NAS. Restic CronJob mirrors
+  # to tier-2/3 per ADR 0006. Forgejo metadata is internal-class
+  # data per ADR 0003 (issue text + commit metadata, not
+  # secret); backup-encrypt via barmanObjectStore + restic-tier-3
+  # password.
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://homelab-backups-cluster/cnpg/forgejo
+      endpointURL: http://minio.minio.svc.cluster.local:9000
+      s3Credentials:
+        accessKeyId:
+          name: forgejo-cnpg-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: forgejo-cnpg-s3
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: bzip2
+      data:
+        compression: bzip2
+    retentionPolicy: "30d"

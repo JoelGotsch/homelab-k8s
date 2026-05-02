@@ -1,0 +1,57 @@
+# RBAC for the woodpecker-agent + ci-woodpecker step pods.
+# Per ADR 0023 D5 (separate ns + restrictive RBAC) + D6 (pod-
+# per-step isolation).
+#
+# Two ServiceAccounts:
+# - woodpecker-agent (in `woodpecker` ns): the agent uses this
+#   to call kube-API and create/delete step Pods in the
+#   ci-woodpecker namespace. Cross-namespace pod management
+#   needs an explicit Role + RoleBinding in the target ns.
+# - ci-woodpecker-runner (in `ci-woodpecker` ns): step Pods
+#   run as this. NO kube-API permissions — step containers
+#   can't introspect the cluster, can't read Secrets they
+#   weren't injected, can't list other step Pods.
+
+# Role for the agent to manage step Pods (and supporting
+# resources) in ci-woodpecker.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: woodpecker-step-pod-manager
+  namespace: ci-woodpecker
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/exec"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: woodpecker-agent-step-pod-manager
+  namespace: ci-woodpecker
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: woodpecker-step-pod-manager
+subjects:
+  - kind: ServiceAccount
+    name: woodpecker-agent
+    namespace: woodpecker
+---
+# Step-pod ServiceAccount in ci-woodpecker. NO RBAC bindings
+# below — step Pods can't talk to kube-API.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ci-woodpecker-runner
+  namespace: ci-woodpecker
+automountServiceAccountToken: false

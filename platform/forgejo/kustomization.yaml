@@ -1,0 +1,29 @@
+# Forgejo — self-hosted forge, source of truth per ADR 0023.
+# Single-replica Forgejo + external CNPG Postgres + NFS-backed
+# LFS + Packages, Authentik OIDC, Tailscale-only HTTPRoute.
+#
+# Helm chart: code.forgejo.org/forgejo-helm/forgejo (OCI).
+# Per ADR 0023 D1 + D11 + D12; ADR 0019 D1 + D7; ADR 0024 D4.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: forgejo
+
+helmCharts:
+  - name: forgejo
+    repo: oci://code.forgejo.org/forgejo-helm
+    version: "10.0.0"  # OPERATOR PINS via Renovate
+    releaseName: forgejo
+    namespace: forgejo
+    valuesFile: values.yaml
+    includeCRDs: true
+
+resources:
+  - namespace.yaml
+  - cnpg-cluster.yaml
+  - nfs-pv.yaml
+  - externalsecret.yaml
+  - httproute.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml

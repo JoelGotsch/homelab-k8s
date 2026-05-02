@@ -1,0 +1,205 @@
+# NetworkPolicies for Woodpecker server + agent + step Pods.
+# Per ADR 0023 D5.
+
+# Server: ingress from Cilium Gateway (UI) + Forgejo
+# (webhooks). Egress: kube-DNS + Forgejo + agent grpc.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: woodpecker-server
+  namespace: woodpecker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: woodpecker
+      app.kubernetes.io/component: server
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress
+      ports:
+        - port: 8000
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: forgejo
+      ports:
+        - port: 8000
+          protocol: TCP
+        - port: 9000
+          protocol: TCP
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: woodpecker
+              app.kubernetes.io/component: agent
+      ports:
+        - port: 9000
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Forgejo for OAuth + git metadata.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: forgejo
+      ports:
+        - port: 3000
+          protocol: TCP
+---
+# Agent: ingress only from server (grpc). Egress: kube-DNS +
+# server + kube-API (to manage step Pods in ci-woodpecker).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: woodpecker-agent
+  namespace: woodpecker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: woodpecker
+      app.kubernetes.io/component: agent
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: woodpecker
+              app.kubernetes.io/component: server
+      ports:
+        - port: 9000
+          protocol: TCP
+    # kube-API — agent talks to it to create/delete step pods.
+    # No `to:` selector matches kube-API directly in vanilla
+    # NetworkPolicy; this rule allows TCP/443 to ANY destination
+    # within the cluster. Combined with default-deny on this ns,
+    # the only realistic 443-egress targets are kube-API +
+    # cluster-internal pods. NO external 443 reachable (no
+    # 0.0.0.0/0 escape).
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+---
+# CI step Pods (ci-woodpecker ns): default-deny ingress;
+# egress to kube-DNS + Forgejo (git clone) + curated
+# upstream registries (CCNP toFQDNs).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ci-woodpecker-default
+  namespace: ci-woodpecker
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Forgejo for git-clone (HTTPS) + Forgejo Packages push.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: forgejo
+      ports:
+        - port: 3000
+          protocol: TCP
+---
+# CCNP for ci-woodpecker step Pods: FQDN-based egress to
+# upstream package registries. Same shape as the renovate
+# layer's CCNP — operator extends the toFQDNs list when a
+# pipeline references an unlisted registry.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: ci-woodpecker-egress-fqdn
+  namespace: ci-woodpecker
+spec:
+  endpointSelector: {}
+  egress:
+    # kube-DNS — Cilium needs to see the DNS query to
+    # populate its FQDN→IP cache for the toFQDNs rules below.
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # Common registries CI step pods consult.
+    - toFQDNs:
+        # Container registries
+        - matchName: "registry-1.docker.io"
+        - matchName: "auth.docker.io"
+        - matchName: "production.cloudflare.docker.com"
+        - matchName: "ghcr.io"
+        - matchName: "pkg-containers.githubusercontent.com"
+        - matchName: "registry.k8s.io"
+        - matchName: "quay.io"
+        - matchName: "cdn03.quay.io"
+        - matchName: "gcr.io"
+        # Language-package registries
+        - matchName: "pypi.org"
+        - matchName: "files.pythonhosted.org"
+        - matchName: "registry.npmjs.org"
+        # GitHub (release archives, source for github-tags
+        # / github-releases datasources, git+https deps)
+        - matchName: "api.github.com"
+        - matchName: "objects.githubusercontent.com"
+        - matchName: "codeload.github.com"
+        - matchName: "github.com"
+        - matchName: "raw.githubusercontent.com"
+        # OS package mirrors (apt/apk during image build).
+        # Operator extends per pipeline image base (Alpine,
+        # Debian, etc.).
+        - matchName: "deb.debian.org"
+        - matchName: "security.debian.org"
+        - matchName: "dl-cdn.alpinelinux.org"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "80"
+              protocol: TCP

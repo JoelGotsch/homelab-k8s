@@ -1,0 +1,104 @@
+# Static PVs for Forgejo LFS objects + Forgejo Packages
+# (artifact registry per ADR 0019). Both backed by NAS NFS
+# shares per ADR 0019 D7 + ADR 0023 D12.
+#
+# Static binding (storageClassName: "") rather than dynamic
+# provisioning so the NFS path stays stable across re-deploys —
+# operator can `mount -t nfs` the same path during recovery
+# without consulting kube-apiserver for a per-PV uuid.
+# Same shape as infrastructure/minio-on-nas/pv.yaml.
+#
+# OPERATOR FILLS:
+#   <NAS-IP>             — matches nas_storage_ip in
+#                          homelab-infra/group_vars/cluster.yml
+#   <NAS_LFS_SHARE>      — Synology share path for LFS,
+#                          e.g., /volume1/forgejo-lfs
+#   <NAS_PACKAGES_SHARE> — Synology share path for Packages,
+#                          e.g., /volume1/forgejo-packages
+#
+# Pre-req: both directories exist on the NAS and are exported
+# by their respective shares (per nas/initial-setup.md).
+# The k8s-nfs DSM account has rw on both shares.
+#
+# Capacity: 200Gi each is a soft hint; actual limit is the
+# share's free space. LFS grows with binary-blob commits;
+# Packages grows with image+pyPI+helm artifacts pushed by CI.
+# Resize PV (capacity-only edit allowed) when usage approaches.
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: forgejo-lfs
+  labels:
+    app.kubernetes.io/name: forgejo
+    app.kubernetes.io/component: lfs
+spec:
+  capacity:
+    storage: 200Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  csi:
+    driver: nfs.csi.k8s.io
+    volumeHandle: forgejo-lfs
+    volumeAttributes:
+      server: <NAS-IP>
+      share: <NAS_LFS_SHARE>
+  mountOptions:
+    - nfsvers=4.1
+    - hard
+    - nconnect=8
+    - rsize=131072
+    - wsize=131072
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: forgejo-lfs
+  namespace: forgejo
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 200Gi
+  volumeName: forgejo-lfs
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: forgejo-packages
+  labels:
+    app.kubernetes.io/name: forgejo
+    app.kubernetes.io/component: packages
+spec:
+  capacity:
+    storage: 200Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  csi:
+    driver: nfs.csi.k8s.io
+    volumeHandle: forgejo-packages
+    volumeAttributes:
+      server: <NAS-IP>
+      share: <NAS_PACKAGES_SHARE>
+  mountOptions:
+    - nfsvers=4.1
+    - hard
+    - nconnect=8
+    - rsize=131072
+    - wsize=131072
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: forgejo-packages
+  namespace: forgejo
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 200Gi
+  volumeName: forgejo-packages
