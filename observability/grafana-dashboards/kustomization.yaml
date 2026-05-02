@@ -1,0 +1,30 @@
+# Operator-authored Grafana dashboards. Per ADR 0021 D7 +
+# the kube-prometheus-stack values.yaml comment block:
+#
+#   "Operator-authored dashboards live in
+#    observability/grafana/dashboards/ as ConfigMaps with the
+#    chart's sidecar discovery label `grafana_dashboard: \"1\"`."
+#
+# This layer ships ConfigMaps only. Grafana itself is in
+# observability/kube-prometheus-stack/; its bundled
+# dashboard-sidecar (kiwigrid/k8s-sidecar) watches for
+# ConfigMaps with `grafana_dashboard: "1"` cluster-wide and
+# imports them into the running Grafana via its HTTP API.
+#
+# Convention: each dashboard is a single ConfigMap named after
+# the dashboard slug, with the JSON model in a single data key
+# (`<slug>.json`). The `grafana_dashboard: "1"` label on the
+# ConfigMap is the discovery contract; the slug filename is
+# how Grafana threads the dashboard's `uid` and folder.
+#
+# Folder routing: the chart's sidecar honors a `grafana_folder`
+# annotation if present (see chart docs); we route both starter
+# dashboards to the "Homelab" folder so they don't intermix
+# with chart-default ones.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - cluster-overview.yaml
+  - llm-gateway.yaml

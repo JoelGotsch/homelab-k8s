@@ -1,0 +1,271 @@
+# LLM gateway deep-dive — single-page dashboard for the
+# LiteLLM proxy at apps/llm-gateway/. Per ADR 0007 + ADR 0026.
+#
+# LiteLLM's prometheus_callback exposes a stable set of
+# metrics we lean on here:
+#   litellm_requests_metric{model,team,end_user,...}
+#   litellm_total_tokens{model,team,...}
+#   litellm_input_tokens{model,team,...}
+#   litellm_output_tokens{model,team,...}
+#   litellm_request_total_latency_metric{model,...}  (Histogram)
+#   litellm_proxy_failed_requests_metric{model,exception_class,...}
+#
+# Tag rejections happen in our llm-gateway pre_call hook
+# (llm-gateway/llm_gateway/hooks/pre_call.py) via
+# log.warning("rejected_by_tag" / "rejected_by_secrets_scan" /
+# "rejected_by_mcp_tag"). These are structured-log events; the
+# Loki panel below counts them by parsing the structured log
+# stream from the llm-gateway namespace. Once the hook exposes
+# Prometheus counters directly (TODO line in llm-gateway
+# repo), swap the Loki query for the counter.
+#
+# Panels (8):
+#   1. Requests/s by model (timeseries)
+#   2. Token throughput input vs output (timeseries, stacked)
+#   3. Latency p50/p95/p99 by model (timeseries)
+#   4. Tag rejections over time (Loki — until counters land)
+#   5. Per-team request counts top 5 (bar gauge) — team =
+#      virtual-key team label set per consumer
+#   6. Failed requests by exception class (timeseries)
+#   7. Tokens by tag (data classification) (bar gauge)
+#   8. Active models (stat)
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-llm-gateway
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/name: grafana-dashboards
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: observability
+  annotations:
+    grafana_folder: "Homelab"
+data:
+  llm-gateway.json: |
+    {
+      "uid": "homelab-llm-gateway",
+      "title": "Homelab — LLM gateway",
+      "tags": ["homelab", "llm-gateway", "litellm"],
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-6h", "to": "now" },
+      "timepicker": {},
+      "timezone": "browser",
+      "editable": true,
+      "graphTooltip": 1,
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "Active models (last 1h)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+            "colorMode": "value",
+            "graphMode": "none"
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "count(count by (model) (rate(litellm_requests_metric[1h]) > 0))"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Requests / s (cluster-wide)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+            "colorMode": "value",
+            "graphMode": "area"
+          },
+          "fieldConfig": { "defaults": { "unit": "reqps" } },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(litellm_requests_metric[5m]))"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Tokens / s in",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+            "colorMode": "value",
+            "graphMode": "area"
+          },
+          "fieldConfig": { "defaults": { "unit": "short" } },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(litellm_input_tokens[5m]))"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Tokens / s out",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+            "colorMode": "value",
+            "graphMode": "area"
+          },
+          "fieldConfig": { "defaults": { "unit": "short" } },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(litellm_output_tokens[5m]))"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Requests / s by model",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "stacking": { "mode": "none" } }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "legendFormat": "{{model}}",
+              "expr": "sum by (model) (rate(litellm_requests_metric[5m]))"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Token throughput (in vs out, stacked)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "custom": { "drawStyle": "line", "fillOpacity": 30, "lineWidth": 1, "stacking": { "mode": "normal" } }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "legendFormat": "input {{model}}",
+              "expr": "sum by (model) (rate(litellm_input_tokens[5m]))"
+            },
+            {
+              "refId": "B",
+              "legendFormat": "output {{model}}",
+              "expr": "sum by (model) (rate(litellm_output_tokens[5m]))"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "Latency p50 / p95 / p99 by model",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": { "drawStyle": "line", "fillOpacity": 0, "lineWidth": 1 }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "legendFormat": "p50 {{model}}",
+              "expr": "histogram_quantile(0.50, sum by (model, le) (rate(litellm_request_total_latency_metric_bucket[5m])))"
+            },
+            {
+              "refId": "B",
+              "legendFormat": "p95 {{model}}",
+              "expr": "histogram_quantile(0.95, sum by (model, le) (rate(litellm_request_total_latency_metric_bucket[5m])))"
+            },
+            {
+              "refId": "C",
+              "legendFormat": "p99 {{model}}",
+              "expr": "histogram_quantile(0.99, sum by (model, le) (rate(litellm_request_total_latency_metric_bucket[5m])))"
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "Failed requests by exception class",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "custom": { "drawStyle": "line", "fillOpacity": 20, "lineWidth": 1 }
+            }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "legendFormat": "{{exception_class}} {{model}}",
+              "expr": "sum by (exception_class, model) (rate(litellm_proxy_failed_requests_metric[5m]))"
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "type": "bargauge",
+          "title": "Per-team request counts (top 5, last 1h)",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+          "options": {
+            "orientation": "horizontal",
+            "displayMode": "gradient",
+            "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "legendFormat": "{{team}}",
+              "expr": "topk(5, sum by (team) (increase(litellm_requests_metric[1h])))"
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "type": "logs",
+          "title": "Tag rejections (rejected_by_tag / rejected_by_secrets_scan)",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+          "options": {
+            "showTime": true,
+            "wrapLogMessage": true,
+            "dedupStrategy": "none",
+            "enableLogDetails": true
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "{namespace=\"llm-gateway\"} |~ \"rejected_by_(tag|secrets_scan|mcp_tag)\""
+            }
+          ]
+        }
+      ],
+      "templating": { "list": [] },
+      "annotations": { "list": [] }
+    }
