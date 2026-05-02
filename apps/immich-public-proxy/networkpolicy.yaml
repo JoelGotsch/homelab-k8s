@@ -1,0 +1,68 @@
+# NetworkPolicies for immich-public-proxy.
+#
+# Ingress: ONLY cloudflare-tunnel (the public entry point) +
+# Prometheus scrape if/when the upstream image exposes metrics
+# (it doesn't today; placeholder block kept commented).
+#
+# Egress: kube-DNS + the immich namespace's server Service.
+# Nothing else — the proxy is creds-free and doesn't reach
+# external services on its own.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: immich-public-proxy
+  namespace: immich-public-proxy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: immich-public-proxy
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # cloudflare-tunnel is the only ingress source. The proxy
+    # is intentionally NOT exposed via Cilium Gateway / HTTPRoute
+    # (operator + family use Immich directly via Tailscale).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cloudflare-tunnel
+      ports:
+        - port: 3000
+          protocol: TCP
+    # If alangrainger/immich-public-proxy adds a metrics endpoint
+    # in a future release, uncomment + add a ServiceMonitor.
+    # - from:
+    #     - namespaceSelector:
+    #         matchLabels:
+    #           kubernetes.io/metadata.name: monitoring
+    #       podSelector:
+    #         matchLabels:
+    #           app.kubernetes.io/name: prometheus
+    #   ports:
+    #     - port: 3000
+    #       protocol: TCP
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Upstream Immich server (cluster-internal).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: immich
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: immich-server
+      ports:
+        - port: 2283
+          protocol: TCP

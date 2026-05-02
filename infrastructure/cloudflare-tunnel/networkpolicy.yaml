@@ -82,6 +82,13 @@ spec:
       ports:
         - port: 8096
           protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: immich-public-proxy
+      ports:
+        - port: 3000
+          protocol: TCP
     # When new tunnel-routed services land:
     #  1. Add an `ingress:` rule in configmap.yaml
     #  2. Add an egress rule here matching the upstream ns + port

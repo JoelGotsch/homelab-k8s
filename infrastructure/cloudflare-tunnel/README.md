@@ -79,6 +79,7 @@ CNAMEs for each hostname routed by the tunnel:
 |---|---|---|---|
 | `vaultwarden` | CNAME | `${TUNNEL_UUID}.cfargotunnel.com` | Proxied (orange cloud) |
 | `jellyfin` | CNAME | `${TUNNEL_UUID}.cfargotunnel.com` | Proxied (orange cloud) |
+| `photos` | CNAME | `${TUNNEL_UUID}.cfargotunnel.com` | Proxied (orange cloud) |
 | `ntfy` (when added) | CNAME | `${TUNNEL_UUID}.cfargotunnel.com` | Proxied (orange cloud) |
 
 **Proxied = orange cloud** — required for tunnel routing.
@@ -121,7 +122,7 @@ curl -I https://vaultwarden.<HOMELAB-DOMAIN>
 | Operator runs step 4 | DNS records routing hostnames to the tunnel. |
 | Argo sync `infrastructure/external-secrets/` + `platform/openbao/` | ESO can pull the credentials Secret. |
 | Argo sync this layer | cloudflared Deployment Ready (2 replicas connected to Cloudflare edge). |
-| Argo sync `apps/vaultwarden/` + `apps/jellyfin/` | Upstream Services that the tunnel routes to come up. |
+| Argo sync `apps/vaultwarden/` + `apps/jellyfin/` + `apps/immich-public-proxy/` | Upstream Services that the tunnel routes to come up. |
 | Operator validates per step 6 above | Public ingress confirmed working. |
 
 ## Adding a new tunnel-routed service
@@ -194,6 +195,8 @@ curl -I https://vaultwarden.<HOMELAB-DOMAIN>
 - [`apps/vaultwarden/`](../../apps/vaultwarden/) — first
   Phase-2 consumer.
 - [`apps/jellyfin/`](../../apps/jellyfin/) — second.
+- [`apps/immich-public-proxy/`](../../apps/immich-public-proxy/)
+  — third; read-only `/share/*` surface for Immich albums.
 - [03-runbooks/network/cloudflare-tunnel-to-dns-failover.md](../../../homelab-docs/03-runbooks/network/cloudflare-tunnel-to-dns-failover.md)
   — failover when tunnel fails.
 - [04-guides/known-caveats.md §Cloudflare Tunnel](../../../homelab-docs/04-guides/known-caveats.md)

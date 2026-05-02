@@ -70,6 +70,14 @@ data:
       # - hostname: ntfy.<HOMELAB-DOMAIN>
       #   service: http://ntfy-e2ee-relay.ntfy-e2ee-relay.svc.cluster.local:80
 
+      # ─── immich-public-proxy ──────────────────────────
+      # Read-only public surface for Immich share links.
+      # Per ADR 0024 D1; the proxy holds no creds and walks
+      # only /share/* — Immich's admin UI / API stays
+      # Tailscale-only. See apps/immich-public-proxy/.
+      - hostname: photos.<HOMELAB-DOMAIN>
+        service: http://immich-public-proxy.immich-public-proxy.svc.cluster.local:3000
+
       # ─── Catch-all (required) ─────────────────────────
       # cloudflared rejects requests for un-mapped
       # hostnames with HTTP 404. Required as the LAST rule.

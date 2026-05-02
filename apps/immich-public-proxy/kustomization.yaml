@@ -1,0 +1,21 @@
+# immich-public-proxy — read-only public sharing surface for
+# Immich. Per ADR 0024 D1 (Cloudflare Tunnel for narrowly-
+# scoped E2EE / public-shareable services). The proxy itself
+# holds no credentials and stores no state; it accepts only
+# /share/* URLs and forwards to the cluster-internal Immich
+# Service.
+#
+# No helm chart — alangrainger/immich-public-proxy is a single
+# stateless image; helm doesn't add value. Mirrors the
+# cloudflare-tunnel manifest pattern (also no chart).
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: immich-public-proxy
+
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service.yaml
+  - networkpolicy.yaml

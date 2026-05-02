@@ -1,0 +1,109 @@
+# immich-public-proxy Deployment. Stateless; 2 replicas behind
+# a ClusterIP Service. cloudflared (in cloudflare-tunnel ns)
+# routes photos.<HOMELAB-DOMAIN> here.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-public-proxy
+  namespace: immich-public-proxy
+  labels:
+    app.kubernetes.io/name: immich-public-proxy
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: immich-public-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: immich-public-proxy
+    spec:
+      affinity:
+        # Soft anti-affinity — prefer different nodes, but
+        # don't refuse-to-schedule when only one is available
+        # (cluster has 3 control-plane + 3 worker nodes; a
+        # 2-replica anti-affinity should always satisfy).
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: immich-public-proxy
+                topologyKey: kubernetes.io/hostname
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: proxy
+          # OPERATOR PINS via Renovate. Image is published on
+          # Docker Hub; mirror to registry.homelab.internal/
+          # immich-public-proxy via the standard pull-through
+          # cache once that's wired (per ADR 0019).
+          image: docker.io/alangrainger/immich-public-proxy:1.15.6
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            # Cluster-internal Immich URL — never leaves the pod
+            # network. The proxy never sees Immich admin / API /
+            # mobile-backup endpoints; it walks /share/* only.
+            - name: IMMICH_URL
+              value: "http://immich-server.immich.svc.cluster.local:2283"
+            # Public base URL the proxy generates share links
+            # against. Match this with what cloudflared routes
+            # photos.<HOMELAB-DOMAIN> to (configmap.yaml's
+            # ingress rule).
+            - name: PUBLIC_BASE_URL
+              value: "https://photos.<HOMELAB-DOMAIN>"
+            - name: IPP_PORT
+              value: "3000"
+          livenessProbe:
+            httpGet:
+              path: /share/healthcheck
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /share/healthcheck
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            # Node.js writes a small amount of cache + tmp;
+            # readOnlyRootFilesystem requires a writable
+            # mount for /tmp.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
