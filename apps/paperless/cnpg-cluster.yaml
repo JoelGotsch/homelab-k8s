@@ -1,0 +1,56 @@
+# CNPG Postgres for Paperless-ngx. Same shape as Forgejo /
+# Authentik / Nextcloud — stock cnpg-postgresql image (Paperless
+# doesn't need pgvector or other extensions).
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: paperless-pg
+  namespace: paperless
+spec:
+  instances: 2
+
+  # Propagate labels to CNPG-managed children. Picked up by
+  # infrastructure/longhorn/recurring-jobs.yaml's
+  # `secret-personal` group: hourly snapshots × 7d retain.
+  # Paperless documents are `personal`-class (financial /
+  # ID / medical paperwork).
+  inheritedMetadata:
+    labels:
+      recurring-job-group.longhorn.io/secret-personal: "enabled"
+
+  storage:
+    size: 10Gi
+    storageClass: longhorn-replica3
+
+  monitoring:
+    enablePodMonitor: true
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+      shared_buffers: "128MB"
+
+  bootstrap:
+    initdb:
+      database: paperless
+      owner: paperless
+
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://homelab-backups-cluster/cnpg/paperless
+      endpointURL: http://minio.minio.svc.cluster.local:9000
+      s3Credentials:
+        accessKeyId:
+          name: paperless-cnpg-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: paperless-cnpg-s3
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: bzip2
+      data:
+        compression: bzip2
+    # Documents are `personal`-class; longer retention than
+    # the 30d default (matches Nextcloud / Immich).
+    retentionPolicy: "90d"

@@ -24,8 +24,8 @@ they never see `/dev/fuse`, never run privileged.
 | `namespace.yaml` | `csi-rclone` ns; PSA **privileged** (driver needs `/dev/fuse` + mount propagation). |
 | `kustomization.yaml` | Helm chart `oci://ghcr.io/veloxpack/charts/csi-driver-rclone` v0.4.11; resource list below. |
 | `values.yaml` | Node DaemonSet + Controller + driver-level rclone defaults (`--vfs-cache-mode=full --vfs-cache-max-size=5G --vfs-cache-max-age=1h`); ServiceMonitor enabled. |
-| `storageclasses.yaml` | Per-share `nas-crypt-*` StorageClasses. Today: `nas-crypt-personal-photos` (Immich), `nas-crypt-personal-files` + `nas-crypt-family-shared` + `nas-crypt-internal-archive` (Nextcloud), `nas-crypt-forgejo-lfs` + `nas-crypt-registry-blobs` (Forgejo). Add new SCs as new encrypted consumer apps land. |
-| `externalsecret.yaml` | One ExternalSecret per StorageClass (6 today), each pulling the share's rclone INI from `kv/prod/nas-encryption/<share>/rclone_config`. Per-share keys per ADR 0025 D8 — compromise of one share doesn't expose another. |
+| `storageclasses.yaml` | Per-share `nas-crypt-*` StorageClasses. Today: `nas-crypt-personal-photos` (Immich), `nas-crypt-personal-files` + `nas-crypt-family-shared` + `nas-crypt-internal-archive` (Nextcloud), `nas-crypt-forgejo-lfs` + `nas-crypt-registry-blobs` (Forgejo), `nas-crypt-personal-documents` (Paperless). Add new SCs as new encrypted consumer apps land. |
+| `externalsecret.yaml` | One ExternalSecret per StorageClass (7 today), each pulling the share's rclone INI from `kv/prod/nas-encryption/<share>/rclone_config`. Per-share keys per ADR 0025 D8 — compromise of one share doesn't expose another. |
 | `networkpolicy.yaml` | Ingress: Prometheus scrape only. Egress: kube-DNS + `<NAS_IP>:2049/111` (NFS). |
 
 ## OpenBao paths to seed
@@ -40,6 +40,7 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 | `kv/data/prod/nas-encryption/internal-archive` | `rclone_config` | Nextcloud Group Folder for archived internal documents. |
 | `kv/data/prod/nas-encryption/forgejo-lfs` | `rclone_config` | Forgejo Git LFS objects per ADR 0023 D12. |
 | `kv/data/prod/nas-encryption/registry-blobs` | `rclone_config` | Forgejo Packages (artifact registry) blob storage per ADR 0019 D7. |
+| `kv/data/prod/nas-encryption/personal-documents` | `rclone_config` | Paperless-ngx source documents (scanned receipts, statements, IDs). |
 
 Field is the **assembled** rclone INI, not the raw password.
 Storing it pre-assembled keeps secrets out of templates and
