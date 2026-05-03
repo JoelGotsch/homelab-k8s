@@ -100,14 +100,17 @@ ciphertext NFS share on the NAS.
    an app that puts thumbnails on `nas-crypt-*` will work but
    take the read-amplification hit.
 
-6. **Existing `nfs-csi` StorageClasses for `personal+` shares
-   become orphaned.** The `nfs-personal-files`,
-   `nfs-family-shared`, `nfs-internal-archive` SCs in
-   `infrastructure/nfs-csi/storageclasses.yaml` predate this
-   ADR and are no longer the right path for `personal+` data.
-   They're left in place pending a sweep that confirms they
-   have no consumers; remove in a follow-up commit when
-   confirmed unused. Tracked in `homelab-docs/TODO.md`.
+6. **`nfs-csi` cleanup landed alongside this ADR.** The
+   `nfs-personal-files`, `nfs-family-shared`,
+   `nfs-internal-archive` SCs that previously sat in
+   `infrastructure/nfs-csi/storageclasses.yaml` were forward-
+   declarations from when ADR 0025 D3's per-app FUSE-sidecar
+   pattern was the assumed shape. They never had a consumer;
+   ADR 0030 redirects every `personal+` consumer here instead.
+   Removed in the same commit that added this layer.
+   `infrastructure/nfs-csi/` now serves only plaintext-at-NAS
+   shares (`internal-media`, `public-*`, `cluster-backups`,
+   `time-machine-mba`).
 
 ## Related
 

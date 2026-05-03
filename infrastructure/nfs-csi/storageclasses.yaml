@@ -2,52 +2,22 @@
 # ADR 0025. Each share has its own SC so apps' PVCs can pin
 # to the correct logical destination + classification.
 #
-# Encryption-at-rest (rclone-crypt for personal+) is layered
-# in the application pod (sidecar or fuse mount), not at the
-# CSI level. NFS mount sees ciphertext for personal-files /
-# family-shared / internal-archive; sees plaintext for
-# internal-media / public-* / cluster-backups / time-machine.
+# `personal+`-classified shares (personal-files, family-shared,
+# internal-archive, personal-photos, etc.) are NOT served from
+# this layer — they go through `infrastructure/csi-rclone/` per
+# ADR 0030, which provides a `nas-crypt-<share>` StorageClass
+# with chained crypt-over-NFS so the NAS sees only ciphertext
+# and consumer pods stay PSA-restricted.
+#
+# This layer serves only the plaintext-at-NAS shares:
+# internal-media (Jellyfin), public-* (static sites),
+# cluster-backups, time-machine. These don't need the crypt
+# hop because they hold non-sensitive or already-client-side-
+# encrypted data per ADR 0025 D5+D7.
 #
 # OPERATOR FILLS the NAS-IP at first commit (matches
 # nas_storage_ip in homelab-infra/group_vars/cluster.yml).
 
-# personal-files — ciphertext at NAS; rclone-crypt at app layer
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: nfs-personal-files
-provisioner: nfs.csi.k8s.io
-reclaimPolicy: Retain
-volumeBindingMode: Immediate
-parameters:
-  server: <NAS-IP>
-  share: /volume1/personal-files
-  mountOptions: nfsvers=4.1,hard,nconnect=8,rsize=131072,wsize=131072
----
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: nfs-family-shared
-provisioner: nfs.csi.k8s.io
-reclaimPolicy: Retain
-volumeBindingMode: Immediate
-parameters:
-  server: <NAS-IP>
-  share: /volume1/family-shared
-  mountOptions: nfsvers=4.1,hard,nconnect=8,rsize=131072,wsize=131072
----
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: nfs-internal-archive
-provisioner: nfs.csi.k8s.io
-reclaimPolicy: Retain
-volumeBindingMode: Immediate
-parameters:
-  server: <NAS-IP>
-  share: /volume1/internal-archive
-  mountOptions: nfsvers=4.1,hard,nconnect=8,rsize=131072,wsize=131072
----
 # internal-media — plaintext NFS (Jellyfin transcode efficiency)
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
