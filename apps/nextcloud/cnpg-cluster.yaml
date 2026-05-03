@@ -9,6 +9,14 @@ metadata:
 spec:
   instances: 2
 
+  # Propagate labels to CNPG-managed children. Picked up by
+  # infrastructure/longhorn/recurring-jobs.yaml's
+  # `secret-personal` group: hourly snapshots × 7d retain.
+  # Nextcloud is `personal`-class (user files + calendar).
+  inheritedMetadata:
+    labels:
+      recurring-job-group.longhorn.io/secret-personal: "enabled"
+
   storage:
     size: 10Gi
     storageClass: longhorn-replica3

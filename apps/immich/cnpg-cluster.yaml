@@ -17,6 +17,14 @@ metadata:
 spec:
   instances: 2
 
+  # Propagate labels to CNPG-managed children. Picked up by
+  # infrastructure/longhorn/recurring-jobs.yaml's
+  # `secret-personal` group: hourly snapshots × 7d retain.
+  # Immich is `personal`-class (photos + face/embedding metadata).
+  inheritedMetadata:
+    labels:
+      recurring-job-group.longhorn.io/secret-personal: "enabled"
+
   # OPERATOR PINS via Renovate. The image must include
   # vectorchord (loaded via shared_preload_libraries below).
   imageName: ghcr.io/corentingiraud/cnpg-pgvector-vectorchord:17-vchord-0.4.3

@@ -27,3 +27,22 @@ resources:
   - httproute.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml
+
+# The Helm chart creates the main app PVC (Forgejo's data dir
+# on Longhorn — git repos + config + runtime state). Patch in
+# the recurring-job-group label so it joins
+# infrastructure/longhorn/recurring-jobs.yaml's `internal`
+# group (4-hourly × 7d retain). Targets only Helm-managed PVCs
+# (`app.kubernetes.io/managed-by=Helm`) so the explicit NFS
+# PVCs in nfs-pv.yaml are not touched.
+patches:
+  - target:
+      kind: PersistentVolumeClaim
+      labelSelector: "app.kubernetes.io/managed-by=Helm"
+    patch: |-
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: not-used
+        labels:
+          recurring-job-group.longhorn.io/internal: "enabled"

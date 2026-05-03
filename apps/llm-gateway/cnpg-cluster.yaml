@@ -16,6 +16,13 @@ metadata:
 spec:
   instances: 2
 
+  # Propagate labels to CNPG-managed children (Pods, PVCs,
+  # Services). Picked up by infrastructure/longhorn/recurring-jobs.yaml's
+  # `internal` group: 4-hourly snapshots × 7d retain.
+  inheritedMetadata:
+    labels:
+      recurring-job-group.longhorn.io/internal: "enabled"
+
   # CNPG primaries opt into replica3 per ADR 0016 — instances: 2
   # is DB-level redundancy, replica3 is disk-level redundancy
   # for the authoritative copy. Both layers earned.

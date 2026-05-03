@@ -16,6 +16,14 @@ metadata:
 spec:
   instances: 2
 
+  # Propagate labels to CNPG-managed children. Picked up by
+  # infrastructure/longhorn/recurring-jobs.yaml's
+  # `secret-personal` group: hourly snapshots × 7d retain.
+  # Langfuse is `personal`-class (LLM input/output text).
+  inheritedMetadata:
+    labels:
+      recurring-job-group.longhorn.io/secret-personal: "enabled"
+
   storage:
     size: 10Gi
     storageClass: longhorn-replica3

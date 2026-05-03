@@ -25,3 +25,22 @@ resources:
   - httproute.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml
+
+# The Helm chart creates the config PVC on Longhorn (Jellyfin's
+# config + cache + library DB). Patch in the recurring-job-group
+# label so it joins infrastructure/longhorn/recurring-jobs.yaml's
+# `internal-media` group (daily × 7d retain — appropriate for
+# multi-TB-class workloads where hourly snapshots would amplify
+# disk pressure). Targets only Helm-managed PVCs; the NFS media
+# PV in nfs-pv.yaml is not touched (it's not Longhorn anyway).
+patches:
+  - target:
+      kind: PersistentVolumeClaim
+      labelSelector: "app.kubernetes.io/managed-by=Helm"
+    patch: |-
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: not-used
+        labels:
+          recurring-job-group.longhorn.io/internal-media: "enabled"

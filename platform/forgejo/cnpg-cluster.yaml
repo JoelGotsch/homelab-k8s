@@ -23,6 +23,13 @@ metadata:
 spec:
   instances: 2
 
+  # Propagate labels to CNPG-managed children. Picked up by
+  # infrastructure/longhorn/recurring-jobs.yaml's `internal`
+  # group: 4-hourly snapshots × 7d retain.
+  inheritedMetadata:
+    labels:
+      recurring-job-group.longhorn.io/internal: "enabled"
+
   storage:
     # Forgejo's data churn is bounded — git data lives on
     # Longhorn (handled by the helm chart's PVC); only relational

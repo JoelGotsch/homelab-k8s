@@ -21,6 +21,12 @@ kind: PersistentVolumeClaim
 metadata:
   name: ntfy-data
   namespace: ntfy
+  labels:
+    # Opt into infrastructure/longhorn/recurring-jobs.yaml's
+    # `internal` group: 4-hourly snapshots × 7d retain. ntfy
+    # data is internal-class (alert metadata; relay re-encrypts
+    # every fresh alert, no user-identifying content at rest).
+    recurring-job-group.longhorn.io/internal: "enabled"
 spec:
   accessModes: [ReadWriteOnce]
   storageClassName: longhorn-replica2
