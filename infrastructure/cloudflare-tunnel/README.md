@@ -150,8 +150,7 @@ curl -I https://vaultwarden.<HOMELAB-DOMAIN>
    via the attacker's cloudflared. Mitigation: credentials
    are in OpenBao; tunnel is bound to the operator's
    Cloudflare account; rotation procedure documented in
-   `03-runbooks/external-services/cloudflare-tunnel-rotation.md`
-   (TBD — tracked in `homelab-docs/TODO.md` under "Runbooks").
+   [`03-runbooks/external-services/cloudflare-tunnel-rotation.md`](../../../homelab-docs/03-runbooks/external-services/cloudflare-tunnel-rotation.md).
 
 2. **TLS termination at Cloudflare.** Per ADR 0024 D4:
    only services where Cloudflare-readable plaintext is
