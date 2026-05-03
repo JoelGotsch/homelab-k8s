@@ -52,4 +52,5 @@ spec:
         compression: bzip2
       data:
         compression: bzip2
-    retentionPolicy: "30d"
+    # 90d per backup-and-dr.md class-aligned rule (personal class).
+    retentionPolicy: "90d"

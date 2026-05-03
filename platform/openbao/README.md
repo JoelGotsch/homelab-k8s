@@ -16,6 +16,7 @@ Box.
 | `values.yaml` | HA Raft mode, 3 replicas, TLS, audit log, listener config. |
 | `httproute.yaml` | Internal HTTPRoute (Tailscale-only — operator reaches the UI / API via tailnet). |
 | `raft-snapshot-cronjob.yaml` | Daily 03:00 UTC snapshot via `bao operator raft snapshot save`, scp'd to Hetzner Storage Box per ADR 0018 D5. |
+| `raft-snapshot-hourly.yaml` | Hourly snapshot to a local Longhorn PVC (`openbao-raft-snapshots`, 10Gi, replica2), 168 retain (= 7d). Per ADR 0018 D5 + backup-and-dr.md §"OpenBao". The PVC opts into Longhorn's `secret-personal` recurring-job group so the volume itself is also Longhorn-snapshotted hourly — file-level (this CronJob) + block-level (Longhorn) at the same cadence. |
 
 ## OpenBao paths to seed
 
@@ -71,10 +72,20 @@ shred -u /tmp/hetzner-sb /tmp/hetzner-sb.pub
 
 ## Raft snapshot retention
 
-Per ADR 0018 D5: tier-3 retains the snapshots; tier-2 (friend's
-NAS) intentionally does **not** receive OpenBao snapshots —
-the seal already makes them opaque-and-encrypted, so tier-2's
-dedup buys nothing. Direct `scp` to Hetzner SB only.
+Two-tier shape per ADR 0018 D5 + backup-and-dr.md §"OpenBao":
+
+- **Tier-1 (hourly, local)** — `raft-snapshot-hourly.yaml`
+  saves to PVC `openbao-raft-snapshots`, retains 168 (= 7d).
+  Recovery floor for cluster-internal incidents (accidental
+  delete, transient corruption); no network round-trip.
+- **Tier-3 (daily, remote)** — `raft-snapshot-cronjob.yaml`
+  scps a fresh snapshot to Hetzner Storage Box. Recovery floor
+  for cluster-loss / DR scenarios.
+
+Tier-2 (friend's NAS) intentionally does **not** receive
+OpenBao snapshots — the seal already makes them opaque-and-
+encrypted, so tier-2's dedup buys nothing. Direct `scp` to
+Hetzner SB only.
 
 The Restic CronJob in [infrastructure/backup-cronjobs/](../../infrastructure/backup-cronjobs/)
 also writes to Hetzner SB but at a different path

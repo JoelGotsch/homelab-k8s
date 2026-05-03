@@ -16,3 +16,5 @@ helmCharts:
 
 resources:
   - storageclasses.yaml
+  - externalsecret.yaml
+  - recurring-jobs.yaml

@@ -1,0 +1,94 @@
+# Hourly Raft snapshot to a local Longhorn volume.
+# Per ADR 0018 D5 + backup-and-dr.md §"OpenBao":
+# "Hourly Raft snapshot via `bao operator raft snapshot save`
+# to local Longhorn volume."
+#
+# Closes the gap surfaced by
+# 99-journal/2026-05-02-backup-topology-gap-check.md item 2 —
+# the daily-to-Hetzner CronJob (raft-snapshot-cronjob.yaml)
+# was the only snapshot path; this scaffolds the architecture-
+# documented hourly-local tier.
+#
+# Snapshot token Secret (`openbao-snapshot-token`) is already
+# projected by raft-snapshot-cronjob.yaml's ExternalSecret;
+# this CronJob reuses it.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openbao-raft-snapshots
+  namespace: openbao
+  labels:
+    # Per infrastructure/longhorn/recurring-jobs.yaml: opt the
+    # snapshot-storage PVC itself into Longhorn's
+    # `secret-personal` group so the snapshots-of-the-snapshots
+    # PVC also gets hourly Longhorn-volume snapshots. The chain
+    # is intentional — Raft-snapshot fidelity at hourly cadence
+    # both at file-level (this CronJob) and at block-level
+    # (Longhorn).
+    recurring-job-group.longhorn.io/secret-personal: "enabled"
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: longhorn-replica2
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: openbao-raft-snapshot-hourly
+  namespace: openbao
+spec:
+  schedule: "5 * * * *"  # hourly at :05 (offset from daily 03:00 to avoid overlap)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: openbao
+          containers:
+            - name: snapshot
+              image: openbao/openbao:0.10.0  # OPERATOR PINS via Renovate
+              env:
+                - name: BAO_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: openbao-snapshot-token
+                      key: token
+                - name: BAO_ADDR
+                  value: https://openbao.openbao.svc:8200
+                - name: BAO_CACERT
+                  value: /vault/userconfig/openbao-tls/ca.crt
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  TS=$(date -u +%Y%m%dT%H%M%SZ)
+                  bao operator raft snapshot save \
+                    /snapshots/bao-${TS}.snap
+                  # Prune: keep latest 168 hourly snapshots
+                  # (7 days at hourly cadence — matches
+                  # backup-and-dr.md §"Retention schedules"
+                  # tier-1 row for `secret` class).
+                  ls -1t /snapshots/bao-*.snap 2>/dev/null \
+                    | tail -n +169 \
+                    | xargs -r rm -f
+              volumeMounts:
+                - name: tls
+                  mountPath: /vault/userconfig/openbao-tls
+                  readOnly: true
+                - name: snapshots
+                  mountPath: /snapshots
+          volumes:
+            - name: tls
+              secret:
+                secretName: openbao-tls
+            - name: snapshots
+              persistentVolumeClaim:
+                claimName: openbao-raft-snapshots

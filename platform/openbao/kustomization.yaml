@@ -23,4 +23,5 @@ helmCharts:
 
 resources:
   - raft-snapshot-cronjob.yaml
+  - raft-snapshot-hourly.yaml
   - httproute.yaml

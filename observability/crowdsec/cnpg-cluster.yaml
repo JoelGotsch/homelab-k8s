@@ -59,4 +59,7 @@ spec:
         compression: bzip2
       data:
         compression: bzip2
-    retentionPolicy: "90d"
+    # 30d per backup-and-dr.md class-aligned rule (internal class —
+    # banned-IP / decision metadata; older PITR satisfied via
+    # Restic tier-2/3 restore if ever needed).
+    retentionPolicy: "30d"

@@ -1,0 +1,111 @@
+# Longhorn RecurringJob CRs — class-aligned snapshot + backup
+# cadence per backup-and-dr.md §"Retention schedules" + ADR 0016
+# D4. Closes the snapshot-CR gap surfaced by
+# 99-journal/2026-05-02-backup-topology-gap-check.md item 1.
+#
+# Volume opt-in: each PVC selects a class group via the label
+# `recurring-job-group.longhorn.io/<group>: enabled`. Volumes
+# without an explicit group join `default` (catch-all,
+# conservative cadence). Per-app PVC labelling retrofit is
+# tracked separately in TODO §"Backup-topology sub-items".
+
+# ─── default group: catch-all conservative ─────────────────
+# Matches the `secret`/`personal` cadence (hourly × 7d). Volumes
+# under this default get the strictest scheduled retention by
+# default; class-aware groups below let internal / internal-media
+# volumes reduce snapshot churn at the cost of fewer rollback
+# points.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: snapshot-default
+  namespace: longhorn-system
+spec:
+  cron: "0 * * * *"           # hourly on the hour
+  task: snapshot
+  groups: [default]
+  retain: 168                  # 168 hourly snapshots = 7 days
+  concurrency: 4
+  labels:
+    homelab-class: catch-all
+---
+# ─── secret + personal explicit group ──────────────────────
+# Same cadence as `default`, but explicit so an app can label
+# its PVC `recurring-job-group.longhorn.io/secret-personal: enabled`
+# to opt in deliberately rather than relying on the default
+# (e.g., if a future class-default change shifts the catch-all).
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: snapshot-secret-personal
+  namespace: longhorn-system
+spec:
+  cron: "0 * * * *"
+  task: snapshot
+  groups: [secret-personal]
+  retain: 168                  # 7 days at hourly cadence
+  concurrency: 4
+  labels:
+    homelab-class: secret-personal
+---
+# ─── internal class ────────────────────────────────────────
+# 4-hourly snapshots × 7 days = 42 retain. Forgejo git data,
+# CrowdSec metadata, llm-gateway budget tracking. Lower
+# snapshot churn than secret/personal because RPO 4h is
+# acceptable for these classes per backup-and-dr.md.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: snapshot-internal
+  namespace: longhorn-system
+spec:
+  cron: "0 */4 * * *"          # every 4 hours
+  task: snapshot
+  groups: [internal]
+  retain: 42                   # 6/day × 7 days
+  concurrency: 4
+  labels:
+    homelab-class: internal
+---
+# ─── internal-media class ──────────────────────────────────
+# Daily snapshots × 7 days. Jellyfin media libraries can be
+# multi-TB; hourly snapshots would amplify storage pressure
+# substantially. RPO 24h acceptable per backup-and-dr.md.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: snapshot-internal-media
+  namespace: longhorn-system
+spec:
+  cron: "0 2 * * *"            # 02:00 daily (off-peak)
+  task: snapshot
+  groups: [internal-media]
+  retain: 7                    # 7 daily snapshots
+  concurrency: 2
+  labels:
+    homelab-class: internal-media
+---
+# ─── volume-level backup to MinIO-on-NAS ───────────────────
+# Per ADR 0016 D4 + backup-and-dr.md §"Cluster Longhorn volumes":
+# daily volume backup to NAS-MinIO `longhorn-backups` bucket,
+# retained 90d locally; the Restic CronJob at
+# `infrastructure/backup-cronjobs/` mirrors the bucket nightly
+# to tier-2 (friend's NAS) + tier-3 (Hetzner Storage Box).
+#
+# Backup target + credentials configured in values.yaml
+# (`defaultSettings.backupTarget` + `backupTargetCredentialSecret`).
+# Without those filled, `task: backup` fails per-volume — the
+# snapshot tasks above keep working regardless.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: backup-daily
+  namespace: longhorn-system
+spec:
+  cron: "0 3 * * *"            # 03:00 daily, after snapshots settle
+  task: backup
+  groups: [default]
+  retain: 90                   # 90 daily backups
+  concurrency: 2
+  labels:
+    homelab-purpose: tier1-to-nas-minio
