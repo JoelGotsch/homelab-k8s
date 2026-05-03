@@ -109,27 +109,9 @@ spec:
           protocol: TCP
         - port: 9443
           protocol: TCP
----
-# CCNP for NAS NFS egress — vanilla NetworkPolicy can't
-# match traffic to off-cluster IPs by hostname; use Cilium's
-# toCIDR (NAS IP is operator-fillable) for L4 allow.
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: forgejo-nfs-egress
-  namespace: forgejo
-spec:
-  endpointSelector:
-    matchLabels:
-      app.kubernetes.io/name: forgejo
-  egress:
-    # NAS NFS — operator fills <NAS-IP>. Same pattern as
-    # infrastructure/minio-on-nas/ for off-cluster NFS targets.
-    - toCIDR:
-        - "<NAS-IP>/32"
-      toPorts:
-        - ports:
-            - port: "2049"
-              protocol: TCP
-            - port: "111"
-              protocol: TCP
+# NAS NFS egress is NOT allowed from Forgejo pods — per
+# ADR 0030 §D1 the csi-rclone driver in `csi-rclone` ns is
+# the only thing that talks to the NAS. Forgejo sees the
+# encrypted shares (forgejo-lfs, registry-blobs) as normal
+# mounted filesystems via CSI; if a PVC fails to bind, the
+# pod fails to start (correct behaviour — fail-closed).

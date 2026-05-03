@@ -8,9 +8,13 @@ Per [ADR 0023](../../../homelab-docs/02-decisions/0023-forgejo-and-woodpecker-ci
 (Tailscale-only ingress, no Cloudflare for source-of-truth).
 
 Single-replica Forgejo on Longhorn for app + git data; external
-CNPG Postgres for relational metadata; NAS NFS-CSI for LFS +
-Packages bulk storage; Authentik OIDC for login; Cilium HTTPRoute
-on `forgejo.lab.<HOMELAB-DOMAIN>` reachable only via Tailscale.
+CNPG Postgres for relational metadata; csi-rclone-NFS-crypt for
+LFS + Packages bulk storage per
+[ADR 0030 §D1](../../../homelab-docs/02-decisions/0030-csi-rclone-and-storage-split.md)
+(refining ADR 0025 D7) — `internal` data with cluster-overlay
+encryption, per-share keys per ADR 0025 D8. Authentik OIDC for
+login; Cilium HTTPRoute on `forgejo.lab.<HOMELAB-DOMAIN>`
+reachable only via Tailscale.
 
 GitHub stays as a unidirectional read-only mirror (per ADR 0023
 D14 — sync direction Forgejo → GitHub for public + internal repos).
@@ -21,12 +25,12 @@ D14 — sync direction Forgejo → GitHub for public + internal repos).
 |---|---|
 | `namespace.yaml` | `forgejo` ns; PSA restricted. |
 | `kustomization.yaml` | Forgejo helm chart 10.0.0 (OCI); resource list below. |
-| `values.yaml` | Single-replica; external CNPG; NFS-backed LFS+Packages; OIDC; readonly rootfs. |
+| `values.yaml` | Single-replica; external CNPG; chart's persistence on Longhorn for app data; csi-rclone PVCs for LFS + Packages mounted via `additionalVolumes` + `additionalVolumeMounts` at `/data/lfs` + `/data/packages`. OIDC; readonly rootfs. |
 | `cnpg-cluster.yaml` | 2-instance CNPG cluster `forgejo-pg` on `longhorn-replica3`; barman backup → MinIO; same shape as Langfuse / Crowdsec. |
-| `nfs-pv.yaml` | Static PVs+PVCs for `forgejo-lfs` + `forgejo-packages` backed by NAS NFS shares (operator-fillable). 200Gi each at first install; resize-only edits allowed. |
+| `pvc.yaml` | Two dynamic PVCs per ADR 0030 §D2: `forgejo-lfs` (200Gi `nas-crypt-forgejo-lfs` SC) + `forgejo-packages` (200Gi `nas-crypt-registry-blobs` SC). Both RWX; per-share keys; encryption-at-rest on NAS via the chained `crypt:` over `nfs:` remote. |
 | `externalsecret.yaml` | 5 ExternalSecrets: admin, security-keys (4 fields), postgres-creds, oidc, cnpg-s3. |
 | `httproute.yaml` | Cilium HTTPRoute for `forgejo.lab.<HOMELAB-DOMAIN>`; Tailscale-reachable; cert via cluster Gateway TLS block. |
-| `networkpolicy.yaml` | Ingress: Cilium Gateway + Prometheus + Woodpecker server/agent + ci-woodpecker runner pods + Renovate. Egress: kube-DNS + CNPG + OpenBao + Authentik + NAS NFS (CCNP toCIDR). |
+| `networkpolicy.yaml` | Ingress: Cilium Gateway + Prometheus + Woodpecker server/agent + ci-woodpecker runner pods + Renovate. Egress: kube-DNS + CNPG + OpenBao + Authentik. **No CCNP NAS egress** — csi-rclone is the only NAS-talking layer per ADR 0030. |
 | `servicemonitor.yaml` | Prometheus scrape on `/metrics`. |
 
 ## OpenBao paths to seed
@@ -96,13 +100,14 @@ homelab-infra/scripts/provision-minio-svcacct.sh \
 
 | Bring-up step | What lands |
 |---|---|
+| Operator runs the rclone-crypt key bootstrap ceremony twice (once per share) per [`03-runbooks/nas/rclone-crypt-key-bootstrap.md`](../../../homelab-docs/03-runbooks/nas/rclone-crypt-key-bootstrap.md). | OpenBao paths `kv/prod/nas-encryption/{forgejo-lfs,registry-blobs}/rclone_config` populated; offline-recovery archive entries added per ADR 0025 D8; two NAS ciphertext shares pre-created. |
 | Argo sync `infrastructure/cnpg/` | CNPG operator up. |
 | Argo sync `infrastructure/cert-manager/` | TLS certs available. |
 | Argo sync `platform/authentik/` | IdP up; operator creates the `forgejo` OIDC client. |
 | Argo sync `platform/openbao/` | OpenBao + ESO ready; operator runs the seed snippet above. |
 | Argo sync `infrastructure/minio-on-nas/` | `homelab-backups-cluster` bucket pre-created for CNPG barman. |
-| Operator pre-stages NFS shares on NAS | `<NAS_LFS_SHARE>` + `<NAS_PACKAGES_SHARE>` exist + are exported. |
-| Argo sync this layer | CNPG `forgejo-pg` Cluster up; NFS PVCs bind; Forgejo Deployment Ready; HTTPRoute reconciled; first admin login works. |
+| Argo sync `infrastructure/csi-rclone/` (with `nas-crypt-forgejo-lfs` + `nas-crypt-registry-blobs` SCs registered) | csi-rclone driver up; per-share ExternalSecrets reconcile to Secrets in csi-rclone ns. |
+| Argo sync this layer | CNPG `forgejo-pg` Cluster up; csi-rclone PVCs bind (`forgejo-lfs`, `forgejo-packages`); Forgejo Deployment Ready; HTTPRoute reconciled; first admin login works. |
 | Operator post-bring-up: `forgejo admin auth add-oauth` | OIDC enabled in Forgejo; subsequent logins via Authentik. |
 | Argo sync `platform/woodpecker/` | Woodpecker server registers Forgejo OAuth client. |
 

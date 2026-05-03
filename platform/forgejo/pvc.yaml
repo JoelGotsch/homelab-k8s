@@ -1,0 +1,53 @@
+# PVCs for Forgejo's cold buckets per ADR 0030.
+#
+# Forgejo's storage shape was already split before ADR 0030
+# landed: Longhorn for app data (config, repo storage,
+# runtime state) via the chart's `persistence` block; NFS for
+# LFS objects + Packages blobs (per ADR 0019 D7 + ADR 0023 D12).
+# This file replaces the old static NFS-CSI PVs with dynamic
+# csi-rclone PVCs against per-share `nas-crypt-*` SCs —
+# encryption-at-rest on NAS via the chained `crypt:` over
+# `nfs:` remote per ADR 0030 §D1.
+#
+# Both shares are `internal`-classified but flagged for
+# cluster-overlay encryption per ADR 0025 D7 — corp-style
+# source artefacts shouldn't be readable in the at-rest case.
+# Per-share keys per ADR 0025 D8.
+
+# LFS objects — large binary blobs committed against Git
+# repositories. Content-addressed (WORM-shape).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: forgejo-lfs
+  namespace: forgejo
+  labels:
+    app.kubernetes.io/name: forgejo
+    app.kubernetes.io/component: lfs
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nas-crypt-forgejo-lfs
+  resources:
+    requests:
+      # Soft cap; NAS share is the actual constraint. LFS
+      # grows with binary-blob commits — 200Gi covers the
+      # operator's expected scale for several years. Resize
+      # PVC (capacity-only edit) when usage approaches.
+      storage: 200Gi
+---
+# Forgejo Packages — OCI / PyPI / Helm / etc. artefacts
+# pushed by CI. Content-addressed (WORM-shape).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: forgejo-packages
+  namespace: forgejo
+  labels:
+    app.kubernetes.io/name: forgejo
+    app.kubernetes.io/component: packages
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nas-crypt-registry-blobs
+  resources:
+    requests:
+      storage: 200Gi

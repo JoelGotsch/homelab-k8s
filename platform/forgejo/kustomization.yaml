@@ -1,9 +1,14 @@
 # Forgejo — self-hosted forge, source of truth per ADR 0023.
-# Single-replica Forgejo + external CNPG Postgres + NFS-backed
-# LFS + Packages, Authentik OIDC, Tailscale-only HTTPRoute.
+# Single-replica Forgejo + external CNPG Postgres +
+# csi-rclone-NFS-crypt for LFS + Packages (per ADR 0030 §D1
+# refining ADR 0025 D7) — `internal` data but cluster-overlay-
+# encrypted; per-share keys per ADR 0025 D8. App data
+# (config, git repos, runtime state) on Longhorn (LUKS-at-
+# rest via ADR 0017). Authentik OIDC, Tailscale-only HTTPRoute.
 #
 # Helm chart: code.forgejo.org/forgejo-helm/forgejo (OCI).
-# Per ADR 0023 D1 + D11 + D12; ADR 0019 D1 + D7; ADR 0024 D4.
+# Per ADR 0023 D1 + D11 + D12; ADR 0019 D1 + D7; ADR 0024 D4;
+# ADR 0030.
 
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -22,7 +27,7 @@ helmCharts:
 resources:
   - namespace.yaml
   - cnpg-cluster.yaml
-  - nfs-pv.yaml
+  - pvc.yaml
   - externalsecret.yaml
   - httproute.yaml
   - networkpolicy.yaml
@@ -33,8 +38,10 @@ resources:
 # the recurring-job-group label so it joins
 # infrastructure/longhorn/recurring-jobs.yaml's `internal`
 # group (4-hourly × 7d retain). Targets only Helm-managed PVCs
-# (`app.kubernetes.io/managed-by=Helm`) so the explicit NFS
-# PVCs in nfs-pv.yaml are not touched.
+# (`app.kubernetes.io/managed-by=Helm`) so the explicit
+# csi-rclone PVCs in pvc.yaml are not touched (those live on
+# NAS, not Longhorn — recurring-jobs are per-storage-class
+# anyway).
 patches:
   - target:
       kind: PersistentVolumeClaim

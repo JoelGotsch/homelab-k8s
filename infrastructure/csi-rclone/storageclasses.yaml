@@ -95,3 +95,39 @@ parameters:
   csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-internal-archive-config"
   csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
   mountOptions: ""
+---
+# nas-crypt-forgejo-lfs — Forgejo Git LFS objects per
+# ADR 0023 D12 + ADR 0019 D7. WORM-ish workload (LFS objects
+# are content-addressed; once written, never modified).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nas-crypt-forgejo-lfs
+provisioner: csi-rclone.veloxpack.io
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+parameters:
+  remote: "nas-crypt-forgejo-lfs"
+  remotePath: ""
+  csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-forgejo-lfs-config"
+  csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
+  mountOptions: ""
+---
+# nas-crypt-registry-blobs — Forgejo Packages (artifact
+# registry) blob storage per ADR 0019 D7. WORM-ish workload
+# (OCI / PyPI / Helm artefacts are content-addressed).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nas-crypt-registry-blobs
+provisioner: csi-rclone.veloxpack.io
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+parameters:
+  remote: "nas-crypt-registry-blobs"
+  remotePath: ""
+  csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-registry-blobs-config"
+  csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
+  mountOptions: ""
