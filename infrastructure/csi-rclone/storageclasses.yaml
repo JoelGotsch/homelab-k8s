@@ -42,3 +42,56 @@ parameters:
   # cold-originals access pattern is well-served by the
   # driver-level defaults; left empty here.
   mountOptions: ""
+---
+# nas-crypt-personal-files — Nextcloud's primary data dir.
+# Per ADR 0030 §D2 only the user-files tree lives here;
+# Nextcloud's config / custom_apps / themes / tmp + DB cache
+# stay on Longhorn.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nas-crypt-personal-files
+provisioner: csi-rclone.veloxpack.io
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+parameters:
+  remote: "nas-crypt-personal-files"
+  remotePath: ""
+  csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-personal-files-config"
+  csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
+  mountOptions: ""
+---
+# nas-crypt-family-shared — Nextcloud Group Folder for
+# family-shared content (cross-account, non-private).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nas-crypt-family-shared
+provisioner: csi-rclone.veloxpack.io
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+parameters:
+  remote: "nas-crypt-family-shared"
+  remotePath: ""
+  csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-family-shared-config"
+  csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
+  mountOptions: ""
+---
+# nas-crypt-internal-archive — Nextcloud Group Folder for
+# archived internal documents (operator-driven, non-active).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nas-crypt-internal-archive
+provisioner: csi-rclone.veloxpack.io
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+parameters:
+  remote: "nas-crypt-internal-archive"
+  remotePath: ""
+  csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-internal-archive-config"
+  csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
+  mountOptions: ""

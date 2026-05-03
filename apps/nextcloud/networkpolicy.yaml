@@ -67,23 +67,9 @@ spec:
       ports:
         - port: 9000
           protocol: TCP
----
-# CCNP for NFS egress to NAS.
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: nextcloud-nfs-egress
-  namespace: nextcloud
-spec:
-  endpointSelector:
-    matchLabels:
-      app.kubernetes.io/name: nextcloud
-  egress:
-    - toCIDR:
-        - "<NAS-IP>/32"
-      toPorts:
-        - ports:
-            - port: "2049"
-              protocol: TCP
-            - port: "111"
-              protocol: TCP
+# NAS NFS egress is NOT allowed from Nextcloud pods — per
+# ADR 0030 §D1 the csi-rclone driver in `csi-rclone` ns is
+# the only thing that talks to the NAS. Nextcloud sees the
+# encrypted shares as normal mounted filesystems via CSI;
+# if a PVC fails to bind, the pod fails to start (correct
+# behaviour — fail-closed).

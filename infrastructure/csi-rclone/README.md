@@ -24,8 +24,8 @@ they never see `/dev/fuse`, never run privileged.
 | `namespace.yaml` | `csi-rclone` ns; PSA **privileged** (driver needs `/dev/fuse` + mount propagation). |
 | `kustomization.yaml` | Helm chart `oci://ghcr.io/veloxpack/charts/csi-driver-rclone` v0.4.11; resource list below. |
 | `values.yaml` | Node DaemonSet + Controller + driver-level rclone defaults (`--vfs-cache-mode=full --vfs-cache-max-size=5G --vfs-cache-max-age=1h`); ServiceMonitor enabled. |
-| `storageclasses.yaml` | Per-share `nas-crypt-*` StorageClasses. Today: `nas-crypt-personal-photos` (Immich). Add new SCs as new `personal+` consumer apps land. |
-| `externalsecret.yaml` | One ExternalSecret per StorageClass, pulling the share's rclone INI from `kv/prod/nas-encryption/<share>/rclone_config`. |
+| `storageclasses.yaml` | Per-share `nas-crypt-*` StorageClasses. Today: `nas-crypt-personal-photos` (Immich), `nas-crypt-personal-files` + `nas-crypt-family-shared` + `nas-crypt-internal-archive` (Nextcloud). Add new SCs as new `personal+` consumer apps land. |
+| `externalsecret.yaml` | One ExternalSecret per StorageClass (4 today), each pulling the share's rclone INI from `kv/prod/nas-encryption/<share>/rclone_config`. Per-share keys per ADR 0025 D8 — compromise of one share doesn't expose another. |
 | `networkpolicy.yaml` | Ingress: Prometheus scrape only. Egress: kube-DNS + `<NAS_IP>:2049/111` (NFS). |
 
 ## OpenBao paths to seed
@@ -34,7 +34,10 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 
 | Path | Field(s) | Source |
 |---|---|---|
-| `kv/data/prod/nas-encryption/personal-photos` | `rclone_config` | Generated during the operator-side ceremony per [`03-runbooks/nas/rclone-crypt-key-bootstrap.md`](../../../homelab-docs/03-runbooks/nas/rclone-crypt-key-bootstrap.md). Single string holding the full rclone INI for the chained `crypt:` over `nfs:` remote (NAS IP, ciphertext share path, obscured password + salt). |
+| `kv/data/prod/nas-encryption/personal-photos` | `rclone_config` | Immich originals. Generated during the operator-side ceremony per [`03-runbooks/nas/rclone-crypt-key-bootstrap.md`](../../../homelab-docs/03-runbooks/nas/rclone-crypt-key-bootstrap.md). Single string holding the full rclone INI for the chained `crypt:` over `nfs:` remote (NAS IP, ciphertext share path, obscured password + salt). |
+| `kv/data/prod/nas-encryption/personal-files` | `rclone_config` | Nextcloud's primary data dir (operator + family user-home tree). Same generation procedure as personal-photos. |
+| `kv/data/prod/nas-encryption/family-shared` | `rclone_config` | Nextcloud Group Folder for family-shared content. |
+| `kv/data/prod/nas-encryption/internal-archive` | `rclone_config` | Nextcloud Group Folder for archived internal documents. |
 
 Field is the **assembled** rclone INI, not the raw password.
 Storing it pre-assembled keeps secrets out of templates and

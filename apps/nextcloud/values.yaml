@@ -1,5 +1,24 @@
 # Nextcloud helm values (nextcloud/nextcloud official chart).
-# Per ADR 0024 D5 + identity.md.
+# Per ADR 0024 D5 + ADR 0030 (csi-rclone hot/cold split) +
+# identity.md.
+#
+# Storage layout per ADR 0030 §D2:
+#   /var/www/html              ← Longhorn (nextcloud-hot PVC)
+#                                config, custom_apps, themes,
+#                                tmp — hot, regenerable-or-
+#                                tiny, LUKS-at-rest via ADR 0017
+#   /var/www/html/data         ← csi-rclone (nextcloud-personal-
+#                                files PVC, nas-crypt-personal-
+#                                files SC) — operator + family
+#                                user-home tree, encrypted at NAS
+#   /mnt/family-shared         ← csi-rclone (nextcloud-family-
+#                                shared PVC) — Group Folder
+#                                target, operator configures
+#                                post-install via Group Folders
+#                                admin UI
+#   /mnt/internal-archive      ← csi-rclone (nextcloud-internal-
+#                                archive PVC) — Group Folder
+#                                target, operator-only access
 #
 # Tailscale-only ingress at first commit (Nextcloud is the
 # Synology Drive + Radicale replacement; calendar/contacts/
@@ -49,14 +68,15 @@ redis:
 cronjob:
   enabled: true
 
-# Primary file storage on NFS-backed PVC.
+# Hot-bucket PVC mounted at /var/www/html (the chart's primary
+# mount). Subpath mappings cover everything EXCEPT data —
+# data lives on the csi-rclone PVC mounted via extraVolumes
+# below.
 persistence:
   enabled: true
-  existingClaim: nextcloud-data
-  # Subpaths used by the chart for various app data:
+  existingClaim: nextcloud-hot
   subPath:
     config: /config
-    data: /data
     customApps: /custom_apps
     themes: /themes
     tmp: /tmp
@@ -107,6 +127,33 @@ nextcloud:
         secretKeyRef:
           name: nextcloud-oidc
           key: issuer
+
+# Cold-bucket PVCs mounted at the paths Nextcloud expects.
+# - /var/www/html/data overlays the hot bucket's data subpath
+#   so Nextcloud's `datadirectory` (default
+#   /var/www/html/data) writes to the encrypted PVC.
+# - /mnt/family-shared and /mnt/internal-archive are mount
+#   targets for the corresponding Nextcloud Group Folders;
+#   operator post-install configures Group Folders to point
+#   at these paths via `occ groupfolders:create`.
+extraVolumes:
+  - name: nextcloud-personal-files
+    persistentVolumeClaim:
+      claimName: nextcloud-personal-files
+  - name: nextcloud-family-shared
+    persistentVolumeClaim:
+      claimName: nextcloud-family-shared
+  - name: nextcloud-internal-archive
+    persistentVolumeClaim:
+      claimName: nextcloud-internal-archive
+
+extraVolumeMounts:
+  - name: nextcloud-personal-files
+    mountPath: /var/www/html/data
+  - name: nextcloud-family-shared
+    mountPath: /mnt/family-shared
+  - name: nextcloud-internal-archive
+    mountPath: /mnt/internal-archive
 
 # Don't expose Service externally — Cilium HTTPRoute owns
 # ingress.

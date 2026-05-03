@@ -7,9 +7,14 @@ D5 (Tailscale-only — non-E2EE files / calendar / contacts
 don't qualify for Cloudflare TLS termination per D4).
 
 Single-replica Nextcloud + external CNPG Postgres + bundled
-Redis + NAS NFS-CSI for primary file storage. Cilium
-HTTPRoute on `nextcloud.lab.<HOMELAB-DOMAIN>` reachable only
-via Tailscale.
+Redis + hot/cold storage split per
+[ADR 0030 §D2](../../../homelab-docs/02-decisions/0030-csi-rclone-and-storage-split.md):
+hot bucket (config / custom_apps / themes / tmp) on Longhorn,
+cold buckets (user files + Group Folders) on csi-rclone-NFS-
+crypt across three shares — `personal-files`,
+`family-shared`, `internal-archive` — each with its own key
+per ADR 0025 D8. Cilium HTTPRoute on
+`nextcloud.lab.<HOMELAB-DOMAIN>` reachable only via Tailscale.
 
 ## Layout
 
@@ -17,12 +22,12 @@ via Tailscale.
 |---|---|
 | `namespace.yaml` | `nextcloud` ns; PSA restricted. |
 | `kustomization.yaml` | nextcloud/nextcloud helm 5.5.0; resource list below. |
-| `values.yaml` | Single-replica + external CNPG + bundled Redis + NFS-PVC for `/data`; OIDC env wired (operator activates via occ post-Authentik). |
+| `values.yaml` | Single-replica + external CNPG + bundled Redis. **Four PVCs** mounted per ADR 0030 §D2: `nextcloud-hot` (Longhorn) at `/var/www/html` for config/custom_apps/themes/tmp; `nextcloud-personal-files` (csi-rclone) at `/var/www/html/data` for user homes; `nextcloud-family-shared` (csi-rclone) at `/mnt/family-shared`; `nextcloud-internal-archive` (csi-rclone) at `/mnt/internal-archive`. OIDC env wired (operator activates via occ post-Authentik). |
 | `cnpg-cluster.yaml` | 2-instance CNPG `nextcloud-pg` on `longhorn-replica3`; barman → MinIO; 90d retention. |
-| `nfs-pv.yaml` | Static PV+PVC `nextcloud-data` (1Ti soft cap) backed by NAS share `<NAS_NEXTCLOUD_SHARE>`. |
+| `pvc.yaml` | Four PVCs per ADR 0030 §D2: `nextcloud-hot` (50Gi Longhorn-replica2 RWX, LUKS-at-rest via ADR 0017) + three csi-rclone PVCs (`nextcloud-personal-files` 1Ti, `nextcloud-family-shared` 500Gi, `nextcloud-internal-archive` 1Ti) against per-share `nas-crypt-*` StorageClasses. |
 | `externalsecret.yaml` | 4 ESOs: admin, postgres, oidc, cnpg-s3. |
 | `httproute.yaml` | Cilium HTTPRoute on `nextcloud.lab.<HOMELAB-DOMAIN>`. |
-| `networkpolicy.yaml` | Vanilla NP: Cilium Gateway + Prometheus + CNPG + Redis + Authentik. CCNP: NFS egress to `<NAS-IP>`. |
+| `networkpolicy.yaml` | Vanilla NP: Cilium Gateway + Prometheus + CNPG + Redis + Authentik. **No CCNP NAS egress** — csi-rclone is the only NAS-talking layer per ADR 0030. |
 | `servicemonitor.yaml` | Prometheus scrape on `/metrics`. |
 
 ## OpenBao paths to seed
@@ -74,12 +79,13 @@ homelab-infra/scripts/provision-minio-svcacct.sh \
 
 | Bring-up step | What lands |
 |---|---|
-| Argo sync `infrastructure/cnpg/` + `cert-manager/` + `minio-on-nas/` + `platform/openbao/` | Prereqs Healthy. |
-| Operator pre-stages NAS share (`<NAS_NEXTCLOUD_SHARE>` exists + exported to k8s-nfs). | NFS PV can bind. |
+| Operator runs the rclone-crypt key bootstrap ceremony three times (one per share) per [`03-runbooks/nas/rclone-crypt-key-bootstrap.md`](../../../homelab-docs/03-runbooks/nas/rclone-crypt-key-bootstrap.md). | OpenBao paths `kv/prod/nas-encryption/{personal-files,family-shared,internal-archive}/rclone_config` populated; offline-recovery archive updated; three NAS ciphertext shares pre-created. |
+| Argo sync `infrastructure/cnpg/` + `cert-manager/` + `minio-on-nas/` + `platform/openbao/` + `infrastructure/csi-rclone/` (with the three `nas-crypt-*` StorageClasses registered) | Prereqs Healthy. |
 | Operator runs the seed snippet above. | ESO populates Secrets. |
-| Argo sync this layer | CNPG `nextcloud-pg` up; NFS PVC binds; Nextcloud Deployment Ready; HTTPRoute reconciled. |
+| Argo sync this layer | CNPG `nextcloud-pg` up; four PVCs bind (`nextcloud-hot` on Longhorn + three csi-rclone PVCs); Nextcloud Deployment Ready; HTTPRoute reconciled. |
 | First-time admin login at `https://nextcloud.lab.<HOMELAB-DOMAIN>` | Operator dismisses default-app-enable wizard; sets locale + timezone. |
 | (post-Authentik) operator runs `occ app:install user_oidc + occ user_oidc:provider` | OIDC login flow active for family members. |
+| Operator installs Group Folders app + creates `family-shared` and `internal-archive` group folders pointing at `/mnt/family-shared` and `/mnt/internal-archive` respectively. | Family + archive group folders accessible to assigned users; data goes to the right encrypted backend per ACL. |
 
 ## Post-bring-up activation (one-time)
 
@@ -137,11 +143,15 @@ dir, then runs `occ files:scan` to register them.
    surfaces a viable encrypted-at-rest story (per TODO.md
    "Investigate Nextcloud E2EE").
 
-2. **NFS-backed primary data on NAS.** Recovery via NAS
-   Synology snapshot-replication + Restic tier-2/3 per
-   ADR 0006. **NOT** cluster-Longhorn-backed — file data
-   doesn't fit the Longhorn capacity profile. CNPG metadata
-   + Redis cache are Longhorn-resilient.
+2. **Cold-bucket data on NAS via csi-rclone-NFS-crypt.**
+   User files (home trees + group folders) live on three
+   per-share encrypted volumes per ADR 0030 §D2; NAS sees
+   only ciphertext. Recovery via NAS Synology snapshot-
+   replication + Restic tier-2/3 per ADR 0006. NOT
+   cluster-Longhorn-backed — file data doesn't fit the
+   Longhorn capacity profile. CNPG metadata + Redis cache +
+   chart's hot bucket (config / custom_apps / themes / tmp)
+   are Longhorn-resilient with LUKS-at-rest via ADR 0017.
 
 3. **`readOnlyRootFilesystem: false`** — Nextcloud-fpm-alpine
    writes to `/var` at runtime (PHP session, cache, opcache).
