@@ -1,0 +1,66 @@
+# csi-driver-rclone helm values (veloxpack chart).
+#
+# Per ADR 0030 §D1. The driver embeds rclone as a Go library —
+# no external binary to manage. Node DaemonSet uses /dev/fuse;
+# controller is a single Deployment.
+#
+# We keep the chart's defaults narrow:
+#   - VFS cache: --vfs-cache-mode full + --vfs-cache-max-size
+#     5G + --vfs-cache-max-age 1h. Per ADR 0030 §D4 — sized for
+#     the cold-bucket working set after the storage split. Lives
+#     on each node's root disk; node-SSD purchase deferred.
+#   - Metrics enabled so the cluster-wide Prometheus scrapes
+#     the driver's cache-hit / cache-eviction counters.
+
+# Image pinning. OPERATOR replaces the tag with a digest
+# pin via Renovate before first sync per ADR 0030 §D5.
+image:
+  pullPolicy: IfNotPresent
+
+# Node DaemonSet — runs on every node that schedules consumer
+# pods. /dev/fuse + mount propagation Bidirectional are the
+# privileges that make this PSA-privileged.
+node:
+  # FUSE-related flags are baked into the driver's Pod spec
+  # by the chart; values exposed below are the operator-tunable
+  # subset.
+  metrics:
+    enabled: true
+    service:
+      enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+# Controller — single Deployment, leader-elects.
+controller:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+# rclone-side default flags. Each StorageClass can override
+# via parameters.mountOptions; defaults set sensible behaviour
+# for the cold-originals workload.
+rclone:
+  # Default mount options applied when a StorageClass doesn't
+  # override. Tuned for cold-originals access (full-screen
+  # views + ML-index sequential scans) per ADR 0030 §D4.
+  defaultMountOptions:
+    - "--vfs-cache-mode=full"
+    - "--vfs-cache-max-size=5G"
+    - "--vfs-cache-max-age=1h"
+    - "--vfs-read-ahead=128M"
+    - "--buffer-size=32M"
+    - "--dir-cache-time=1h"
+    - "--allow-other"

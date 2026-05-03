@@ -1,9 +1,25 @@
 # Immich helm values (immich-app/immich-charts).
 # Per ADR 0024 (Tailscale-only Phase 1 + CF Tunnel via
 # immich-public-proxy for public album sharing) +
-# ADR 0025 D4 (Immich replaces Synology Photos / PhotoPrism;
-# `personal-photos` share encrypted at NAS via rclone-crypt
-# overlay per D3) + identity.md (Authentik OIDC).
+# ADR 0025 D4 (Immich replaces Synology Photos / PhotoPrism) +
+# ADR 0030 (csi-rclone + hot/cold storage split) +
+# identity.md (Authentik OIDC).
+#
+# Storage layout per ADR 0030 §D2:
+#   /usr/src/app/upload         ← Longhorn (immich-hot PVC)
+#                                 thumbs, previews, encoded
+#                                 video, profile, DB backups,
+#                                 upload-staging
+#   /usr/src/app/upload/library ← csi-rclone (immich-originals
+#                                 PVC, StorageClass
+#                                 nas-crypt-personal-photos)
+#                                 storage-template-organised
+#                                 originals, encrypted at NAS
+#
+# The split keeps thumbs OFF rclone-crypt — every timeline
+# scroll is local, no FUSE-decrypt on the hot path. The
+# 8-10x read amplification observed on rclone-mounted thumbs
+# (Immich discussion #3814) doesn't apply here.
 #
 # Postgres: EXTERNAL — bundled subchart disabled; uses the
 # CNPG cluster from cnpg-cluster.yaml (vectorchord-enabled
@@ -33,10 +49,19 @@ postgresql:
 server:
   enabled: true
   persistence:
+    # Hot bucket on Longhorn — outer mount.
     library:
       type: pvc
-      existingClaim: immich-library
+      existingClaim: immich-hot
       mountPath: /usr/src/app/upload
+      readOnly: false
+    # Cold bucket on csi-rclone — inner mount stacked on top
+    # of the hot bucket at the `library/` subdir. Immich's
+    # storage-template moves originals here on first index.
+    originals:
+      type: pvc
+      existingClaim: immich-originals
+      mountPath: /usr/src/app/upload/library
       readOnly: false
 
 # Microservices (background job worker — ingest, thumbnail,
@@ -46,8 +71,13 @@ microservices:
   persistence:
     library:
       type: pvc
-      existingClaim: immich-library
+      existingClaim: immich-hot
       mountPath: /usr/src/app/upload
+      readOnly: false
+    originals:
+      type: pvc
+      existingClaim: immich-originals
+      mountPath: /usr/src/app/upload/library
       readOnly: false
 
 # Machine-learning (CLIP smart search + ArcFace facial

@@ -5,9 +5,12 @@
 #
 # Helm chart: official immich-app/immich-charts (OCI). Bundled
 # Redis kept (chart default); Postgres EXTERNAL via CNPG cluster
-# defined in cnpg-cluster.yaml. Library backend is the NAS share
-# `personal-photos` mounted RWX via NFS-CSI (encrypted-at-NAS via
-# rclone-crypt overlay per ADR 0025 D3 — see README).
+# in cnpg-cluster.yaml. Storage layout follows ADR 0030 §D2 —
+# hot bucket (thumbs, previews, encoded video, profile,
+# backups) on Longhorn; cold bucket (originals) on csi-rclone
+# (`nas-crypt-personal-photos` StorageClass from
+# `infrastructure/csi-rclone/`). Both PVCs declared in
+# pvc.yaml.
 #
 # Public sharing of albums goes through `apps/immich-public-proxy/`
 # behind Cloudflare Tunnel per ADR 0024 D1; Immich itself stays
@@ -30,7 +33,7 @@ helmCharts:
 resources:
   - namespace.yaml
   - cnpg-cluster.yaml
-  - nfs-pv.yaml
+  - pvc.yaml
   - externalsecret.yaml
   - httproute.yaml
   - networkpolicy.yaml

@@ -29,9 +29,9 @@ behind Cloudflare Tunnel per
 |---|---|
 | `namespace.yaml` | `immich` ns; PSA restricted. |
 | `kustomization.yaml` | Helm chart `oci://ghcr.io/immich-app/immich-charts/immich` v0.11.1; resource list below. |
-| `values.yaml` | server + microservices + machine-learning enabled; bundled Redis on, bundled Postgres off; library PVC `immich-library` mounted at `/usr/src/app/upload`; OAuth (Authentik OIDC) wired via `OAUTH_*` extraEnv; non-root + dropped caps. |
+| `values.yaml` | server + microservices + machine-learning enabled; bundled Redis on, bundled Postgres off; **two PVCs** mounted per ADR 0030 §D2 — `immich-hot` (Longhorn) at `/usr/src/app/upload` + `immich-originals` (csi-rclone) at `/usr/src/app/upload/library`; OAuth (Authentik OIDC) wired via `OAUTH_*` extraEnv; non-root + dropped caps. |
 | `cnpg-cluster.yaml` | 2-instance CNPG cluster `immich-pg` using the cnpg-pgvector-vectorchord image (vectorchord + pgvector + pgvecto.rs); 20Gi Longhorn-replica3; barman → MinIO; `vchord.so` preloaded; `vector` + `vchord` extensions installed at bootstrap. |
-| `nfs-pv.yaml` | Static PV+PVC `immich-library` (4Ti soft cap, RWX) backed by NAS share `<NAS_PERSONAL_PHOTOS>`. **Mounts the ciphertext share — see "Bring-up wiring" below for the rclone-crypt overlay activation.** |
+| `pvc.yaml` | Two PVCs per ADR 0030 §D2: `immich-hot` (100Gi Longhorn-replica2 RWX, holds thumbs/encoded-video/profile/backups/upload-staging — LUKS-at-rest via cluster-node disk encryption per ADR 0017) + `immich-originals` (4Ti `nas-crypt-personal-photos` StorageClass RWX, holds storage-template-organised originals encrypted at NAS via csi-rclone). |
 | `externalsecret.yaml` | OIDC client + CNPG-WAL S3 creds (DB credentials are CNPG-managed in-namespace, not in OpenBao). |
 | `httproute.yaml` | Cilium HTTPRoute on `immich.lab.<HOMELAB-DOMAIN>`; Tailscale-only at all times. |
 | `networkpolicy.yaml` | Vanilla NP: same-ns broad allow + Cilium Gateway ingress on server, Prometheus scrape, immich-public-proxy ingress on server. CCNP: NFS to `<NAS_IP>` + MinIO (CNPG WAL) + GeoNames + GitHub releases (Immich's reverse-geocoding download). |
@@ -75,44 +75,11 @@ bao kv put kv/immich/cnpg-s3 \
 
 | Step | What lands |
 |---|---|
-| Argo sync `infrastructure/cert-manager/` + `platform/openbao/` + `platform/external-secrets/` + `platform/cnpg/` + `infrastructure/minio-on-nas/` | Prereqs Healthy. |
-| Operator pre-stages NAS share `<NAS_PERSONAL_PHOTOS>` (ciphertext rclone-crypt config) per `nas/initial-setup.md`; rclone-crypt key seeded at `kv/prod/nas-encryption/personal-photos`. | NFS PV can bind. |
-| **Operator wires the rclone-crypt overlay** (TBD — see "Known scaffolding gap" below). | Server + microservices + ML pods see plaintext at `/usr/src/app/upload`. |
-| Argo sync this layer | CNPG cluster reconciles; `immich-pg-app` Secret materialises; ExternalSecrets pull OIDC + S3 creds; library PVC binds; server / microservices / ML Deployments Ready; HTTPRoute reconciled. |
+| Operator runs the rclone-crypt key bootstrap ceremony per [`03-runbooks/nas/rclone-crypt-key-bootstrap.md`](../../../homelab-docs/03-runbooks/nas/rclone-crypt-key-bootstrap.md). | OpenBao path `kv/prod/nas-encryption/personal-photos/rclone_config` populated with the assembled rclone INI; offline-recovery archive updated (ADR 0025 D8); NAS ciphertext share `<NAS_PERSONAL_PHOTOS>` pre-created. |
+| Argo sync `infrastructure/cert-manager/` + `platform/openbao/` + `platform/external-secrets/` + `infrastructure/cnpg/` + `infrastructure/minio-on-nas/` + `infrastructure/csi-rclone/` | Prereqs Healthy. csi-rclone driver up; `nas-crypt-personal-photos` StorageClass registered. |
+| Argo sync this layer | CNPG cluster reconciles; `immich-pg-app` Secret materialises; ExternalSecrets pull OIDC + S3 creds; both PVCs bind (`immich-hot` on Longhorn, `immich-originals` via csi-rclone); server / microservices / ML Deployments Ready; HTTPRoute reconciled. |
 | Operator visits `https://immich.lab.<HOMELAB-DOMAIN>` | Sign-up flow creates the operator's admin user (the first registered user is admin in Immich). Subsequent users provision via OIDC. |
 | Operator runs the migration runbook | PhotoPrism originals + albums move into the library; tag tree built from the original folder hierarchy. |
-
-## Known scaffolding gap — rclone-crypt overlay
-
-This layer is the **first** consumer of the
-[ADR 0025 D3](../../../homelab-docs/02-decisions/0025-nas-as-encrypted-bulk-substrate.md)
-encrypted-bulk pattern (`personal+` data on NAS encrypted
-client-side, decrypted only in cluster pods). The pattern is
-specified in the ADR but has no reference implementation in the
-codebase as of this scaffold's first commit.
-
-What's missing:
-
-- A sidecar / init-container running `rclone mount` against the
-  ciphertext NFS PV with the `crypt:` remote configured from
-  the OpenBao-projected key, exposing the plaintext mount to the
-  app containers via a shared `emptyDir` (or via a propagated
-  `mountPropagation: Bidirectional` once the FUSE-in-Pod
-  permissions are sorted).
-- Or, alternatively, a CSI plugin that does the same
-  decryption transparently.
-- A livenessProbe touching the decrypted mount to detect
-  overlay hangs (called out in ADR 0025 D3).
-
-Until that's wired, **do not Argo-sync this layer against
-production data** — the pods will see ciphertext, fail to read
-EXIF, and (worse) write plaintext over the encrypted blobs in a
-way that needs a full restore to recover from. A test sync against
-a throwaway share is fine for validating the rest of the
-plumbing (Postgres bootstrap, OIDC, Helm release).
-
-This gap is tracked in `homelab-docs/TODO.md` under "Wire ADR
-0025 D3 rclone-crypt overlay; Immich is the first consumer."
 
 ## Caveats
 
@@ -166,11 +133,20 @@ This gap is tracked in `homelab-docs/TODO.md` under "Wire ADR
    later, raise the ML pod's `resources` and add a
    `nodeSelector` for the GPU node.
 
-8. **Locked Folder is UI-only.** Per ADR 0003, the rclone-crypt
-   overlay encrypts everything in the library at NAS rest;
-   Locked Folder adds a UI-level visibility gate but no
-   additional encryption layer. See guide §"Locked Folder for
+8. **Locked Folder is UI-only.** Per ADR 0030 the originals
+   live on csi-rclone-encrypted NAS storage; thumbs and
+   previews live on Longhorn (LUKS-at-rest via ADR 0017).
+   Locked Folder adds a UI-level visibility gate on top, not
+   another encryption layer. See guide §"Locked Folder for
    sensitive content" for the framing.
+
+9. **Hot/cold split caveat.** Storage-template's first-index
+   move from `/usr/src/app/upload/upload/<userId>/` (hot,
+   Longhorn) to `/usr/src/app/upload/library/<userId>/...`
+   (cold, csi-rclone) is a cross-PVC copy, not a rename.
+   Per-file one-shot at upload time; amortises to
+   imperceptible at steady state. The initial bulk import
+   from PhotoPrism stages every file through this path.
 
 ## Migration from PhotoPrism
 
@@ -194,7 +170,15 @@ High-level:
   D1 — Tailscale Phase 1 + CF Tunnel via immich-public-proxy
   for public sharing.
 - [ADR 0025](../../../homelab-docs/02-decisions/0025-nas-as-encrypted-bulk-substrate.md)
-  D3+D4 — rclone-crypt overlay; Immich replaces Synology Photos.
+  D4 — Immich replaces Synology Photos.
+- [ADR 0030](../../../homelab-docs/02-decisions/0030-csi-rclone-and-storage-split.md)
+  — csi-rclone for the cold bucket + hot/cold split (refines
+  ADR 0025 D3).
+- [ADR 0017](../../../homelab-docs/02-decisions/0017-cluster-node-disk-encryption.md)
+  — closes the threat-model loop for hot-bucket data on
+  Longhorn.
+- [`infrastructure/csi-rclone/`](../../infrastructure/csi-rclone/)
+  — driver + StorageClass `nas-crypt-personal-photos`.
 - [`storage.md`](../../../homelab-docs/01-architecture/storage.md) —
   `personal-photos` share, Tier-A/B/C access matrix.
 - [`platform/authentik/templates/`](../../platform/authentik/templates/)
@@ -202,8 +186,11 @@ High-level:
 - [`infrastructure/cnpg/`](../../infrastructure/cnpg/) —
   CNPG operator base.
 - [`apps/nextcloud/`](../nextcloud/) — sibling app with the
-  same CNPG + ExternalSecret + NFS-PV pattern.
+  same CNPG + ExternalSecret pattern (Files migration to
+  csi-rclone is its own future task).
 - [03-runbooks/immich/](../../../homelab-docs/03-runbooks/immich/)
   — migration runbook.
+- [03-runbooks/nas/rclone-crypt-key-bootstrap.md](../../../homelab-docs/03-runbooks/nas/rclone-crypt-key-bootstrap.md)
+  — operator ceremony for the encryption key.
 - [04-guides/photo-management-with-immich.md](../../../homelab-docs/04-guides/photo-management-with-immich.md)
   — day-to-day usage.

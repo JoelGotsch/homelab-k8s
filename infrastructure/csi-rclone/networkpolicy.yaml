@@ -1,0 +1,80 @@
+# NetworkPolicies for csi-rclone.
+#
+# Ingress: only Prometheus scrape on the metrics endpoint.
+# The driver's Node DaemonSet is consumed via the kubelet
+# CSI socket (host-local, not in-cluster network).
+#
+# Egress: kube-DNS + the NAS NFS endpoint. The driver doesn't
+# fetch external content (rclone is embedded as a library; no
+# rclone-config-fetch from a remote URL).
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: csi-rclone
+  namespace: csi-rclone
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: csi-driver-rclone
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Prometheus scrape on the driver's metrics port.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: metrics
+          protocol: TCP
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# CCNP for NFS egress to the NAS. The driver's Node DaemonSet
+# pods need to reach <NAS_IP>:2049 for the underlying NFS
+# transport (the crypt layer is wholly in-pod; only the NFS
+# bytes traverse the wire and they're already ciphertext).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: csi-rclone-egress
+  namespace: csi-rclone
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: csi-driver-rclone
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toCIDR:
+        - "<NAS_IP>/32"
+      toPorts:
+        - ports:
+            - port: "2049"
+              protocol: TCP
+            - port: "111"
+              protocol: TCP

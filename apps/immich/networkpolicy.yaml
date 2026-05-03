@@ -108,15 +108,12 @@ spec:
           rules:
             dns:
               - matchPattern: "*"
-    # NFS to NAS for the personal-photos library.
-    - toCIDR:
-        - "<NAS_IP>/32"
-      toPorts:
-        - ports:
-            - port: "2049"
-              protocol: TCP
-            - port: "111"
-              protocol: TCP
+    # NAS NFS egress is NOT allowed from Immich pods — per
+    # ADR 0030 §D1 the csi-rclone driver in `csi-rclone` ns
+    # is the only thing that talks to the NAS. Immich pods
+    # see the encrypted library as a normal mounted FS via
+    # the CSI provisioning. If the PVC fails to bind, the
+    # pod fails to start (correct behaviour — fail-closed).
     # MinIO (cluster-internal — for CNPG WAL).
     - toEndpoints:
         - matchLabels:

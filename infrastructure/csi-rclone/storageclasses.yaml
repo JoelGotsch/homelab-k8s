@@ -1,0 +1,44 @@
+# StorageClasses backed by csi-rclone — one per `personal+`
+# share per ADR 0030 §D1. Each maps to a chained
+# `crypt:` over `nfs:` remote whose config sits in the matching
+# Secret (see externalsecret.yaml).
+#
+# Adding a new share at consumer-onboarding time:
+#   1. Operator generates the per-share crypt key +
+#      offline-recovery archive update per
+#      `03-runbooks/nas/rclone-crypt-key-bootstrap.md`.
+#   2. Add an ExternalSecret in this layer pulling
+#      `kv/prod/nas-encryption/<share>/rclone_config`.
+#   3. Add the matching StorageClass below pointing at the
+#      Secret name.
+#   4. Cold-start.md Step 13c gets a row for the new share.
+
+# nas-crypt-personal-photos — Immich library backend.
+# Per ADR 0030 §D2 only the *originals* sub-tree of Immich's
+# UPLOAD_LOCATION lives here; thumbs/encoded-video/profile
+# stay on Longhorn.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nas-crypt-personal-photos
+provisioner: csi-rclone.veloxpack.io
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+parameters:
+  # Top-level remote name as defined in the rclone INI in the
+  # referenced Secret. Driver mounts `<remote>:<remotePath>`.
+  remote: "nas-crypt-personal-photos"
+  remotePath: ""
+
+  # Secret holding the rclone INI (configData key). Per-share
+  # so that key compromise of one share doesn't expose
+  # another.
+  csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-personal-photos-config"
+  csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
+
+  # Per-share mount options override the driver-level defaults
+  # in values.yaml when the workload calls for it. Immich's
+  # cold-originals access pattern is well-served by the
+  # driver-level defaults; left empty here.
+  mountOptions: ""

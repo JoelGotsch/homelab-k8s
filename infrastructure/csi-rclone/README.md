@@ -1,0 +1,130 @@
+# infrastructure/csi-rclone
+
+Cluster-wide encryption layer for `personal+`-classified data
+on the NAS. Per
+[ADR 0030](../../../homelab-docs/02-decisions/0030-csi-rclone-and-storage-split.md)
+(refines [ADR 0025 D3](../../../homelab-docs/02-decisions/0025-nas-as-encrypted-bulk-substrate.md)).
+
+`veloxpack/csi-driver-rclone` runs a privileged DaemonSet in
+this namespace; rclone is embedded as a Go library so there's
+no external binary to manage. Each `personal+` share gets its
+own StorageClass `nas-crypt-<share>` whose config (NFS host +
+share path + obscured crypt password/salt) lives in OpenBao
+and is projected via ExternalSecret into a Secret the
+StorageClass references via
+`csi.storage.k8s.io/node-publish-secret-name`. Consumer apps
+(Immich, future Nextcloud Files, Paperless, etc.) claim a PVC
+against the relevant StorageClass and stay PSA-`restricted` —
+they never see `/dev/fuse`, never run privileged.
+
+## Layout
+
+| File | Purpose |
+|---|---|
+| `namespace.yaml` | `csi-rclone` ns; PSA **privileged** (driver needs `/dev/fuse` + mount propagation). |
+| `kustomization.yaml` | Helm chart `oci://ghcr.io/veloxpack/charts/csi-driver-rclone` v0.4.11; resource list below. |
+| `values.yaml` | Node DaemonSet + Controller + driver-level rclone defaults (`--vfs-cache-mode=full --vfs-cache-max-size=5G --vfs-cache-max-age=1h`); ServiceMonitor enabled. |
+| `storageclasses.yaml` | Per-share `nas-crypt-*` StorageClasses. Today: `nas-crypt-personal-photos` (Immich). Add new SCs as new `personal+` consumer apps land. |
+| `externalsecret.yaml` | One ExternalSecret per StorageClass, pulling the share's rclone INI from `kv/prod/nas-encryption/<share>/rclone_config`. |
+| `networkpolicy.yaml` | Ingress: Prometheus scrape only. Egress: kube-DNS + `<NAS_IP>:2049/111` (NFS). |
+
+## OpenBao paths to seed
+
+Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
+
+| Path | Field(s) | Source |
+|---|---|---|
+| `kv/data/prod/nas-encryption/personal-photos` | `rclone_config` | Generated during the operator-side ceremony per [`03-runbooks/nas/rclone-crypt-key-bootstrap.md`](../../../homelab-docs/03-runbooks/nas/rclone-crypt-key-bootstrap.md). Single string holding the full rclone INI for the chained `crypt:` over `nfs:` remote (NAS IP, ciphertext share path, obscured password + salt). |
+
+Field is the **assembled** rclone INI, not the raw password.
+Storing it pre-assembled keeps secrets out of templates and
+matches the offline-recovery archive shape — the operator
+backs up only the OpenBao snapshot, not a separate "what does
+the config look like" sidecar doc. The crypt password +
+salt themselves additionally land in the offline-recovery
+archive per ADR 0025 D8 so a full-cluster-loss scenario can
+reconstruct without OpenBao.
+
+**Operator-side ceremony** (one-time, per share):
+[`03-runbooks/nas/rclone-crypt-key-bootstrap.md`](../../../homelab-docs/03-runbooks/nas/rclone-crypt-key-bootstrap.md).
+High-level: generate password + salt, run
+`rclone obscure`, build the INI, seed OpenBao, update the
+offline-recovery archive (Nitrokey-gated). Pre-create the
+ciphertext NFS share on the NAS.
+
+## Bring-up wiring
+
+| Step | Owner | What lands |
+|---|---|---|
+| 1. Generate per-share rclone-crypt key + assembled INI | Operator (one-time, per share) | `kv/prod/nas-encryption/<share>/rclone_config` populated; offline-recovery archive updated; NAS ciphertext share pre-created. |
+| 2. Argo sync `infrastructure/external-secrets/` + `platform/openbao/` | Argo | ESO can pull the Secret. |
+| 3. Argo sync this layer | Argo | Driver DaemonSet up on every node; ExternalSecret reconciles to Secret in this ns; StorageClass `nas-crypt-<share>` registered. |
+| 4. Argo sync the consumer app (e.g., `apps/immich/`) | Argo | Consumer claims PVC against `nas-crypt-<share>`; CSI provisions a volume; volume mounts in consumer pod with plaintext view. |
+| 5. End-to-end check | Operator | Write a test file in the consumer pod → verify it appears as ciphertext on the NAS share via SSH-to-NAS + `ls`. Read it back via the consumer pod → verify plaintext round-trip. |
+
+## Caveats
+
+1. **Veloxpack is pre-1.0**, ~318 stars, primarily one
+   maintainer. Per ADR 0030 §D5 the maturity hedge is:
+   pin image digest, mirror to Forgejo Packages once ADR 0019
+   is serving, FUSE-sidecar fallback documented in
+   [`known-caveats.md`](../../../homelab-docs/04-guides/known-caveats.md).
+   Operator monitors upstream releases via Renovate.
+
+2. **Privileged namespace.** The driver's Node DaemonSet runs
+   privileged with `/dev/fuse` + mount propagation
+   `Bidirectional`. Bounded to this namespace; consumer apps
+   stay PSA `restricted`. Falco rules
+   ([`observability/falco/`](../../observability/falco/))
+   should scope an exception for `csi-rclone`'s privileged
+   ops so they don't trigger general "privileged container"
+   alerts.
+
+3. **One key per share.** Per ADR 0025 D8, each NAS share has
+   its own rclone-crypt key. Compromise of one key exposes
+   only that share. Adding a new `personal+` consumer →
+   generate a new key + StorageClass, not reuse an existing
+   one.
+
+4. **Initial ML index pass on Immich** (and any future
+   consumer doing a full-library re-scan) burns through the
+   entire library decrypted once. Bounded one-shot cost; not
+   a steady-state concern. Flagged in
+   [`migrate-from-photoprism.md`](../../../homelab-docs/03-runbooks/immich/migrate-from-photoprism.md).
+
+5. **Hot/cold split is a per-app responsibility.** This layer
+   provides the encrypted cold-bucket surface. Each consumer
+   declares two PVCs (one Longhorn-backed for the hot bucket,
+   one `nas-crypt-*`-backed for the cold bucket) per
+   ADR 0030 §D2. The split is not enforced by this layer;
+   an app that puts thumbnails on `nas-crypt-*` will work but
+   take the read-amplification hit.
+
+6. **Existing `nfs-csi` StorageClasses for `personal+` shares
+   become orphaned.** The `nfs-personal-files`,
+   `nfs-family-shared`, `nfs-internal-archive` SCs in
+   `infrastructure/nfs-csi/storageclasses.yaml` predate this
+   ADR and are no longer the right path for `personal+` data.
+   They're left in place pending a sweep that confirms they
+   have no consumers; remove in a follow-up commit when
+   confirmed unused. Tracked in `homelab-docs/TODO.md`.
+
+## Related
+
+- [ADR 0030](../../../homelab-docs/02-decisions/0030-csi-rclone-and-storage-split.md)
+  — the decision this layer implements.
+- [ADR 0025](../../../homelab-docs/02-decisions/0025-nas-as-encrypted-bulk-substrate.md)
+  — D3 refined; D8 (offline-recovery key) still applies.
+- [ADR 0017](../../../homelab-docs/02-decisions/0017-cluster-node-disk-encryption.md)
+  — closes the threat-model loop for hot-bucket data on
+  Longhorn.
+- [`storage.md`](../../../homelab-docs/01-architecture/storage.md)
+  — share inventory + Tier-A/B/C access matrix.
+- [`apps/immich/`](../../apps/immich/) — first consumer.
+- [`infrastructure/nfs-csi/`](../nfs-csi/) — sibling layer
+  for `internal-media` / `public-*` plaintext shares (e.g.,
+  Jellyfin) that don't need the encryption hop.
+- Upstream:
+  [veloxpack/csi-driver-rclone](https://github.com/veloxpack/csi-driver-rclone),
+  [PR #17 nested remotes](https://github.com/veloxpack/csi-driver-rclone/pull/17),
+  [veloxpack docs](https://www.veloxpack.io/docs/csi-driver-rclone/).

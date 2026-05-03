@@ -1,0 +1,31 @@
+# csi-rclone — cluster-wide encryption layer for `personal+`
+# data on the NAS. Per ADR 0030.
+#
+# Helm chart: veloxpack/csi-driver-rclone (OCI). Driver runs
+# privileged in this namespace; consumer apps claim a PVC
+# against the `nas-crypt-*` StorageClasses defined in
+# storageclasses.yaml and stay PSA-restricted.
+#
+# OPERATOR PINS the chart version + image digest via Renovate.
+# Image-digest pin (not just tag) per ADR 0030 §D5 maturity
+# hedge — veloxpack is pre-1.0; explicit human review on bumps.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: csi-rclone
+
+helmCharts:
+  - name: csi-driver-rclone
+    repo: oci://ghcr.io/veloxpack/charts
+    version: "0.4.11"  # OPERATOR PINS via Renovate
+    releaseName: csi-rclone
+    namespace: csi-rclone
+    valuesFile: values.yaml
+    includeCRDs: true
+
+resources:
+  - namespace.yaml
+  - externalsecret.yaml
+  - storageclasses.yaml
+  - networkpolicy.yaml
