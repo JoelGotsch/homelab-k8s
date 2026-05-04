@@ -68,6 +68,34 @@ ciphertext NFS share on the NAS.
 | 4. Argo sync the consumer app (e.g., `apps/immich/`) | Argo | Consumer claims PVC against `nas-crypt-<share>`; CSI provisions a volume; volume mounts in consumer pod with plaintext view. |
 | 5. End-to-end check | Operator | Write a test file in the consumer pod → verify it appears as ciphertext on the NAS share via SSH-to-NAS + `ls`. Read it back via the consumer pod → verify plaintext round-trip. |
 
+## Onboarding a new encrypted share
+
+Each new `personal+` (or `internal`-encrypted) consumer app
+that needs cluster-side-encrypted bulk storage requires four
+mechanical additions, all in lockstep. Pattern established
+with `nas-crypt-personal-photos` (Immich); follow the same
+shape for every subsequent share.
+
+| Step | Where | What |
+|---|---|---|
+| 1. Per-share rclone-crypt key generation | Operator (one-time) | Run [`03-runbooks/nas/rclone-crypt-key-bootstrap.md`](../../../homelab-docs/03-runbooks/nas/rclone-crypt-key-bootstrap.md) for the new share name. The runbook generates the crypt password + salt, assembles the rclone INI, seeds `kv/prod/nas-encryption/<share>/rclone_config`, and adds the password+salt to the offline-recovery archive (per [ADR 0025 D8](../../../homelab-docs/02-decisions/0025-nas-as-encrypted-bulk-substrate.md)). |
+| 2. NAS ciphertext share pre-create | Operator (one-time) | DSM Control Panel → Shared Folder → create `<share>-cipher` with k8s-nfs RW + NFS-export to cluster nodes per [`nas/initial-setup.md` §"Step 3 — Create shares"](../../../homelab-docs/03-runbooks/nas/initial-setup.md). Do **not** enable DSM-side encryption — the encryption layer is cluster-side rclone-crypt per ADR 0025 D6. |
+| 3. ExternalSecret + StorageClass | This layer | Add an `ExternalSecret` row to `externalsecret.yaml` pulling `kv/prod/nas-encryption/<share>/rclone_config` into Secret `nas-crypt-<share>-config`; add a matching `StorageClass nas-crypt-<share>` to `storageclasses.yaml` referencing the secret via `csi.storage.k8s.io/node-publish-secret-name`. |
+| 4. cold-start.md row | docs | Append a row to [`cold-start.md` Step 13c](../../../homelab-docs/04-guides/cold-start.md) under `infrastructure/csi-rclone/` so the operator-action gate (Step 1 above) is sequenced before this layer's first sync. |
+
+Plus the consumer app's own kustomize layer claims a PVC
+against `nas-crypt-<share>` — that's app-side, not this layer.
+
+**Sequencing**: steps 1+2 are operator-actions; they must
+land **before** Argo syncs this layer, otherwise the
+ExternalSecret stays in `SecretSyncedError` and the
+StorageClass is registered but unusable.
+
+**Compromise blast radius**: per ADR 0025 D8, each share has
+its own crypt key. Compromise of one key exposes only its
+share; the others stay opaque. Rotation per
+[`03-runbooks/nas/encryption-key-rotation.md`](../../../homelab-docs/03-runbooks/nas/encryption-key-rotation.md).
+
 ## Caveats
 
 1. **Veloxpack is pre-1.0**, ~318 stars, primarily one
