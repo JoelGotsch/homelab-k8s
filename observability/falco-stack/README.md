@@ -33,7 +33,7 @@ points at
 | `values.yaml` | `driver: modern_ebpf`; tolerations for CP-tainted nodes; rule files (upstream + local overlay); Falcosidekick webhook → relay; Loki/Alertmanager outputs disabled-with-TODO until those layers land. |
 | `networkpolicy.yaml` | Falco egress to Falcosidekick + kube-DNS; Falcosidekick ingress from Falco + Prometheus, egress to ntfy-e2ee-relay + kube-DNS. |
 | `servicemonitor.yaml` | Self-metrics scrape for both Falco + Falcosidekick. |
-| `rules-configmap.yaml` | Operator's local rule overlay (mounted at `/etc/falco/rules.d`). Empty at first install; conventions documented inline. |
+| `rules-configmap.yaml` | Operator's local rule overlay (mounted at `/etc/falco/rules.d`). Today carries: csi-rclone driver allowlist (`user_privileged_containers` + `user_sensitive_mount_containers` extension entries for `ghcr.io/veloxpack/csi-driver-rclone`) + a homelab rule "Unexpected /dev/fuse access outside csi-rclone" defense-in-depth signal. Conventions documented inline. |
 
 ## Bring-up
 

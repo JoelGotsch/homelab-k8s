@@ -80,11 +80,15 @@ ciphertext NFS share on the NAS.
 2. **Privileged namespace.** The driver's Node DaemonSet runs
    privileged with `/dev/fuse` + mount propagation
    `Bidirectional`. Bounded to this namespace; consumer apps
-   stay PSA `restricted`. Falco rules
-   ([`observability/falco/`](../../observability/falco/))
-   should scope an exception for `csi-rclone`'s privileged
-   ops so they don't trigger general "privileged container"
-   alerts.
+   stay PSA `restricted`. Falco rules in
+   [`observability/falco-stack/rules-configmap.yaml`](../../observability/falco-stack/rules-configmap.yaml)
+   carry a scoped exception (`user_privileged_containers` +
+   `user_sensitive_mount_containers` extension entries for
+   the veloxpack csi-driver-rclone image) so csi-rclone's
+   privileged ops don't trigger general "privileged
+   container" alerts. Defense-in-depth: a homelab-custom rule
+   in the same overlay fires if `/dev/fuse` is opened from
+   any namespace other than `csi-rclone`.
 
 3. **One key per share.** Per ADR 0025 D8, each NAS share has
    its own rclone-crypt key. Compromise of one key exposes

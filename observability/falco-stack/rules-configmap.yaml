@@ -37,9 +37,61 @@ data:
   homelab-overlay.yaml: |
     # Operator's local Falco rule overlay.
     # See rules-configmap.yaml for conventions.
-    #
-    # Empty at first install. Add rules below.
 
+    # ─── csi-rclone driver allowlist ──────────────────────────
+    # The veloxpack csi-driver-rclone Node DaemonSet runs
+    # PSA-`privileged` with /dev/fuse + Bidirectional mount
+    # propagation per ADR 0030 §D1. Without these allowlist
+    # entries the upstream rules `Launch Privileged Container`
+    # + `Launch Sensitive Mount Container` fire on every
+    # node-pod start (and after every node reboot or driver
+    # restart) — that's known-good behaviour, not signal.
+    #
+    # Per known-caveats §csi-rclone "Privileged namespace
+    # bounded but not invisible". The allowlist is on
+    # container.image.repository (the upstream macros'
+    # extension point); operator updates the entry if the
+    # chart bumps to a different image repo path (Renovate-
+    # surfaced).
+    - list: user_privileged_containers
+      override:
+        items: append
+      items:
+        - "ghcr.io/veloxpack/csi-driver-rclone"
+
+    - list: user_sensitive_mount_containers
+      override:
+        items: append
+      items:
+        - "ghcr.io/veloxpack/csi-driver-rclone"
+
+    # Defense-in-depth: a homelab-custom rule that fires when
+    # /dev/fuse is opened OUTSIDE the csi-rclone namespace.
+    # csi-rclone is the only allowlisted FUSE consumer per
+    # ADR 0030; anything else is either an attacker
+    # smuggling FUSE access, or a legitimate new consumer
+    # that needs to be added to the allowlist (in which case
+    # the operator extends user_privileged_containers above
+    # to also cover it). Either way, this rule surfaces it.
+    - rule: Unexpected /dev/fuse access outside csi-rclone
+      desc: >
+        /dev/fuse is opened by a process that is not the
+        csi-rclone driver Node DaemonSet. csi-rclone is the
+        only allowlisted FUSE consumer per ADR 0030; anything
+        else means a workload smuggled FUSE access in OR a
+        new legitimate consumer needs adding to the allowlist.
+      condition: >
+        open_read
+        and fd.name = "/dev/fuse"
+        and k8s.ns.name != "csi-rclone"
+      output: >
+        /dev/fuse opened outside csi-rclone ns
+        (user=%user.name proc=%proc.cmdline ns=%k8s.ns.name
+        pod=%k8s.pod.name image=%container.image.repository)
+      priority: WARNING
+      tags: [homelab-custom, csi-rclone, T2, T3]
+
+    # ─── deception canaries ────────────────────────────────────
     # Example placeholder — uncomment + adapt for the first
     # deception canary per ADR 0010 (when the deception
     # layer lands):
