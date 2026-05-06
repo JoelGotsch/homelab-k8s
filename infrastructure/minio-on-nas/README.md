@@ -218,8 +218,8 @@ to back up at the infra layer.
   scale. Distributed mode would not.
 - **Network is the bottleneck**, not CPU. CRS312 10 GbE
   upgrade per [ADR 0020](../../../homelab-docs/02-decisions/0020-switch-upgrade-to-10g-mikrotik.md)
-  + Synology E10G22-T1-Mini NIC will materially help; pre-upgrade
-  the path is 1 GbE.
+  + 10Gtek X520-DA2 SFP+ NIC (per ADR 0020 D4 amendment) will
+  materially help; pre-upgrade the path is 1 GbE.
 - **No HA.** Single replica, single PV. A NAS reboot or NFS
   blip stalls all in-cluster backup writes for the duration.
   Acceptable: backups are not on the critical path; consumers
