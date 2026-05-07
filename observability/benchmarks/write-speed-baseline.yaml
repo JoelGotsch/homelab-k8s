@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: write-speed-baseline-runner
+  annotations:
+    argocd.argoproj.io/sync-wave: "50"
+data:
+  run.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    HOST="${NODE_NAME:-$(hostname)}"
+    OUT=/scratch/${HOST}
+    SENTINEL=${OUT}-fio.json
+
+    if [ -f "${SENTINEL}" ]; then
+      echo "[baseline] sentinel ${SENTINEL} already exists; skipping. Sleeping."
+      exec sleep infinity
+    fi
+
+    apt-get update -qq
+    apt-get install -y -qq --no-install-recommends fio smartmontools >/dev/null
+
+    echo "[baseline] smartctl pre-fio on /dev/nvme0n1"
+    smartctl -a /dev/nvme0n1 >"${OUT}-smart-pre.txt" || true
+
+    echo "[baseline] fio randwrite 200G / 1800s on ${HOST}"
+    fio \
+      --name=writeperf-baseline \
+      --filename=${OUT}-fio.dat \
+      --rw=randwrite \
+      --bs=4k \
+      --size=200G \
+      --runtime=1800 \
+      --time_based \
+      --ioengine=libaio \
+      --direct=1 \
+      --numjobs=1 \
+      --iodepth=16 \
+      --output-format=json \
+      --output=${SENTINEL}
+
+    echo "[baseline] smartctl post-fio on /dev/nvme0n1"
+    smartctl -a /dev/nvme0n1 >"${OUT}-smart-post.txt" || true
+
+    rm -f "${OUT}-fio.dat"
+
+    echo "[baseline] complete. Outputs at ${OUT}-{fio.json,smart-pre.txt,smart-post.txt}"
+    exec sleep infinity
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: write-speed-baseline
+  annotations:
+    argocd.argoproj.io/sync-wave: "50"
+spec:
+  selector:
+    matchLabels:
+      app: write-speed-baseline
+  template:
+    metadata:
+      labels:
+        app: write-speed-baseline
+    spec:
+      hostPID: false
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      nodeSelector:
+        kubernetes.io/os: linux
+      containers:
+        - name: runner
+          image: debian:12-slim
+          command: ["/bin/bash", "/runner/run.sh"]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            privileged: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          volumeMounts:
+            - name: scratch
+              mountPath: /scratch
+            - name: runner
+              mountPath: /runner
+      volumes:
+        - name: scratch
+          hostPath:
+            path: /var/lib/fio-baseline
+            type: DirectoryOrCreate
+        - name: runner
+          configMap:
+            name: write-speed-baseline-runner
+            defaultMode: 0755
