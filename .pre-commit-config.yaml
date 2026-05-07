@@ -43,3 +43,11 @@ repos:
         language: script
         pass_filenames: false
         files: '\.md$'
+
+      - id: check-no-mac-addresses
+        name: no MAC-address-shaped strings in tracked files (per CLAUDE.md cross-cutting rules)
+        entry: scripts/check-no-mac-addresses.sh
+        language: script
+        pass_filenames: false
+        # Always-on; runs every commit. Cheap (single git grep over
+        # tracked files); allowlist-by-path inside the script.
