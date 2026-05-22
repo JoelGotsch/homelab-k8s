@@ -193,6 +193,16 @@ extraVolumes:
   - name: hubble-flow-exporter-config
     configMap:
       name: hubble-flow-exporter-config
+      # Optional: true — keeps cilium-agent startable even if
+      # the hubble-flow-exporter ConfigMap is temporarily
+      # absent (gone during ConfigMap rotation, or after a
+      # cluster restore where Argo's reconcile-order resurrects
+      # Cilium before the observability layer). The Vector
+      # sidecar CrashLoopBackOffs until the real ConfigMap is
+      # present (per comment block above the sidecar
+      # definition), but cilium-agent itself stays running.
+      # MUST match homelab-infra/ansible/files/cilium-values.yaml.
+      optional: true
       items:
         - key: vector.yaml
           path: vector.yaml
