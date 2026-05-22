@@ -1,5 +1,17 @@
-# cert-manager — issues internal TLS leaf certs from the
-# OpenBao PKI engine (configured by 09b-argocd-bootstrap.yml).
+# cert-manager — hybrid cert issuance per ADR 0034.
+#
+# Two ClusterIssuers:
+#   - letsencrypt-production (ACME + Cloudflare DNS-01) — for
+#     any operator-facing cert (`*.lab.vyramo.com`, etc.).
+#     Operator-trust-store config NOT required (LE is in
+#     every CA bundle).
+#   - homelab-internal-issuer (OpenBao PKI) — for
+#     cluster-internal mTLS only (OpenBao gossip + future
+#     service-to-service auth). OpenBao generates its own
+#     root + intermediate at init; no offline ceremony.
+#
+# Both are configured by 09b-argocd-bootstrap.yml during
+# initial cluster bootstrap.
 
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -14,5 +26,9 @@ helmCharts:
     includeCRDs: true
 
 resources:
+  # OpenBao-PKI ClusterIssuer (cluster-internal mTLS only)
   - clusterissuer.yaml
   - openbao-pki-secret.yaml
+  # Let's Encrypt ClusterIssuer (operator-facing certs) — ADR 0034
+  - letsencrypt-clusterissuer.yaml
+  - cloudflare-api-token-secret.yaml

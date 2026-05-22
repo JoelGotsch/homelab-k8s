@@ -1,0 +1,51 @@
+# Let's Encrypt production ClusterIssuer.
+#
+# Per ADR 0034 D1 + D3: this issuer is for any cert validated
+# by an operator-facing client (browser, phone, CLI tools,
+# `requests.get()`). Uses ACME DNS-01 via Cloudflare for any
+# `*.lab.vyramo.com` (or sibling) name. LE-signed → every
+# relevant client trust store recognises it natively, no
+# trust-store config required on operator devices.
+#
+# Internal-only mTLS (OpenBao gossip, cluster-internal service
+# auth) uses `homelab-internal-issuer` (clusterissuer.yaml)
+# instead — that path is OpenBao-PKI-backed and never seen by
+# operator clients.
+#
+# Cloudflare API token is in the `cloudflare-api-token` Secret
+# (same namespace, `cert-manager`). The Secret is initially
+# seeded by `homelab-infra/scripts/seed-cloudflare-api-token.sh`
+# during 09b bootstrap; later replaced by an ExternalSecret
+# once OpenBao + ESO are up.
+
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-production
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # ACME registration email — operator-fill per the
+    # homelab-k8s README "Operator first-commit fills"
+    # table. Same value as `operator_email` in
+    # homelab-infra/ansible/inventory/group_vars/all/main.yml.
+    # LE uses this for expiry-warning / renewal-failure emails.
+    email: <OPERATOR-EMAIL>
+    privateKeySecretRef:
+      # cert-manager stores the ACME account private key here
+      # on first registration. Persists across cert-manager
+      # restarts; deleting this Secret forces re-registration.
+      name: letsencrypt-production-account-key
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+        # Constrain to vyramo.com so this solver doesn't get
+        # picked for any DNS challenge — defence in depth in
+        # case future ClusterIssuers share the same Cloudflare
+        # token but want different domains.
+        selector:
+          dnsZones:
+            - vyramo.com

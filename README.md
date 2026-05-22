@@ -71,6 +71,7 @@ Search for `<` placeholders and replace before applying:
 | `<CLUSTER-VIP>` | `infrastructure/cilium/values.yaml` | Cluster API VIP — fills post-cluster |
 | `<HOMELAB-DOMAIN>` | `infrastructure/ingress/gateway.yaml`, `platform/openbao/httproute.yaml`, etc. | Operator's domain |
 | `<NAS-IP>` | `infrastructure/nfs-csi/storageclasses.yaml` | NAS IP on `storage` VLAN |
+| `<OPERATOR-EMAIL>` | `infrastructure/cert-manager/letsencrypt-clusterissuer.yaml` | Same as `operator_email` in `homelab-infra/ansible/inventory/group_vars/all/main.yml` — Let's Encrypt registration / expiry-warning address (ADR 0034 D3) |
 | Root CA cert | `infrastructure/trust-manager/bundles.yaml` | `pki/ca-ceremony.md` Step 7 output |
 | OpenBao bootstrap CA | `infrastructure/cert-manager/openbao-pki-secret.yaml`, `infrastructure/external-secrets/clustersecretstore.yaml`, `infrastructure/trust-manager/bundles.yaml` | `homelab-infra/scripts/generate-openbao-bootstrap-tls.sh` output |
 
