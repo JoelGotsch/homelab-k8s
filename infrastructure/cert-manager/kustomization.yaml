@@ -1,17 +1,19 @@
-# cert-manager — hybrid cert issuance per ADR 0034.
+# cert-manager — Helm chart + the OpenBao-PKI ClusterIssuer
+# for cluster-internal mTLS.
 #
-# Two ClusterIssuers:
-#   - letsencrypt-production (ACME + Cloudflare DNS-01) — for
-#     any operator-facing cert (`*.lab.vyramo.com`, etc.).
-#     Operator-trust-store config NOT required (LE is in
-#     every CA bundle).
-#   - homelab-internal-issuer (OpenBao PKI) — for
-#     cluster-internal mTLS only (OpenBao gossip + future
-#     service-to-service auth). OpenBao generates its own
-#     root + intermediate at init; no offline ceremony.
+# The Let's Encrypt ClusterIssuer (operator-facing certs per
+# ADR 0034 D1) lives in homelab-infra/ansible/files/
+# letsencrypt-clusterissuer.yaml.j2 and is rendered + applied
+# by 09b-argocd-bootstrap.yml — NOT reconciled by Argo CD —
+# so the operator's ACME-registration email doesn't land in
+# this GitOps repo. The downstream cloudflare-api-token Secret
+# in this namespace is also Ansible-seeded (via
+# homelab-infra/scripts/seed-cloudflare-api-token.sh reading
+# from secrets.sops.yaml).
 #
-# Both are configured by 09b-argocd-bootstrap.yml during
-# initial cluster bootstrap.
+# Same discipline as cilium-overrides + openbao-overrides:
+# bootstrap infrastructure with operator-private values stays
+# Ansible-rendered.
 
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -29,6 +31,3 @@ resources:
   # OpenBao-PKI ClusterIssuer (cluster-internal mTLS only)
   - clusterissuer.yaml
   - openbao-pki-secret.yaml
-  # Let's Encrypt ClusterIssuer (operator-facing certs) — ADR 0034
-  - letsencrypt-clusterissuer.yaml
-  - cloudflare-api-token-secret.yaml
