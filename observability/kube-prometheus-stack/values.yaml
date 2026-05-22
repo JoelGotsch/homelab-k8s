@@ -5,6 +5,16 @@
 # alertmanager-config.yaml; Grafana with admin password from
 # OpenBao via ESO; OIDC against Authentik when that lands.
 
+# CRDs are pre-installed at cluster bootstrap by
+# homelab-infra/ansible/playbooks/09b-argocd-bootstrap.yml
+# (via the `prometheus-operator-crds` chart) — Cilium's
+# ServiceMonitor manifests need them to apply, and Cilium
+# installs before Argo CD reconciles this chart. Setting
+# crds.enabled: false here avoids double-ownership / install
+# conflicts when Argo CD later reconciles kube-prometheus-stack.
+crds:
+  enabled: false
+
 # ---------- Prometheus ----------
 prometheus:
   prometheusSpec:
