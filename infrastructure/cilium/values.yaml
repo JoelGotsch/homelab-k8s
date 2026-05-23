@@ -24,79 +24,11 @@ cni:
   install: true
 encryption:
   enabled: false
-extraContainers:
-- args:
-  - --config-yaml
-  - /etc/hubble-flow-exporter/vector.yaml
-  env:
-  - name: NODE_NAME
-    valueFrom:
-      fieldRef:
-        fieldPath: spec.nodeName
-  - name: VECTOR_LOG
-    value: warn
-  image: timberio/vector:0.43.1-distroless-libc
-  imagePullPolicy: IfNotPresent
-  name: hubble-flow-exporter
-  ports:
-  - containerPort: 9598
-    name: hubble-export
-    protocol: TCP
-  resources:
-    limits:
-      memory: 256Mi
-    requests:
-      cpu: 25m
-      memory: 64Mi
-  securityContext:
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-      - ALL
-    readOnlyRootFilesystem: true
-    runAsUser: 0
-  volumeMounts:
-  - mountPath: /var/run/cilium
-    name: cilium-run
-    readOnly: true
-  - mountPath: /etc/hubble-flow-exporter
-    name: hubble-flow-exporter-config
-    readOnly: true
-  - mountPath: /var/lib/vector
-    name: hubble-flow-exporter-data
-extraVolumes:
-- configMap:
-    items:
-    - key: vector.yaml
-      path: vector.yaml
-    name: hubble-flow-exporter-config
-    optional: true
-  name: hubble-flow-exporter-config
-- hostPath:
-    path: /var/lib/vector/hubble-flow-exporter
-    type: DirectoryOrCreate
-  name: hubble-flow-exporter-data
 gatewayAPI:
   enableAlpn: true
   enabled: true
 hubble:
   enabled: true
-  export:
-    fileCompress: true
-    fileMaxBackups: 5
-    fileMaxSizeMb: 10
-    static:
-      enabled: true
-      fieldMask:
-      - time
-      - source
-      - destination
-      - verdict
-      - drop_reason_desc
-      - traffic_direction
-      - l4
-      - l7
-      filePath: /var/run/cilium/hubble/events.log
   metrics:
     enabled:
     - dns:query;ignoreAAAA
