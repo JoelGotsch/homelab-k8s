@@ -21,8 +21,27 @@ spec:
   # Match all endpoints — every pod is a candidate destination
   # to be protected.
   endpointSelector: {}
-  # Per CCNP semantics: an `ingressDeny` rule overrides any
-  # `ingress` allow rule. We're explicit about the deny here.
+  # CRITICAL: keep ingress default-allow.
+  #
+  # Cilium's per-endpoint policy mode is determined by whether
+  # ANY policy targets the endpoint in that direction. The
+  # moment one matches, the endpoint flips to **default-deny**
+  # — meaning only EXPLICITLY-allowed flows pass. Since this
+  # CCNP has `endpointSelector: {}` it targets every pod →
+  # every pod's ingress would become deny-by-default + only
+  # this single deny rule applies → all legit pod-to-pod
+  # traffic silently dropped.
+  #
+  # `enableDefaultDeny.ingress: false` keeps the policy in
+  # deny-list-only mode. The explicit ingressDeny rule still
+  # fires for crowdsec-banned CIDRs; everything else passes
+  # without per-endpoint policy enforcement (so individual
+  # pod policies, if any, still apply).
+  #
+  # Observed 2026-05-24 — without this flag, the cluster lost
+  # all DNS / inter-pod connectivity on first apply.
+  enableDefaultDeny:
+    ingress: false
   ingressDeny:
     - fromCIDRSet:
         - cidrGroupRef: crowdsec-banned
