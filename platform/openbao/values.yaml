@@ -39,15 +39,15 @@ server:
     raft:
       config: "cluster_addr = \"https://POD_IP:8201\"\napi_addr = \"https://POD_IP:8200\"\
         \n\nlistener \"tcp\" {\n  tls_disable = 0\n  address = \"[::]:8200\"\n  cluster_address\
-        \ = \"[::]:8201\"\n  tls_cert_file = \"/vault/userconfig/openbao-tls/tls.crt\"\
-        \n  tls_key_file  = \"/vault/userconfig/openbao-tls/tls.key\"\n}\n\nstorage\
-        \ \"raft\" {\n  path = \"/vault/data\"\n\n  retry_join {\n    leader_api_addr\
+        \ = \"[::]:8201\"\n  tls_cert_file = \"/openbao/userconfig/openbao-tls/tls.crt\"\
+        \n  tls_key_file  = \"/openbao/userconfig/openbao-tls/tls.key\"\n}\n\nstorage\
+        \ \"raft\" {\n  path = \"/openbao/data\"\n\n  retry_join {\n    leader_api_addr\
         \ = \"https://openbao-0.openbao-internal:8200\"\n    leader_ca_cert_file =\
-        \ \"/vault/userconfig/openbao-tls/ca.crt\"\n  }\n  retry_join {\n    leader_api_addr\
+        \ \"/openbao/userconfig/openbao-tls/ca.crt\"\n  }\n  retry_join {\n    leader_api_addr\
         \ = \"https://openbao-1.openbao-internal:8200\"\n    leader_ca_cert_file =\
-        \ \"/vault/userconfig/openbao-tls/ca.crt\"\n  }\n  retry_join {\n    leader_api_addr\
+        \ \"/openbao/userconfig/openbao-tls/ca.crt\"\n  }\n  retry_join {\n    leader_api_addr\
         \ = \"https://openbao-2.openbao-internal:8200\"\n    leader_ca_cert_file =\
-        \ \"/vault/userconfig/openbao-tls/ca.crt\"\n  }\n\n  autopilot {\n    cleanup_dead_servers\
+        \ \"/openbao/userconfig/openbao-tls/ca.crt\"\n  }\n\n  autopilot {\n    cleanup_dead_servers\
         \ = true\n    last_contact_threshold = \"10s\"\n    min_quorum = 2\n    server_stabilization_time\
         \ = \"10s\"\n  }\n}\n\nservice_registration \"kubernetes\" {}\n\ntelemetry\
         \ {\n  prometheus_retention_time = \"30s\"\n  disable_hostname = true\n}\n"
