@@ -82,7 +82,7 @@ persistence:
     tmp: /tmp
 
 nextcloud:
-  host: "nextcloud.lab.<HOMELAB-DOMAIN>"
+  host: "nextcloud.lab.vyramo.com"
   existingSecret:
     enabled: true
     secretName: nextcloud-admin
@@ -92,7 +92,7 @@ nextcloud:
   # Trusted reverse-proxy + domain config so URLs render
   # correctly behind Cilium Gateway.
   trustedDomains:
-    - "nextcloud.lab.<HOMELAB-DOMAIN>"
+    - "nextcloud.lab.vyramo.com"
 
   # Rendered config injected via the chart's configs section.
   # Operator extends with per-deployment options (default
@@ -165,11 +165,19 @@ ingress:
 # Pod-level security: non-root, dropped caps. Nextcloud-
 # fpm-alpine runs as user 82 (www-data) by default; override
 # carefully — chart manages fsGroup correctly.
+#
+# Do NOT set `fsGroup` here. The nextcloud chart v5.5.0
+# template hardcodes `fsGroup: 33` at the bottom of the pod
+# securityContext block (after the "# Will mount configuration
+# files as www-data (id: 33)" comment). Setting it again via
+# values.yaml renders both entries inside the SAME map →
+# YAML duplicate-key error → kustomize build fails with
+# `mapping key "fsGroup" already defined at line N`. Observed
+# 2026-05-23 — Argo app-nextcloud stuck Sync=Unknown.
 securityContext:
   runAsNonRoot: true
   runAsUser: 33
   runAsGroup: 33
-  fsGroup: 33
   seccompProfile:
     type: RuntimeDefault
 
