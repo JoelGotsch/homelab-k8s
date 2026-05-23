@@ -5,7 +5,7 @@
 # app investigation surfaces a viable encrypted-at-rest
 # story (per TODO.md "Investigate Nextcloud E2EE").
 #
-# OPERATOR FILLS <HOMELAB-DOMAIN>.
+# OPERATOR FILLS vyramo.com.
 
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -18,7 +18,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "nextcloud.lab.<HOMELAB-DOMAIN>"
+    - "nextcloud.lab.vyramo.com"
   rules:
     - matches:
         - path:

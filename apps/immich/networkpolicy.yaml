@@ -56,7 +56,7 @@ spec:
         - port: 2283
           protocol: TCP
     # immich-public-proxy (when that layer lands per ADR 0024 D1
-    # for `photos.<HOMELAB-DOMAIN>` public album sharing).
+    # for `photos.vyramo.com` public album sharing).
     - from:
         - namespaceSelector:
             matchLabels:

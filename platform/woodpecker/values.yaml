@@ -20,12 +20,12 @@ server:
     pullPolicy: IfNotPresent
 
   env:
-    WOODPECKER_HOST: "https://woodpecker.lab.<HOMELAB-DOMAIN>"
+    WOODPECKER_HOST: "https://woodpecker.lab.vyramo.com"
     WOODPECKER_OPEN: "false"  # closed registration; OAuth required
     WOODPECKER_ADMIN: "<operator-username>"
     # Forgejo integration (the only forge driver enabled).
     WOODPECKER_FORGEJO: "true"
-    WOODPECKER_FORGEJO_URL: "https://forgejo.lab.<HOMELAB-DOMAIN>"
+    WOODPECKER_FORGEJO_URL: "https://forgejo.lab.vyramo.com"
     # OAuth client_id + secret come from the ExternalSecret
     # (woodpecker-oauth) via envFrom below.
     WOODPECKER_LOG_LEVEL: "info"
@@ -33,7 +33,7 @@ server:
     WOODPECKER_LOG_FORMAT: "json"
     # Disable webhooks-to-public; Forgejo + Woodpecker are
     # in-cluster.
-    WOODPECKER_WEBHOOK_HOST: "https://woodpecker.lab.<HOMELAB-DOMAIN>"
+    WOODPECKER_WEBHOOK_HOST: "https://woodpecker.lab.vyramo.com"
     # Database: SQLite on Longhorn for the server's job state.
     # Forgejo's CNPG handles the source-of-truth metadata;
     # Woodpecker's DB is just pipeline-execution state — recovery

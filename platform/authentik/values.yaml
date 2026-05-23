@@ -15,7 +15,7 @@ global:
     # Required by Authentik: canonical hostname for
     # links/emails/issuer URIs.
     - name: AUTHENTIK_HOST
-      value: "https://auth.lab.<HOMELAB-DOMAIN>"
+      value: "https://auth.lab.vyramo.com"
     # Disable Authentik's anonymous error reporting +
     # update telemetry — keep operator data in the cluster
     # per principle #2.

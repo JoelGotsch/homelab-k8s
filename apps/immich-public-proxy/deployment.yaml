@@ -1,6 +1,6 @@
 # immich-public-proxy Deployment. Stateless; 2 replicas behind
 # a ClusterIP Service. cloudflared (in cloudflare-tunnel ns)
-# routes photos.<HOMELAB-DOMAIN> here.
+# routes photos.vyramo.com here.
 
 apiVersion: apps/v1
 kind: Deployment
@@ -65,10 +65,10 @@ spec:
               value: "http://immich-server.immich.svc.cluster.local:2283"
             # Public base URL the proxy generates share links
             # against. Match this with what cloudflared routes
-            # photos.<HOMELAB-DOMAIN> to (configmap.yaml's
+            # photos.vyramo.com to (configmap.yaml's
             # ingress rule).
             - name: PUBLIC_BASE_URL
-              value: "https://photos.<HOMELAB-DOMAIN>"
+              value: "https://photos.vyramo.com"
             - name: IPP_PORT
               value: "3000"
           livenessProbe:

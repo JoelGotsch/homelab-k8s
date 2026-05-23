@@ -1,7 +1,7 @@
 # Woodpecker UI exposed via Cilium Gateway API HTTPRoute.
 # Tailscale-only, same shape as Forgejo's HTTPRoute.
 #
-# OPERATOR FILLS <HOMELAB-DOMAIN>.
+# OPERATOR FILLS vyramo.com.
 
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -14,7 +14,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "woodpecker.lab.<HOMELAB-DOMAIN>"
+    - "woodpecker.lab.vyramo.com"
   rules:
     - matches:
         - path:

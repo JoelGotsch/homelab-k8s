@@ -18,7 +18,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "paperless.lab.<HOMELAB-DOMAIN>"
+    - "paperless.lab.vyramo.com"
   rules:
     - matches:
         - path:

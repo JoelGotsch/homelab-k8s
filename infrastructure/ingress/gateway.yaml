@@ -18,7 +18,7 @@ spec:
     - name: https
       port: 443
       protocol: HTTPS
-      hostname: "*.lab.<HOMELAB-DOMAIN>"
+      hostname: "*.lab.vyramo.com"
       tls:
         mode: Terminate
         certificateRefs:
@@ -34,7 +34,7 @@ spec:
     - name: http
       port: 80
       protocol: HTTP
-      hostname: "*.lab.<HOMELAB-DOMAIN>"
+      hostname: "*.lab.vyramo.com"
       allowedRoutes:
         namespaces:
           from: All
@@ -51,9 +51,9 @@ spec:
   issuerRef:
     name: homelab-internal-issuer
     kind: ClusterIssuer
-  commonName: "lab.<HOMELAB-DOMAIN>"
+  commonName: "lab.vyramo.com"
   dnsNames:
-    - "lab.<HOMELAB-DOMAIN>"
-    - "*.lab.<HOMELAB-DOMAIN>"
+    - "lab.vyramo.com"
+    - "*.lab.vyramo.com"
   duration: 720h    # 30 days
   renewBefore: 240h # renew at 10 days remaining

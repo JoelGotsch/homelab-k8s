@@ -1,10 +1,10 @@
 # Jellyfin HTTPRoute via Cilium Gateway.
 #
 # Phase 1 (today): Tailscale-only on
-#   jellyfin.lab.<HOMELAB-DOMAIN>
+#   jellyfin.lab.vyramo.com
 # Phase 2 (when infrastructure/cloudflare-tunnel/ lands per
 # ADR 0024 D1): public-facing on
-#   jellyfin.<HOMELAB-DOMAIN>
+#   jellyfin.vyramo.com
 # via Cloudflare Tunnel. Per ADR 0024 D1, Jellyfin's
 # `internal-media` content classification permits CF TLS
 # termination.
@@ -20,7 +20,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "jellyfin.lab.<HOMELAB-DOMAIN>"
+    - "jellyfin.lab.vyramo.com"
   rules:
     - matches:
         - path:

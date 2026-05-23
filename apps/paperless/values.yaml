@@ -78,7 +78,7 @@ env:
   PAPERLESS_TIME_ZONE: "Europe/Berlin"
 
   # The URL the app generates self-references against.
-  PAPERLESS_URL: "https://paperless.lab.<HOMELAB-DOMAIN>"
+  PAPERLESS_URL: "https://paperless.lab.vyramo.com"
 
   # CNPG-issued DB creds — Secret name comes from CNPG's
   # role-binding on the paperless-pg cluster.

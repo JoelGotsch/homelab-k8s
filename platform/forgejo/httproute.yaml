@@ -3,7 +3,7 @@
 # Cloudflare Tunnel; ADR 0024 D4 keeps the source-of-truth
 # off the public internet).
 #
-# OPERATOR FILLS <HOMELAB-DOMAIN>.
+# OPERATOR FILLS vyramo.com.
 
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -16,7 +16,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "forgejo.lab.<HOMELAB-DOMAIN>"
+    - "forgejo.lab.vyramo.com"
   rules:
     - matches:
         - path:

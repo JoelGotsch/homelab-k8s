@@ -4,7 +4,7 @@
 # ADR 0024 — Grafana stays Tailscale-only because dashboards
 # may surface internal-class data in graph titles + labels.
 #
-# OPERATOR FILLS <HOMELAB-DOMAIN> at first commit; caught by
+# OPERATOR FILLS vyramo.com at first commit; caught by
 # scripts/check-placeholders.sh.
 
 apiVersion: gateway.networking.k8s.io/v1
@@ -18,7 +18,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "grafana.lab.<HOMELAB-DOMAIN>"
+    - "grafana.lab.vyramo.com"
   rules:
     - matches:
         - path:
@@ -40,7 +40,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "alertmanager.lab.<HOMELAB-DOMAIN>"
+    - "alertmanager.lab.vyramo.com"
   rules:
     - matches:
         - path:
@@ -62,7 +62,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "prometheus.lab.<HOMELAB-DOMAIN>"
+    - "prometheus.lab.vyramo.com"
   rules:
     - matches:
         - path:

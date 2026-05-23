@@ -14,7 +14,7 @@
 #                     (matches the UUID in the
 #                     credentials JSON at
 #                     kv/cloudflare/tunnel/credentials_json)
-#   <HOMELAB-DOMAIN>  the public domain whose subdomains
+#   vyramo.com  the public domain whose subdomains
 #                     will route through the tunnel
 #
 # Hostnames here are PUBLIC names (no `.lab` infix). Each
@@ -23,7 +23,7 @@
 # When adding a new service to the tunnel:
 #   1. Append an `ingress:` rule below
 #   2. Add a CNAME in Cloudflare DNS:
-#      <subdomain>.<HOMELAB-DOMAIN> →
+#      <subdomain>.vyramo.com →
 #      <CF_TUNNEL_UUID>.cfargotunnel.com
 #   3. Update the consuming app's NetworkPolicy to allow
 #      ingress from the cloudflare-tunnel namespace
@@ -53,21 +53,21 @@ data:
       # E2EE — operator's vault is zero-knowledge encrypted
       # client-side per ADR 0024 D1 + identity.md. Cloudflare
       # sees only ciphertext for vault contents.
-      - hostname: vaultwarden.<HOMELAB-DOMAIN>
+      - hostname: vaultwarden.vyramo.com
         service: http://vaultwarden-http.vaultwarden.svc.cluster.local:80
 
       # ─── Jellyfin ─────────────────────────────────────
       # `internal-media` classification — non-personal
       # publishable assets. Cloudflare seeing media in
       # transit is acceptable per ADR 0024 D1.
-      - hostname: jellyfin.<HOMELAB-DOMAIN>
+      - hostname: jellyfin.vyramo.com
         service: http://jellyfin.jellyfin.svc.cluster.local:8096
 
       # ─── ntfy-e2ee-relay (when ready) ─────────────────
       # AES-256-GCM payload encryption — Cloudflare sees
       # only ciphertext. Uncomment when the relay layer is
       # bring-up-ready per ADR 0024 D1.
-      # - hostname: ntfy.<HOMELAB-DOMAIN>
+      # - hostname: ntfy.vyramo.com
       #   service: http://ntfy-e2ee-relay.ntfy-e2ee-relay.svc.cluster.local:80
 
       # ─── immich-public-proxy ──────────────────────────
@@ -75,7 +75,7 @@ data:
       # Per ADR 0024 D1; the proxy holds no creds and walks
       # only /share/* — Immich's admin UI / API stays
       # Tailscale-only. See apps/immich-public-proxy/.
-      - hostname: photos.<HOMELAB-DOMAIN>
+      - hostname: photos.vyramo.com
         service: http://immich-public-proxy.immich-public-proxy.svc.cluster.local:3000
 
       # ─── Catch-all (required) ─────────────────────────

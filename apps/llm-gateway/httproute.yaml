@@ -15,7 +15,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "llm.lab.<HOMELAB-DOMAIN>"
+    - "llm.lab.vyramo.com"
   rules:
     - matches:
         - path:

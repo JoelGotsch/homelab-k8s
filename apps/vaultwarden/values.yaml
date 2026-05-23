@@ -64,7 +64,7 @@ ingress:
   enabled: false
 
 # Vaultwarden environment.
-domain: "https://vaultwarden.<HOMELAB-DOMAIN>"
+domain: "https://vaultwarden.vyramo.com"
 
 signupsAllowed: false   # ADR 0024 D7 — closed-registration; operator
                         # invites family members
@@ -99,7 +99,7 @@ sso:
 smtp:
   existingSecret: vaultwarden-smtp
   fromName: "Vaultwarden — homelab"
-  fromAddress: "vaultwarden@<HOMELAB-DOMAIN>"
+  fromAddress: "vaultwarden@vyramo.com"
   security: "starttls"
   port: 587
 

@@ -15,7 +15,7 @@
 langfuse:
   # Operator-fillable per the homelab convention.
   nextauth:
-    url: "https://langfuse.<HOMELAB_INTERNAL_DOMAIN>"
+    url: "https://langfuse.lab.vyramo.com"
     secret:
       existingSecret: langfuse-app-secrets
       key: NEXTAUTH_SECRET

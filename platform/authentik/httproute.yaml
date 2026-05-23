@@ -2,7 +2,7 @@
 # Tailscale-only per ADR 0024 D3 — Authentik is the entry
 # point for all internal services; never publicly exposed.
 #
-# OPERATOR FILLS <HOMELAB-DOMAIN>.
+# OPERATOR FILLS vyramo.com.
 
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -15,7 +15,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "auth.lab.<HOMELAB-DOMAIN>"
+    - "auth.lab.vyramo.com"
   rules:
     - matches:
         - path:

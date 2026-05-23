@@ -56,11 +56,11 @@ metadata:
   name: {{APP_NAME}}-oidc-config
   namespace: {{APP_NAME}}
 data:
-  issuer: "https://auth.lab.<HOMELAB-DOMAIN>/application/o/{{APP_NAME}}/"
-  authorization_endpoint: "https://auth.lab.<HOMELAB-DOMAIN>/application/o/authorize/"
-  token_endpoint: "https://auth.lab.<HOMELAB-DOMAIN>/application/o/token/"
-  userinfo_endpoint: "https://auth.lab.<HOMELAB-DOMAIN>/application/o/userinfo/"
-  jwks_uri: "https://auth.lab.<HOMELAB-DOMAIN>/application/o/{{APP_NAME}}/jwks/"
+  issuer: "https://auth.lab.vyramo.com/application/o/{{APP_NAME}}/"
+  authorization_endpoint: "https://auth.lab.vyramo.com/application/o/authorize/"
+  token_endpoint: "https://auth.lab.vyramo.com/application/o/token/"
+  userinfo_endpoint: "https://auth.lab.vyramo.com/application/o/userinfo/"
+  jwks_uri: "https://auth.lab.vyramo.com/application/o/{{APP_NAME}}/jwks/"
   redirect_uri: "{{REDIRECT_URI}}"
   scopes: "{{SCOPES}}"
 
@@ -91,7 +91,7 @@ data:
 #      kv/prod/authentik/clients/{{APP_NAME}} \
 #      client_id=<from-authentik> \
 #      client_secret=<from-authentik> \
-#      issuer=https://auth.lab.<HOMELAB-DOMAIN>/application/o/{{APP_NAME}}/
+#      issuer=https://auth.lab.vyramo.com/application/o/{{APP_NAME}}/
 #
 # 4. Apply this template (rendered) via Argo CD on next sync.
 #

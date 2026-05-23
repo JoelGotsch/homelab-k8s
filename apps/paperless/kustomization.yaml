@@ -7,7 +7,7 @@
 # (media — originals + thumbnails + archive variants) on
 # csi-rclone-NFS-crypt per ADR 0030 §D2. Authentik OIDC for
 # operator (and family members granted document access);
-# Tailscale-only HTTPRoute on `paperless.lab.<HOMELAB-DOMAIN>`
+# Tailscale-only HTTPRoute on `paperless.lab.vyramo.com`
 # per ADR 0024 (Personal data — no Cloudflare TLS termination).
 #
 # Helm chart: gabe565/charts/paperless-ngx (OCI). Bundled

@@ -50,7 +50,7 @@ spec:
           protocol: TCP
     # Cilium Gateway envoy — OpenWrt agent + bouncer reach
     # LAPI via Tailscale → HTTPRoute on
-    # crowdsec.lab.<HOMELAB-DOMAIN> (per
+    # crowdsec.lab.vyramo.com (per
     # 99-journal/2026-05-02-crowdsec-router-side.md).
     - from:
         - namespaceSelector:

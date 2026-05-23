@@ -37,7 +37,7 @@ spec:
         - port: 3000
           protocol: TCP
     # Cilium Gateway HTTPRoute (operator-side ingress; lands
-    # when langfuse.<HOMELAB_INTERNAL_DOMAIN> HTTPRoute is
+    # when langfuse.lab.vyramo.com HTTPRoute is
     # wired). Permits any pod with the gateway-class label.
     # Operator-narrows when Gateway API ingress is concrete.
     - from:

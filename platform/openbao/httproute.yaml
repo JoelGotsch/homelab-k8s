@@ -16,7 +16,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "openbao.lab.<HOMELAB-DOMAIN>"
+    - "openbao.lab.vyramo.com"
   rules:
     - matches:
         - path:
