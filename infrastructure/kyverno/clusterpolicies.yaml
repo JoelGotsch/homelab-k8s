@@ -42,7 +42,14 @@ metadata:
       registry.homelab.internal/*) MUST be referenced by
       digest, not tag. Per ADR 0019 D3.
 spec:
-  validationFailureAction: Enforce
+  # Audit during the bring-up window (2026-05-23). The
+  # first-party registry (registry.homelab.internal) doesn't
+  # exist yet — Forgejo isn't deployed and Woodpecker CI
+  # hasn't run. Any pod referencing those images would be
+  # admission-blocked at first-deploy. Flip back to Enforce
+  # once Forgejo + Woodpecker are producing signed images.
+  # See homelab-docs/TODO.md Phase-1 follow-ups.
+  validationFailureAction: Audit
   background: true
   rules:
     - name: require-digest-on-first-party
@@ -66,40 +73,34 @@ spec:
             containers:
               - image: "*@sha256:*"
 
-# === First-party: cosign signature required (Enforce) ===
----
-apiVersion: kyverno.io/v1
-kind: ClusterPolicy
-metadata:
-  name: verify-first-party-image-signature
-  annotations:
-    policies.kyverno.io/category: Supply Chain
-    policies.kyverno.io/severity: high
-    policies.kyverno.io/description: |
-      First-party images (signed in Woodpecker CI per
-      ADR 0019 D3) must carry a verifiable cosign
-      signature. Keyless via Forgejo OIDC issuer.
-spec:
-  validationFailureAction: Enforce
-  webhookTimeoutSeconds: 30
-  rules:
-    - name: verify-cosign-on-first-party
-      match:
-        any:
-          - resources:
-              kinds: [Pod]
-      verifyImages:
-        - imageReferences:
-            - "forgejo.lab/homelab/*"
-            - "registry.homelab.internal/*"
-          attestors:
-            - count: 1
-              entries:
-                - keyless:
-                    subject: "https://forgejo.lab/homelab/*"
-                    issuer: "https://forgejo.lab"
-          mutateDigest: true
-          required: true
+# verify-first-party-image-signature policy REMOVED 2026-05-23
+# — restore when Forgejo + Woodpecker signing pipeline is up.
+#
+# Why removed (vs an Audit-mode flip): kyverno's schema
+# validation rejects the keyless attestor because it requires
+# either a `rekor.url` or explicit `roots` cert, even for an
+# Audit-mode policy. The homelab doesn't run a local Rekor
+# yet (Forgejo's not deployed); plumbing public sigstore.dev
+# would be a kludge for a policy whose only job is to run
+# against a registry that doesn't exist yet.
+#
+# When Forgejo + Woodpecker are operational + producing
+# signed images, restore the policy with the correct attestor
+# shape:
+#   verifyImages:
+#     - imageReferences: ["forgejo.lab/homelab/*",
+#                         "registry.homelab.internal/*"]
+#       attestors:
+#         - count: 1
+#           entries:
+#             - keyless:
+#                 subject: "https://forgejo.lab/homelab/*"
+#                 issuer: "https://forgejo.lab"
+#                 rekor:
+#                   url: <local-rekor-or-sigstore-public>
+#       mutateDigest: true
+#       required: true
+# Per homelab-docs/TODO.md Phase-1 follow-ups.
 
 # === Third-party: digest-pinning visibility (Audit only) ===
 ---
