@@ -11,7 +11,7 @@ metadata:
 data:
   oidc.config: |
     name: Authentik
-    issuer: https://auth.<HOMELAB_INTERNAL_DOMAIN>/application/o/argocd/
+    issuer: https://auth.lab.vyramo.com/application/o/argocd/
     clientID: <AUTHENTIK_CLIENT_ID_ARGOCD>
     clientSecret: $oidc.authentik.clientSecret  # ESO-synced from OpenBao
     requestedScopes: ["openid", "profile", "email", "groups"]

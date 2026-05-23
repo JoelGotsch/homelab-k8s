@@ -24,7 +24,17 @@ kind: Kustomization
 namespace: argocd
 
 resources:
-  - https://raw.githubusercontent.com/argoproj/argo-cd/<ARGOCD_VERSION>/manifests/install.yaml
+  # Pinned-by-version Argo CD install manifest from the
+  # upstream argo-cd repo. kustomize's URL heuristic flags
+  # github.com-hosted URLs as git URLs and tries `git fetch`
+  # — which fails against raw.githubusercontent.com. We commit
+  # the manifest locally instead. Refresh sequence: download
+  # the new version, replace this file, bump argocd_version
+  # in homelab-infra group_vars/all/main.yml, commit + push.
+  # Source URL pattern:
+  #   https://raw.githubusercontent.com/argoproj/argo-cd/<vX.Y.Z>/manifests/install.yaml
+  # Current pin: v3.4.2 (matches homelab-infra argocd_version).
+  - argocd-install.yaml
 
 patches:
   - path: patches/argocd-cmd-params.yaml

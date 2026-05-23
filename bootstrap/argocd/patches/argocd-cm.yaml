@@ -7,7 +7,7 @@ kind: ConfigMap
 metadata:
   name: argocd-cm
 data:
-  url: "https://argocd.<HOMELAB_INTERNAL_DOMAIN>"
+  url: "https://argocd.lab.vyramo.com"
 
   # Enable kustomize's Helm chart inflation generator. See
   # homelab-infra/argocd/install/patches/argocd-cm.yaml.j2 for
