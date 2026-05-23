@@ -1,116 +1,77 @@
-# OpenBao Argo-managed values. MUST match the bootstrap-time
-# values in homelab-infra/ansible/files/openbao-values.yaml +
-# overrides.yaml (or be drifted from them deliberately for
-# bootstrap-only reasons).
+# OpenBao values — Argo-managed (matches the live helm release
+# captured 2026-05-23). Bootstrap install in
+# homelab-infra/ansible/files/openbao-{values,overrides}.yaml
+# produces the SAME effective config; check-values-drift.sh
+# verifies they stay in sync. Per ADR 0018.
 
+csi:
+  enabled: false
 global:
   enabled: true
-
-server:
-  logLevel: info
-  logFormat: json
-
-  ha:
-    enabled: true
-    replicas: 3
-    raft:
-      enabled: true
-      setNodeId: true
-      config: |
-        cluster_addr = "https://POD_IP:8201"
-        api_addr = "https://POD_IP:8200"
-
-        listener "tcp" {
-          tls_disable = 0
-          address = "[::]:8200"
-          cluster_address = "[::]:8201"
-          tls_cert_file = "/vault/userconfig/openbao-tls/tls.crt"
-          tls_key_file  = "/vault/userconfig/openbao-tls/tls.key"
-        }
-
-        storage "raft" {
-          path = "/vault/data"
-          retry_join {
-            leader_api_addr = "https://openbao-0.openbao-internal:8200"
-            leader_ca_cert_file = "/vault/userconfig/openbao-tls/ca.crt"
-          }
-          retry_join {
-            leader_api_addr = "https://openbao-1.openbao-internal:8200"
-            leader_ca_cert_file = "/vault/userconfig/openbao-tls/ca.crt"
-          }
-          retry_join {
-            leader_api_addr = "https://openbao-2.openbao-internal:8200"
-            leader_ca_cert_file = "/vault/userconfig/openbao-tls/ca.crt"
-          }
-          autopilot {
-            cleanup_dead_servers = true
-            last_contact_threshold = "10s"
-            min_quorum = 2
-            server_stabilization_time = "10s"
-          }
-        }
-
-        service_registration "kubernetes" {}
-
-        telemetry {
-          prometheus_retention_time = "30s"
-          disable_hostname = true
-        }
-
-  service:
-    enabled: true
-    type: ClusterIP
-
-  resources:
-    requests: {cpu: 100m, memory: 256Mi}
-    limits: {memory: 512Mi}
-
-  serviceAccount:
-    create: true
-
-  readinessProbe:
-    enabled: true
-  livenessProbe:
-    enabled: true
-    initialDelaySeconds: 60
-
-  auditStorage:
-    enabled: true
-    size: 5Gi
-    storageClass: longhorn-replica2
-    accessMode: ReadWriteOnce
-
-  dataStorage:
-    enabled: true
-    size: 10Gi
-    storageClass: longhorn-replica2
-    accessMode: ReadWriteOnce
-
-  extraVolumes:
-    - type: secret
-      name: openbao-tls
-
-  affinity: |
-    podAntiAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
-            matchLabels:
-              app.kubernetes.io/name: openbao
-              app.kubernetes.io/instance: "{{ .Release.Name }}"
-              component: server
-          topologyKey: kubernetes.io/hostname
-
+injector:
+  enabled: false
 seal:
   shamir:
     secretShares: 3
     secretThreshold: 2
-
-injector:
-  enabled: false
-
+server:
+  affinity: "podAntiAffinity:\n  requiredDuringSchedulingIgnoredDuringExecution:\n\
+    \    - labelSelector:\n        matchLabels:\n          app.kubernetes.io/name:\
+    \ openbao\n          app.kubernetes.io/instance: openbao\n          component:\
+    \ server\n      topologyKey: kubernetes.io/hostname\n"
+  auditStorage:
+    accessMode: ReadWriteOnce
+    enabled: true
+    size: 5Gi
+    storageClass: local-path
+  dataStorage:
+    accessMode: ReadWriteOnce
+    enabled: true
+    size: 10Gi
+    storageClass: local-path
+  extraEnvironmentVars:
+    OPENBAO_CLUSTER_NAME: homelab
+  extraVolumes:
+  - name: openbao-tls
+    type: secret
+  ha:
+    enabled: true
+    raft:
+      config: "cluster_addr = \"https://POD_IP:8201\"\napi_addr = \"https://POD_IP:8200\"\
+        \n\nlistener \"tcp\" {\n  tls_disable = 0\n  address = \"[::]:8200\"\n  cluster_address\
+        \ = \"[::]:8201\"\n  tls_cert_file = \"/vault/userconfig/openbao-tls/tls.crt\"\
+        \n  tls_key_file  = \"/vault/userconfig/openbao-tls/tls.key\"\n}\n\nstorage\
+        \ \"raft\" {\n  path = \"/vault/data\"\n\n  retry_join {\n    leader_api_addr\
+        \ = \"https://openbao-0.openbao-internal:8200\"\n    leader_ca_cert_file =\
+        \ \"/vault/userconfig/openbao-tls/ca.crt\"\n  }\n  retry_join {\n    leader_api_addr\
+        \ = \"https://openbao-1.openbao-internal:8200\"\n    leader_ca_cert_file =\
+        \ \"/vault/userconfig/openbao-tls/ca.crt\"\n  }\n  retry_join {\n    leader_api_addr\
+        \ = \"https://openbao-2.openbao-internal:8200\"\n    leader_ca_cert_file =\
+        \ \"/vault/userconfig/openbao-tls/ca.crt\"\n  }\n\n  autopilot {\n    cleanup_dead_servers\
+        \ = true\n    last_contact_threshold = \"10s\"\n    min_quorum = 2\n    server_stabilization_time\
+        \ = \"10s\"\n  }\n}\n\nservice_registration \"kubernetes\" {}\n\ntelemetry\
+        \ {\n  prometheus_retention_time = \"30s\"\n  disable_hostname = true\n}\n"
+      enabled: true
+      setNodeId: true
+    replicas: 3
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 60
+  logFormat: json
+  logLevel: info
+  readinessProbe:
+    enabled: true
+  resources:
+    limits:
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  service:
+    enabled: true
+    type: ClusterIP
+  serviceAccount:
+    create: true
 ui:
   enabled: true
   serviceType: ClusterIP
-
-csi:
-  enabled: false
