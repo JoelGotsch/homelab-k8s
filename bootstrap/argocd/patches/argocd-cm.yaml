@@ -9,6 +9,15 @@ metadata:
 data:
   url: "https://argocd.<HOMELAB_INTERNAL_DOMAIN>"
 
+  # Enable kustomize's Helm chart inflation generator. See
+  # homelab-infra/argocd/install/patches/argocd-cm.yaml.j2 for
+  # the full rationale — short version: helmCharts-using
+  # layers (e.g. infrastructure/cert-manager) need
+  # --enable-helm for Argo's repo-server kustomize-build to
+  # work. Must stay in sync between bootstrap (this file) and
+  # argocd-self take-over (this same file rendered).
+  kustomize.buildOptions: --enable-helm
+
   resource.exclusions: |
     - apiGroups:
       - cilium.io
