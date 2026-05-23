@@ -1,0 +1,16 @@
+# Gateway API CRDs — sync-wave -20 so they land before any
+# HTTPRoute / Gateway CR Argo tries to apply.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - gatewayclasses.yaml
+  - gateways.yaml
+  - httproutes.yaml
+  - grpcroutes.yaml
+  - referencegrants.yaml
+  - tlsroutes.yaml
+
+commonAnnotations:
+  argocd.argoproj.io/sync-wave: "-20"
