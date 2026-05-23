@@ -12,9 +12,19 @@ kind: Kustomization
 namespace: llm-gateway
 
 helmCharts:
+  # OCI chart pull composes URL as `{repo}/{name}` — if repo
+  # already includes the chart name as a path suffix, helm
+  # tries `…/litellm-helm/litellm-helm/manifests/<ver>`
+  # which 404s. The published OCI artifact lives at
+  # `oci://ghcr.io/berriai/litellm-helm` (the repo IS the
+  # artifact, no name segment), so we drop the `name` field
+  # to `litellm-helm` and the repo to its parent.
+  # Chart version mirrors the LiteLLM PyPI version (per
+  # BerriAI's release workflow): chart 1.85.1 = LiteLLM
+  # 1.85.1.
   - name: litellm-helm
-    repo: oci://ghcr.io/berriai/litellm-helm
-    version: "1.1.0"  # OPERATOR PINS via Renovate
+    repo: oci://ghcr.io/berriai
+    version: "1.85.1"  # OPERATOR PINS via Renovate
     releaseName: llm-gateway
     namespace: llm-gateway
     valuesFile: values.yaml

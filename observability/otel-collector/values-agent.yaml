@@ -39,7 +39,13 @@ config:
       endpoint: opentelemetry-collector-gateway.monitoring.svc.cluster.local:4317
       tls:
         insecure: true   # cluster-internal HTTP
+  extensions:
+    # Required by the chart since 0.110.x — see values-gateway.yaml
+    # for context. Probes hit this endpoint.
+    health_check:
+      endpoint: 0.0.0.0:13133
   service:
+    extensions: [health_check]
     pipelines:
       traces:
         receivers: [otlp]

@@ -12,21 +12,27 @@
 #   by infrastructure/minio-on-nas/).
 
 # Langfuse web (UI + API) + worker (async ingestion).
+# Chart 1.5.x dropped the `existingSecret`/`key` shape in
+# favour of native k8s `secretKeyRef`. Update both at once if
+# bumping past 1.5.x.
 langfuse:
   # Operator-fillable per the homelab convention.
   nextauth:
     url: "https://langfuse.lab.vyramo.com"
     secret:
-      existingSecret: langfuse-app-secrets
-      key: NEXTAUTH_SECRET
+      secretKeyRef:
+        name: langfuse-app-secrets
+        key: NEXTAUTH_SECRET
 
   salt:
-    existingSecret: langfuse-app-secrets
-    key: SALT
+    secretKeyRef:
+      name: langfuse-app-secrets
+      key: SALT
 
   encryptionKey:
-    existingSecret: langfuse-app-secrets
-    key: ENCRYPTION_KEY
+    secretKeyRef:
+      name: langfuse-app-secrets
+      key: ENCRYPTION_KEY
 
   # Telemetry to Langfuse Inc. — disabled per principle #2
   # (security over convenience; no anonymous telemetry to
@@ -85,18 +91,22 @@ clickhouse:
     key: password
 
 # === External Postgres (CNPG-managed) ===
+# Chart 1.5.x moved username + secret config under `auth.`
+# (was flat in 1.4.x). Update both at once if bumping past 1.5.x.
 postgresql:
   deploy: false
   host: "langfuse-pg-rw.langfuse.svc.cluster.local"
   port: 5432
   database: "langfuse"
-  username: "langfuse"
-  # CNPG creates the user-credentials Secret automatically;
-  # we point at it via existingSecret. CNPG's secret name is
-  # `<cluster-name>-app` by default.
-  existingSecret: "langfuse-pg-app"
-  existingSecretPasswordKey: "password"
-  existingSecretUserKey: "username"
+  auth:
+    username: "langfuse"
+    # CNPG creates the user-credentials Secret automatically;
+    # we point at it via existingSecret. CNPG's secret name is
+    # `<cluster-name>-app` by default.
+    existingSecret: "langfuse-pg-app"
+    secretKeys:
+      userPasswordKey: "password"
+      adminPasswordKey: "password"
 
 # === Redis (chart-managed) ===
 redis:

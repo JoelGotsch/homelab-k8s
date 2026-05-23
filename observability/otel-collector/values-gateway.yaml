@@ -61,12 +61,19 @@ config:
       auth:
         authenticator: basicauth/langfuse
   extensions:
+    # Required by the chart since 0.110.x — without it,
+    # `helm template` fails with "The opentelemetry-collector
+    # chart requires that the health_check extension to be
+    # included in the extension list." The chart's bundled
+    # liveness/readiness probes hit this endpoint.
+    health_check:
+      endpoint: 0.0.0.0:13133
     basicauth/langfuse:
       client_auth:
         username: ${env:LANGFUSE_OTEL_PUBLIC_KEY}
         password: ${env:LANGFUSE_OTEL_SECRET_KEY}
   service:
-    extensions: [basicauth/langfuse]
+    extensions: [health_check, basicauth/langfuse]
     pipelines:
       traces:
         receivers: [otlp]

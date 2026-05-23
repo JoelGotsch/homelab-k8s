@@ -21,7 +21,7 @@ kind: Kustomization
 helmCharts:
   - name: crowdsec
     repo: https://crowdsecurity.github.io/helm-charts
-    version: "0.13.5"  # OPERATOR PINS via Renovate
+    version: "0.24.0"  # OPERATOR PINS via Renovate (chart app v1.7.8)
     releaseName: crowdsec
     namespace: crowdsec
     valuesFile: values.yaml

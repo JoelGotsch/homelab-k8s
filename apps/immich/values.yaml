@@ -39,46 +39,43 @@ image:
   tag: "v1.135.0"
   pullPolicy: IfNotPresent
 
-# Disable the bundled Postgres subchart — we use external CNPG
-# (see cnpg-cluster.yaml). Bundled Redis stays enabled (chart
-# default true).
-postgresql:
-  enabled: false
+# Bundled Postgres subchart was removed in immich-charts 0.10.0
+# (chart enforces this via a checks.yaml template — setting
+# `postgresql.enabled: false` is rejected, not no-op'd). We
+# use external CNPG (cnpg-cluster.yaml); connection details
+# come via the chart's `immich.env` values pointing at the
+# Service DNS + ESO-projected creds.
 
-# Server (HTTP API + web frontend).
-server:
-  enabled: true
+# Persistence — chart-managed PVCs, shared across all components
+# (server, microservices, machine-learning). Previously this was
+# under `server.persistence` + `microservices.persistence`
+# separately; chart moved to a top-level `immich.persistence`
+# block that all components mount.
+immich:
   persistence:
     # Hot bucket on Longhorn — outer mount.
     library:
-      type: pvc
+      enabled: true
       existingClaim: immich-hot
       mountPath: /usr/src/app/upload
-      readOnly: false
+      accessMode: ReadWriteOnce
     # Cold bucket on csi-rclone — inner mount stacked on top
     # of the hot bucket at the `library/` subdir. Immich's
     # storage-template moves originals here on first index.
     originals:
-      type: pvc
+      enabled: true
       existingClaim: immich-originals
       mountPath: /usr/src/app/upload/library
-      readOnly: false
+      accessMode: ReadWriteOnce
+
+# Server (HTTP API + web frontend).
+server:
+  enabled: true
 
 # Microservices (background job worker — ingest, thumbnail,
 # transcode, smart-search indexing, face detection).
 microservices:
   enabled: true
-  persistence:
-    library:
-      type: pvc
-      existingClaim: immich-hot
-      mountPath: /usr/src/app/upload
-      readOnly: false
-    originals:
-      type: pvc
-      existingClaim: immich-originals
-      mountPath: /usr/src/app/upload/library
-      readOnly: false
 
 # Machine-learning (CLIP smart search + ArcFace facial
 # recognition). Workers do this entirely on-cluster — per

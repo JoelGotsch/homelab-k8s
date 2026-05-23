@@ -21,7 +21,12 @@ agent:
   # Loki-API acquisition. Per decision E: clean composability
   # over real-time at this layer; reconsider-trigger if
   # credential-stuffing slips past the auth-layer rate limit.
-  acquisition:
+  #
+  # Chart schema in v0.24.0: `acquisition` is reserved for
+  # K8s pod-log tail sources (namespace/podName/program
+  # tuple). External-source modes (loki, s3, http, kafka, …)
+  # live under `additionalAcquisition`. We use Loki only.
+  additionalAcquisition:
     - source: loki
       url: http://loki.monitoring.svc.cluster.local:3100
       # Cilium Gateway envoy access logs. The exact selector

@@ -76,11 +76,14 @@ gitea:
     email: "<FORGEJO_ADMIN_EMAIL>"
     username: forgejo-admin
 
-  # Mount external CNPG Postgres + ESO-projected security keys.
-  database:
-    builtIn:
-      postgresql:
-        enabled: false
+  # External Postgres via CNPG — disable bundled chart deps.
+  # Chart removed `gitea.database.builtIn.*` switches; bundled
+  # database enablement now lives in the top-level chart-
+  # dependency blocks (`postgresql.enabled: false`,
+  # `postgresql-ha.enabled: false` — set earlier in this file).
+  # External connection details go in `gitea.config.database`
+  # below (DB_TYPE, HOST, NAME, USER + the security envFrom
+  # for DB_PASSWD).
 
   config:
     APP_NAME: "Forgejo — homelab"

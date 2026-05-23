@@ -205,8 +205,18 @@ worker:
 # (chart's own implementation requires the `metrics` port to
 # be exposed; the ServiceMonitor in this layer references it
 # explicitly).
+# Chart 2024.2+ relocated serviceMonitor under server.metrics
+# + worker.metrics (was prometheus.serviceMonitor). Disable
+# both since kube-prometheus-stack discovers via release-label
+# convention, not chart-managed ServiceMonitors.
+server:
+  metrics:
+    serviceMonitor:
+      enabled: false
+worker:
+  metrics:
+    serviceMonitor:
+      enabled: false
 prometheus:
-  serviceMonitor:
-    enabled: false
   rules:
     enabled: false

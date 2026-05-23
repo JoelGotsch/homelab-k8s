@@ -63,12 +63,25 @@ persistence:
 
 # Don't expose Service externally — Cilium HTTPRoute owns
 # ingress.
+#
+# bjw-s common library expects a nested service schema:
+#   service.<name>.{type, ports.<portName>.port}
+# not the flat `service.type` + `service.port`. The flat
+# shape fails deep in `_ports.tpl` with:
+#   `<$service>: wrong type for value; expected map[string]
+#    interface {}; got float64`
+# because the chart iterates services as a map keyed by name.
 service:
-  type: ClusterIP
-  port: 8000
+  main:
+    type: ClusterIP
+    ports:
+      http:
+        port: 8000
 
+# bjw-s common: ingress.<name>.enabled, not flat ingress.enabled
 ingress:
-  enabled: false
+  main:
+    enabled: false
 
 # Paperless config + secrets via env (chart's `env` block).
 # DB_* + REDIS_* + URL + OIDC vars projected from Secrets
