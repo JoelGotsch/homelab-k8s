@@ -45,8 +45,8 @@ spec:
     # as root-app at the same revision). Operator FILLS at first
     # commit; matches homelab-infra/argocd/root-app.yaml.j2's
     # `homelab_k8s_repo_url` and `homelab_k8s_repo_revision`.
-    repoURL: <HOMELAB_K8S_REPO_URL>
-    targetRevision: <HOMELAB_K8S_REPO_REVISION>
+    repoURL: https://github.com/JoelGotsch/homelab-k8s
+    targetRevision: main
     path: bootstrap/argocd
   destination:
     server: https://kubernetes.default.svc

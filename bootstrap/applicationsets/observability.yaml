@@ -11,7 +11,7 @@ spec:
   goTemplateOptions: ["missingkey=error"]
   generators:
     - git:
-        repoURL: <REPO-URL>
+        repoURL: https://github.com/JoelGotsch/homelab-k8s
         revision: main
         directories:
           - path: observability/*
@@ -26,7 +26,7 @@ spec:
     spec:
       project: default
       source:
-        repoURL: <REPO-URL>
+        repoURL: https://github.com/JoelGotsch/homelab-k8s
         targetRevision: main
         path: '{{.path.path}}'
       destination:
