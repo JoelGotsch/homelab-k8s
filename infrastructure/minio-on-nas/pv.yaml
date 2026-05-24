@@ -37,7 +37,7 @@ spec:
     # to the same NFS path.
     volumeHandle: minio-on-nas
     volumeAttributes:
-      server: <NAS-IP>
+      server: 10.10.10.10
       share: /volume1/cluster-backups/minio
   mountOptions:
     - nfsvers=4.1
