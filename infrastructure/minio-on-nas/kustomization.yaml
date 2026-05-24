@@ -24,7 +24,7 @@ helmCharts:
     repo: https://charts.min.io/
     version: "5.4.0"  # OPERATOR PINS via Renovate
     releaseName: minio
-    namespace: minio
+    namespace: minio-on-nas
     valuesFile: values.yaml
     includeCRDs: false  # chart ships no CRDs in standalone mode
 

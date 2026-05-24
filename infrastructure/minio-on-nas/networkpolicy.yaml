@@ -11,7 +11,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: minio-default-deny
-  namespace: minio
+  namespace: minio-on-nas
 spec:
   podSelector: {}
   policyTypes: [Ingress, Egress]
@@ -20,7 +20,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: minio-allow
-  namespace: minio
+  namespace: minio-on-nas
 spec:
   podSelector:
     matchLabels:
