@@ -8,6 +8,13 @@ csi:
   enabled: false
 global:
   enabled: true
+  # Match bootstrap config — chart default tlsDisable=true
+  # injects BAO_ADDR=http://127.0.0.1:8200, but our listener
+  # is HTTPS. Without this, the readinessProbe (`bao status`)
+  # + livenessProbe both fail; pod stays 0/1 + crashloops on
+  # liveness. See homelab-infra/ansible/files/openbao-values.yaml
+  # for the full rationale.
+  tlsDisable: false
 injector:
   enabled: false
 seal:
@@ -31,6 +38,10 @@ server:
     storageClass: local-path
   extraEnvironmentVars:
     OPENBAO_CLUSTER_NAME: homelab
+    # In-pod bao client talks to its own listener over HTTPS;
+    # the bootstrap TLS cert is self-signed (not in the pod's
+    # CA bundle). Skip-verify keeps readiness probe working.
+    BAO_SKIP_VERIFY: "true"
   extraVolumes:
   - name: openbao-tls
     type: secret
