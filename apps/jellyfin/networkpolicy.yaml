@@ -92,7 +92,7 @@ spec:
               - matchPattern: "*"
     # NFS to NAS.
     - toCIDR:
-        - "10.10.10.122/32"
+        - "10.10.10.10/32"
       toPorts:
         - ports:
             - port: "2049"
