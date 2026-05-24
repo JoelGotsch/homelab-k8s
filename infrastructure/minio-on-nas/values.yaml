@@ -54,29 +54,19 @@ consoleService:
 # Lifecycle policies (e.g. 90-day expire on cnpg WAL) live in
 # the consumer's own backup config, NOT here — keeps the
 # bucket-side surface dumb.
-buckets:
-  - name: homelab-backups-cluster
-    policy: none
-    purge: false
-    versioning: false  # Restic CronJob handles version retention
-  - name: longhorn-backups
-    policy: none
-    purge: false
-    versioning: false
-  - name: loki-chunks
-    policy: none
-    purge: false
-    versioning: false  # Loki retention configured in its values
-  - name: tempo-blocks
-    policy: none
-    purge: false
-    versioning: false  # Tempo retention per ADR 0021 D8 (14d hot, 30d warm)
-  - name: langfuse-blobs
-    policy: none
-    purge: false
-    versioning: false  # Langfuse stores large trace payloads (LLM
-                        # input/output text, attachments) here.
-                        # Per ADR 0021 D8 + ADR 0028.
+# Buckets created by homelab-infra/scripts/setup-minio-buckets.sh
+# post-deploy, NOT via the chart's `buckets:` post-install
+# Job. Why: the chart's post-install Job uses a minio/mc
+# container that doesn't comply with the namespace's
+# restricted PSS (no allowPrivilegeEscalation, no
+# capabilities.drop, no seccompProfile in the chart's
+# template — chart doesn't expose those fields). The setup
+# script does the same work + skips PSS for the operator-
+# driven path. See scripts/setup-minio-buckets.sh for the
+# per-app bucket+user matrix (replaces the entries listed
+# here previously: cnpg-*, loki-chunks, tempo-traces,
+# langfuse-blobs, etc.).
+buckets: []
 
 # Per-app access keys (svc accounts) are NOT provisioned by
 # the chart. Operator creates them via `mc admin user svcacct
