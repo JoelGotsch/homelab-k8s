@@ -27,7 +27,7 @@ provisioner: nfs.csi.k8s.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
 parameters:
-  server: 10.10.10.10
+  server: 10.10.10.122
   share: /volume1/internal-media
   mountOptions: nfsvers=4.1,hard,nconnect=8,rsize=131072,wsize=131072
 ---
@@ -39,7 +39,7 @@ provisioner: nfs.csi.k8s.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
 parameters:
-  server: 10.10.10.10
+  server: 10.10.10.122
   share: /volume1/public-static
   mountOptions: nfsvers=4.1,hard,nconnect=8,rsize=131072,wsize=131072
 ---
@@ -51,6 +51,6 @@ provisioner: nfs.csi.k8s.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
 parameters:
-  server: 10.10.10.10
+  server: 10.10.10.122
   share: /volume1/cluster-backups
   mountOptions: nfsvers=4.1,hard,nconnect=8,rsize=131072,wsize=131072

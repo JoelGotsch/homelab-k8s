@@ -96,7 +96,7 @@ spec:
     # nas_storage_ip in homelab-infra/group_vars/cluster.yml).
     - to:
         - ipBlock:
-            cidr: 10.10.10.10/32
+            cidr: 10.10.10.122/32
       ports:
         - port: 2049  # NFSv4
           protocol: TCP
