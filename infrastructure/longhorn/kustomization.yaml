@@ -1,20 +1,15 @@
-# Longhorn — block storage per ADR 0016.
-# Default replica=2; critical workloads opt into replica=3 via
-# StorageClass; regenerable data uses replica=1 class.
-
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 helmCharts:
-  - name: longhorn
-    repo: https://charts.longhorn.io
-    version: "1.7.2"  # OPERATOR PINS via Renovate
-    releaseName: longhorn
-    namespace: longhorn-system
-    valuesFile: values.yaml
-    includeCRDs: true
-
+- name: longhorn
+  repo: https://charts.longhorn.io
+  version: 1.7.2
+  releaseName: longhorn
+  namespace: longhorn-system
+  valuesFile: values.yaml
+  includeCRDs: true
 resources:
-  - storageclasses.yaml
-  - externalsecret.yaml
-  - recurring-jobs.yaml
+- bootstrap-sa.yaml
+- storageclasses.yaml
+- externalsecret.yaml
+- recurring-jobs.yaml
