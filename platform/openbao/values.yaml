@@ -68,6 +68,13 @@ server:
   livenessProbe:
     enabled: true
     initialDelaySeconds: 60
+    # Status-code tolerance: chart-default path returns 503 for
+    # sealed pods + 501 for uninitialized. Kubelet treats both
+    # as failure → kills container → crashloop during the
+    # operator-attended unseal window (or before init). Tell
+    # OpenBao to return 204 (success) for both. See homelab-
+    # infra/ansible/files/openbao-values.yaml for context.
+    path: "/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"
   logFormat: json
   logLevel: info
   readinessProbe:
