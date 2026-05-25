@@ -29,11 +29,18 @@ global:
     - name: AUTHENTIK_LOG_FORMAT
       value: json
 
-  # Project the SECRET_KEY into the standard env var the
-  # chart expects.
+  # Project all operator-managed creds into env vars.
+  # ESO writes Secret keys named after the env var; chart's
+  # global.envFrom is the only supported per-cred injection
+  # point — server.envFrom / worker.envFrom are NOT honored
+  # by the chart's deployment templates.
   envFrom:
     - secretRef:
         name: authentik-secret-key
+    - secretRef:
+        name: authentik-postgres-creds
+    - secretRef:
+        name: authentik-bootstrap
 
 # Use external CNPG Postgres + bundled Redis (default).
 # Authentik chart's bundled Postgres dependency is disabled
@@ -106,37 +113,10 @@ server:
     serviceMonitor:
       enabled: false
 
-  # Project bootstrap + db password as env vars. The chart's
-  # generated `authentik` Secret (envFrom'd by default) does NOT
-  # include AUTHENTIK_POSTGRESQL__PASSWORD because we set
-  # postgresql.enabled=false and don't pass authentik.postgresql.password
-  # in values — explicit env block below wires it from the ESO Secret.
-  envFrom:
-    - secretRef:
-        name: authentik-bootstrap
-    - secretRef:
-        name: authentik-postgres-creds
-  env:
-    - name: AUTHENTIK_BOOTSTRAP_PASSWORD
-      valueFrom:
-        secretKeyRef:
-          name: authentik-bootstrap
-          key: bootstrap_password
-    - name: AUTHENTIK_BOOTSTRAP_TOKEN
-      valueFrom:
-        secretKeyRef:
-          name: authentik-bootstrap
-          key: bootstrap_token
-    - name: AUTHENTIK_BOOTSTRAP_EMAIL
-      valueFrom:
-        secretKeyRef:
-          name: authentik-bootstrap
-          key: bootstrap_email
-    - name: AUTHENTIK_POSTGRESQL__PASSWORD
-      valueFrom:
-        secretKeyRef:
-          name: authentik-postgres-creds
-          key: password
+  # Note: env/envFrom for server-only injection NOT supported
+  # by this chart — postgres + bootstrap + secret-key all flow
+  # through global.envFrom above (applied to both server +
+  # worker, which is correct: worker needs DB creds too).
 
   resources:
     requests:
@@ -175,15 +155,7 @@ worker:
     serviceMonitor:
       enabled: false
 
-  envFrom:
-    - secretRef:
-        name: authentik-postgres-creds
-  env:
-    - name: AUTHENTIK_POSTGRESQL__PASSWORD
-      valueFrom:
-        secretKeyRef:
-          name: authentik-postgres-creds
-          key: password
+  # env/envFrom flow through global.envFrom (see top of file).
 
   resources:
     requests:
