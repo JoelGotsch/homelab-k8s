@@ -119,6 +119,15 @@ grafana:
     accessModes: [ReadWriteOnce]
     size: 10Gi
 
+  # RWO PVC + replicas: 1 deadlocks the default RollingUpdate
+  # strategy — new pod can't attach the volume while the old
+  # one holds it. Forces `kubectl scale rs --replicas=0` on
+  # every rollout otherwise. Hit on 2026-05-25 during the
+  # OIDC bring-up; see known-caveats §"Helm-chart rollouts
+  # on RWO PVCs".
+  deploymentStrategy:
+    type: Recreate
+
   # OIDC against Authentik. Activated per the operator's
   # post-Authentik step — the values below are present at
   # first commit, but Grafana stops at "OAuth disabled" until

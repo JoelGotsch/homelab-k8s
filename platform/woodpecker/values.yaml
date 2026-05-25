@@ -54,6 +54,13 @@ server:
     accessModes:
       - ReadWriteOnce
 
+  # RWO PVC + replicaCount: 1 deadlocks RollingUpdate. Use
+  # Recreate so the old pod terminates before the new one
+  # tries to attach. See known-caveats §"Helm-chart rollouts
+  # on RWO PVCs" (2026-05-25).
+  strategy:
+    type: Recreate
+
   service:
     type: ClusterIP
     port: 80

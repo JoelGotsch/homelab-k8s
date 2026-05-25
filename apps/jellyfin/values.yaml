@@ -11,6 +11,14 @@
 
 replicaCount: 1
 
+# RWO Longhorn PVCs (config + cache below) + replicaCount: 1
+# deadlocks RollingUpdate. New pod can't attach volumes while
+# old pod holds them. See known-caveats §"Helm-chart rollouts
+# on RWO PVCs" (2026-05-25). The jellyfin/jellyfin chart uses
+# top-level strategy.
+strategy:
+  type: Recreate
+
 # Lowest-priority workload — evicted first under cluster
 # resource pressure (operator decision 2026-05-02).
 # See priorityclass.yaml.

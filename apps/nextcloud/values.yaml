@@ -29,6 +29,13 @@
 # data PVC.
 replicaCount: 1
 
+# RWO PVC + replicaCount: 1 deadlocks RollingUpdate (new pod
+# can't attach the volume while the old pod holds it). Forces
+# operator to manually scale the old RS to 0 on every rollout.
+# See known-caveats §"Helm-chart rollouts on RWO PVCs" (2026-05-25).
+strategy:
+  type: Recreate
+
 image:
   repository: nextcloud
   # OPERATOR PINS via Renovate.
