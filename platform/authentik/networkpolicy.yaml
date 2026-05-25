@@ -1,4 +1,13 @@
-# NetworkPolicies for the Authentik layer.
+# Network policies for the Authentik layer.
+#
+# Implemented as CiliumNetworkPolicy (not vanilla NetworkPolicy)
+# because Cilium Gateway API egress to backends carries a
+# special reserved identity `ingress`, not the source namespace.
+# K8s NetworkPolicy's `namespaceSelector: kubernetes.io/metadata.name=ingress`
+# does NOT match this identity — it would silently drop all
+# Gateway → authentik-server traffic with a 5s timeout (envoy
+# returns 503 "upstream connect/disconnect or reset before
+# headers"). See homelab-docs/04-guides/known-caveats.md.
 #
 # - Server ingress: Cilium Gateway envoy (HTTPRoute) +
 #   Prometheus scrape + every in-cluster OIDC consumer
@@ -10,166 +19,157 @@
 #   OpenBao + outbound to OIDC clients (for token refresh
 #   + outpost reconciliation).
 
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: authentik-server
   namespace: authentik
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
       app.kubernetes.io/name: authentik
       app.kubernetes.io/component: server
-  policyTypes: [Ingress, Egress]
   ingress:
-    # Cilium Gateway envoy.
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ingress
-      ports:
-        - port: 9000
-          protocol: TCP
-        - port: 9443
-          protocol: TCP
+    # Cilium Gateway API traffic — carries reserved `ingress`
+    # identity, NOT the ingress namespace identity.
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+            - port: "9443"
+              protocol: TCP
     # Prometheus scrape.
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-      ports:
-        - port: 9300   # default authentik metrics port
-          protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: prometheus
+      toPorts:
+        - ports:
+            - port: "9300"
+              protocol: TCP
     # In-cluster OIDC consumers — every namespace whose pods
     # call the OIDC discovery + token endpoints. Listing each
     # ns explicitly so a future namespace doesn't accidentally
     # gain unauthenticated-discovery access.
-    - from:
-        - namespaceSelector:
-            matchExpressions:
-              - key: kubernetes.io/metadata.name
-                operator: In
-                values:
-                  - forgejo
-                  - woodpecker
-                  - vaultwarden
-                  - monitoring        # Grafana
-                  - langfuse
-                  - llm-gateway
-                  - nextcloud
-                  - jellyfin
-                  - argocd            # OIDC integration too
-      ports:
-        - port: 9000
-          protocol: TCP
+    - fromEndpoints:
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: In
+              values:
+                - forgejo
+                - woodpecker
+                - vaultwarden
+                - monitoring        # Grafana
+                - langfuse
+                - llm-gateway
+                - nextcloud
+                - jellyfin
+                - argocd
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
   egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+    # kube-DNS.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
     # CNPG Postgres (same ns).
-    - to:
-        - podSelector:
-            matchLabels:
-              cnpg.io/cluster: authentik-pg
-      ports:
-        - port: 5432
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: authentik-pg
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
     # Bundled Redis (same ns).
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: redis
-      ports:
-        - port: 6379
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: redis
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
     # OpenBao for ESO refreshes.
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: openbao
-      ports:
-        - port: 8200
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: openbao
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
 ---
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: authentik-worker
   namespace: authentik
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
       app.kubernetes.io/name: authentik
       app.kubernetes.io/component: worker
-  policyTypes: [Ingress, Egress]
-  ingress: []
+  # No ingress rules — worker exposes no in-cluster services.
   egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
-    - to:
-        - podSelector:
-            matchLabels:
-              cnpg.io/cluster: authentik-pg
-      ports:
-        - port: 5432
-          protocol: TCP
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: redis
-      ports:
-        - port: 6379
-          protocol: TCP
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: openbao
-      ports:
-        - port: 8200
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: authentik-pg
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: redis
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: openbao
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
     # Outpost / OIDC client reconciliation: worker may push
-    # tokens to in-cluster OIDC clients during apply. Allow
-    # 9000+9443 to the same OIDC-consumer namespaces as the
-    # server's ingress rules above.
-    - to:
-        - namespaceSelector:
-            matchExpressions:
-              - key: kubernetes.io/metadata.name
-                operator: In
-                values:
-                  - forgejo
-                  - woodpecker
-                  - vaultwarden
-                  - monitoring
-                  - langfuse
-                  - llm-gateway
-                  - nextcloud
-                  - jellyfin
-                  - argocd
-      ports:
-        - port: 443
-          protocol: TCP
-        - port: 80
-          protocol: TCP
+    # tokens to in-cluster OIDC clients during apply.
+    - toEndpoints:
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: In
+              values:
+                - forgejo
+                - woodpecker
+                - vaultwarden
+                - monitoring
+                - langfuse
+                - llm-gateway
+                - nextcloud
+                - jellyfin
+                - argocd
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "80"
+              protocol: TCP
