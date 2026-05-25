@@ -36,6 +36,13 @@ configMapGenerator:
     namespace: authentik
     files:
       - blueprints/grafana.yaml
+      - blueprints/forgejo.yaml
+      - blueprints/langfuse.yaml
+      - blueprints/nextcloud.yaml
+      - blueprints/jellyfin.yaml
+      - blueprints/immich.yaml
+      - blueprints/paperless.yaml
+      - blueprints/argocd.yaml
     options:
       # Kustomize hash suffix would force ConfigMap rename on
       # every blueprint edit + force chart re-render. Disable

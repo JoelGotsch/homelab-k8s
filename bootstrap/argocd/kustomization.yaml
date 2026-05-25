@@ -36,6 +36,11 @@ resources:
   # Current pin: v3.4.2 (matches homelab-infra argocd_version).
   - argocd-install.yaml
 
+  # ESO-projected Authentik OIDC client creds. Targets the
+  # Secret `oidc.authentik` referenced by `$oidc.authentik.*`
+  # in patches/oidc-config.yaml. See externalsecret.yaml.
+  - externalsecret.yaml
+
 patches:
   - path: patches/argocd-cmd-params.yaml
     target:
