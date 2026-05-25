@@ -40,10 +40,13 @@ spec:
     parameters:
       max_connections: "200"
       shared_buffers: "256MB"
-      # Required by vectorchord per upstream Immich docs —
-      # without this, the extension fails to register and
-      # Immich's startup health-check rejects the DB.
-      shared_preload_libraries: "vchord.so"
+    # `shared_preload_libraries` is a CNPG-managed FIXED parameter
+    # — setting it under `parameters:` makes CNPG reject the Cluster
+    # with "Can't set fixed configuration parameter". Use the
+    # top-level list under `spec.postgresql.shared_preload_libraries`.
+    # Required by vectorchord per upstream Immich docs.
+    shared_preload_libraries:
+      - vchord.so
 
   bootstrap:
     initdb:

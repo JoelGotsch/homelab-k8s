@@ -105,7 +105,15 @@ smtp:
 
 # Container security: non-root, dropped caps. The
 # vaultwarden/server image runs as user 1000 by default.
-securityContext:
+#
+# guerzon/vaultwarden chart key mapping (discovered via 2026-05-25
+# StatefulSet schema rejection "fsGroup: field not declared in
+# schema"):
+#   `podSecurityContext:` → pod-level (fsGroup, runAsUser, etc.)
+#   `securityContext:`    → container-level (caps, ROFS, etc.)
+# A block with fsGroup under `securityContext:` lands in the
+# container schema where fsGroup is invalid.
+podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
   runAsGroup: 1000
@@ -113,7 +121,7 @@ securityContext:
   seccompProfile:
     type: RuntimeDefault
 
-containerSecurityContext:
+securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
   capabilities:

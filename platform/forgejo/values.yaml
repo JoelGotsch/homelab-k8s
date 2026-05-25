@@ -175,10 +175,16 @@ gitea:
 # We project security-keys + DB_PASSWD via envFrom on the
 # main container.
 extraEnvVars:
+  # CNPG generates the DB password and stores it in
+  # `forgejo-pg-app` (autocreated, kubernetes.io/basic-auth type).
+  # Read it directly rather than mirroring through OpenBao —
+  # the password has a single in-cluster producer + consumer; the
+  # OpenBao roundtrip would just add operator-toil (manual copy
+  # from forgejo-pg-app → OpenBao on every CNPG-issued rotation).
   - name: FORGEJO__database__PASSWD
     valueFrom:
       secretKeyRef:
-        name: forgejo-postgres-creds
+        name: forgejo-pg-app
         key: password
   - name: FORGEJO__security__SECRET_KEY
     valueFrom:
