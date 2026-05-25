@@ -157,12 +157,16 @@ worker:
 
   # env/envFrom flow through global.envFrom (see top of file).
 
+  # 512Mi limit OOMKilled the worker during blueprint discovery
+  # + WebAuthn MDS import at startup — chart 2026.2.0 needs
+  # ~750Mi steady-state; 1Gi limit gives headroom for periodic
+  # task spikes.
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
-    limits:
       memory: 512Mi
+    limits:
+      memory: 1Gi
 
   podSecurityContext:
     runAsNonRoot: true
