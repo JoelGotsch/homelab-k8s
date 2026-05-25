@@ -1,5 +1,13 @@
 # NetworkPolicies for the Forgejo layer.
 #
+# Implemented as CiliumNetworkPolicy (not vanilla NetworkPolicy)
+# because Cilium Gateway API traffic carries the reserved
+# `ingress` identity, NOT the source namespace identity. K8s
+# NetPol's `namespaceSelector: kubernetes.io/metadata.name=ingress`
+# silently drops Gateway → forgejo traffic (503 / 5s timeout).
+# See homelab-k8s/platform/authentik/networkpolicy.yaml for the
+# canonical write-up.
+#
 # - Forgejo ingress: Cilium Gateway envoy (HTTPRoute) +
 #   Prometheus scrape + in-cluster consumers (Woodpecker
 #   server + agent for OAuth + git-fetch, Renovate for API).
@@ -7,108 +15,103 @@
 #   OpenBao (for ESO-managed secrets) + NFS server (NAS) +
 #   Authentik (OIDC discovery + token validation).
 
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: forgejo
   namespace: forgejo
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
       app.kubernetes.io/name: forgejo
-  policyTypes: [Ingress, Egress]
   ingress:
-    # Cilium Gateway envoy — HTTP(S) ingress for the UI.
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ingress
-      ports:
-        - port: 3000
-          protocol: TCP
-        - port: 22
-          protocol: TCP
+    # Cilium Gateway envoy — HTTP(S) ingress for the UI,
+    # reserved `ingress` identity.
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+            - port: "22"
+              protocol: TCP
     # Prometheus scrape.
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-      ports:
-        - port: 3000
-          protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: prometheus
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
     # Woodpecker server + agent (OAuth + git-fetch).
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: woodpecker
-      ports:
-        - port: 3000
-          protocol: TCP
-        - port: 22
-          protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: woodpecker
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+            - port: "22"
+              protocol: TCP
     # Woodpecker CI runner pods clone repos via HTTP.
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ci-woodpecker
-      ports:
-        - port: 3000
-          protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: ci-woodpecker
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
     # Renovate runner — autodiscover + PR creation.
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: renovate
-      ports:
-        - port: 3000
-          protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: renovate
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
   egress:
     # kube-DNS.
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
     # CNPG Postgres (same ns).
-    - to:
-        - podSelector:
-            matchLabels:
-              cnpg.io/cluster: forgejo-pg
-      ports:
-        - port: 5432
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: forgejo-pg
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
     # OpenBao for ESO secret refreshes (ESO operator runs in
     # external-secrets ns; the actual fetch is from the
     # operator pod, not Forgejo's pod — but allow Forgejo
     # to reach OpenBao directly in case of operator-debug
     # `bao` use from inside the pod).
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: openbao
-      ports:
-        - port: 8200
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: openbao
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
     # Authentik OIDC discovery + token endpoint.
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: authentik
-      ports:
-        - port: 9000
-          protocol: TCP
-        - port: 9443
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+            - port: "9443"
+              protocol: TCP
 # NAS NFS egress is NOT allowed from Forgejo pods — per
 # ADR 0030 §D1 the csi-rclone driver in `csi-rclone` ns is
 # the only thing that talks to the NAS. Forgejo sees the

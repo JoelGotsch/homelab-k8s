@@ -2,7 +2,18 @@
 # chokepoint — narrow ingress to Cilium gateway pods + scrape,
 # narrow egress to: kube-DNS, OpenBao, CNPG, Mac Studio (MLX +
 # Ollama), and the WAN for upstream LLM providers.
+#
+# Implemented as CiliumNetworkPolicy (not vanilla NetworkPolicy)
+# because Cilium Gateway API traffic carries the reserved
+# `ingress` identity, NOT the source namespace identity. K8s
+# NetPol's `namespaceSelector: kubernetes.io/metadata.name=ingress`
+# silently drops Gateway → LiteLLM traffic (503 / 5s timeout).
+# See homelab-k8s/platform/authentik/networkpolicy.yaml for the
+# canonical write-up.
 
+# Default-deny remains a vanilla NetworkPolicy: it has no
+# rules referencing the ingress namespace, so it doesn't
+# trip the Cilium Gateway identity mismatch.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -12,171 +23,163 @@ spec:
   podSelector: {}
   policyTypes: [Ingress, Egress]
 ---
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: llm-gateway-allow
   namespace: llm-gateway
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
       app.kubernetes.io/name: litellm
-  policyTypes: [Ingress, Egress]
   ingress:
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ingress
-      ports:
-        - port: 4000
-          protocol: TCP
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-      ports:
-        - port: 4000
-          protocol: TCP
+    # Cilium Gateway envoy — reserved `ingress` identity.
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "4000"
+              protocol: TCP
+    # Monitoring scrape.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "4000"
+              protocol: TCP
   egress:
     # kube-dns
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
     # OpenBao (for ExternalSecret refresh — ESO controller does
     # the actual fetch, but kept here for parity if ever moved
     # in-pod).
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: openbao
-      ports:
-        - port: 8200
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: openbao
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
     # CloudNativePG cluster (budget/spend tracking).
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: cnpg
-      ports:
-        - port: 5432
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
     # Presidio analyzer + anonymizer (same ns; PII guardrail
     # before LLM dispatch). Per
     # 99-journal/2026-05-02-presidio-litellm-integration.md.
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/part-of: llm-gateway
-              app.kubernetes.io/component: pii-detection
-      ports:
-        - port: 3000
-          protocol: TCP
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/part-of: llm-gateway
-              app.kubernetes.io/component: pii-redaction
-      ports:
-        - port: 3000
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/part-of: llm-gateway
+            app.kubernetes.io/component: pii-detection
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/part-of: llm-gateway
+            app.kubernetes.io/component: pii-redaction
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
     # Mac Studio inference VLAN — operator inserts the actual
     # /32 once known. Keep as a placeholder ipBlock.
-    - to:
-        - ipBlock:
-            cidr: <MAC_STUDIO_INFERENCE_IP>/32
-      ports:
-        - port: 8080
-          protocol: TCP
-        - port: 11434
-          protocol: TCP
+    - toCIDR:
+        - <MAC_STUDIO_INFERENCE_IP>/32
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+            - port: "11434"
+              protocol: TCP
     # WAN egress for upstream LLM providers (Anthropic, OpenAI).
     # Cluster-egress goes through the WAN gateway; this rule is
     # the "everything else" allow. If tighter needed later,
     # narrow to Anthropic/OpenAI public CIDR ranges.
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 10.0.0.0/8
-              - 172.16.0.0/12
-              - 192.168.0.0/16
-      ports:
-        - port: 443
-          protocol: TCP
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except:
+            - 10.0.0.0/8
+            - 172.16.0.0/12
+            - 192.168.0.0/16
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
 ---
 # Presidio analyzer — ingress from LiteLLM only; egress
 # kube-DNS only (NLP model loaded in-image; no external
 # pulls at runtime).
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: presidio-analyzer
   namespace: llm-gateway
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
       app.kubernetes.io/name: presidio-analyzer
-  policyTypes: [Ingress, Egress]
   ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: litellm
-      ports:
-        - port: 3000
-          protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: litellm
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
   egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
 ---
 # Presidio anonymizer — same posture.
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: presidio-anonymizer
   namespace: llm-gateway
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
       app.kubernetes.io/name: presidio-anonymizer
-  policyTypes: [Ingress, Egress]
   ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: litellm
-      ports:
-        - port: 3000
-          protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: litellm
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
   egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP

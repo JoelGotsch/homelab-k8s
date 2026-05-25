@@ -1,79 +1,81 @@
 # NetworkPolicies for Vaultwarden.
 #
+# Implemented as CiliumNetworkPolicy (not vanilla NetworkPolicy)
+# because Cilium Gateway API traffic carries the reserved
+# `ingress` identity, NOT the source namespace identity. K8s
+# NetPol's `namespaceSelector: kubernetes.io/metadata.name=ingress`
+# silently drops Gateway → Vaultwarden traffic (503 / 5s timeout).
+# See homelab-k8s/platform/authentik/networkpolicy.yaml for the
+# canonical write-up.
+#
 # - Ingress: Cilium Gateway envoy (HTTPRoute) + Prometheus
 #   scrape + cloudflare-tunnel ingress (Phase 2 public).
 # - Egress: kube-DNS + Authentik (for OIDC discovery + token
 #   validation) + (when SMTP enabled) external SMTP relay.
 
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: vaultwarden
   namespace: vaultwarden
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
       app.kubernetes.io/name: vaultwarden
-  policyTypes: [Ingress, Egress]
   ingress:
-    # Cilium Gateway envoy.
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ingress
-      ports:
-        - port: 80
-          protocol: TCP
+    # Cilium Gateway envoy — reserved `ingress` identity.
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
     # Prometheus scrape.
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-      ports:
-        - port: 80
-          protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: prometheus
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
     # cloudflare-tunnel namespace (Phase 2 public ingress
     # per ADR 0024 D1).
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: cloudflare-tunnel
-      ports:
-        - port: 80
-          protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cloudflare-tunnel
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
   egress:
     # kube-DNS.
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
     # CNPG Postgres (same ns).
-    - to:
-        - podSelector:
-            matchLabels:
-              cnpg.io/cluster: vaultwarden-pg
-      ports:
-        - port: 5432
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: vaultwarden-pg
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
     # Authentik for OIDC discovery + token validation.
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: authentik
-      ports:
-        - port: 9000
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
 ---
 # CCNP for SMTP egress — vanilla NetworkPolicy can't match
 # off-cluster IPs by hostname. SMTP relay is operator-typed

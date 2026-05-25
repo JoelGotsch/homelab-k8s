@@ -1,5 +1,13 @@
 # NetworkPolicies for the CrowdSec layer.
 #
+# Implemented as CiliumNetworkPolicy (not vanilla NetworkPolicy)
+# because Cilium Gateway API traffic carries the reserved
+# `ingress` identity, NOT the source namespace identity. K8s
+# NetPol's `namespaceSelector: kubernetes.io/metadata.name=ingress`
+# silently drops Gateway → LAPI traffic (503 / 5s timeout). See
+# homelab-k8s/platform/authentik/networkpolicy.yaml for the
+# canonical write-up.
+#
 # - LAPI ingress: agent (same ns) + cidrgroup-sync CronJob (same ns)
 #                 + Prometheus self-metrics + community Console
 #                   bidirectional API (egress to api.crowdsec.net).
@@ -10,188 +18,171 @@
 # - CronJob ingress: none.
 # - CronJob egress: kube-DNS + LAPI + kube-API.
 
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: crowdsec-lapi
   namespace: crowdsec
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
       app.kubernetes.io/component: lapi
-  policyTypes: [Ingress, Egress]
   ingress:
     # Agent in same ns.
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: agent
-      ports:
-        - port: 8080
-          protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: agent
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
     # CronJob in same ns.
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: cidrgroup-sync
-      ports:
-        - port: 8080
-          protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: cidrgroup-sync
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
     # Prometheus scrape.
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-      ports:
-        - port: 6060
-          protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: prometheus
+      toPorts:
+        - ports:
+            - port: "6060"
+              protocol: TCP
     # Cilium Gateway envoy — OpenWrt agent + bouncer reach
     # LAPI via Tailscale → HTTPRoute on
     # crowdsec.lab.vyramo.com (per
     # 99-journal/2026-05-02-crowdsec-router-side.md).
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ingress
-      ports:
-        - port: 8080
-          protocol: TCP
+    # Reserved `ingress` identity.
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
   egress:
     # kube-DNS.
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
     # CNPG Postgres in same ns.
-    - to:
-        - podSelector:
-            matchLabels:
-              cnpg.io/cluster: crowdsec-lapi
-      ports:
-        - port: 5432
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: crowdsec-lapi
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
     # CrowdSec Console (community blocklist + telemetry):
     # narrowed to specific FQDNs via the companion
     # CiliumNetworkPolicy in ciliumnetworkpolicy-egress.yaml
-    # (toFQDNs: api.crowdsec.net, app.crowdsec.net). The
-    # vanilla NetworkPolicy intentionally has NO 443-egress
-    # rule for LAPI — Cilium's FQDN-based allow is the
-    # gate. Vanilla cannot match on hostname; this is the
-    # canonical "use CCNP for L7-aware egress" pattern.
+    # (toFQDNs: api.crowdsec.net, app.crowdsec.net). This
+    # policy intentionally has NO 443-egress rule for LAPI —
+    # Cilium's FQDN-based allow is the gate, set in the
+    # companion CCNP.
 ---
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: crowdsec-agent
   namespace: crowdsec
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
       app.kubernetes.io/component: agent
-  policyTypes: [Ingress, Egress]
   ingress:
     # Prometheus scrape.
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-      ports:
-        - port: 6060
-          protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: prometheus
+      toPorts:
+        - ports:
+            - port: "6060"
+              protocol: TCP
   egress:
     # kube-DNS.
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
     # LAPI (same ns).
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: lapi
-      ports:
-        - port: 8080
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: lapi
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
     # Loki (acquisition source per decision E).
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: loki
-      ports:
-        - port: 3100
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: loki
+      toPorts:
+        - ports:
+            - port: "3100"
+              protocol: TCP
     # CrowdSec Hub (parser/scenario fetch): narrowed to the
     # specific FQDN via the companion CiliumNetworkPolicy in
     # ciliumnetworkpolicy-egress.yaml (toFQDNs:
-    # hub.crowdsec.net). Vanilla NetworkPolicy cannot match
-    # on hostname; the L7-aware gate lives in the CCNP.
+    # hub.crowdsec.net). The L7-aware gate lives in the
+    # companion CCNP.
 ---
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: crowdsec-cidrgroup-sync
   namespace: crowdsec
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
       app.kubernetes.io/component: cidrgroup-sync
-  policyTypes: [Ingress, Egress]
-  ingress: []   # no inbound; CronJob is initiator-only
+  # No ingress rules — CronJob is initiator-only.
   egress:
     # kube-DNS.
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
     # LAPI (read decisions list).
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: lapi
-      ports:
-        - port: 8080
-          protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: lapi
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
     # kube-API for `kubectl apply` of the CIDRGroup CR.
-    - to:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              component: kube-apiserver
-      ports:
-        - port: 6443
-          protocol: TCP
-        - port: 443
-          protocol: TCP
+    # Cilium reserved `kube-apiserver` entity.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
