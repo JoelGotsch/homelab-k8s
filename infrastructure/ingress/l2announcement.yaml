@@ -10,9 +10,16 @@
 # one node per service to own the announcement; if that node
 # goes down, election re-runs.
 #
-# `interfaces` matches the physical NIC on cluster nodes
-# (enp4s0 per `cilium-dbg status` output; all nodes have
-# the same).
+# `interfaces` matches the physical NIC on cluster nodes —
+# Talos nodes use `enpNs0` naming where N varies by hardware:
+# cp1/cp2/cp3/worker1-3 all sit on the `enp[0-9]+s0` interface
+# carrying their servers-VLAN address. Regex matches any
+# enpXs0 to stay portable across node hardware mixes.
+#
+# An overly-narrow regex (e.g. `^enp4s0$`) silently no-ops:
+# the policy is accepted, the announcer lease is taken, but
+# no node ARP-responds on the actual NIC — Gateway IP
+# unreachable on the VLAN.
 
 apiVersion: "cilium.io/v2alpha1"
 kind: CiliumL2AnnouncementPolicy
@@ -26,6 +33,6 @@ spec:
     matchLabels:
       kubernetes.io/os: linux
   interfaces:
-    - "^enp4s0$"
+    - "^enp[0-9]+s0$"
   externalIPs: true
   loadBalancerIPs: true
