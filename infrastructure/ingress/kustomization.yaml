@@ -9,3 +9,5 @@ kind: Kustomization
 resources:
   - gatewayclass.yaml
   - gateway.yaml
+  - loadbalancer-ippool.yaml
+  - l2announcement.yaml

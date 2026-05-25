@@ -1,0 +1,31 @@
+# Cilium L2 announcement — ARP-broadcasts the LB IP onto the
+# servers VLAN so clients on that L2 can find the Gateway pod.
+#
+# Without this, the LB-IPAM-allocated IP exists in Cilium's
+# service map but no ARP responder advertises it. ARP requests
+# from clients (operator's WiFi → flint3 → servers VLAN)
+# timeout, browser shows "no route to host".
+#
+# `nodeSelector: {}` = all nodes participate. Cilium elects
+# one node per service to own the announcement; if that node
+# goes down, election re-runs.
+#
+# `interfaces` matches the physical NIC on cluster nodes
+# (enp4s0 per `cilium-dbg status` output; all nodes have
+# the same).
+
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: homelab-ingress
+spec:
+  serviceSelector:
+    matchLabels:
+      io.cilium.gateway/owning-gateway: homelab-gateway
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/os: linux
+  interfaces:
+    - "^enp4s0$"
+  externalIPs: true
+  loadBalancerIPs: true
