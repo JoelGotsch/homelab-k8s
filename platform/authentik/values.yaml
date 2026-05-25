@@ -99,7 +99,18 @@ authentik:
 server:
   replicas: 1
 
-  # Project bootstrap + db password as env vars.
+  # Chart 2024.2+ relocated serviceMonitor under server.metrics
+  # (was prometheus.serviceMonitor). Disable since kube-prometheus-stack
+  # discovers via release-label convention.
+  metrics:
+    serviceMonitor:
+      enabled: false
+
+  # Project bootstrap + db password as env vars. The chart's
+  # generated `authentik` Secret (envFrom'd by default) does NOT
+  # include AUTHENTIK_POSTGRESQL__PASSWORD because we set
+  # postgresql.enabled=false and don't pass authentik.postgresql.password
+  # in values — explicit env block below wires it from the ESO Secret.
   envFrom:
     - secretRef:
         name: authentik-bootstrap
@@ -126,11 +137,6 @@ server:
         secretKeyRef:
           name: authentik-postgres-creds
           key: password
-    - name: AUTHENTIK_SECRET_KEY
-      valueFrom:
-        secretKeyRef:
-          name: authentik-secret-key
-          key: secret_key
 
   resources:
     requests:
@@ -165,6 +171,10 @@ server:
 worker:
   replicas: 1
 
+  metrics:
+    serviceMonitor:
+      enabled: false
+
   envFrom:
     - secretRef:
         name: authentik-postgres-creds
@@ -174,11 +184,6 @@ worker:
         secretKeyRef:
           name: authentik-postgres-creds
           key: password
-    - name: AUTHENTIK_SECRET_KEY
-      valueFrom:
-        secretKeyRef:
-          name: authentik-secret-key
-          key: secret_key
 
   resources:
     requests:
@@ -201,22 +206,7 @@ worker:
     capabilities:
       drop: [ALL]
 
-# Service-monitor handled separately in servicemonitor.yaml
-# (chart's own implementation requires the `metrics` port to
-# be exposed; the ServiceMonitor in this layer references it
-# explicitly).
-# Chart 2024.2+ relocated serviceMonitor under server.metrics
-# + worker.metrics (was prometheus.serviceMonitor). Disable
-# both since kube-prometheus-stack discovers via release-label
-# convention, not chart-managed ServiceMonitors.
-server:
-  metrics:
-    serviceMonitor:
-      enabled: false
-worker:
-  metrics:
-    serviceMonitor:
-      enabled: false
+# PrometheusRules disabled (kube-prometheus-stack owns alerting).
 prometheus:
   rules:
     enabled: false
