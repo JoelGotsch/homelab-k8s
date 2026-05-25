@@ -24,3 +24,21 @@ resources:
   - httproute.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml
+
+# Custom blueprints — one YAML per app, materialised as a
+# ConfigMap that the chart mounts at /blueprints/. Worker
+# auto-discovers `*.yaml` keys and applies them on reconcile.
+# Idempotent via blueprint `identifiers`; rotating an OIDC
+# secret only requires updating OpenBao (env-injected via
+# !Env tags in the blueprints).
+configMapGenerator:
+  - name: authentik-blueprints
+    namespace: authentik
+    files:
+      - blueprints/grafana.yaml
+    options:
+      # Kustomize hash suffix would force ConfigMap rename on
+      # every blueprint edit + force chart re-render. Disable
+      # so values.yaml's static `blueprints.configMaps:`
+      # reference stays valid across edits.
+      disableNameSuffixHash: true

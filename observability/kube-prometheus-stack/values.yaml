@@ -133,7 +133,7 @@ grafana:
     - name: grafana-oidc
   grafana.ini:
     auth.generic_oauth:
-      enabled: false   # operator flips to true post-Authentik
+      enabled: true   # Authentik blueprint provisioned 2026-05-25
       name: Authentik
       client_id: ${OIDC_CLIENT_ID}
       client_secret: ${OIDC_CLIENT_SECRET}
