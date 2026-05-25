@@ -40,7 +40,20 @@ spec:
           from: All
 ---
 # Wildcard cert for *.lab.<homelab-domain>, issued by
-# cert-manager via the homelab-internal-issuer (OpenBao PKI).
+# Let's Encrypt via cert-manager (Cloudflare DNS-01 solver).
+# Per ADR 0034: operator-facing certs MUST be browser-trusted,
+# so this listener uses LE — the homelab-internal-issuer (OpenBao
+# PKI) is reserved for cluster-internal mTLS / service-to-service
+# where the homelab.internal CA bundle is mounted via trust-manager.
+#
+# A browser-trusted cert is also a hard prerequisite for WebAuthn
+# enrollment + login: the WebAuthn API refuses to register
+# credentials when the page's TLS chain is not in the OS trust
+# store. (Tested 2026-05-25: enrollment fails silently with
+# "Failed to register" on internal-CA cert.)
+#
+# Letsencrypt-issued certs land in the public Certificate
+# Transparency log; that's the explicit ADR 0034 trade-off.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -49,11 +62,13 @@ metadata:
 spec:
   secretName: homelab-wildcard-tls
   issuerRef:
-    name: homelab-internal-issuer
+    name: letsencrypt-production
     kind: ClusterIssuer
   commonName: "lab.vyramo.com"
   dnsNames:
     - "lab.vyramo.com"
     - "*.lab.vyramo.com"
-  duration: 720h    # 30 days
-  renewBefore: 240h # renew at 10 days remaining
+  # LE certs are 90-day; renew at 30 days remaining (default cert-
+  # manager behavior, but pin explicitly so it's not opaque).
+  duration: 2160h     # 90 days
+  renewBefore: 720h   # 30 days remaining
