@@ -56,6 +56,27 @@ ipv4NativeRoutingCIDR: 10.244.0.0/16
 k8sServiceHost: 10.10.30.11
 k8sServicePort: 6443
 kubeProxyReplacement: true
+
+# L2 announcement — broadcasts LoadBalancer IPs onto the local
+# VLAN via ARP so external clients can reach Gateway/Service
+# VIPs without BGP. Required for CiliumL2AnnouncementPolicy to
+# actually do anything (without these flags the policy CR is
+# parsed but inert).
+l2announcements:
+  enabled: true
+  leaseDuration: "15s"
+  leaseRenewDeadline: "5s"
+  leaseRetryPeriod: "2s"
+
+# Enables neighbor discovery / ARP-resolution path on host —
+# precondition for L2 announcer to install ARP entries.
+enableL2NeighDiscovery: true
+
+# Allow LoadBalancer Services to share IPs with externalIPs in
+# the IPPool — required when LB-IPAM is the IP source.
+externalIPs:
+  enabled: true
+
 operator:
   replicas: 2
   resources:
