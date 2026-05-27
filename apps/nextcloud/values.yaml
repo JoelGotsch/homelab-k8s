@@ -79,6 +79,16 @@ redis:
 # default but explicit here.
 cronjob:
   enabled: true
+  # The nextcloud-cron container (runs in the SAME pod as the main
+  # container) needs restricted-PSS securityContext too — chart key is
+  # cronjob.securityContext. Missing it got the whole pod rejected
+  # ("container nextcloud-cron must set allowPrivilegeEscalation=false").
+  # Fixed 2026-05-27.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop: [ALL]
 
 # Hot-bucket PVC mounted at /var/www/html (the chart's primary
 # mount). Subpath mappings cover everything EXCEPT data —
@@ -94,6 +104,17 @@ persistence:
     tmp: /tmp
 
 nextcloud:
+  # Main 'nextcloud' container securityContext. Chart key is
+  # nextcloud.securityContext — the top-level `containerSecurityContext`
+  # we previously used is NOT a key this chart reads (count 0 in chart
+  # values), so the container got no securityContext and restricted-PSS
+  # refused to create the pod (ReplicaSet stuck current=0 for days).
+  # Fixed 2026-05-27.
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop: [ALL]
   host: "nextcloud.lab.vyramo.com"
   existingSecret:
     enabled: true
@@ -186,23 +207,19 @@ ingress:
 # YAML duplicate-key error → kustomize build fails with
 # `mapping key "fsGroup" already defined at line N`. Observed
 # 2026-05-23 — Argo app-nextcloud stuck Sync=Unknown.
+# Pod-level securityContext (this top-level key maps to the pod in chart
+# v5.5.0). Container-level securityContext lives under
+# `nextcloud.securityContext` + `cronjob.securityContext` above — the
+# chart has no `containerSecurityContext` key, so the block previously
+# here was silently dropped (the cause of the restricted-PSS rejection).
+# Nextcloud writes to /var at runtime (PHP session/cache) so the
+# containers keep readOnlyRootFilesystem: false.
 securityContext:
   runAsNonRoot: true
   runAsUser: 33
   runAsGroup: 33
   seccompProfile:
     type: RuntimeDefault
-
-containerSecurityContext:
-  allowPrivilegeEscalation: false
-  # readOnlyRootFilesystem: false — Nextcloud writes to /var
-  # at runtime (PHP session, cache, etc.). The data dir is
-  # already on NFS PVC; cache writes live in /var on rootfs.
-  # Switch to true if cache can be redirected to a separate
-  # emptyDir.
-  readOnlyRootFilesystem: false
-  capabilities:
-    drop: [ALL]
 
 resources:
   requests:
