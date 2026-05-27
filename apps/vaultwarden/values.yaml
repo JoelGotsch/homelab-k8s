@@ -35,6 +35,16 @@ image:
 # restart.
 database:
   type: postgresql
+  # Use the CNPG-provided connection URI directly via the chart's
+  # existingSecret support. Setting only `type: postgresql` made the
+  # chart build its OWN DATABASE_URL from the empty host/username/
+  # password fields → it collided with (and beat) a manual extraEnv
+  # DATABASE_URL, leaving an empty URL → libpq fell back to the OS user
+  # → "local user with ID 1000 does not exist" at pool creation. The
+  # `uri` key on vaultwarden-pg-app is the full postgresql://… DSN.
+  # Fixed 2026-05-27.
+  existingSecret: vaultwarden-pg-app
+  existingSecretKey: uri
 
 # Persistent /data — holds the RSA keypair (rsa_key.pem, used to
 # sign JWTs), icon cache, sends, and attachments (which default to
@@ -56,12 +66,8 @@ storage:
     path: "/data"
     accessMode: "ReadWriteOnce"
 
-extraEnv:
-  - name: DATABASE_URL
-    valueFrom:
-      secretKeyRef:
-        name: vaultwarden-pg-app
-        key: uri
+# (DATABASE_URL is now provided by database.existingSecret above — a
+# manual extraEnv DATABASE_URL collided with the chart's own and lost.)
 
 # Don't expose the chart's bundled Service externally — the
 # Cilium HTTPRoute owns ingress.
