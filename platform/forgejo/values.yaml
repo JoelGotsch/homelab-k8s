@@ -171,41 +171,43 @@ gitea:
     - name: packages
       mountPath: /data/packages
 
-# Forgejo uses INI keys from env vars: FORGEJO__<section>__<KEY>.
-# We project security-keys + DB_PASSWD via envFrom on the
-# main container.
-extraEnvVars:
-  # CNPG generates the DB password and stores it in
-  # `forgejo-pg-app` (autocreated, kubernetes.io/basic-auth type).
-  # Read it directly rather than mirroring through OpenBao —
-  # the password has a single in-cluster producer + consumer; the
-  # OpenBao roundtrip would just add operator-toil (manual copy
-  # from forgejo-pg-app → OpenBao on every CNPG-issued rotation).
-  - name: FORGEJO__database__PASSWD
-    valueFrom:
-      secretKeyRef:
-        name: forgejo-pg-app
-        key: password
-  - name: FORGEJO__security__SECRET_KEY
-    valueFrom:
-      secretKeyRef:
-        name: forgejo-security-keys
-        key: secret_key
-  - name: FORGEJO__security__INTERNAL_TOKEN
-    valueFrom:
-      secretKeyRef:
-        name: forgejo-security-keys
-        key: internal_token
-  - name: FORGEJO__oauth2__JWT_SECRET
-    valueFrom:
-      secretKeyRef:
-        name: forgejo-security-keys
-        key: jwt_secret
-  - name: FORGEJO__server__LFS_JWT_SECRET
-    valueFrom:
-      secretKeyRef:
-        name: forgejo-security-keys
-        key: lfs_jwt_secret
+  # Forgejo reads INI keys from env vars (FORGEJO__<section>__<KEY>)
+  # via environment-to-ini. These MUST live under
+  # gitea.additionalConfigFromEnvs — the chart (forgejo 10.0.0) has
+  # NO top-level `extraEnvVars` key, so the previous placement was
+  # silently dropped and the DB password never reached the container
+  # → init crashloop "password authentication failed for user
+  # forgejo". Fixed 2026-05-27.
+  additionalConfigFromEnvs:
+    # CNPG generates the DB password and stores it in
+    # `forgejo-pg-app` (autocreated, kubernetes.io/basic-auth type).
+    # Read directly rather than mirroring through OpenBao (single
+    # in-cluster producer + consumer; avoids rotation toil).
+    - name: FORGEJO__database__PASSWD
+      valueFrom:
+        secretKeyRef:
+          name: forgejo-pg-app
+          key: password
+    - name: FORGEJO__security__SECRET_KEY
+      valueFrom:
+        secretKeyRef:
+          name: forgejo-security-keys
+          key: secret_key
+    - name: FORGEJO__security__INTERNAL_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: forgejo-security-keys
+          key: internal_token
+    - name: FORGEJO__oauth2__JWT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: forgejo-security-keys
+          key: jwt_secret
+    - name: FORGEJO__server__LFS_JWT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: forgejo-security-keys
+          key: lfs_jwt_secret
 
 # Pod-level security: non-root, readOnlyRootFilesystem true
 # (Forgejo writes only to mounted volumes), drop all caps.
