@@ -18,6 +18,15 @@
 
 mode: standalone
 
+# Single-replica MinIO on an RWO PVC (minio-data) — a RollingUpdate
+# deadlocks (the new pod can't attach the volume while the old still
+# holds it; hit across the cluster's RWO charts on 2026-05-25). The
+# minio chart's deployment update key is `deploymentUpdate`. Added
+# 2026-05-27 (RWO rollout sweep, known-caveats §"Helm-chart rollouts
+# on RWO PVCs").
+deploymentUpdate:
+  type: Recreate
+
 # Use the existing PV/PVC defined in pv.yaml — chart skips
 # its own PVC-template creation.
 persistence:

@@ -71,6 +71,15 @@ immich:
 # Server (HTTP API + web frontend).
 server:
   enabled: true
+  # Mounts the immich-hot RWO PVC; replicaCount 1. Force Recreate so
+  # a chart bump doesn't deadlock (new pod can't attach the RWO volume
+  # while the old holds it). immich-charts uses the bjw-s controllers
+  # structure → strategy lives at controllers.main.strategy. Added
+  # 2026-05-27 (RWO rollout sweep, known-caveats §"Helm-chart rollouts
+  # on RWO PVCs").
+  controllers:
+    main:
+      strategy: Recreate
 
 # Microservices (background job worker — ingest, thumbnail,
 # transcode, smart-search indexing, face detection).
