@@ -122,12 +122,18 @@ spec:
     # CNPG instance manager → kube-apiserver. 10.96.0.1:443 is the
     # reserved `kube-apiserver` Cilium entity, NOT a regular pod/CIDR;
     # the CNPG initdb/instance manager times out reading its Cluster CR
-    # without it. Fixed 2026-05-27.
+    # without it. BOTH 443 and 6443: Cilium socket-LB translates the
+    # ClusterIP (:443) to the Talos apiserver backend (:6443) before
+    # egress policy is evaluated, so the backend port must be allowed
+    # too (matches the alloy/crowdsec/clickhouse convention). Fixed
+    # 2026-05-27.
     - toEntities:
         - kube-apiserver
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+            - port: "6443"
               protocol: TCP
     # MinIO (cluster-internal — for CNPG WAL). Lives in minio-on-nas,
     # not `minio` (Thread-3 namespace fix; Cilium label form missed by

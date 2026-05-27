@@ -108,11 +108,17 @@ spec:
     # a plain port:443 toFQDNs/toCIDR rule does not match it. Without
     # this the initdb pod times out reading its Cluster CR → cluster
     # stuck "Unable to create required cluster objects". Fixed 2026-05-27.
+    # BOTH 443 and 6443: Cilium socket-LB translates the ClusterIP
+    # (10.96.0.1:443) to the Talos apiserver backend (:6443) BEFORE
+    # egress policy is evaluated, so the rule must allow the backend
+    # port 6443 too (matches the alloy/crowdsec/clickhouse convention).
     - toEntities:
         - kube-apiserver
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+            - port: "6443"
               protocol: TCP
     # MinIO (cluster-internal — for CNPG WAL). Lives in minio-on-nas,
     # not `minio` (the Thread-3 namespace fix; this CNP uses the Cilium
