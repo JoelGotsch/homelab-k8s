@@ -10,7 +10,7 @@
 # accidental cluster-side mutation.
 #
 # OPERATOR FILLS:
-#   10.10.10.10             matches infrastructure/minio-on-nas/
+#   10.10.40.2              storage-VLAN NFS IP; matches infrastructure/minio-on-nas/
 #   <NAS_MEDIA_SHARE>    Synology share path, e.g.,
 #                        /volume1/media
 #
@@ -35,7 +35,7 @@ spec:
     driver: nfs.csi.k8s.io
     volumeHandle: jellyfin-media
     volumeAttributes:
-      server: 10.10.10.10
+      server: 10.10.40.2
       share: <NAS_MEDIA_SHARE>
   mountOptions:
     - nfsvers=4.1
