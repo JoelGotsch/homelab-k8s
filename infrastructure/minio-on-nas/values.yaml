@@ -100,3 +100,10 @@ containerSecurityContext:
   capabilities:
     drop: [ALL]
   readOnlyRootFilesystem: true
+  # Required by the namespace's restricted PodSecurity enforcement.
+  # The original pod predated the enforcement and was grandfathered;
+  # any recreate (e.g. the 2026-05-27 storage-VLAN repoint) is
+  # rejected without this. Set at container level since the MinIO
+  # chart renders containerSecurityContext verbatim (toYaml).
+  seccompProfile:
+    type: RuntimeDefault
