@@ -18,6 +18,15 @@
 # they're file-based not DB-stored.
 replicaCount: 1
 
+# Deployment + RWO /data PVC (storage.data) deadlocks RollingUpdate —
+# the new pod hits Multi-Attach on the volume the old pod still holds.
+# Recreate terminates the old pod first. (Same RWO rollout class as
+# jellyfin/immich/minio; vaultwarden surfaced as a Deployment once the
+# /data PVC landed.) The guerzon chart key is top-level `strategy`.
+# Added 2026-05-27.
+strategy:
+  type: Recreate
+
 image:
   registry: docker.io
   repository: vaultwarden/server
