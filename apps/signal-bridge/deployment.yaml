@@ -65,6 +65,36 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        # s6-overlay (rootless image) refuses to boot unless /run is
+        # owned by the runtime uid (1000): its preinit aborts with
+        # "/run belongs to uid 0 ... lacking privileges to fix it".
+        # A k8s emptyDir always mounts root-owned and fsGroup only sets
+        # the group, so this one-shot root init chowns /run (clearing the
+        # fsGroup setgid bit). Reuses the same pinned image — no extra
+        # image to scan/pin — with root confined to init and caps
+        # dropped to just CHOWN. Trips restricted PSA audit/warn (noise).
+        - name: chown-run
+          image: "bbernhard/signal-cli-rest-api:0.99-rootless@sha256:bf76cf1b34cc54763fc0f542b4210e2a60216ab23b335eec93e9d14556dd68bd"
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "chown 1000:1000 /run && chmod 0755 /run"]
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN]
+          volumeMounts:
+            - name: run
+              mountPath: /run
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
       containers:
         - name: signal-cli-rest-api
           image: "bbernhard/signal-cli-rest-api:0.99-rootless@sha256:bf76cf1b34cc54763fc0f542b4210e2a60216ab23b335eec93e9d14556dd68bd"  # OPERATOR PINS via Renovate
