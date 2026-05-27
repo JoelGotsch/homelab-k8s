@@ -29,3 +29,34 @@ resources:
   - externalsecret.yaml
   - storageclasses.yaml
   - networkpolicy.yaml
+
+# Post-render patch: both this node DaemonSet AND nfs-csi's csi-nfs-node
+# run hostNetwork=true and the chart defaults their CSI liveness-probe to
+# localhost:29653 — so on every node they collide ("bind: address already
+# in use") and both crashloop. Move csi-rclone's liveness endpoint to 29655
+# (nfs-csi keeps the standard 29653). Must change BOTH the liveness-probe
+# sidecar's --http-endpoint and the rclone container's livenessProbe httpGet
+# that targets it. Fixed 2026-05-27.
+patches:
+  - target:
+      kind: DaemonSet
+      name: csi-rclone-node
+    patch: |-
+      apiVersion: apps/v1
+      kind: DaemonSet
+      metadata:
+        name: csi-rclone-node
+      spec:
+        template:
+          spec:
+            containers:
+              - name: liveness-probe
+                args:
+                  - --csi-address=/csi/csi.sock
+                  - --probe-timeout=3s
+                  - --http-endpoint=localhost:29655
+                  - --v=5
+              - name: rclone
+                livenessProbe:
+                  httpGet:
+                    port: 29655
