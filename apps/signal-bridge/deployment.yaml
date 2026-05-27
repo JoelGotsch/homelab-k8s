@@ -77,7 +77,11 @@ spec:
         - name: chown-run
           image: "bbernhard/signal-cli-rest-api:0.99-rootless@sha256:bf76cf1b34cc54763fc0f542b4210e2a60216ab23b335eec93e9d14556dd68bd"
           imagePullPolicy: IfNotPresent
-          command: ["sh", "-c", "chown 1000:1000 /run && chmod 0755 /run"]
+          # chmod BEFORE chown: once /run is owned by 1000, root (uid 0)
+          # no longer owns it and — with caps dropped to CHOWN only (no
+          # FOWNER) — can't chmod it. Doing chmod while still root-owned
+          # also clears the fsGroup setgid bit s6 rejects as "insecure".
+          command: ["sh", "-c", "chmod 0755 /run && chown 1000:1000 /run"]
           securityContext:
             runAsUser: 0
             runAsNonRoot: false
