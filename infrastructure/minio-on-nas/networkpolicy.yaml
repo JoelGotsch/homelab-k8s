@@ -36,8 +36,14 @@ spec:
     - from:
         - namespaceSelector: {}
           podSelector:
-            matchLabels:
-              cnpg.io/cluster: ""
+            # Match ANY pod carrying the cnpg.io/cluster label (any value).
+            # Was matchLabels {cnpg.io/cluster: ""} which only matches an
+            # EMPTY value → matched no real CNPG pod (they're labelled
+            # cnpg.io/cluster: <app>-pg) → every CNPG backup timed out on
+            # minio ingress. Fixed 2026-05-27.
+            matchExpressions:
+              - key: cnpg.io/cluster
+                operator: Exists
       ports:
         - port: 9000
           protocol: TCP
