@@ -36,15 +36,25 @@ image:
 database:
   type: postgresql
 
-# Attachments + sends storage — small volume on Longhorn-
-# replica3. Vaultwarden's encrypted-at-rest model means
+# Persistent /data — holds the RSA keypair (rsa_key.pem, used to
+# sign JWTs), icon cache, sends, and attachments (which default to
+# /data/attachments). Vaultwarden's encrypted-at-rest model means
 # attachments are zero-knowledge ciphertext to the server.
+#
+# The guerzon chart uses a NESTED storage schema (storage.data /
+# storage.attachments). The previous flat block
+# (storage.enabled/storageClassName/size) was silently ignored at
+# render → no /data PVC → with readOnlyRootFilesystem: true the pod
+# crashed at boot: "Error creating private key 'data/rsa_key.pem':
+# No such file or directory". A single data PVC covers attachments
+# too (they live under /data). Fixed 2026-05-27.
 storage:
-  enabled: true
-  storageClassName: longhorn-replica3
-  size: 5Gi
-  accessModes:
-    - ReadWriteOnce
+  data:
+    name: "vaultwarden-data"
+    size: "5Gi"
+    class: "longhorn-replica3"
+    path: "/data"
+    accessMode: "ReadWriteOnce"
 
 extraEnv:
   - name: DATABASE_URL

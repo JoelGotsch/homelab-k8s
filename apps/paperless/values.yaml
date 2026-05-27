@@ -31,8 +31,23 @@ mariadb:
   enabled: false
 
 # Bundled Redis kept (chart default).
+# The bundled bitnami redis subchart verifies its image against the
+# known bitnami registry and refuses bitnamilegacy/* (render hard-fails:
+# "Original containers have been substituted for unrecognized ones")
+# unless this global is set (bitnami/charts#30850). Required alongside
+# the redis.image.repository override below. Added 2026-05-27.
+global:
+  security:
+    allowInsecureImages: true
+
 redis:
   enabled: true
+  # Bitnami sunset their free docker.io/bitnami images (2025); the old
+  # bitnami/redis tags 404 → paperless-redis-master ImagePullBackOff.
+  # Repoint to the bitnamilegacy archive (same tags). Matches the
+  # nextcloud-redis + langfuse-valkey repoints. Added 2026-05-27.
+  image:
+    repository: bitnamilegacy/redis
   auth:
     enabled: false
   master:
