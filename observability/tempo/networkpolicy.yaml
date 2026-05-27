@@ -60,7 +60,7 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: minio
+              kubernetes.io/metadata.name: minio-on-nas
       ports:
         - port: 9000
           protocol: TCP

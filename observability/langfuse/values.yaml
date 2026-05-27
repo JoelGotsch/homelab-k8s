@@ -131,7 +131,7 @@ s3:
   eventUpload:
     bucket: "langfuse-blobs"
     region: "auto"
-    endpoint: "http://minio.minio.svc.cluster.local:9000"
+    endpoint: "http://minio.minio-on-nas.svc.cluster.local:9000"
     forcePathStyle: true
     accessKeyId:
       existingSecret: langfuse-app-secrets
@@ -143,7 +143,7 @@ s3:
   mediaUpload:
     bucket: "langfuse-blobs"
     region: "auto"
-    endpoint: "http://minio.minio.svc.cluster.local:9000"
+    endpoint: "http://minio.minio-on-nas.svc.cluster.local:9000"
     forcePathStyle: true
     accessKeyId:
       existingSecret: langfuse-app-secrets

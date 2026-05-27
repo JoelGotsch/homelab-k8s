@@ -99,7 +99,7 @@ bao kv put kv/loki/s3-creds \
 3. **`s3ForcePathStyle: true` + `insecure: true`** — required
    for MinIO (path-style URL form) + cluster-internal HTTP
    (no TLS termination on the MinIO endpoint at
-   `minio.minio.svc.cluster.local:9000`). The bytes-in-flight
+   `minio.minio-on-nas.svc.cluster.local:9000`). The bytes-in-flight
    stay within Cilium-mesh.
 
 4. **90d default retention with 1y overrides for security-

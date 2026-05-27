@@ -170,7 +170,7 @@ Manual fallback for the MinIO svcacct (e.g., if `--policy-actions`
 doesn't fit):
 
 ```sh
-mc alias set minio http://minio.minio.svc.cluster.local:9000 \
+mc alias set minio http://minio.minio-on-nas.svc.cluster.local:9000 \
   "$ROOT_USER" "$ROOT_PASSWORD"
 mc admin user svcacct add minio root \
   --policy <(cat <<'EOF'

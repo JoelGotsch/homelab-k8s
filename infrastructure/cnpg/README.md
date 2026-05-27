@@ -45,7 +45,7 @@ spec:
   backup:
     barmanObjectStore:
       destinationPath: s3://homelab-backups-cluster/cnpg/<app>
-      endpointURL: http://minio.minio.svc.cluster.local:9000
+      endpointURL: http://minio.minio-on-nas.svc.cluster.local:9000
       s3Credentials:
         accessKeyId:    { name: <app>-cnpg-s3, key: ACCESS_KEY_ID }
         secretAccessKey: { name: <app>-cnpg-s3, key: SECRET_ACCESS_KEY }
