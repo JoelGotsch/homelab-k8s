@@ -73,7 +73,7 @@ service:
 gitea:
   admin:
     existingSecret: forgejo-admin
-    email: "<FORGEJO_ADMIN_EMAIL>"
+    email: "contact@joelgotsch.com"
     username: forgejo-admin
 
   # External Postgres via CNPG — disable bundled chart deps.
