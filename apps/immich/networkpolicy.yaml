@@ -156,3 +156,40 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+---
+# CNPG instance pods need INGRESS from the operator (cnpg-system) on the
+# instance-manager status port (8000) and from Prometheus (monitoring) on
+# the metrics port (9187). The namespace-wide `immich-allow-same-ns`
+# NetworkPolicy (podSelector {}, ingress only from the same namespace) flips
+# every immich pod — including the CNPG instances — to ingress default-deny,
+# so the cross-namespace operator probe to :8000 timed out
+# ("Get https://<pod-ip>:8000/pg/status: i/o timeout") → the cluster hung in
+# "Instance Status Extraction Error: HTTP communication issue" and never
+# left bootstrap. Healthy clusters (forgejo/authentik) have no same-ns
+# policy, so their operator reaches the instances freely. Added 2026-05-27.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: immich-pg-operator-ingress
+  namespace: immich
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: immich-pg
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+            - port: "9187"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "9187"
+              protocol: TCP
