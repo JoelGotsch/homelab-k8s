@@ -80,9 +80,14 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /home/.local/share/signal-cli
-            # Native build wants a writable /tmp.
+            # The rootless image is s6-overlay-based. Under
+            # readOnlyRootFilesystem it needs writable /run (s6 preinit
+            # tests /run writability and aborts otherwise) and /tmp
+            # (S6_RUNTIME_PATH=/tmp/s6-runtime + native build scratch).
             - name: tmp
               mountPath: /tmp
+            - name: run
+              mountPath: /run
           livenessProbe:
             httpGet:
               path: /v1/health
@@ -115,6 +120,9 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
+        - name: run
+          emptyDir:
+            sizeLimit: 16Mi
 ---
 apiVersion: v1
 kind: Service
