@@ -9,10 +9,13 @@
 # cluster Jellyfin. This protects the library from
 # accidental cluster-side mutation.
 #
-# OPERATOR FILLS:
-#   10.10.40.2              storage-VLAN NFS IP; matches infrastructure/minio-on-nas/
-#   <NAS_MEDIA_SHARE>    Synology share path, e.g.,
-#                        /volume1/media
+# Filled 2026-05-27:
+#   10.10.40.2                          storage-VLAN NFS IP; matches infrastructure/minio-on-nas/
+#   /volume1/docker/media-center/media  existing media library (movies/tv/music/...)
+# NOTE: this is a SUBFOLDER of the `docker` share. The NAS must NFS-export
+# a path that covers it, scoped read-only to the cluster. Do NOT export all
+# of /volume1/docker (it holds bitwarden/gitea/harbor data) — see README /
+# the storage-VLAN runbook for the dedicated-media-share approach.
 #
 # Jellyfin's CONFIG (database, users, watch state, metadata
 # cache) lives separately on Longhorn — this NFS PV is
@@ -36,7 +39,7 @@ spec:
     volumeHandle: jellyfin-media
     volumeAttributes:
       server: 10.10.40.2
-      share: <NAS_MEDIA_SHARE>
+      share: /volume1/docker/media-center/media
   mountOptions:
     - nfsvers=4.1
     - hard
