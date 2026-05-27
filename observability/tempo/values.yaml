@@ -13,6 +13,11 @@
 # scale; chart-default 1 replica with optional HA via
 # replication_factor + memberlist later.
 tempo:
+  # Tempo only substitutes ${ENV} in its config file when started with
+  # -config.expand-env=true. Without it the storage block's ${ACCESS_KEY_ID}
+  # stays literal → minio "Access Key Id does not exist". Added 2026-05-27.
+  extraArgs:
+    "config.expand-env": "true"
   # S3 creds for the storage block's ${ACCESS_KEY_ID}/${SECRET_ACCESS_KEY}
   # substitution. MUST be tempo.extraEnv — a top-level extraEnv: is silently
   # ignored by the grafana/tempo chart (was the bug: empty key → minio

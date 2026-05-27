@@ -101,6 +101,10 @@ singleBinary:
   extraEnvFrom:
     - secretRef:
         name: loki-s3-creds
+  # Loki only expands ${LOKI_S3_*} in its config with -config.expand-env=true;
+  # without it the refs stay literal → minio InvalidAccessKeyId. Added 2026-05-27.
+  extraArgs:
+    - "-config.expand-env=true"
   resources:
     requests:
       cpu: 200m
