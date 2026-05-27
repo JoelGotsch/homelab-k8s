@@ -103,10 +103,23 @@ spec:
           rules:
             dns:
               - matchPattern: "*"
-    # MinIO (cluster-internal — for CNPG WAL).
+    # CNPG instance manager → kube-apiserver. 10.96.0.1:443 is the
+    # reserved `kube-apiserver` Cilium entity, NOT a regular pod/CIDR —
+    # a plain port:443 toFQDNs/toCIDR rule does not match it. Without
+    # this the initdb pod times out reading its Cluster CR → cluster
+    # stuck "Unable to create required cluster objects". Fixed 2026-05-27.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # MinIO (cluster-internal — for CNPG WAL). Lives in minio-on-nas,
+    # not `minio` (the Thread-3 namespace fix; this CNP uses the Cilium
+    # label form so the earlier sed missed it). Fixed 2026-05-27.
     - toEndpoints:
         - matchLabels:
-            "k8s:io.kubernetes.pod.namespace": minio
+            "k8s:io.kubernetes.pod.namespace": minio-on-nas
       toPorts:
         - ports:
             - port: "9000"

@@ -1,12 +1,19 @@
 # CNPG Postgres for Immich. Same shape as Forgejo / Authentik /
 # Nextcloud, with one difference: Immich requires the
 # **vectorchord** extension (CLIP embeddings + face vectors) so
-# the imageName below points at the cnpg-pgvector-vectorchord
+# the imageName below points at a VectorChord-enabled Postgres
 # build rather than the stock cloudnative-pg image. The image
 # also includes pgvector + pgvecto.rs so it can restore from
 # pre-v1.133 backups.
 #
-# See: https://github.com/corentingiraud/cnpg-pgvector-vectorchord
+# Was ghcr.io/corentingiraud/cnpg-pgvector-vectorchord:17-vchord-0.4.3 —
+# that personal mirror went stale (its registry now only publishes a
+# single `16-migration` tag) → ImagePullBackOff, cluster stuck "Setting
+# up primary". Switched 2026-05-27 to the canonical upstream
+# ghcr.io/tensorchord/cloudnative-vectorchord at the identical PG major
+# (17) + VectorChord version (0.4.3).
+#
+# See: https://github.com/tensorchord/VectorChord
 # + https://docs.immich.app/administration/postgres-standalone/
 
 apiVersion: postgresql.cnpg.io/v1
@@ -27,7 +34,7 @@ spec:
 
   # OPERATOR PINS via Renovate. The image must include
   # vectorchord (loaded via shared_preload_libraries below).
-  imageName: ghcr.io/corentingiraud/cnpg-pgvector-vectorchord:17-vchord-0.4.3
+  imageName: ghcr.io/tensorchord/cloudnative-vectorchord:17-0.4.3
 
   storage:
     size: 20Gi

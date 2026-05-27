@@ -119,10 +119,22 @@ spec:
     # see the encrypted library as a normal mounted FS via
     # the CSI provisioning. If the PVC fails to bind, the
     # pod fails to start (correct behaviour — fail-closed).
-    # MinIO (cluster-internal — for CNPG WAL).
+    # CNPG instance manager → kube-apiserver. 10.96.0.1:443 is the
+    # reserved `kube-apiserver` Cilium entity, NOT a regular pod/CIDR;
+    # the CNPG initdb/instance manager times out reading its Cluster CR
+    # without it. Fixed 2026-05-27.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # MinIO (cluster-internal — for CNPG WAL). Lives in minio-on-nas,
+    # not `minio` (Thread-3 namespace fix; Cilium label form missed by
+    # the earlier sed). Fixed 2026-05-27.
     - toEndpoints:
         - matchLabels:
-            "k8s:io.kubernetes.pod.namespace": minio
+            "k8s:io.kubernetes.pod.namespace": minio-on-nas
       toPorts:
         - ports:
             - port: "9000"
