@@ -34,8 +34,11 @@ spec:
   csi:
     driver: nfs.csi.k8s.io
     # Stable handle so re-deploy of the PV resource binds back
-    # to the same NFS path.
-    volumeHandle: minio-on-nas
+    # to the same NFS path. Bumped to -storagevlan 2026-05-27 when
+    # repointing server mgmt→storage VLAN, so the CSI node plugin
+    # stages at a fresh path instead of colliding with the stuck
+    # hard-mount left by the old (unreachable 10.10.10.10) handle.
+    volumeHandle: minio-on-nas-storagevlan
     volumeAttributes:
       server: 10.10.40.2
       share: /volume1/cluster-backups/minio
