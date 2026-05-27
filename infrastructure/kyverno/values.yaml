@@ -1,5 +1,16 @@
 # Kyverno values.
 
+# Kyverno's cleanup jobs (webhooksCleanup, policyReportsCleanup) default to
+# bitnami/kubectl, which Bitnami sunset on docker.io (2025) — the old tags
+# 404, so kyverno-clean-reports ImagePullBackOffs. Repoint to the
+# bitnamilegacy archive (same tag). Added 2026-05-27.
+webhooksCleanup:
+  image:
+    repository: bitnamilegacy/kubectl
+policyReportsCleanup:
+  image:
+    repository: bitnamilegacy/kubectl
+
 admissionController:
   replicas: 2
   resources:

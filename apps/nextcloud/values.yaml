@@ -60,6 +60,11 @@ externalDatabase:
 # Longhorn-replica2.
 redis:
   enabled: true
+  # Bitnami sunset their free docker.io/bitnami images (2025); the old
+  # bitnami/redis tags 404. Repoint to the bitnamilegacy archive (same
+  # tags). Matches the langfuse valkey repoint. Added 2026-05-27.
+  image:
+    repository: bitnamilegacy/redis
   architecture: standalone
   auth:
     enabled: false
