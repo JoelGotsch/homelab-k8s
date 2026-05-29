@@ -116,10 +116,10 @@ disableAdminToken: false  # explicit; admin panel exists, gated
 # OIDC ("SSO") — Vaultwarden's built-in OIDC integration
 # (added in 1.30+). Project the Secret's fields as env vars.
 sso:
-  enabled: false          # operator flips post-Authentik OIDC
-                          # client provisioned. ESO emits empty
-                          # fields until then; flipping with
-                          # empty fields breaks Vaultwarden auth.
+  enabled: true           # Authentik OIDC client provisioned + kv/vaultwarden/
+                          # oidc seeded 2026-05-29 (vaultwarden-oidc ES synced:
+                          # SSO_CLIENT_ID/SECRET/AUTHORITY). Was false until the
+                          # secret had real values (empty fields break auth).
   existingSecret: vaultwarden-oidc
   organizationsEnabled: true
   onlyDomains: ""         # operator restricts at activation
