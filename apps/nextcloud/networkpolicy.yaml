@@ -18,12 +18,16 @@ spec:
     matchLabels:
       app.kubernetes.io/name: nextcloud
   ingress:
-    # Cilium Gateway envoy — reserved `ingress` identity.
+    # Cilium Gateway envoy — reserved `ingress` identity. Port must be the
+    # POD's container port (apache :80), not the Service port — Cilium DNATs
+    # the Service (8080) → pod (80) before evaluating ingress policy, so the
+    # pod sees :80. Was "8080" (a leftover from the planned nginx setup) →
+    # every gateway request dropped → 503. Fixed 2026-05-29.
     - fromEntities:
         - ingress
       toPorts:
         - ports:
-            - port: "8080"
+            - port: "80"
               protocol: TCP
     # Prometheus scrape.
     - fromEndpoints:
