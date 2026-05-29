@@ -89,16 +89,14 @@ redis:
 # default but explicit here.
 cronjob:
   enabled: true
-  # The nextcloud-cron container (runs in the SAME pod as the main
-  # container) needs restricted-PSS securityContext too — chart key is
-  # cronjob.securityContext. Missing it got the whole pod rejected
-  # ("container nextcloud-cron must set allowPrivilegeEscalation=false").
-  # Fixed 2026-05-27.
+  # nextcloud-cron runs the same image entrypoint as root → www-data, so
+  # it keeps the default cap set (NET_BIND_SERVICE/CHOWN/SETUID/SETGID).
+  # Under the namespace's baseline PSS (2026-05-29) this is allowed; only
+  # readOnlyRootFilesystem stays false (image writes to rootfs). A prior
+  # restricted-PSS block here (allowPrivilegeEscalation:false + caps drop
+  # ALL) blocked the root entrypoint.
   securityContext:
-    allowPrivilegeEscalation: false
     readOnlyRootFilesystem: false
-    capabilities:
-      drop: [ALL]
 
 # Hot-bucket PVC mounted at /var/www/html (the chart's primary
 # mount). Subpath mappings cover everything EXCEPT data —
@@ -114,17 +112,13 @@ persistence:
     tmp: /tmp
 
 nextcloud:
-  # Main 'nextcloud' container securityContext. Chart key is
-  # nextcloud.securityContext — the top-level `containerSecurityContext`
-  # we previously used is NOT a key this chart reads (count 0 in chart
-  # values), so the container got no securityContext and restricted-PSS
-  # refused to create the pod (ReplicaSet stuck current=0 for days).
-  # Fixed 2026-05-27.
+  # Main 'nextcloud' container. The apache image entrypoint runs as root
+  # (PHP conf.d writes, chown, bind :80) then drops to www-data, so it keeps
+  # the default cap set — dropping ALL would stop even root from binding :80
+  # and from setuid-dropping. Allowed under the namespace's baseline PSS
+  # (2026-05-29). readOnlyRootFilesystem stays false (image writes rootfs).
   securityContext:
-    allowPrivilegeEscalation: false
     readOnlyRootFilesystem: false
-    capabilities:
-      drop: [ALL]
   host: "nextcloud.lab.vyramo.com"
   existingSecret:
     enabled: true
@@ -224,10 +218,15 @@ ingress:
 # here was silently dropped (the cause of the restricted-PSS rejection).
 # Nextcloud writes to /var at runtime (PHP session/cache) so the
 # containers keep readOnlyRootFilesystem: false.
+#
+# Run as the IMAGE DEFAULT (root): the apache entrypoint needs root to
+# write PHP conf.d, chown data, and bind :80, then drops to www-data
+# itself. runAsNonRoot/runAsUser:33 here forced the entrypoint non-root →
+# "can't create conf.d/redis-session.ini: Permission denied". Allowed by
+# the namespace's baseline PSS (2026-05-29 decision). fsGroup:33 is added
+# by the chart template (don't set it here — duplicate-key). seccompProfile
+# kept (baseline-compatible hardening).
 securityContext:
-  runAsNonRoot: true
-  runAsUser: 33
-  runAsGroup: 33
   seccompProfile:
     type: RuntimeDefault
 
