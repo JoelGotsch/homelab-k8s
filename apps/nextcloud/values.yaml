@@ -236,3 +236,13 @@ resources:
     memory: 512Mi
   limits:
     memory: 2Gi
+
+# First-run install/migration takes minutes, but the chart's startupProbe is
+# disabled by default, so the livenessProbe (10s delay, 3 failures) kills
+# nextcloud at ~40s mid-install ("failed liveness probe: status.php connection
+# refused") → restart loop, install never completes. Enable the startupProbe so
+# liveness/readiness hold off until status.php responds; failureThreshold 60 ×
+# 10s ≈ 10min headroom for the install. Added 2026-05-29.
+startupProbe:
+  enabled: true
+  failureThreshold: 60
