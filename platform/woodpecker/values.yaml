@@ -26,8 +26,8 @@ server:
     # Forgejo integration (the only forge driver enabled).
     WOODPECKER_FORGEJO: "true"
     WOODPECKER_FORGEJO_URL: "https://forgejo.lab.vyramo.com"
-    # OAuth client_id + secret come from the ExternalSecret
-    # (woodpecker-oauth) via envFrom below.
+    # OAuth client_id + secret come from the woodpecker-oauth secret
+    # (extraSecretNamesForEnvFrom below).
     WOODPECKER_LOG_LEVEL: "info"
     # JSON logs for Loki ingestion per ADR 0021.
     WOODPECKER_LOG_FORMAT: "json"
@@ -41,11 +41,18 @@ server:
     WOODPECKER_DATABASE_DRIVER: "sqlite3"
     WOODPECKER_DATABASE_DATASOURCE: "/var/lib/woodpecker/woodpecker.db"
 
-  envFrom:
-    - secretRef:
-        name: woodpecker-agent-secret
-    - secretRef:
-        name: woodpecker-oauth
+  # Extra env from the OAuth secret. The chart's key is
+  # extraSecretNamesForEnvFrom (a list of secret NAMES), NOT `envFrom` —
+  # the woodpecker statefulset template only reads the former, so the
+  # previous envFrom block was silently dropped and woodpecker-server
+  # never received WOODPECKER_FORGEJO_CLIENT/SECRET (OAuth login
+  # non-functional). The shared WOODPECKER_AGENT_SECRET is provided by
+  # the chart's auto-created woodpecker-default-agent-secret (used by
+  # both server + agent), so the custom woodpecker-agent-secret ref isn't
+  # needed here. Fixed 2026-05-29. (The woodpecker-agent-secret
+  # ExternalSecret is now unused — candidate for cleanup.)
+  extraSecretNamesForEnvFrom:
+    - woodpecker-oauth
 
   persistentVolume:
     enabled: true
@@ -127,9 +134,10 @@ agent:
     WOODPECKER_LOG_LEVEL: "info"
     WOODPECKER_LOG_FORMAT: "json"
 
-  envFrom:
-    - secretRef:
-        name: woodpecker-agent-secret
+  # The shared WOODPECKER_AGENT_SECRET comes from the chart's
+  # auto-created woodpecker-default-agent-secret (both server + agent
+  # reference it). A custom `envFrom` here is ignored by the chart (wrong
+  # key) and unnecessary. Removed 2026-05-29.
 
   resources:
     requests:
