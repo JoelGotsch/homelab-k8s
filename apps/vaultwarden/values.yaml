@@ -34,6 +34,15 @@ image:
   # / known-caveats §Vaultwarden.
   tag: "1.33.0"
   pullPolicy: IfNotPresent
+  # SSO via Authentik OIDC. The guerzon chart injects custom env via
+  # image.extraVars (literal) + image.extraVarsSecret (envFrom a secret) —
+  # it has no `sso:`/`extraEnv` block (those were silently ignored).
+  # SSO_CLIENT_ID/SECRET/AUTHORITY come from the vaultwarden-oidc
+  # ExternalSecret (seeded 2026-05-29); SSO_ENABLED flips it on.
+  extraVars:
+    - key: SSO_ENABLED
+      value: "true"
+  extraVarsSecret: vaultwarden-oidc
 
 # External CNPG Postgres. CNPG auto-creates the
 # `vaultwarden-pg-app` Secret at cluster bootstrap with these
@@ -113,16 +122,8 @@ adminToken:
   existingSecretKey: ADMIN_TOKEN
 disableAdminToken: false  # explicit; admin panel exists, gated
 
-# OIDC ("SSO") — Vaultwarden's built-in OIDC integration
-# (added in 1.30+). Project the Secret's fields as env vars.
-sso:
-  enabled: true           # Authentik OIDC client provisioned + kv/vaultwarden/
-                          # oidc seeded 2026-05-29 (vaultwarden-oidc ES synced:
-                          # SSO_CLIENT_ID/SECRET/AUTHORITY). Was false until the
-                          # secret had real values (empty fields break auth).
-  existingSecret: vaultwarden-oidc
-  organizationsEnabled: true
-  onlyDomains: ""         # operator restricts at activation
+# (SSO is wired via image.extraVars + image.extraVarsSecret above — the chart's
+# only custom-env mechanism. A top-level `sso:`/`extraEnv` block is ignored.)
 
 # SMTP — ships empty. Operator populates if family-shared
 # email invites are needed.
