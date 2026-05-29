@@ -88,8 +88,13 @@ service:
 ingress:
   enabled: false
 
-# Vaultwarden environment.
-domain: "https://vaultwarden.vyramo.com"
+# Vaultwarden environment. Canonical URL = how it's actually reached today:
+# Tailscale-only via the Cilium gateway at vaultwarden.lab.vyramo.com.
+# (Was vaultwarden.vyramo.com — the future Cloudflare-fronted public URL, which
+# isn't reachable yet; vaultwarden derives its OIDC redirect_uri + cookies from
+# `domain`, so it must match the URL in use or SSO login breaks. Flip back to
+# the public host when the Cloudflare Tunnel layer lands.) Changed 2026-05-29.
+domain: "https://vaultwarden.lab.vyramo.com"
 
 signupsAllowed: false   # ADR 0024 D7 — closed-registration; operator
                         # invites family members
