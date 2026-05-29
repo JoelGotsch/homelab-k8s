@@ -22,7 +22,13 @@ server:
   env:
     WOODPECKER_HOST: "https://woodpecker.lab.vyramo.com"
     WOODPECKER_OPEN: "false"  # closed registration; OAuth required
-    WOODPECKER_ADMIN: "<operator-username>"
+    # Comma-separated Forgejo usernames admitted as admin on first login
+    # (bypasses the closed-registration gate). Was the unfilled
+    # <operator-username> placeholder → forgejo-admin's OAuth login was
+    # refused with "The registration is closed". Filled 2026-05-29 with
+    # the actual Forgejo admin login. Add more usernames here (CSV) for
+    # additional operators.
+    WOODPECKER_ADMIN: "forgejo-admin"
     # Forgejo integration (the only forge driver enabled).
     WOODPECKER_FORGEJO: "true"
     WOODPECKER_FORGEJO_URL: "https://forgejo.lab.vyramo.com"
