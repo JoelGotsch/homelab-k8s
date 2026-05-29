@@ -97,9 +97,15 @@ postgresql:
   deploy: false
   host: "langfuse-pg-rw.langfuse.svc.cluster.local"
   port: 5432
-  database: "langfuse"
   auth:
     username: "langfuse"
+    # DB name MUST be under auth.database — the chart's key. A top-level
+    # postgresql.database is ignored, so it fell back to the chart default
+    # `postgres_langfuse`, which CNPG never created (CNPG db = `langfuse`) →
+    # langfuse-web connected to a nonexistent DB → Prisma reported P1001
+    # "can't reach" (the network path is fine; verified a web-labelled pod
+    # reaches pg-rw:5432). Fixed 2026-05-29.
+    database: "langfuse"
     # CNPG creates the user-credentials Secret automatically;
     # we point at it via existingSecret. CNPG's secret name is
     # `<cluster-name>-app` by default.
