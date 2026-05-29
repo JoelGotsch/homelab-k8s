@@ -63,6 +63,13 @@ langfuse:
       additionalEnvFrom:
         - secretRef:
             name: langfuse-oidc
+            # optional: the langfuse-oidc Secret only exists once the operator
+            # provisions the OIDC client (kv/langfuse/oidc) via
+            # provision-authentik-oidc-client.sh. Until then the ExternalSecret
+            # is SecretSyncedError and the Secret is absent — without `optional`
+            # that's a hard CreateContainerConfigError. OIDC simply stays dormant
+            # until seeded (NextAuth provider needs CLIENT_ID/SECRET anyway).
+            optional: true
       additionalEnv:
         # Tell Langfuse's NextAuth which provider to register. `custom` matches
         # the AUTH_CUSTOM_* env from the langfuse-oidc Secret.
