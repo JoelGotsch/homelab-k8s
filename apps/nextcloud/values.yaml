@@ -60,6 +60,10 @@ externalDatabase:
     # the same CNPG-creds-via-OpenBao anti-pattern fixed for forgejo.
     # Fixed 2026-05-29. (nextcloud-postgres-creds ES now unused — remove.)
     secretName: nextcloud-pg-app
+    # CNPG names the keys `username` + `password`; the chart defaults
+    # usernameKey to `db-username` (which doesn't exist in the CNPG
+    # secret → POSTGRES_USER CreateContainerConfigError). Map both.
+    usernameKey: username
     passwordKey: password
 
 # Bundled Redis for sessions + file-locking. Persistence on
