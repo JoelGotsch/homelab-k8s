@@ -66,6 +66,28 @@ langfuse:
         value: "Authentik"
       - name: AUTH_CUSTOM_SCOPE
         value: "openid email profile"
+      # DB connection: feed Prisma the EXPLICIT, pre-built DSN from CNPG's
+      # `uri` key instead of letting Langfuse assemble DATABASE_URL from the
+      # DATABASE_HOST/PORT/USERNAME/PASSWORD/NAME components. The component
+      # build produced a URL Prisma rejected with P1001 ("can't reach") even
+      # though the infra is provably fine: from a pod with the EXACT web
+      # identity (subject to the langfuse-app NetPol), psql with this same
+      # `uri` connects, authenticates, and reaches the `langfuse` DB — and a
+      # plain component-style URL connects too. So the fault was Langfuse's
+      # own URL assembly, not network/creds/DB. CNPG's `uri` is the canonical,
+      # correctly-encoded DSN (same pattern as vaultwarden's database.existingSecret).
+      # DIRECT_URL is what Prisma uses for migrations (bypasses any pooling).
+      # Fixed 2026-05-29.
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: langfuse-pg-app
+            key: uri
+      - name: DIRECT_URL
+        valueFrom:
+          secretKeyRef:
+            name: langfuse-pg-app
+            key: uri
 
   # Worker (async ingestion + eval runs) replicas + resources.
   worker:
@@ -76,6 +98,19 @@ langfuse:
         memory: 256Mi
       limits:
         memory: 1Gi
+    # Same explicit-DSN fix as web — the worker also runs Prisma against
+    # Postgres and would hit the identical component-build P1001.
+    extraEnv:
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: langfuse-pg-app
+            key: uri
+      - name: DIRECT_URL
+        valueFrom:
+          secretKeyRef:
+            name: langfuse-pg-app
+            key: uri
 
 # === External ClickHouse ===
 clickhouse:
