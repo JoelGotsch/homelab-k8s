@@ -28,8 +28,9 @@ spec:
         - ingress
       toPorts:
         - ports:
-            - port: "80"
-              protocol: TCP
+            - port: "8080"   # vaultwarden container port; Cilium DNATs Service
+              protocol: TCP   # :80 -> pod :8080 before ingress policy eval, so
+                              # the policy must match the pod port (was "80" -> 503/500)
     # Prometheus scrape.
     - fromEndpoints:
         - matchLabels:
@@ -37,8 +38,9 @@ spec:
             app.kubernetes.io/name: prometheus
       toPorts:
         - ports:
-            - port: "80"
-              protocol: TCP
+            - port: "8080"   # vaultwarden container port; Cilium DNATs Service
+              protocol: TCP   # :80 -> pod :8080 before ingress policy eval, so
+                              # the policy must match the pod port (was "80" -> 503/500)
     # cloudflare-tunnel namespace (Phase 2 public ingress
     # per ADR 0024 D1).
     - fromEndpoints:
@@ -46,8 +48,9 @@ spec:
             k8s:io.kubernetes.pod.namespace: cloudflare-tunnel
       toPorts:
         - ports:
-            - port: "80"
-              protocol: TCP
+            - port: "8080"   # vaultwarden container port; Cilium DNATs Service
+              protocol: TCP   # :80 -> pod :8080 before ingress policy eval, so
+                              # the policy must match the pod port (was "80" -> 503/500)
   egress:
     # kube-DNS.
     - toEndpoints:
