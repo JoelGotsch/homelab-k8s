@@ -38,8 +38,14 @@ strategy:
 
 image:
   repository: nextcloud
-  # OPERATOR PINS via Renovate.
-  tag: "30-fpm-alpine"
+  # OPERATOR PINS via Renovate. APACHE variant (serves HTTP on :80 directly
+  # via mod_php). The previous `30-fpm-alpine` pin was php-fpm (FastCGI only)
+  # with nginx.enabled:false → nothing served :80, so the liveness/startup
+  # probe (:80/status.php) could never pass — nextcloud could never come up.
+  # Under the namespace's baseline PSS the apache entrypoint runs as root and
+  # binds :80 fine. (Switching to fpm+nginx-non-root is the deferred hardening
+  # TODO.) Fixed 2026-05-29.
+  tag: "30-apache"
   pullPolicy: IfNotPresent
 
 # Use external CNPG. Chart's bundled Postgres dependency off.
