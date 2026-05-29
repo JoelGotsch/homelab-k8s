@@ -53,7 +53,13 @@ externalDatabase:
   user: nextcloud
   existingSecret:
     enabled: true
-    secretName: nextcloud-postgres-creds
+    # Read the DB password straight from the CNPG-generated secret
+    # (nextcloud-pg-app has a `password` key), NOT a mirror through
+    # OpenBao. The old nextcloud-postgres-creds ExternalSecret pulled
+    # kv/nextcloud/postgres (never seeded → CreateContainerConfigError),
+    # the same CNPG-creds-via-OpenBao anti-pattern fixed for forgejo.
+    # Fixed 2026-05-29. (nextcloud-postgres-creds ES now unused — remove.)
+    secretName: nextcloud-pg-app
     passwordKey: password
 
 # Bundled Redis for sessions + file-locking. Persistence on
