@@ -34,5 +34,9 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: vaultwarden-http
+        # The guerzon chart's Service is named `vaultwarden` (port 80 →
+        # targetPort 8080), not `vaultwarden-http` — the wrong name made the
+        # HTTPRoute BackendNotFound → gateway 500 (vaultwarden was never
+        # externally reachable). Fixed 2026-05-29.
+        - name: vaultwarden
           port: 80
