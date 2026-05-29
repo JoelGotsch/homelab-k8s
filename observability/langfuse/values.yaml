@@ -126,17 +126,24 @@ langfuse:
               key: uri
 
 # === External ClickHouse ===
+# Chart keys (verified via `helm show values langfuse/langfuse@1.5.31`):
+# host / httpPort / nativePort / database at top level; credentials under
+# `auth.{username,existingSecret,existingSecretKey}`. The previous
+# `port`/`user`/`password.existingSecret` were NOT chart keys → dropped →
+# CLICKHOUSE_PASSWORD unset → "clickhouse migrations failed". Same wrong-key
+# class as the web.extraEnv→pod.additionalEnv fix. Corrected 2026-05-29.
 clickhouse:
   # Tells the chart NOT to deploy its own ClickHouse subchart.
   deploy: false
 
   host: "clickhouse-langfuse.langfuse.svc.cluster.local"
-  port: 8123
-  user: "langfuse"
+  httpPort: 8123
+  nativePort: 9000
   database: "langfuse"
-  password:
+  auth:
+    username: "langfuse"
     existingSecret: langfuse-clickhouse-creds
-    key: password
+    existingSecretKey: password
 
 # === External Postgres (CNPG-managed) ===
 # Chart 1.5.x moved username + secret config under `auth.`
