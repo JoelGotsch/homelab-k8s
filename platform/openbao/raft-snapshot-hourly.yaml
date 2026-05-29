@@ -53,7 +53,9 @@ spec:
           serviceAccountName: openbao
           containers:
             - name: snapshot
-              image: openbao/openbao:0.10.0  # OPERATOR PINS via Renovate
+              image: quay.io/openbao/openbao:2.5.4  # OPERATOR PINS via Renovate. Match the
+              # server image; docker.io/openbao/openbao:0.10.0 doesn't exist → ImagePullBackOff.
+              # Fixed 2026-05-29.
               env:
                 - name: BAO_TOKEN
                   valueFrom:
