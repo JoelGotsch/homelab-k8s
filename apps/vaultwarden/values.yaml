@@ -31,8 +31,13 @@ image:
   registry: docker.io
   repository: vaultwarden/server
   # OPERATOR PINS via Renovate. Minimum 1.33.0 per ADR 0024
-  # / known-caveats §Vaultwarden.
-  tag: "1.33.0"
+  # / known-caveats §Vaultwarden — but SSO (OpenID Connect) first
+  # shipped in the OFFICIAL image at 1.35.0; 1.33.0 silently IGNORED
+  # all SSO_* env (no /sso route, no log line, no /api/config
+  # featureState). Pinned to 1.36.0 (latest stable, 2026-05-03; web
+  # vault 2025.12.0 + release attestation) to enable SSO on the
+  # official image — no fork (timshel) needed. Changed 2026-05-29.
+  tag: "1.36.0"
   pullPolicy: IfNotPresent
   # SSO via Authentik OIDC. The guerzon chart injects custom env via
   # image.extraVars (literal) + image.extraVarsSecret (envFrom a secret) —
