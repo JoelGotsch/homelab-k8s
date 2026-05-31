@@ -181,8 +181,19 @@ postgresql:
       adminPasswordKey: "password"
 
 # === Redis (chart-managed) ===
+# IMPORTANT: the chart wires `REDIS_CONNECTION_STRING=redis://default@host:6379/0`
+# WITHOUT a password unless `auth.existingSecret` is set. The Bitnami Valkey
+# sub-chart auto-creates `langfuse-redis` Secret with key `valkey-password` at
+# first install — so Redis requires auth but langfuse-web doesn't send it, and
+# every Redis op (incl. API-key creation) hits `WRONGPASS` → UI returns 500.
+# Pointing the chart at the existing Bitnami-created Secret wires the password
+# into BOTH the Valkey sub-chart's server config AND langfuse-web's connection
+# string. Discovered 2026-05-31 when API-key creation 500'd post-bring-up.
 redis:
   deploy: true
+  auth:
+    existingSecret: langfuse-redis
+    existingSecretPasswordKey: valkey-password
   primary:
     persistence:
       enabled: true
