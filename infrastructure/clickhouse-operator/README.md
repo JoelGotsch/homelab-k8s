@@ -74,6 +74,29 @@ Langfuse, migrate."*
    ClickHouse Keeper (only multi-shard / replicated tables
    require it). The chart-default skips Keeper unless we
    declare a `ClickHouseKeeperInstallation` CR.
+5. **`WATCH_NAMESPACES` MUST be explicit on this operator
+   version (0.26.3).** The docs claim "empty = all
+   namespaces"; empirically (verified 2026-05-31), an empty
+   `WATCH_NAMESPACES` defaults to the operator's own
+   namespace and CHIs in other namespaces are silently
+   ignored. `values.yaml` sets the env explicitly via
+   `operator.env`. **Any future app that ships a
+   `ClickHouseInstallation` must add its namespace to this
+   comma-separated list.** Symptom if forgotten: CHI
+   created, finalizer never added, status empty, operator
+   log shows zero mentions of the CHI name. Pinned by the
+   journal entry at
+   [99-journal/2026-05-31-langfuse-and-vaultwarden-bringup-saga.md](../../../homelab-docs/99-journal/2026-05-31-langfuse-and-vaultwarden-bringup-saga.md).
+6. **Annotation-only changes don't trigger user-credential
+   refresh.** When `kv/<app>/clickhouse` is re-seeded, ESO
+   updates the K8s Secret but the CH pod still holds the
+   *old* value in its `secretKeyRef` env var. The fix flow:
+   re-seed → ESO sync → patch the CHI spec (not just an
+   annotation — needs `metadata.generation` to bump, e.g.
+   `kubectl patch chi <name> --type=merge -p
+   '{"spec":{"stop":"no"}}'`) → **delete the CH pod**
+   so it re-reads the env. Operator alone does not restart
+   the pod on user-credential changes.
 
 ## Related
 
