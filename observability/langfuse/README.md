@@ -139,10 +139,85 @@ homelab-infra/scripts/provision-langfuse-otel-ingest-keys.sh \
 | Argo sync `infrastructure/cnpg/` | CNPG operator up. |
 | Argo sync `infrastructure/clickhouse-operator/` | Altinity operator up + CRDs. |
 | Argo sync `infrastructure/minio-on-nas/` (with `langfuse-blobs` bucket) | Bucket pre-created. |
-| Operator seeds OpenBao paths above | ESO can populate Secrets. |
+| Operator seeds OpenBao paths above (`langfuse/clickhouse`, `langfuse/redis`, `langfuse/postgres`, `langfuse/app`, `langfuse/s3`, `cnpg/langfuse/s3-creds`) | ESO can populate Secrets. |
 | Argo sync this layer | CNPG `langfuse-pg` cluster + Altinity `langfuse` chi + Langfuse helm release. ClickHouse + Postgres ready in 1–3 minutes; Langfuse migrations run on web pod startup. |
+| Operator one-shot: `CREATE DATABASE IF NOT EXISTS langfuse` on the CH pod | Langfuse-web migrations succeed (langfuse-web does not pre-create its CH database — see caveat 8). |
+| **First-install bootstrap** (see below) — admin user → project → API key → seed `langfuse/oidc` + `langfuse/otel-ingest` | OIDC SSO + OTel basicauth go from dormant to live. |
 | Argo sync `observability/otel-collector/` (Langfuse exporter un-commented) | Gateway forwards OTLP to Langfuse `/api/public/otel`. |
 | First workload emits OTLP | Spans appear in Langfuse Trace view. |
+
+### First-install bootstrap order
+
+After Langfuse pods are `1/1 Running` the deployment still needs an
+out-of-band ceremony for the bits that require a real Langfuse session.
+Langfuse self-hosted v3 does NOT expose admin / project / API-key
+endpoints on its public REST API (those are Langfuse-Cloud-only), so
+these steps are operator-driven via the UI plus the seed scripts. Order
+matters — later steps depend on what earlier ones produce.
+
+1. **Admin user.** Open `https://langfuse.lab.<HOMELAB-DOMAIN>/` and
+   register the operator's email + a strong password. Record the email
+   somewhere recoverable (the Langfuse OIDC client provisioner needs it
+   later if SSO breaks).
+2. **Organization + project.** Create an organization (homelab
+   convention: `homelab`) and a project under it (homelab convention:
+   `homelab-project`). The project name will be passed to the seed
+   script later.
+3. **API key for OTel ingest.** In `Project Settings → API keys → Create
+   new key`, label it `otel-collector-ingest` (matches the script's
+   default). Copy both `pk-lf-…` AND `sk-lf-…` immediately — the secret
+   is shown ONCE.
+4. **Bao session.** In a separate terminal:
+   ```sh
+   ~/Desktop/joel/homelab/homelab-infra/scripts/bao-shell.sh
+   ```
+   That sets up the port-forward + `BAO_ADDR`/`BAO_SKIP_VERIFY` env +
+   prompts for `bao login` once. All subsequent commands below run inside
+   that subshell.
+5. **Seed OTel-ingest keys.** Inside the bao subshell:
+   ```sh
+   LANGFUSE_URL=https://langfuse.lab.<HOMELAB-DOMAIN> \
+   ~/Desktop/joel/homelab/homelab-infra/scripts/provision-langfuse-otel-ingest-keys.sh \
+       --kv-path kv/langfuse/otel-ingest
+   ```
+   The script prompts for the `pk-lf-…` / `sk-lf-…` pair via `read -rs`
+   (no shell history exposure), smoke-tests them against
+   `/api/public/projects`, and seeds them atomically.
+6. **Restart OTel collector.** Outside the bao subshell:
+   ```sh
+   kubectl -n monitoring rollout restart deploy/opentelemetry-collector-gateway
+   ```
+   The `basicauth/langfuse` extension picks up the new credentials.
+7. **Provision the Authentik OIDC client.** Inside the bao subshell:
+   ```sh
+   export AUTHENTIK_URL=https://auth.lab.<HOMELAB-DOMAIN>
+   read -rs AUTHENTIK_TOKEN; export AUTHENTIK_TOKEN
+   ~/Desktop/joel/homelab/homelab-infra/scripts/provision-authentik-oidc-client.sh \
+       --app-name langfuse \
+       --redirect-uri "https://langfuse.lab.<HOMELAB-DOMAIN>/api/auth/callback/custom" \
+       --kv-path kv/langfuse/oidc
+   ```
+   Callback path is `.../api/auth/callback/custom` because the
+   `AUTH_CUSTOM_*` env vars register NextAuth's provider under the id
+   `custom` (not the display name "Authentik").
+8. **Bind the Authentik app to the operator's group.** Authentik UI
+   → `Applications → langfuse → Bindings` → add the operator's group.
+   Until this step SSO will fail with "no matching policy."
+9. **Sync the langfuse-oidc ExternalSecret + restart langfuse-web** so
+   it picks up the new env:
+   ```sh
+   kubectl annotate externalsecret langfuse-oidc -n langfuse \
+       "force-sync=$(date +%s)" --overwrite
+   kubectl rollout restart deploy/langfuse-web -n langfuse
+   ```
+10. **Test SSO.** Log out of Langfuse in a *fresh / incognito browser*
+    (the web vault caches login-form HTML aggressively — same gotcha
+    class as vaultwarden #6445). The "Sign in with Authentik" button
+    should appear; click → Authentik login → back to Langfuse logged in.
+
+Exit the bao subshell (`exit` or Ctrl-D) — the port-forward tears down
+cleanly. The `kv/langfuse/oidc` + `kv/langfuse/otel-ingest` paths are
+now populated; ESO will keep them in sync.
 
 ## Caveats
 

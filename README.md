@@ -137,10 +137,37 @@ each is a repo-local script under [scripts/](scripts/):
 | `check-bare-tokens.sh` | bare ALL_CAPS placeholder tokens at value-bearing keys (`cidr:`, `server:`, `endpoint:`, etc.) — must be `<UPPER_SNAKE>` form so `check-placeholders.sh` catches them | pre-commit |
 | `check-eso-readme.sh` | every kustomize layer with an ExternalSecret has the `## OpenBao paths to seed` section in its README | pre-commit |
 | `check-placeholders.sh` | unfilled `<PLACEHOLDER>` tokens — **deploy-time** (cold-start.md Step 13a), not commit-time. Run manually before `kubectl apply -k` / Argo apply. | manual |
+| `check-helm-values-keys.sh` | every key path in a layer's `values.yaml` exists in the chart's published `helm show values` tree — catches the wrong-chart-key class that bit 4 apps in the 2026-05-29→31 bring-up ([journal](../homelab-docs/99-journal/2026-05-31-langfuse-and-vaultwarden-bringup-saga.md)). v1 is manual-run because charts with undocumented back-compat shims produce false positives; a per-layer `.helmcheckignore` baseline-file refinement is queued in TODO. | manual |
 
 Per the operator's "script everything scriptable now" policy:
 new schema-pairing or cross-doc completeness checks land here
 as scripts, not as deferred journal items.
+
+## Argo CD Server-Side Apply — constraints worth knowing
+
+Argo CD applies manifests with **Server-Side Apply** (SSA), not the
+client-side `kubectl apply` (CSA) you might use locally. There are two
+SSA constraints that are easy to forget and have already cost
+debugging time this codebase:
+
+1. **No duplicate env keys in a container.** SSA's
+   structured-merge-diff rejects two `env:` entries with the same
+   `name` in the same container with `ComparisonError`. `kubectl apply`
+   (CSA) tolerates duplicates and last-wins, which is sometimes used in
+   ad-hoc overrides — that approach is NOT portable to Argo. If you need
+   to override a chart-rendered env var, use the chart's documented knob
+   (`existingSecret`, `additionalEnv`, etc.) **or** a kustomize
+   strategic-merge patch with the `name` merge key replacing the entry
+   in place — never duplicate-and-rely-on-last-wins.
+2. **`additionalEnv` cannot shadow chart-rendered env by re-declaring.**
+   Following from (1): if the chart already defines `FOO` and you set
+   `additionalEnv: - name: FOO ...`, Argo's SSA refuses the apply. Use
+   a different env name, a kustomize strategic-merge patch, or change
+   the chart's rendered value via its own values.
+
+If you find yourself wanting to "just add the env again with a different
+value," it won't work under Argo — you have to come at it the chart's
+own way.
 
 ## Related
 
