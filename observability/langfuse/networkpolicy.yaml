@@ -173,3 +173,31 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
+---
+# Cilium Gateway → langfuse-web (HTTPRoute traffic).
+#
+# Implemented as CiliumNetworkPolicy because Cilium Gateway API traffic carries
+# the reserved `ingress` identity, NOT the source namespace. A vanilla NetPol
+# `namespaceSelector: kubernetes.io/metadata.name=ingress` does NOT match (the
+# gateway is the Envoy, a reserved entity). The langfuse-app vanilla NetPol
+# above continues to cover OTel/Prometheus/Cilium ingress; K8s+Cilium policies
+# are additive within the same direction, so this CNP just ADDS the gateway
+# rule without touching the existing ones. Added 2026-05-31 (gateway 404 — no
+# HTTPRoute or rule existed; route also created alongside).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: langfuse-gateway-ingress
+  namespace: langfuse
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: web
+      app.kubernetes.io/name: langfuse
+  ingress:
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "3000"   # langfuse-web container port (Service port 3000
+              protocol: TCP   # → targetPort 3000 — no DNAT delta here)

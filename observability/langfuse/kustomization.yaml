@@ -36,4 +36,5 @@ resources:
   - clickhouseinstallation.yaml
   - externalsecret.yaml
   - networkpolicy.yaml
+  - httproute.yaml
   - servicemonitor.yaml
