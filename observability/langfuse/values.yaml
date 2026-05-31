@@ -107,17 +107,6 @@ langfuse:
         # langfuse issues plain DDL against the single CH host. Added 2026-05-31.
         - name: CLICKHOUSE_CLUSTER_ENABLED
           value: "false"
-        # Redis auth — Bitnami-auto-created Secret (see Redis section). REDIS_PASSWORD
-        # MUST come first so `$(REDIS_PASSWORD)` in CONNECTION_STRING below resolves.
-        # additionalEnv lands AFTER the chart's env block, so this REDIS_CONNECTION_STRING
-        # overrides the chart's password-less version.
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: langfuse-redis
-              key: valkey-password
-        - name: REDIS_CONNECTION_STRING
-          value: "redis://default:$(REDIS_PASSWORD)@langfuse-redis-primary:6379/0"
 
   # Worker (async ingestion + eval runs) replicas + resources.
   worker:
@@ -146,14 +135,6 @@ langfuse:
         # Single-node ClickHouse — see web block above.
         - name: CLICKHOUSE_CLUSTER_ENABLED
           value: "false"
-        # Redis auth — see web block above for rationale.
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: langfuse-redis
-              key: valkey-password
-        - name: REDIS_CONNECTION_STRING
-          value: "redis://default:$(REDIS_PASSWORD)@langfuse-redis-primary:6379/0"
 
 # === External ClickHouse ===
 # Chart keys (verified via `helm show values langfuse/langfuse@1.5.31`):
@@ -200,26 +181,24 @@ postgresql:
       adminPasswordKey: "password"
 
 # === Redis (chart-managed) ===
-# The Bitnami Valkey sub-chart auto-creates the `langfuse-redis` Secret with
-# key `valkey-password` and password-protects the server. The langfuse chart
-# wires `REDIS_CONNECTION_STRING=redis://default@host:6379/0` WITHOUT a password
-# unless `auth.existingSecret`/`password` is set — so app pods hit `WRONGPASS`
-# on every Redis op (API-key creation 500'd in the UI on 2026-05-31).
+# The chart wires `REDIS_CONNECTION_STRING=redis://default@host:6379/0` WITHOUT
+# a password unless `auth.existingSecret`/`password` is set — so app pods hit
+# `WRONGPASS` on every Redis op (API-key creation 500'd in the UI on 2026-05-31).
+# When `auth.existingSecret` IS set, the chart correctly wires
+# `redis://default:$(REDIS_PASSWORD)@host:6379/0` with `REDIS_PASSWORD` declared
+# earlier in the env list via secretKeyRef — that's the chart's canonical mode.
 #
-# Pointing `auth.existingSecret: langfuse-redis` looks like the obvious fix,
-# but it makes the chart STOP rendering the secret-creation manifest (it
-# expects the operator to provide it) → Argo prunes the auto-created Secret →
-# Valkey + web + worker all fail with `secret "langfuse-redis" not found`.
-# Mode switch one-way.
-#
-# Working path: leave existingSecret unset so Bitnami keeps managing the
-# Secret, and override `REDIS_CONNECTION_STRING` ourselves via
-# `pod.additionalEnv` below, using K8s env-var substitution `$(REDIS_PASSWORD)`
-# sourced from the auto-created Secret. Same templating pattern the chart
-# itself uses when existingSecret IS set; we just do it without forcing the
-# chart's mode switch. Settled 2026-05-31.
+# Setting existingSecret tells the Bitnami Valkey sub-chart to STOP rendering its
+# own auto-created Secret (it expects the operator to provide it). So we pair
+# this with an ExternalSecret in externalsecret.yaml that creates `langfuse-redis`
+# from `kv/langfuse/redis` (operator seeds the path once, see README §OpenBao paths).
+# Cannot use `pod.additionalEnv` to override REDIS_CONNECTION_STRING — Argo's
+# Server-Side Apply rejects duplicate env keys (verified 2026-05-31).
 redis:
   deploy: true
+  auth:
+    existingSecret: langfuse-redis
+    existingSecretPasswordKey: valkey-password
   primary:
     persistence:
       enabled: true
