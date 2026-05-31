@@ -99,6 +99,14 @@ langfuse:
             secretKeyRef:
               name: langfuse-pg-app
               key: uri
+        # Single-node ClickHouse — no Keeper/Zookeeper configured. With
+        # CLICKHOUSE_CLUSTER_ENABLED=true (langfuse v3 default), migrations
+        # use `CREATE TABLE ... ON CLUSTER default`, which requires
+        # distributed-DDL coordination and fails with code 139 ("There is no
+        # Zookeeper configuration in server config"). Disable cluster mode so
+        # langfuse issues plain DDL against the single CH host. Added 2026-05-31.
+        - name: CLICKHOUSE_CLUSTER_ENABLED
+          value: "false"
 
   # Worker (async ingestion + eval runs) replicas + resources.
   worker:
@@ -124,6 +132,9 @@ langfuse:
             secretKeyRef:
               name: langfuse-pg-app
               key: uri
+        # Single-node ClickHouse — see web block above.
+        - name: CLICKHOUSE_CLUSTER_ENABLED
+          value: "false"
 
 # === External ClickHouse ===
 # Chart keys (verified via `helm show values langfuse/langfuse@1.5.31`):
