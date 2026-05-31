@@ -13,6 +13,18 @@ operator:
       memory: 128Mi
     limits:
       memory: 512Mi
+  # Container hardening — the chart's REAL key for container-level securityContext
+  # is `operator.containerSecurityContext` (and the same under `metrics:` below).
+  # A top-level `securityContext:` block was NOT a chart key and was silently
+  # dropped at render → the operator container ran without these settings (PSS
+  # warning at startup: "containers must set allowPrivilegeEscalation=false +
+  # capabilities.drop=[ALL]"). Moved here 2026-05-31. (Top-level `podSecurityContext:`
+  # IS a real chart key and stays where it is.)
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
   # Namespaces the operator watches for ClickHouseInstallation CRs.
   # EMPIRICALLY (2026-05-29): with no WATCH_NAMESPACES and an empty config
   # `watch.namespaces: []`, this operator (0.26.3) watched ONLY its own
@@ -41,6 +53,12 @@ metrics:
       memory: 64Mi
     limits:
       memory: 256Mi
+  # Same correct key as `operator.containerSecurityContext` above.
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
 
 # RBAC — cluster-level Roles/Bindings so the operator can act on CHIs in
 # OTHER namespaces (e.g. langfuse). The chart key is `rbac.namespaceScoped`
@@ -62,8 +80,6 @@ podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
 
-securityContext:
-  allowPrivilegeEscalation: false
-  capabilities:
-    drop: [ALL]
-  readOnlyRootFilesystem: true
+# (Container-level securityContext now lives under operator.containerSecurityContext
+# and metrics.containerSecurityContext — the actual chart keys. The top-level
+# `securityContext:` here was a wrong key + silently dropped; removed 2026-05-31.)
