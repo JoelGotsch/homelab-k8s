@@ -80,6 +80,30 @@ server:
   controllers:
     main:
       strategy: Recreate
+      # PSS-restricted compliance — pod + container hardening MUST be
+      # under controllers.main.{pod,containers.main}.securityContext
+      # in the bjw-s common schema, NOT at top-level podSecurityContext/
+      # securityContext (those are silently dropped → both deployments
+      # got rejected by PSS-restricted enforcement: violates "restricted:
+      # latest": allowPrivilegeEscalation != false, drop:[ALL] missing,
+      # runAsNonRoot != true, seccompProfile missing). Fixed 2026-06-01
+      # (cluster degraded sweep). Same wrong-chart-key class as Langfuse
+      # and the clickhouse-operator, just under a different chart schema.
+      pod:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          fsGroup: 1000
+          seccompProfile:
+            type: RuntimeDefault
+      containers:
+        main:
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false   # immich writes /tmp + upload cache
+            capabilities:
+              drop: [ALL]
 
 # Microservices (background job worker — ingest, thumbnail,
 # transcode, smart-search indexing, face detection).
@@ -91,6 +115,24 @@ microservices:
 # ADR 0026 photos are `personal` data and never leave the lab.
 machine-learning:
   enabled: true
+  controllers:
+    main:
+      # Same PSS fix as server above — bjw-s schema.
+      pod:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          fsGroup: 1000
+          seccompProfile:
+            type: RuntimeDefault
+      containers:
+        main:
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
   image:
     repository: ghcr.io/immich-app/immich-machine-learning
     tag: "v1.135.0"
@@ -179,24 +221,13 @@ service:
 ingress:
   enabled: false
 
-# Pod-level security: non-root, dropped caps. Immich images
-# run as user 1000 by default.
-podSecurityContext:
-  runAsNonRoot: true
-  runAsUser: 1000
-  runAsGroup: 1000
-  fsGroup: 1000
-  seccompProfile:
-    type: RuntimeDefault
-
-securityContext:
-  allowPrivilegeEscalation: false
-  # readOnlyRootFilesystem: false — Immich writes thumbnails
-  # and transcode-cache under /usr/src/app/upload (the PVC),
-  # but server + microservices also write to /tmp.
-  readOnlyRootFilesystem: false
-  capabilities:
-    drop: [ALL]
+# (Pod- and container-level security context now live nested under
+# server.controllers.main.{pod,containers.main}.securityContext +
+# machine-learning.controllers.main.{pod,containers.main}.securityContext
+# per the bjw-s common-chart schema. The top-level `podSecurityContext:`
+# and `securityContext:` blocks here were NOT chart keys → silently
+# dropped at render, PSS-restricted enforcement rejected both deployments.
+# Moved + removed 2026-06-01.)
 
 # Resource budget for server + microservices. Sized for
 # ~100k photos library, 2-3 simultaneous mobile-backup
