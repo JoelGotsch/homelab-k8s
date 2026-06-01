@@ -21,6 +21,10 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-personal-photos
+mountOptions:
+  - allow-other=true
+  - file-perms=0666
+  - dir-perms=0777
 provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
@@ -41,7 +45,6 @@ parameters:
   # in values.yaml when the workload calls for it. Immich's
   # cold-originals access pattern is well-served by the
   # driver-level defaults; left empty here.
-  mountOptions: "--allow-other --file-perms 0666 --dir-perms 0777"
 ---
 # nas-crypt-personal-files — Nextcloud's primary data dir.
 # Per ADR 0030 §D2 only the user-files tree lives here;
@@ -51,6 +54,10 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-personal-files
+mountOptions:
+  - allow-other=true
+  - file-perms=0666
+  - dir-perms=0777
 provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
@@ -60,7 +67,6 @@ parameters:
   remotePath: ""
   csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-personal-files-config"
   csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
-  mountOptions: "--allow-other --file-perms 0666 --dir-perms 0777"
 ---
 # nas-crypt-family-shared — Nextcloud Group Folder for
 # family-shared content (cross-account, non-private).
@@ -68,6 +74,10 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-family-shared
+mountOptions:
+  - allow-other=true
+  - file-perms=0666
+  - dir-perms=0777
 provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
@@ -77,7 +87,6 @@ parameters:
   remotePath: ""
   csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-family-shared-config"
   csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
-  mountOptions: "--allow-other --file-perms 0666 --dir-perms 0777"
 ---
 # nas-crypt-internal-archive — Nextcloud Group Folder for
 # archived internal documents (operator-driven, non-active).
@@ -85,6 +94,10 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-internal-archive
+mountOptions:
+  - allow-other=true
+  - file-perms=0666
+  - dir-perms=0777
 provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
@@ -94,7 +107,6 @@ parameters:
   remotePath: ""
   csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-internal-archive-config"
   csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
-  mountOptions: "--allow-other --file-perms 0666 --dir-perms 0777"
 ---
 # nas-crypt-forgejo-lfs — Forgejo Git LFS objects per
 # ADR 0023 D12 + ADR 0019 D7. WORM-ish workload (LFS objects
@@ -103,6 +115,10 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-forgejo-lfs
+mountOptions:
+  - allow-other=true
+  - file-perms=0666
+  - dir-perms=0777
 provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
@@ -112,7 +128,6 @@ parameters:
   remotePath: ""
   csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-forgejo-lfs-config"
   csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
-  mountOptions: "--allow-other --file-perms 0666 --dir-perms 0777"
 ---
 # nas-crypt-registry-blobs — Forgejo Packages (artifact
 # registry) blob storage per ADR 0019 D7. WORM-ish workload
@@ -121,6 +136,10 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-registry-blobs
+mountOptions:
+  - allow-other=true
+  - file-perms=0666
+  - dir-perms=0777
 provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
@@ -130,7 +149,6 @@ parameters:
   remotePath: ""
   csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-registry-blobs-config"
   csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
-  mountOptions: "--allow-other --file-perms 0666 --dir-perms 0777"
 ---
 # nas-crypt-personal-documents — Paperless-ngx source
 # documents. Per ADR 0030 §D2 only the document originals
@@ -140,6 +158,10 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-personal-documents
+mountOptions:
+  - allow-other=true
+  - file-perms=0666
+  - dir-perms=0777
 provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
@@ -149,4 +171,3 @@ parameters:
   remotePath: ""
   csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-personal-documents-config"
   csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
-  mountOptions: "--allow-other --file-perms 0666 --dir-perms 0777"
