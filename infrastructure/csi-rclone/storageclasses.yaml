@@ -34,6 +34,9 @@ parameters:
   # referenced Secret. Driver mounts `<remote>:<remotePath>`.
   remote: "nas-crypt-personal-photos"
   remotePath: ""
+  allow_other: "true"
+  uid: "0"
+  gid: "0"
 
   # Secret holding the rclone INI (configData key). Per-share
   # so that key compromise of one share doesn't expose
@@ -65,6 +68,9 @@ allowVolumeExpansion: true
 parameters:
   remote: "nas-crypt-personal-files"
   remotePath: ""
+  allow_other: "true"
+  uid: "0"
+  gid: "0"
   csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-personal-files-config"
   csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
 ---
@@ -85,6 +91,9 @@ allowVolumeExpansion: true
 parameters:
   remote: "nas-crypt-family-shared"
   remotePath: ""
+  allow_other: "true"
+  uid: "0"
+  gid: "0"
   csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-family-shared-config"
   csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
 ---
@@ -105,6 +114,9 @@ allowVolumeExpansion: true
 parameters:
   remote: "nas-crypt-internal-archive"
   remotePath: ""
+  allow_other: "true"
+  uid: "0"
+  gid: "0"
   csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-internal-archive-config"
   csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
 ---
@@ -126,6 +138,9 @@ allowVolumeExpansion: true
 parameters:
   remote: "nas-crypt-forgejo-lfs"
   remotePath: ""
+  allow_other: "true"
+  uid: "0"
+  gid: "0"
   csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-forgejo-lfs-config"
   csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
 ---
@@ -147,6 +162,9 @@ allowVolumeExpansion: true
 parameters:
   remote: "nas-crypt-registry-blobs"
   remotePath: ""
+  allow_other: "true"
+  uid: "0"
+  gid: "0"
   csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-registry-blobs-config"
   csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
 ---
@@ -169,5 +187,8 @@ allowVolumeExpansion: true
 parameters:
   remote: "nas-crypt-personal-documents"
   remotePath: ""
+  allow_other: "true"
+  uid: "0"
+  gid: "0"
   csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-personal-documents-config"
   csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
