@@ -117,3 +117,49 @@ spec:
       ports:
         - port: 9093
           protocol: TCP
+---
+# Falco falcoctl-artifact-install needs to pull `falco-rules:3` from the
+# OCI registry at first install (and on every restart since it lives in
+# an initContainer). The vanilla netpol above only allows DNS +
+# falcosidekick; without this CCNP, falcoctl exits code 1 with no log
+# (just "context deadline exceeded" on the HTTPS connect). 8 days of
+# falco-* CrashLoopBackOff = this.
+#
+# Implemented as CiliumNetworkPolicy because vanilla NetworkPolicy can't
+# match FQDNs — and ghcr.io / falcosecurity.github.io front through CDN
+# IPs that aren't worth enumerating in ipBlock. K8s policies are
+# additive within a direction so this just EXTENDS the egress allow-set;
+# the falco-default-deny rules above stay in place. Added 2026-06-01.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: falco-outbound-https
+  namespace: monitoring
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: falco
+  egress:
+    # kube-DNS, with L7 DNS rules so toFQDNs below resolve correctly.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # OCI registry + rules index.
+    - toFQDNs:
+        - matchName: ghcr.io
+        - matchName: falcosecurity.github.io
+        - matchPattern: "*.githubusercontent.com"
+        - matchPattern: "*.actions.githubusercontent.com"
+        - matchName: pkg-containers.githubusercontent.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

@@ -4,7 +4,7 @@ driver:
   name: nfs.csi.k8s.io
 
 controller:
-  replicas: 2
+  replicas: 1   # homelab does not need CSI controller HA; second replica had a persistent liveness-probe bind failure (2367 restarts over 8d)
   resources:
     requests: {cpu: 25m, memory: 64Mi}
     limits: {memory: 256Mi}
