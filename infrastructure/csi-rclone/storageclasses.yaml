@@ -21,7 +21,7 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-personal-photos
-provisioner: csi-rclone.veloxpack.io
+provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
@@ -51,7 +51,7 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-personal-files
-provisioner: csi-rclone.veloxpack.io
+provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
@@ -68,7 +68,7 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-family-shared
-provisioner: csi-rclone.veloxpack.io
+provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
@@ -85,7 +85,7 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-internal-archive
-provisioner: csi-rclone.veloxpack.io
+provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
@@ -103,7 +103,7 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-forgejo-lfs
-provisioner: csi-rclone.veloxpack.io
+provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
@@ -121,7 +121,7 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-registry-blobs
-provisioner: csi-rclone.veloxpack.io
+provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
@@ -140,7 +140,7 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-personal-documents
-provisioner: csi-rclone.veloxpack.io
+provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
