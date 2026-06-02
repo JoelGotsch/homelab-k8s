@@ -104,6 +104,71 @@ server:
             readOnlyRootFilesystem: false   # immich writes /tmp + upload cache
             capabilities:
               drop: [ALL]
+          # Immich-server env. DB_* + REDIS_* + OAUTH_* + vector-extension
+          # selector — projected from CNPG-managed Secrets + the langfuse-
+          # style external-secret pattern. The bjw-s common-chart schema
+          # places ALL container env here, under
+          # server.controllers.main.containers.main.env (map form). The
+          # previous top-level `env:` + `extraEnv:` blocks at file-root
+          # level were NOT chart keys → silently dropped at render → server
+          # fell back to the chart-default DB_HOSTNAME="database" and hit
+          # `getaddrinfo EAI_AGAIN database` on every startup
+          # (CrashLoopBackOff). Same wrong-chart-key class as the PSS fix
+          # above. Moved 2026-06-02; see TODO §"NAS-encryption follow-ups".
+          env:
+            # CNPG-issued user creds — Secret name comes from CNPG's
+            # role-binding on the immich-pg cluster.
+            DB_HOSTNAME:
+              valueFrom:
+                secretKeyRef:
+                  name: immich-pg-app
+                  key: host
+            DB_USERNAME:
+              valueFrom:
+                secretKeyRef:
+                  name: immich-pg-app
+                  key: username
+            DB_PASSWORD:
+              valueFrom:
+                secretKeyRef:
+                  name: immich-pg-app
+                  key: password
+            DB_DATABASE_NAME:
+              valueFrom:
+                secretKeyRef:
+                  name: immich-pg-app
+                  key: dbname
+            # Vectorchord required for v1.133+ smart-search; CNPG image
+            # ships it. Tells Immich's startup probe which vector
+            # extension to load.
+            DB_VECTOR_EXTENSION: "vectorchord"
+            # Redis bundled by the chart — points at the chart's Service.
+            REDIS_HOSTNAME: "immich-redis-master"
+            # OAuth (Authentik OIDC). The immich-oidc Secret is populated
+            # by ESO once the operator provisions the Authentik client +
+            # seeds kv/immich/oidc (queued in the OIDC seed batch). Until
+            # then those secretKeyRefs resolve to empty strings; Immich
+            # treats OAUTH_ENABLED=true + empty issuer as configured-but-
+            # broken (not configured-not-attempted) so this stays inert
+            # until ES is Ready. Acceptable for now.
+            OAUTH_ENABLED: "true"
+            OAUTH_ISSUER_URL:
+              valueFrom:
+                secretKeyRef:
+                  name: immich-oidc
+                  key: issuer
+            OAUTH_CLIENT_ID:
+              valueFrom:
+                secretKeyRef:
+                  name: immich-oidc
+                  key: client_id
+            OAUTH_CLIENT_SECRET:
+              valueFrom:
+                secretKeyRef:
+                  name: immich-oidc
+                  key: client_secret
+            OAUTH_AUTO_REGISTER: "true"
+            OAUTH_BUTTON_TEXT: "Login with Authentik"
 
 # Microservices (background job worker — ingest, thumbnail,
 # transcode, smart-search indexing, face detection).
@@ -153,65 +218,11 @@ machine-learning:
     limits:
       memory: 4Gi
 
-# Immich env. DB_* + REDIS_* + OAUTH_* projected from
-# Secrets created by cnpg-cluster.yaml + externalsecret.yaml.
-env:
-  # CNPG-issued user creds — Secret name comes from CNPG's
-  # role-binding on the immich-pg cluster.
-  DB_HOSTNAME:
-    valueFrom:
-      secretKeyRef:
-        name: immich-pg-app
-        key: host
-  DB_USERNAME:
-    valueFrom:
-      secretKeyRef:
-        name: immich-pg-app
-        key: username
-  DB_PASSWORD:
-    valueFrom:
-      secretKeyRef:
-        name: immich-pg-app
-        key: password
-  DB_DATABASE_NAME:
-    valueFrom:
-      secretKeyRef:
-        name: immich-pg-app
-        key: dbname
-
-  # Redis bundled by the chart — points at the chart's Service.
-  REDIS_HOSTNAME: "immich-redis-master"
-
-  # Vectorchord required for v1.133+ smart-search; CNPG image
-  # ships it. Tells Immich's startup probe which vector
-  # extension to load.
-  DB_VECTOR_EXTENSION: "vectorchord"
-
-# OAuth (Authentik OIDC). Projected to the server pod via
-# extraEnv since these aren't in the chart's `env` schema as
-# first-class keys.
-extraEnv:
-  - name: OAUTH_ENABLED
-    value: "true"
-  - name: OAUTH_ISSUER_URL
-    valueFrom:
-      secretKeyRef:
-        name: immich-oidc
-        key: issuer
-  - name: OAUTH_CLIENT_ID
-    valueFrom:
-      secretKeyRef:
-        name: immich-oidc
-        key: client_id
-  - name: OAUTH_CLIENT_SECRET
-    valueFrom:
-      secretKeyRef:
-        name: immich-oidc
-        key: client_secret
-  - name: OAUTH_AUTO_REGISTER
-    value: "true"
-  - name: OAUTH_BUTTON_TEXT
-    value: "Login with Authentik"
+# (Immich env now lives under server.controllers.main.containers.main.env
+# above per the bjw-s common-chart schema. The top-level `env:` and
+# `extraEnv:` blocks here were NOT chart keys → silently dropped at render,
+# so DB_HOSTNAME fell back to the chart-default "database" and the server
+# CrashLoopBackOff'd with `getaddrinfo EAI_AGAIN`. Moved + removed 2026-06-02.)
 
 # Don't expose Service externally — Cilium HTTPRoute owns
 # ingress (httproute.yaml).
