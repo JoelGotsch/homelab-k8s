@@ -36,6 +36,19 @@ spec:
     - to:
         - podSelector: {}
 ---
+# LABEL TRAP: the immich-app/immich-charts helm chart labels every
+# component pod `app.kubernetes.io/name: <component>` (e.g.
+# `server`, `microservices`, `machine-learning`) + a shared
+# `app.kubernetes.io/instance: immich`. The Service NAMES are
+# `immich-server` / `immich-machine-learning` (chart prefixes with
+# release name), but the pod LABELS are not. Selecting on
+# `app.kubernetes.io/name: immich-server` matched zero endpoints,
+# leaving this CNP unrealized (latent bug — when the operator
+# would have expected ingress default-deny + explicit allows, the
+# pod was actually fully open, gated only by `immich-allow-same-ns`
+# + the IPP-side egress). Selector below uses chart-native labels.
+# Fixed 2026-06-02 alongside the IPP egress label fix that was
+# crashlooping IPP.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -44,7 +57,8 @@ metadata:
 spec:
   endpointSelector:
     matchLabels:
-      app.kubernetes.io/name: immich-server
+      app.kubernetes.io/name: server
+      app.kubernetes.io/instance: immich
   ingress:
     # Cilium Gateway envoy — reserved `ingress` identity.
     - fromEntities:

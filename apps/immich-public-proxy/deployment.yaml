@@ -61,8 +61,24 @@ spec:
             # Cluster-internal Immich URL — never leaves the pod
             # network. The proxy never sees Immich admin / API /
             # mobile-backup endpoints; it walks /share/* only.
+            #
+            # DNS TRAP: trailing-dot FQDN is INTENTIONAL. The
+            # cluster's resolv.conf inherits the node-level
+            # tailscale search domain (`tail<tailnet>.ts.net`),
+            # and getaddrinfo-based resolvers (libcurl, glibc NSS,
+            # Node.js `dns.lookup`) walk the search list against
+            # ndots:5 BEFORE attempting the bare name. Lookups for
+            # `*.cluster.local.tail<tailnet>.ts.net` return
+            # SERVFAIL from the tailscale resolver, and
+            # getaddrinfo aborts on SERVFAIL without ever trying
+            # the bare FQDN. With trailing dot the resolver treats
+            # the name as already-absolute and skips search
+            # expansion. Without this, IPP crashlooped even with
+            # netpol egress correctly allowed (separate, also-fixed
+            # bug — see networkpolicy.yaml LABEL TRAP). Diagnosed
+            # 2026-06-02.
             - name: IMMICH_URL
-              value: "http://immich-server.immich.svc.cluster.local:2283"
+              value: "http://immich-server.immich.svc.cluster.local.:2283"
             # Public base URL the proxy generates share links
             # against. Match this with what cloudflared routes
             # photos.vyramo.com to (configmap.yaml's

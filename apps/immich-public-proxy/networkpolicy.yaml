@@ -56,13 +56,27 @@ spec:
         - port: 53
           protocol: TCP
     # Upstream Immich server (cluster-internal).
+    #
+    # LABEL TRAP: the official immich-app/immich-charts helm chart
+    # labels the server pod `app.kubernetes.io/name: server`
+    # (+ `app.kubernetes.io/instance: immich`), NOT
+    # `app.kubernetes.io/name: immich-server` as the Service name
+    # might suggest. Selecting on `immich-server` here matched zero
+    # pods → every TCP SYN to immich-server.immich.svc.cluster.local
+    # :2283 was DROPPED by Cilium with `policy-verdict:none`, IPP
+    # pods crash-looped on the /share/healthcheck probe (which
+    # round-trips through Immich). Namespace pin + the chart's two
+    # canonical labels is the correct shape; instance pin keeps this
+    # rule from over-broadly matching any future `name=server` pod
+    # that lands in the `immich` ns.
     - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: immich
           podSelector:
             matchLabels:
-              app.kubernetes.io/name: immich-server
+              app.kubernetes.io/name: server
+              app.kubernetes.io/instance: immich
       ports:
         - port: 2283
           protocol: TCP
