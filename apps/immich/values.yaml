@@ -152,21 +152,31 @@ server:
             # broken (not configured-not-attempted) so this stays inert
             # until ES is Ready. Acceptable for now.
             OAUTH_ENABLED: "true"
+            # optional:true on the OIDC secretKeyRefs so the server can start
+            # before the operator provisions the Authentik client + seeds
+            # kv/immich/oidc (queued in the OIDC seed batch). Without
+            # optional:true the pod is CreateContainerConfigError until the
+            # secret exists. With it, OAUTH_* env stays empty until the
+            # secret materializes; Immich's OAuth init logs "issuer empty"
+            # but the rest of the app runs. Same pattern as langfuse-oidc.
             OAUTH_ISSUER_URL:
               valueFrom:
                 secretKeyRef:
                   name: immich-oidc
                   key: issuer
+                  optional: true
             OAUTH_CLIENT_ID:
               valueFrom:
                 secretKeyRef:
                   name: immich-oidc
                   key: client_id
+                  optional: true
             OAUTH_CLIENT_SECRET:
               valueFrom:
                 secretKeyRef:
                   name: immich-oidc
                   key: client_secret
+                  optional: true
             OAUTH_AUTO_REGISTER: "true"
             OAUTH_BUTTON_TEXT: "Login with Authentik"
 
