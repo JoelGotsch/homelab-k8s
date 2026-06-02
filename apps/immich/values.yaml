@@ -142,8 +142,14 @@ server:
             # ships it. Tells Immich's startup probe which vector
             # extension to load.
             DB_VECTOR_EXTENSION: "vectorchord"
-            # Redis bundled by the chart — points at the chart's Service.
-            REDIS_HOSTNAME: "immich-redis-master"
+            # Valkey (Redis-compatible) bundled by the chart — service name
+            # is `<release>-valkey` per bjw-s naming convention, not
+            # `<release>-redis-master` (which is the Bitnami-Redis convention
+            # we'd previously assumed; the chart actually deploys
+            # valkey/valkey, not redis). Discovered 2026-06-02 after the env
+            # rewrite — DB connection worked first try, then crash on
+            # `getaddrinfo EAI_AGAIN immich-redis-master`.
+            REDIS_HOSTNAME: "immich-valkey"
             # OAuth (Authentik OIDC). The immich-oidc Secret is populated
             # by ESO once the operator provisions the Authentik client +
             # seeds kv/immich/oidc (queued in the OIDC seed batch). Until
@@ -183,6 +189,13 @@ server:
 # Microservices (background job worker — ingest, thumbnail,
 # transcode, smart-search indexing, face detection).
 microservices:
+  enabled: true
+
+# Valkey — bundled cache (Redis-compatible). Chart default is enabled:false,
+# so we have to opt in. Service lands at `immich-valkey` and the chart
+# image (valkey/valkey:9.1-alpine) ships with no auth, so REDIS_HOSTNAME
+# alone is sufficient (no REDIS_PASSWORD needed). Added 2026-06-02.
+valkey:
   enabled: true
 
 # Machine-learning (CLIP smart search + ArcFace facial
