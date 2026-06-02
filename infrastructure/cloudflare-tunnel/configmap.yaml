@@ -38,7 +38,7 @@ metadata:
     app.kubernetes.io/name: cloudflared
 data:
   config.yaml: |
-    tunnel: <CF_TUNNEL_UUID>
+    tunnel: 097efe58-67e4-4daa-8669-ae40c8229ebd
     credentials-file: /etc/cloudflared/credentials.json
 
     # Metrics endpoint for Prometheus scrape.
