@@ -48,8 +48,22 @@ redis:
   # nextcloud-redis + langfuse-valkey repoints. Added 2026-05-27.
   image:
     repository: bitnamilegacy/redis
+  # Redis auth ON, via existingSecret. The paperless-ngx chart's
+  # `templates/common.yaml` unconditionally injects an env var
+  # `A_REDIS_PASSWORD` with `secretKeyRef name: <release>-redis`
+  # whenever `redis.enabled: true` — there is NO gate on
+  # `auth.enabled` (chart bug). With `auth.enabled: false` AND no
+  # existingSecret, the bitnami redis subchart never renders the
+  # Secret, so the app pod hangs in CreateContainerConfigError with
+  # `secret "paperless-redis" not found`. Fix per chart README:
+  # provide an existingSecret. Operator materializes the Secret
+  # `paperless-redis` (key: redis-password) from OpenBao via
+  # externalsecret.yaml. Both the bitnami redis pods and the
+  # paperless app pod read from the same Secret.
   auth:
-    enabled: false
+    enabled: true
+    existingSecret: paperless-redis
+    existingSecretPasswordKey: redis-password
   master:
     persistence:
       enabled: true
@@ -131,9 +145,12 @@ env:
         name: paperless-pg-app
         key: password
 
-  # Bundled Redis — chart-default Service name. URL form
-  # required by Paperless.
-  PAPERLESS_REDIS: "redis://paperless-redis-master:6379"
+  # Bundled Redis — DO NOT set PAPERLESS_REDIS here. The chart's
+  # templates/common.yaml auto-renders
+  #   PAPERLESS_REDIS: redis://:$(A_REDIS_PASSWORD)@<release>-redis-master
+  # when `redis.enabled: true`, with A_REDIS_PASSWORD wired from the
+  # existingSecret above. Overriding here would strip the embedded
+  # password and break AUTH against the now-password-protected redis.
 
   # Pre-seeded admin (chart creates on first start). Operator
   # rotates via UI to OIDC-only post-Authentik wiring.
