@@ -197,6 +197,28 @@ microservices:
 # alone is sufficient (no REDIS_PASSWORD needed). Added 2026-06-02.
 valkey:
   enabled: true
+  # Same PSS fix as server + machine-learning above. The bjw-s schema means
+  # securityContext nests under controllers.main.{pod,containers.main}.
+  # Valkey container runs as the valkey user (uid 999 by default for the
+  # bitnami/valkey image; alpine variant uses 1000); we run as 1000 here
+  # since the chart's image override may not match alpine's default uid.
+  controllers:
+    main:
+      pod:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          fsGroup: 1000
+          seccompProfile:
+            type: RuntimeDefault
+      containers:
+        main:
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false   # valkey writes its dump/aof
+            capabilities:
+              drop: [ALL]
 
 # Machine-learning (CLIP smart search + ArcFace facial
 # recognition). Workers do this entirely on-cluster — per
