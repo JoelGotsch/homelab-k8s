@@ -6,10 +6,17 @@
 # letsencrypt-clusterissuer.yaml.j2 and is rendered + applied
 # by 09b-argocd-bootstrap.yml — NOT reconciled by Argo CD —
 # so the operator's ACME-registration email doesn't land in
-# this GitOps repo. The downstream cloudflare-api-token Secret
-# in this namespace is also Ansible-seeded (via
+# this GitOps repo.
+#
+# The downstream `cloudflare-api-token` Secret in this
+# namespace is Ansible-seeded ONCE at cold-start (via
 # homelab-infra/scripts/seed-cloudflare-api-token.sh reading
-# from secrets.sops.yaml).
+# homelab_secrets.cloudflare_api_token from secrets.sops.yaml),
+# then taken over by ESO from OpenBao path
+# kv/shared/cloudflare/api-token via
+# externalsecret-cloudflare-api-token.yaml below — same Secret
+# name, so the LE ClusterIssuer reference is stable across the
+# handoff. Token rotation: edit kv only; ESO re-projects.
 #
 # Same discipline as cilium-overrides + openbao-overrides:
 # bootstrap infrastructure with operator-private values stays
@@ -31,3 +38,6 @@ resources:
   # OpenBao-PKI ClusterIssuer (cluster-internal mTLS only)
   - clusterissuer.yaml
   - openbao-pki-secret.yaml
+  # Cloudflare API token for the Ansible-owned LE ClusterIssuer
+  # — ESO takes over from the cold-start seed script.
+  - externalsecret-cloudflare-api-token.yaml
