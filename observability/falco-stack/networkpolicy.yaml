@@ -152,13 +152,27 @@ spec:
           rules:
             dns:
               - matchPattern: "*"
-    # OCI registry + rules index.
+    # OCI registry + rules index + Sigstore (signature verification).
+    #
+    # Sigstore added 2026-06-02: falcoctl 0.11.0 verifies the OCI
+    # artifact signature against the public-good Sigstore stack by
+    # default. Without these FQDNs allowed, falcoctl-artifact-install
+    # hangs ~30 s on `dial tcp 34.117.62.14:443: i/o timeout` to
+    # tuf-repo-cdn.sigstore.dev (TUF root metadata) and exits non-zero
+    # → DaemonSet Init:CrashLoopBackOff on every node. Verified via
+    # `cilium hubble observe --pod falco --verdict DROPPED` showing
+    # policy-verdict:none DROPPED to 34.117.62.14:443.
+    # rekor.sigstore.dev = transparency log lookup;
+    # fulcio.sigstore.dev included for completeness (cert chain).
     - toFQDNs:
         - matchName: ghcr.io
         - matchName: falcosecurity.github.io
         - matchPattern: "*.githubusercontent.com"
         - matchPattern: "*.actions.githubusercontent.com"
         - matchName: pkg-containers.githubusercontent.com
+        - matchName: tuf-repo-cdn.sigstore.dev
+        - matchName: rekor.sigstore.dev
+        - matchName: fulcio.sigstore.dev
       toPorts:
         - ports:
             - port: "443"
