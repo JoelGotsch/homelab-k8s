@@ -54,7 +54,7 @@ data:
       # client-side per ADR 0024 D1 + identity.md. Cloudflare
       # sees only ciphertext for vault contents.
       - hostname: vaultwarden.vyramo.com
-        service: http://vaultwarden-http.vaultwarden.svc.cluster.local:80
+        service: http://vaultwarden.vaultwarden.svc.cluster.local:80
 
       # ─── Jellyfin ─────────────────────────────────────
       # `internal-media` classification — non-personal
