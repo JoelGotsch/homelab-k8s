@@ -16,15 +16,20 @@
 # but if so shouldn't be bound much by resource limits;
 # priority is lowest compared to all other cluster processes."
 
+# NOTE: PriorityClass is a flat top-level resource — `value`,
+# `globalDefault`, `description`, `preemptionPolicy` are
+# direct siblings of `metadata`, NOT nested under `spec`.
+# An earlier `spec:` wrapper here caused Argo CD typed-patch
+# failures: ".spec: field not declared in schema" on every
+# sync attempt. See app-jellyfin SyncError 2026-06-02.
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
   name: homelab-low
-spec:
-  value: -100
-  globalDefault: false
-  description: >-
-    Low-priority workloads — evicted first under node
-    resource pressure. Used for entertainment + non-critical
-    services that can tolerate brief downtime to free
-    capacity for operator-critical workloads.
+value: -100
+globalDefault: false
+description: >-
+  Low-priority workloads — evicted first under node
+  resource pressure. Used for entertainment + non-critical
+  services that can tolerate brief downtime to free
+  capacity for operator-critical workloads.

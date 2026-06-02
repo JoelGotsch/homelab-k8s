@@ -44,3 +44,29 @@ patches:
         name: not-used
         labels:
           recurring-job-group.longhorn.io/internal-media: "enabled"
+
+  # Argo CD `Replace=true` on the Deployment. The chart sets
+  # strategy.type=Recreate (single-replica + RWO Longhorn config
+  # PVC; rolling deadlocks PVC attachment). Server-side apply
+  # cannot atomically remove the `rollingUpdate` block when
+  # flipping `type: RollingUpdate → Recreate` on an existing
+  # Deployment whose previous reconciler (helm pre-Argo, or an
+  # older chart render that produced rollingUpdate defaults)
+  # left those fields populated — k8s API rejects with
+  # `spec.strategy.rollingUpdate: Forbidden: may not be
+  # specified when strategy type is 'Recreate'`. The
+  # Replace=true sync-option tells Argo to recreate the
+  # Deployment instead of patching it, clearing the residual
+  # rollingUpdate block in one apply. Safe because the
+  # Deployment owns no persistent state directly — config + media
+  # live on PVCs that survive the recreate.
+  - target:
+      kind: Deployment
+      name: jellyfin
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: jellyfin
+        annotations:
+          argocd.argoproj.io/sync-options: Replace=true
