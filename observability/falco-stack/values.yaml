@@ -12,6 +12,18 @@ driver:
   kind: modern_ebpf
   # CO-RE eBPF probes auto-load on supported kernels (5.8+).
   # Talos current ships 6.x; fully supported.
+  #
+  # NOTE 2026-06-02: kernel 6.18+ tightened the BPF verifier's
+  # SCC analysis for bpf_loop() callbacks, which blew the 1M
+  # verified-instruction limit in libs <0.24.0 (recvmmsg_x /
+  # sendmmsg_x programs). Symptom on Talos 6.18.24: scap_init
+  # crash with "An error occurred in an event source, forcing
+  # termination" immediately after "Opening 'syscall' source
+  # with modern BPF probe." Fixed by falcosecurity/libs#2893
+  # → libs 0.24.0 → Falco 0.44.0 (chart 9.0.0). Chart version
+  # pin lives in kustomization.yaml. Hold here on modern_ebpf
+  # per ADR 0021 D4 — legacy ebpf is the documented fallback
+  # if Talos rebases onto a kernel that breaks libs again.
 
 # DaemonSet runs everywhere — including CP nodes.
 # Talos CP-tainted nodes need the toleration.

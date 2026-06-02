@@ -18,7 +18,14 @@ helmCharts:
   # Falco — DaemonSet + Falcosidekick subchart enabled inline.
   - name: falco
     repo: https://falcosecurity.github.io/charts
-    version: "4.20.0"  # OPERATOR PINS via Renovate
+    version: "9.0.0"  # OPERATOR PINS via Renovate.
+    # Bumped from 4.20.0 (Falco 0.40.0) → 9.0.0 (Falco 0.44.0)
+    # on 2026-06-02 to clear scap_init crash on Talos kernel
+    # 6.18.24. Root cause: libs <0.24.0 BPF verifier blow-out
+    # in recvmmsg_x/sendmmsg_x callbacks on kernels with the
+    # tightened SCC analysis (kernel 6.18+ in our case).
+    # Fix: falcosecurity/libs#2893 → libs 0.24.0 → Falco 0.44.0.
+    # Upstream tracking issue: falcosecurity/falco#3813.
     releaseName: falco
     namespace: monitoring
     valuesFile: values.yaml
