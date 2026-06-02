@@ -150,6 +150,34 @@ share; the others stay opaque. Rotation per
    shares (`internal-media`, `public-*`, `cluster-backups`,
    `time-machine-mba`).
 
+7. **Transport is SMB, not NFS** — ADR 0030 §D5 mentioned
+   "csi-driver-rclone PR #17 added crypt: over nfs: stacking";
+   PR #17 added *stacking* support, but neither the embedded
+   rclone library nor upstream rclone has an `nfs:` backend
+   (NFS is kernel-mode). Empirically validated 2026-06-01:
+   `type = nfs` in the rclone INI fails NodePublishVolume with
+   `didn't find backend called "nfs"`. The 7 `kv/prod/nas-encryption/<share>`
+   paths use **`type = smb`** transport with the
+   `ansible-automation` DSM service account; per-share crypt
+   keys layer on top unchanged. See
+   [2026-06-02 journal](../../../homelab-docs/99-journal/2026-06-02-nas-encryption-ceremony.md).
+
+8. **Consumer pods MUST set `securityContext.fsGroup`.** The
+   veloxpack driver only auto-enables `-o allow_other` when
+   the CSI request includes `volume_mount_group`, which kubelet
+   populates *only* from the pod's `fsGroup` (the SC parameter
+   `allow_other: "true"` alone is NOT honored — verified via
+   `pkg/rclone/nodeserver.go`). Without `fsGroup` on the
+   consumer pod, the mount lands `user_id=0,group_id=0`
+   without `allow_other`, and any non-root container hits
+   `Permission denied` on `ls /mnt/...`. Convention:
+   - **Immich / Paperless / Forgejo** → `fsGroup: 1000`
+   - **Nextcloud** → `fsGroup: 33` (www-data)
+   - **Jellyfin** (plaintext NAS, not crypt) → also `fsGroup: 1000` for the consume mount
+   These can land at chart-`pod.securityContext.fsGroup` for
+   bjw-s-schema charts, or top-level `podSecurityContext.fsGroup`
+   for other chart schemas — values-key audit per consumer.
+
 ## Related
 
 - [ADR 0030](../../../homelab-docs/02-decisions/0030-csi-rclone-and-storage-split.md)
