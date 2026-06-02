@@ -53,26 +53,32 @@ spec:
     # (the toEntities rule that was here violated the K8s NP schema).
     # Upstream Services routed by config.yaml's ingress
     # rules. Each one needs an explicit allow.
+    # IMPORTANT (per feedback_gateway_500_503_triage):
+    # Cilium evaluates NetworkPolicy `ports` against POD ports
+    # (post-DNAT), not Service ports. For each upstream below,
+    # the value here MUST be the targetPort (container port),
+    # NOT the Service port that configmap.yaml routes to. Use
+    # `kubectl get svc -o jsonpath` to read targetPort if unsure.
     - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: vaultwarden
       ports:
-        - port: 80
+        - port: 8080      # vaultwarden Service :80 → pod :8080
           protocol: TCP
     - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: jellyfin
       ports:
-        - port: 8096
+        - port: 8096      # jellyfin Service :8096 → pod :8096
           protocol: TCP
     - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: immich-public-proxy
       ports:
-        - port: 3000
+        - port: 3000      # immich-public-proxy Service :3000 → pod :3000
           protocol: TCP
     # When new tunnel-routed services land:
     #  1. Add an `ingress:` rule in configmap.yaml
