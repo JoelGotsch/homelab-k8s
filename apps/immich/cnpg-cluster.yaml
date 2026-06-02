@@ -62,9 +62,21 @@ spec:
       # Install required extensions on the freshly created DB.
       # vectorchord depends on pgvector >=0.7,<0.9 — both ship
       # in the image; CNPG runs CREATE EXTENSION at bootstrap.
+      # earthdistance (for geographic photo queries) requires
+      # cube. Discovered 2026-06-02 — Immich's microservices
+      # worker tried CREATE EXTENSION earthdistance on startup
+      # as the app user, got `permission denied … must be
+      # superuser`. CNPG runs postInitApplicationSQL as
+      # superuser on the immich DB (vs postInitTemplateSQL which
+      # runs on template1 and only affects FUTURE DB creations),
+      # so app-DB-specific extensions land here. For the existing
+      # cluster the operator manually ran the two CREATEs once.
       postInitTemplateSQL:
         - CREATE EXTENSION IF NOT EXISTS vector;
         - CREATE EXTENSION IF NOT EXISTS vchord CASCADE;
+      postInitApplicationSQL:
+        - CREATE EXTENSION IF NOT EXISTS cube;
+        - CREATE EXTENSION IF NOT EXISTS earthdistance;
 
   backup:
     barmanObjectStore:
