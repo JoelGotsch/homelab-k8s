@@ -13,7 +13,7 @@ kind: Kustomization
 helmCharts:
   - name: woodpecker
     repo: https://woodpecker-ci.org/
-    version: "3.4.0"  # OPERATOR PINS via Renovate
+    version: "3.6.4"  # OPERATOR PINS via Renovate (chart 3.6.4 ships Woodpecker app 3.15.0)
     releaseName: woodpecker
     namespace: woodpecker
     valuesFile: values.yaml
