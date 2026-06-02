@@ -4,14 +4,14 @@
 # is an outbound-connect-only daemon; no cluster workload
 # reaches it inbound.
 #
-# Egress: kube-DNS + Cloudflare's edge (regional anycast IPs;
-# resolved via the cloudflared-internal logic, but reaches
-# Cloudflare's published edge ranges) + the upstream Services
-# named in configmap.yaml. The Cloudflare-edge egress is
-# unrestricted-by-FQDN because cloudflared connects to many
-# regional endpoints (region1.argotunnel.com, region2.*, etc.)
-# + the QUIC connections rotate. CCNP toFQDNs would be
-# brittle here.
+# Egress: kube-DNS + upstream Services named in configmap.yaml.
+# The Cloudflare-edge egress (entities: world) is intentionally
+# NOT in this manifest — `toEntities` is a Cilium-only field
+# and was rejected by the standard NetworkPolicy schema
+# (kube-api: ".spec.egress[1].toEntities: field not declared
+# in schema"). Argo wedged here for ~9 days. The edge egress
+# now lives in ciliumnetworkpolicy.yaml as a CiliumNetworkPolicy
+# (additive — Cilium ORs the allow set across both policies).
 
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -49,23 +49,8 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # Cloudflare edge — outbound HTTPS + QUIC. cloudflared
-    # uses HTTP/2 over TCP/443 by default (set in config.yaml
-    # via `protocol: http2`); falls back to QUIC over UDP/443
-    # if HTTP/2 fails. Both ports allowed for resilience.
-    # toEntities: world is the bounded form — cloudflared
-    # must reach Cloudflare's edge which is a published but
-    # geographically-rotating IP set.
-    - toEntities: ["world"]
-      ports:
-        - port: 443
-          protocol: TCP
-        - port: 443
-          protocol: UDP
-        - port: 7844     # cloudflared registration port
-          protocol: TCP
-        - port: 7844
-          protocol: UDP
+    # Cloudflare edge egress now lives in ciliumnetworkpolicy.yaml
+    # (the toEntities rule that was here violated the K8s NP schema).
     # Upstream Services routed by config.yaml's ingress
     # rules. Each one needs an explicit allow.
     - to:

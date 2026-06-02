@@ -1,0 +1,43 @@
+# CCNP — egress to Cloudflare's edge.
+#
+# Split out from networkpolicy.yaml because `toEntities` is a
+# Cilium-only field; including it in a standard NetworkPolicy
+# (networking.k8s.io/v1) makes kube-api reject the manifest with
+# ".spec.egress[1].toEntities: field not declared in schema",
+# wedging Argo at the cloudflare-tunnel layer (was broken
+# 2026-05-24 → 2026-06-02 ≈ 9 days). See journal entry.
+#
+# cloudflared connects HTTP/2 over TCP/443 by default (set in
+# configmap.yaml `protocol: http2`); falls back to QUIC over
+# UDP/443 if HTTP/2 fails. Registration uses 7844 TCP/UDP.
+# Cloudflare's edge is geographically-rotating anycast — bounded
+# `entity: world` is the right shape (toFQDNs would be brittle).
+#
+# Additive to networkpolicy.yaml: Cilium ORs the allow set across
+# both policies targeting the same endpoint. policyTypes lists
+# only Egress so this CCNP doesn't add an ingress default-deny on
+# top of the K8s NP's already-set ingress default-deny (per
+# feedback_cilium_ccnp_default_deny lesson).
+
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cloudflared-edge-egress
+  namespace: cloudflare-tunnel
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+  egress:
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "443"
+              protocol: UDP
+            - port: "7844"
+              protocol: TCP
+            - port: "7844"
+              protocol: UDP

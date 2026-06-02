@@ -13,4 +13,5 @@ resources:
   - externalsecret.yaml
   - deployment.yaml
   - networkpolicy.yaml
+  - ciliumnetworkpolicy.yaml
   - servicemonitor.yaml
