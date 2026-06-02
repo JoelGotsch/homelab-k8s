@@ -14,6 +14,13 @@
 # diagnosis chain (two separate libs bugs against this kernel:
 # bpf_loop() SCC verifier limit in <0.24.0, then bpf_probe_read
 # helper-not-allowed in 0.24.0 itself).
+#
+# CHART PIN: this stack runs on Falco chart 8.0.5 (Falco 0.43.1),
+# not the latest 9.0.0. Chart 9.0.0 removed `driver.kind: ebpf`
+# entirely — only kmod and modern_ebpf remain. Since neither
+# works on Talos/6.18 today, we hold on the 8.x line until libs
+# ships the bpf_probe_read fix. See kustomization.yaml + the
+# journal entry referenced above for the full rationale.
 
 driver:
   kind: ebpf
