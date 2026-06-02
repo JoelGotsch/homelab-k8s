@@ -37,8 +37,14 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 | Path | Field(s) | Source |
 |---|---|---|
 | `kv/data/nextcloud/admin` | `username`, `password` | Operator-typed admin user; password generated random. Operator captures the password for first login (set `--print` on the seed helper). |
-| `kv/data/nextcloud/postgres` | `password` | CNPG-issued; copied from `nextcloud-pg-app` Secret. |
 | `kv/data/nextcloud/oidc` | `client_id`, `client_secret`, `issuer` | Provisioned via `provision-authentik-oidc-client.sh`. Ships dormant; `user_oidc` Nextcloud app activated post-bring-up via `occ`. |
+
+The Postgres credential is NOT seeded into OpenBao. CNPG creates the
+`nextcloud-pg-app` Secret directly in the namespace (with `host`/`username`/
+`password`/`dbname` keys, rotated on password changes), and the chart's
+`externalDatabase.existingSecret` consumes it as-is. Mirroring CNPG-issued
+creds through OpenBao is the anti-pattern previously fixed for forgejo and
+removed here on 2026-06-02.
 | `kv/data/cnpg/nextcloud/s3-creds` | `access_key_id`, `secret_access_key` | MinIO svc-account (CNPG WAL+base). Standard CNPG-app pattern. |
 
 **First-install seed:**
@@ -50,10 +56,7 @@ homelab-infra/scripts/seed-random-secret.sh \
     --print --format base64 --size 32 \
     kv/nextcloud/admin password
 
-# CNPG-issued postgres password.
-bao kv put kv/nextcloud/postgres \
-    password="$(kubectl -n nextcloud get secret nextcloud-pg-app \
-        -o jsonpath='{.data.password}' | base64 -d)"
+# (No CNPG-postgres seed: the chart reads nextcloud-pg-app directly.)
 
 # Authentik OIDC client — provisioned via API helper.
 AUTHENTIK_URL=https://auth.lab.<HOMELAB-DOMAIN> \
