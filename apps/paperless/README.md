@@ -38,6 +38,7 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 | `kv/data/paperless/admin` | `username`, `password`, `email` | Operator-typed admin user; password generated random + `--print` for first login. Operator rotates to OIDC-only post-Authentik. |
 | `kv/data/paperless/oidc` | `client_id`, `client_secret`, `issuer` | Provisioned via `provision-authentik-oidc-client.sh`. Ships dormant; operator activates via admin UI Settings → SocialAccountSettings post-Authentik client provisioning. |
 | `kv/data/paperless/cnpg-s3` | `access_key_id`, `secret_access_key` | MinIO svc-account scoped to `homelab-backups-cluster/cnpg/paperless/`. Standard CNPG-app pattern. |
+| `kv/data/paperless/redis` | `password` | Bitnami redis subchart AUTH password. The paperless-ngx chart unconditionally injects an `A_REDIS_PASSWORD` env from Secret `paperless-redis` key `redis-password` whenever `redis.enabled: true` — with no gate on `auth.enabled` (chart bug). Materialized via `existingSecret` pattern; seed before first Argo sync of this layer. |
 
 DB user/password: not in OpenBao. CNPG creates the
 `paperless-pg-app` Secret in-namespace at cluster bootstrap
@@ -72,6 +73,11 @@ homelab-infra/scripts/provision-minio-svcacct.sh \
     --resource-prefix \
         "arn:aws:s3:::homelab-backups-cluster/cnpg/paperless" \
     --label paperless-cnpg
+
+# Redis AUTH password — random 32-char.
+homelab-infra/scripts/seed-random-secret.sh \
+    --format base64 --size 32 \
+    kv/paperless/redis password
 ```
 
 ## Bring-up wiring
