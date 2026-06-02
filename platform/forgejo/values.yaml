@@ -129,6 +129,17 @@ gitea:
     # The client_id + client_secret live at kv/forgejo/oidc
     # (ESO-projected).
 
+    # Push-to-create: `git push <remote> <branch>` auto-creates
+    # the repo if it doesn't exist (under the pusher's user or
+    # org namespace). Operator workflow — local repos init'd
+    # without a prior round-trip to the Forgejo UI to click
+    # "New repository". Push-created repos default to PRIVATE
+    # so an accidental push doesn't publish an unintended repo.
+    repository:
+      ENABLE_PUSH_CREATE_USER: "true"
+      ENABLE_PUSH_CREATE_ORG: "true"
+      DEFAULT_PUSH_CREATE_PRIVATE: "true"
+
     # LFS storage on NFS-backed PVC mounted at /data/lfs.
     lfs:
       STORAGE_TYPE: local
