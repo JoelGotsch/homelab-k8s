@@ -1,29 +1,40 @@
-# Falco chart values. Per ADR 0021 D4 + D7.
+# Falco chart values. Per ADR 0021 D4 (amended 2026-06-02) + D7.
 #
 # Falco runs as a DaemonSet on every node (including CP and
 # workers — operator-side decision: even CP nodes need
 # runtime detection because the cluster-API server is the
 # crown-jewel target of T3 supply-chain scenarios).
 #
-# Driver: modern_ebpf (CO-RE). Legacy eBPF deprecated
-# upstream; kmod unavailable on Talos.
+# Driver: legacy ebpf (INTERIM — ADR 0021 D4 amendment 2026-06-02).
+# kmod unavailable on Talos (immutable node OS); modern_ebpf is
+# upstream-broken against kernel 6.18.24 in libs through 0.24.0,
+# so legacy ebpf is the only working path today. Revert to
+# modern_ebpf when upstream ships a libs version that loads on
+# 6.18+. See journal 2026-06-02-falco-driver-fallback.md for the
+# diagnosis chain (two separate libs bugs against this kernel:
+# bpf_loop() SCC verifier limit in <0.24.0, then bpf_probe_read
+# helper-not-allowed in 0.24.0 itself).
 
 driver:
-  kind: modern_ebpf
-  # CO-RE eBPF probes auto-load on supported kernels (5.8+).
-  # Talos current ships 6.x; fully supported.
+  kind: ebpf
+  # Legacy eBPF probe (CONFIG_BPF + libpcap-style attach). Falco
+  # downloads the prebuilt probe via falcoctl during init or
+  # falls back to building from source. Works on every kernel
+  # Falco supports.
   #
-  # NOTE 2026-06-02: kernel 6.18+ tightened the BPF verifier's
-  # SCC analysis for bpf_loop() callbacks, which blew the 1M
-  # verified-instruction limit in libs <0.24.0 (recvmmsg_x /
-  # sendmmsg_x programs). Symptom on Talos 6.18.24: scap_init
-  # crash with "An error occurred in an event source, forcing
-  # termination" immediately after "Opening 'syscall' source
-  # with modern BPF probe." Fixed by falcosecurity/libs#2893
-  # → libs 0.24.0 → Falco 0.44.0 (chart 9.0.0). Chart version
-  # pin lives in kustomization.yaml. Hold here on modern_ebpf
-  # per ADR 0021 D4 — legacy ebpf is the documented fallback
-  # if Talos rebases onto a kernel that breaks libs again.
+  # Trade-off (per ADR 0021 D4 amendment): legacy eBPF lacks
+  # the modern CO-RE relocation, which means slightly reduced
+  # visibility into newer syscalls (openat2, clone3, io_uring_*).
+  # For the homelab threat model — pre-prod, single-operator,
+  # detect-don't-block — this is acceptable. Modern_ebpf
+  # observability gap is meaningfully less than zero
+  # observability (Falco-down).
+  #
+  # Revert criterion (set as TODO in homelab-docs/TODO.md):
+  # when `kubectl logs <falco-pod> -c falco` no longer shows
+  # "program of this type cannot use helper bpf_probe_read#4"
+  # against the running Talos kernel, flip back to modern_ebpf
+  # + bump chart to whatever version ships the libs fix.
 
 # DaemonSet runs everywhere — including CP nodes.
 # Talos CP-tainted nodes need the toleration.
