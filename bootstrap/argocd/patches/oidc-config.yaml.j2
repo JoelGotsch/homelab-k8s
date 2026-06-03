@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: oidc-config.yaml.j2.
 # Authentik OIDC for Argo CD operator login.
 # Operator UN-COMMENTS the patches[] reference in the parent
 # kustomization.yaml when Authentik is up + the argocd OIDC
@@ -12,7 +11,7 @@ metadata:
 data:
   oidc.config: |
     name: Authentik
-    issuer: https://auth.lab.vyramo.com/application/o/argocd/
+    issuer: https://auth.{{ homelab_internal_subdomain }}.{{ homelab_domain }}/application/o/argocd/
     clientID: <AUTHENTIK_CLIENT_ID_ARGOCD>
     clientSecret: $oidc.authentik.clientSecret  # ESO-synced from OpenBao
     requestedScopes: ["openid", "profile", "email", "groups"]

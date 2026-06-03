@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: values.yaml.j2.
 # Authentik IdP helm values — server + worker + bundled Redis,
 # external CNPG Postgres, Tailscale-only HTTPRoute via Cilium
 # Gateway.
@@ -16,7 +15,7 @@ global:
     # Required by Authentik: canonical hostname for
     # links/emails/issuer URIs.
     - name: AUTHENTIK_HOST
-      value: "https://auth.lab.vyramo.com"
+      value: "https://auth.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
     # Disable Authentik's anonymous error reporting +
     # update telemetry — keep operator data in the cluster
     # per principle #2.

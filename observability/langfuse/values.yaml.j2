@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: values.yaml.j2.
 # Langfuse v3 Helm values. Per ADR 0028.
 #
 # Wires Langfuse against EXTERNAL ClickHouse + Postgres:
@@ -19,7 +18,7 @@
 langfuse:
   # Operator-fillable per the homelab convention.
   nextauth:
-    url: "https://langfuse.lab.vyramo.com"
+    url: "https://langfuse.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
     secret:
       secretKeyRef:
         name: langfuse-app-secrets

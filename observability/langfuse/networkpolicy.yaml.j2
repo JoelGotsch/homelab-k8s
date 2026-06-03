@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: networkpolicy.yaml.j2.
 # NetworkPolicies for the Langfuse layer.
 #
 # Three pod groups:
@@ -38,7 +37,7 @@ spec:
         - port: 3000
           protocol: TCP
     # Cilium Gateway HTTPRoute (operator-side ingress; lands
-    # when langfuse.lab.vyramo.com HTTPRoute is
+    # when langfuse.{{ homelab_internal_subdomain }}.{{ homelab_domain }} HTTPRoute is
     # wired). Permits any pod with the gateway-class label.
     # Operator-narrows when Gateway API ingress is concrete.
     - from:

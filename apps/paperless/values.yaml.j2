@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: values.yaml.j2.
 # Paperless-ngx helm values (gabe565/charts/paperless-ngx).
 # Per ADR 0024 (Tailscale-only — `personal` data) +
 # ADR 0025 D4 (cluster app for personal-documents share) +
@@ -121,7 +120,7 @@ env:
   PAPERLESS_TIME_ZONE: "Europe/Berlin"
 
   # The URL the app generates self-references against.
-  PAPERLESS_URL: "https://paperless.lab.vyramo.com"
+  PAPERLESS_URL: "https://paperless.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
 
   # CNPG-issued DB creds — Secret name comes from CNPG's
   # role-binding on the paperless-pg cluster.

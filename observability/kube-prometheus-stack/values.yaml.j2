@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: values.yaml.j2.
 # kube-prometheus-stack values. Per ADR 0021 D7 + D8.
 #
 # Major shape: Prometheus 30d retention on Longhorn-encrypted
@@ -138,7 +137,7 @@ grafana:
   #
   # The OIDC_CLIENT_ID / OIDC_CLIENT_SECRET env vars come from
   # the grafana-oidc Secret; grafana.ini references them via
-  # $__env{} substitution. OPERATOR FILLS vyramo.com.
+  # $__env{} substitution. OPERATOR FILLS {{ homelab_domain }}.
   envFromSecrets:
     - name: grafana-oidc
   grafana.ini:
@@ -148,9 +147,9 @@ grafana:
       client_id: ${OIDC_CLIENT_ID}
       client_secret: ${OIDC_CLIENT_SECRET}
       scopes: openid profile email
-      auth_url: https://auth.lab.vyramo.com/application/o/authorize/
-      token_url: https://auth.lab.vyramo.com/application/o/token/
-      api_url: https://auth.lab.vyramo.com/application/o/userinfo/
+      auth_url: https://auth.{{ homelab_internal_subdomain }}.{{ homelab_domain }}/application/o/authorize/
+      token_url: https://auth.{{ homelab_internal_subdomain }}.{{ homelab_domain }}/application/o/token/
+      api_url: https://auth.{{ homelab_internal_subdomain }}.{{ homelab_domain }}/application/o/userinfo/
       allow_sign_up: true
       role_attribute_path: contains(groups[*], 'grafana-admin') && 'Admin' || 'Viewer'
 

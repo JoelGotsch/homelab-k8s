@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: configmap.yaml.j2.
 # ntfy server config (server.yml format).
 # Upstream docs: https://docs.ntfy.sh/config/
 #
@@ -21,7 +20,7 @@ data:
     # OPERATOR FILLS at first commit (matches the operator's
     # homelab domain; the server isn't actually public-facing
     # until phase-2 Cloudflare Tunnel cuts over).
-    base-url: "https://ntfy.vyramo.com"
+    base-url: "https://ntfy.{{ homelab_domain }}"
 
     # Persistence for the message DB + attachment cache.
     cache-file: /var/cache/ntfy/cache.db

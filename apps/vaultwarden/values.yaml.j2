@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: values.yaml.j2.
 # Vaultwarden helm values (guerzon/vaultwarden chart).
 # Per ADR 0024 D1 + audit follow-up:
 # - 1.33.0+ image pin (CVE-2025-24364 fix; admin-panel RCE)
@@ -104,12 +103,12 @@ ingress:
   enabled: false
 
 # Vaultwarden environment. Canonical URL = how it's actually reached today:
-# Tailscale-only via the Cilium gateway at vaultwarden.lab.vyramo.com.
-# (Was vaultwarden.vyramo.com — the future Cloudflare-fronted public URL, which
+# Tailscale-only via the Cilium gateway at vaultwarden.{{ homelab_internal_subdomain }}.{{ homelab_domain }}.
+# (Was vaultwarden.{{ homelab_domain }} — the future Cloudflare-fronted public URL, which
 # isn't reachable yet; vaultwarden derives its OIDC redirect_uri + cookies from
 # `domain`, so it must match the URL in use or SSO login breaks. Flip back to
 # the public host when the Cloudflare Tunnel layer lands.) Changed 2026-05-29.
-domain: "https://vaultwarden.lab.vyramo.com"
+domain: "https://vaultwarden.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
 
 signupsAllowed: false   # ADR 0024 D7 — closed-registration; operator
                         # invites family members
@@ -136,7 +135,7 @@ disableAdminToken: false  # explicit; admin panel exists, gated
 smtp:
   existingSecret: vaultwarden-smtp
   fromName: "Vaultwarden — homelab"
-  fromAddress: "vaultwarden@vyramo.com"
+  fromAddress: "vaultwarden@{{ homelab_domain }}"
   security: "starttls"
   port: 587
 

@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: configmap.yaml.j2.
 # Non-secret PR-Agent configuration. Secrets (Forgejo PAT,
 # webhook secret, gateway virtual-key) come via ExternalSecret.
 #
@@ -14,9 +13,9 @@ data:
   # Provider selection — Forgejo speaks the Gitea API.
   CONFIG__GIT_PROVIDER: "gitea"
 
-  # Forgejo base URL. OPERATOR FILLS vyramo.com.
+  # Forgejo base URL. OPERATOR FILLS {{ homelab_domain }}.
   # PR-Agent's Gitea provider uses the Forgejo HTTP API directly.
-  GITEA__URL: "https://forgejo.lab.vyramo.com"
+  GITEA__URL: "https://forgejo.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
 
   # LLM backend — point LiteLLM client at the in-cluster gateway.
   # Per ADR 0026 D6 the gateway issues per-app virtual keys; the

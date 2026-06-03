@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: kustomization.yaml.j2.
 # Paperless-ngx — document archive (scanned receipts,
 # statements, IDs, etc.). Per `personal-documents` share in
 # storage.md.
@@ -8,7 +7,7 @@
 # (media — originals + thumbnails + archive variants) on
 # csi-rclone-NFS-crypt per ADR 0030 §D2. Authentik OIDC for
 # operator (and family members granted document access);
-# Tailscale-only HTTPRoute on `paperless.lab.vyramo.com`
+# Tailscale-only HTTPRoute on `paperless.{{ homelab_internal_subdomain }}.{{ homelab_domain }}`
 # per ADR 0024 (Personal data — no Cloudflare TLS termination).
 #
 # Helm chart: gabe565/charts/paperless-ngx (OCI). Bundled

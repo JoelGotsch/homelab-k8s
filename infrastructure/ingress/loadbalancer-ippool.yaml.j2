@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: loadbalancer-ippool.yaml.j2.
 # Cilium LB-IPAM pool — cluster Gateway VIP allocation.
 #
 # Cilium allocates IPs from this pool to LoadBalancer Services
@@ -15,7 +14,7 @@
 # auth/grafana/argocd/etc. all resolve to whichever IP this
 # Service ends up with (the first in the pool, typically).
 #
-# Operator-facing DNS: *.lab.vyramo.com → 10.10.30.50 (or
+# Operator-facing DNS: *.{{ homelab_internal_subdomain }}.{{ homelab_domain }} → 10.10.30.50 (or
 # whichever IP gets assigned — operator sets via flint3
 # dnsmasq local-data OR Cloudflare A record). Browser hits
 # that IP → Cilium L2-announces it via ARP on the servers

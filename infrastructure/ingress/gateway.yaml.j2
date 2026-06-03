@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: gateway.yaml.j2.
 # Default Gateway — apps' HTTPRoutes attach to this.
 # One Gateway listens for HTTPS on the cluster ingress IP;
 # cert-manager-issued wildcard cert covers *.lab.<homelab-domain>.
@@ -19,7 +18,7 @@ spec:
     - name: https
       port: 443
       protocol: HTTPS
-      hostname: "*.lab.vyramo.com"
+      hostname: "*.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
       tls:
         mode: Terminate
         certificateRefs:
@@ -35,7 +34,7 @@ spec:
     - name: http
       port: 80
       protocol: HTTP
-      hostname: "*.lab.vyramo.com"
+      hostname: "*.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
       allowedRoutes:
         namespaces:
           from: All
@@ -65,10 +64,10 @@ spec:
   issuerRef:
     name: letsencrypt-production
     kind: ClusterIssuer
-  commonName: "lab.vyramo.com"
+  commonName: "{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
   dnsNames:
-    - "lab.vyramo.com"
-    - "*.lab.vyramo.com"
+    - "{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
+    - "*.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
   # LE certs are 90-day; renew at 30 days remaining (default cert-
   # manager behavior, but pin explicitly so it's not opaque).
   duration: 2160h     # 90 days

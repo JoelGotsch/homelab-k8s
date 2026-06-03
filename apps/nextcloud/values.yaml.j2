@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: values.yaml.j2.
 # Nextcloud helm values (nextcloud/nextcloud official chart).
 # Per ADR 0024 D5 + ADR 0030 (csi-rclone hot/cold split) +
 # identity.md.
@@ -126,7 +125,7 @@ nextcloud:
   # (2026-05-29). readOnlyRootFilesystem stays false (image writes rootfs).
   securityContext:
     readOnlyRootFilesystem: false
-  host: "nextcloud.lab.vyramo.com"
+  host: "nextcloud.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
   existingSecret:
     enabled: true
     secretName: nextcloud-admin
@@ -136,7 +135,7 @@ nextcloud:
   # Trusted reverse-proxy + domain config so URLs render
   # correctly behind Cilium Gateway.
   trustedDomains:
-    - "nextcloud.lab.vyramo.com"
+    - "nextcloud.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
 
   # Rendered config injected via the chart's configs section.
   # Operator extends with per-deployment options (default
