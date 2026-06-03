@@ -1,0 +1,45 @@
+# ApplicationSet for observability/*. Sync wave 5 — after
+# platform but parallel-able with most apps.
+
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: observability
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: {{ homelab_k8s_repo_url }}
+        revision: main
+        directories:
+          - path: observability/*
+  template:
+    metadata:
+      name: 'obs-{{ '{{' }}.path.basename{{ '}}' }}'
+      labels:
+        layer: observability
+        component: '{{ '{{' }}.path.basename{{ '}}' }}'
+      annotations:
+        argocd.argoproj.io/sync-wave: '5'
+    spec:
+      project: default
+      source:
+        repoURL: {{ homelab_k8s_repo_url }}
+        targetRevision: main
+        path: '{{ '{{' }}.path.path{{ '}}' }}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: 'observability-{{ '{{' }}.path.basename{{ '}}' }}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        retry:
+          limit: 5
+          backoff: {duration: 30s, factor: 2, maxDuration: 5m}
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - ApplyOutOfSyncOnly=true

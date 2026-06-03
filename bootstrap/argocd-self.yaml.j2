@@ -1,0 +1,66 @@
+# Argo CD self-management Application — per ADR 0027.
+#
+# Once the root-app syncs, this Application takes ownership of
+# Argo CD's own deployment + configuration. The kustomize layer
+# at bootstrap/argocd/ pulls upstream Argo CD manifests at the
+# pinned version + applies operator-customised patches.
+#
+# ServerSideApply=true is REQUIRED when Argo CD manages itself:
+# without it, field-ownership conflicts between manual `kubectl
+# apply` (bootstrap-time, by Ansible) and Argo's reconciliation
+# break the upgrade path. The root-app
+# (homelab-infra/argocd/root-app.yaml.j2) already sets
+# ServerSideApply globally, so this nested Application inherits
+# it.
+#
+# Routine upgrades: bump the `<ARGOCD_VERSION>` placeholder in
+# `bootstrap/argocd/kustomization.yaml`, commit, Argo reconciles
+# and rolls itself. No Ansible re-run needed for routine version
+# bumps — Ansible's role becomes bootstrap-only (initial install
+# of the operator-environment-specific patches via the homelab-
+# infra side; this side then takes over).
+#
+# Recovery: re-run the bootstrap Ansible playbook to install
+# Argo CD again (kustomize apply); root-app syncs; Argo
+# reconciles itself from this Application. No separate recovery
+# runbook needed.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-self
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    # Sync wave -100: before everything else under root-app, so
+    # Argo CD updates itself before reconciling its dependents.
+    argocd.argoproj.io/sync-wave: "-100"
+spec:
+  project: default
+  source:
+    # repoURL + targetRevision INHERITED from the root-app
+    # (Argo treats nested Applications' source.repoURL as a
+    # required field, but we want it to point at the same repo
+    # as root-app at the same revision). Operator FILLS at first
+    # commit; matches homelab-infra/argocd/root-app.yaml.j2's
+    # `homelab_k8s_repo_url` and `homelab_k8s_repo_revision`.
+    repoURL: {{ homelab_k8s_repo_url }}
+    targetRevision: main
+    path: bootstrap/argocd
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: false       # do NOT prune Argo CD itself; selfHeal handles drift
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+    syncOptions:
+      - ServerSideApply=true   # MUST be set when Argo manages itself
+      - RespectIgnoreDifferences=true

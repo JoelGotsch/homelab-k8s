@@ -1,0 +1,47 @@
+# ApplicationSet for apps/*. Sync wave 10 — after everything
+# else. App deployment manifests live in each subdirectory;
+# operator's per-app initial-setup runbooks (under
+# homelab-docs/03-runbooks/) populate them.
+
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: {{ homelab_k8s_repo_url }}
+        revision: main
+        directories:
+          - path: apps/*
+  template:
+    metadata:
+      name: 'app-{{ '{{' }}.path.basename{{ '}}' }}'
+      labels:
+        layer: apps
+        component: '{{ '{{' }}.path.basename{{ '}}' }}'
+      annotations:
+        argocd.argoproj.io/sync-wave: '10'
+    spec:
+      project: default
+      source:
+        repoURL: {{ homelab_k8s_repo_url }}
+        targetRevision: main
+        path: '{{ '{{' }}.path.path{{ '}}' }}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{ '{{' }}.path.basename{{ '}}' }}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        retry:
+          limit: 5
+          backoff: {duration: 30s, factor: 2, maxDuration: 5m}
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - ApplyOutOfSyncOnly=true

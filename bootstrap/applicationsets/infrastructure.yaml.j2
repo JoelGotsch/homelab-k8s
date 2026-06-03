@@ -1,0 +1,60 @@
+# ApplicationSet for infrastructure/* — one Argo CD Application
+# per subdirectory. Sync wave -10 ensures these come up before
+# platform / observability / apps.
+#
+# Per the wave order documented in cluster/argocd-bootstrap.md
+# (homelab-docs).
+
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: infrastructure
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: {{ homelab_k8s_repo_url }}           # filled at first apply (operator's homelab-k8s URL)
+        revision: main
+        directories:
+          - path: infrastructure/*
+          - path: infrastructure/sops
+            exclude: true             # SOPS handled via external-secrets, not as a separate app
+  template:
+    metadata:
+      name: 'infra-{{ '{{' }}.path.basename{{ '}}' }}'
+      labels:
+        layer: infrastructure
+        component: '{{ '{{' }}.path.basename{{ '}}' }}'
+      annotations:
+        # Sync wave per component; Cilium first, OpenBao early
+        # since secrets-engine is needed by cert-manager etc.
+        argocd.argoproj.io/sync-wave: '-10'
+    spec:
+      project: default
+      source:
+        repoURL: {{ homelab_k8s_repo_url }}
+        targetRevision: main
+        path: '{{ '{{' }}.path.path{{ '}}' }}'
+      destination:
+        server: https://kubernetes.default.svc
+        # Most infra components have their own namespace already
+        # created in bootstrap-namespaces.yaml; ApplicationSet
+        # falls back to creating a namespace named after the dir
+        # for ones not pre-created (e.g., 'cilium' = kube-system).
+        namespace: '{{ '{{' }}.path.basename{{ '}}' }}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        retry:
+          limit: 5
+          backoff:
+            duration: 30s
+            factor: 2
+            maxDuration: 5m
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - ApplyOutOfSyncOnly=true
