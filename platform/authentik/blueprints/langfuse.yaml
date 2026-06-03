@@ -1,4 +1,4 @@
-# RENDERED FILE — DO NOT EDIT. Source: langfuse.yaml.j2.
+# RENDERED FILE — DO NOT EDIT. Source: _blueprint.yaml.j2 (app: langfuse). Re-render via homelab-infra/ansible/playbooks/00-render-static.yml.
 # Authentik blueprint — Langfuse OIDC client.
 #
 # Provisions an OAuth2Provider + Application so Langfuse can

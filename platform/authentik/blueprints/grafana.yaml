@@ -1,4 +1,4 @@
-# RENDERED FILE — DO NOT EDIT. Source: grafana.yaml.j2.
+# RENDERED FILE — DO NOT EDIT. Source: _blueprint.yaml.j2 (app: grafana). Re-render via homelab-infra/ansible/playbooks/00-render-static.yml.
 # Authentik blueprint — Grafana OIDC client.
 #
 # Provisions an OAuth2Provider + Application so Grafana can

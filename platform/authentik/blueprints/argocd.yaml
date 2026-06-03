@@ -1,4 +1,4 @@
-# RENDERED FILE — DO NOT EDIT. Source: argocd.yaml.j2.
+# RENDERED FILE — DO NOT EDIT. Source: _blueprint.yaml.j2 (app: argocd). Re-render via homelab-infra/ansible/playbooks/00-render-static.yml.
 # Authentik blueprint — Argo CD OIDC client.
 #
 # Provisions an OAuth2Provider + Application so Argo CD can

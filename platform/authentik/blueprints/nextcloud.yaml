@@ -1,4 +1,4 @@
-# RENDERED FILE — DO NOT EDIT. Source: nextcloud.yaml.j2.
+# RENDERED FILE — DO NOT EDIT. Source: _blueprint.yaml.j2 (app: nextcloud). Re-render via homelab-infra/ansible/playbooks/00-render-static.yml.
 # Authentik blueprint — Nextcloud OIDC client.
 #
 # Provisions an OAuth2Provider + Application so Nextcloud can

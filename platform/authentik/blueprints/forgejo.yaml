@@ -1,4 +1,4 @@
-# RENDERED FILE — DO NOT EDIT. Source: forgejo.yaml.j2.
+# RENDERED FILE — DO NOT EDIT. Source: _blueprint.yaml.j2 (app: forgejo). Re-render via homelab-infra/ansible/playbooks/00-render-static.yml.
 # Authentik blueprint — Forgejo OIDC client.
 #
 # Provisions an OAuth2Provider + Application so Forgejo can

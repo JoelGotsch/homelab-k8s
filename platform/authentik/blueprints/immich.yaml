@@ -1,4 +1,4 @@
-# RENDERED FILE — DO NOT EDIT. Source: immich.yaml.j2.
+# RENDERED FILE — DO NOT EDIT. Source: _blueprint.yaml.j2 (app: immich). Re-render via homelab-infra/ansible/playbooks/00-render-static.yml.
 # Authentik blueprint — Immich OIDC client.
 #
 # Provisions an OAuth2Provider + Application so Immich can

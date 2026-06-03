@@ -30,8 +30,17 @@ set -euo pipefail
 
 DOMAIN_LITERAL="vyramo.com"
 
-# Paths allowed to contain the literal (README examples).
-ALLOWLIST_REGEX='^README\.md$|^.*/README\.md$'
+# Paths allowed to contain the literal (README examples + outputs
+# of parametric renders that don't follow the per-file .yaml.j2
+# sibling convention).
+#
+# Parametric exemptions:
+#   platform/authentik/blueprints/*.yaml — rendered by
+#     homelab-infra/ansible/playbooks/00-render-static.yml from
+#     ONE template (blueprints/_blueprint.yaml.j2) + an inventory
+#     file (platform/authentik/oidc-apps.yaml). No per-app .yaml.j2
+#     sibling exists by design; see Pick 5 in the workspace audit.
+ALLOWLIST_REGEX='^README\.md$|^.*/README\.md$|^platform/authentik/blueprints/[^/]+\.yaml$'
 
 err()  { echo "ERROR: $*" >&2; }
 
