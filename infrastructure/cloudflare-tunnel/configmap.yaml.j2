@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: configmap.yaml.j2. Re-render with: cd ~/Desktop/joel/homelab/homelab-infra && ansible-playbook ansible/playbooks/00-render-static.yml
 # cloudflared local-config. Per ADR 0024 D1 — Cloudflare
 # Tunnel for the qualifying services (E2EE-encrypted or
 # `internal-media`-classified content where Cloudflare TLS
@@ -15,7 +14,7 @@
 #                     (matches the UUID in the
 #                     credentials JSON at
 #                     kv/cloudflare/tunnel/credentials_json)
-#   vyramo.com  the public domain whose subdomains
+#   {{ homelab_domain }}  the public domain whose subdomains
 #                     will route through the tunnel
 #
 # Hostnames here are PUBLIC names (no `.lab` infix). Each
@@ -24,7 +23,7 @@
 # When adding a new service to the tunnel:
 #   1. Append an `ingress:` rule below
 #   2. Add a CNAME in Cloudflare DNS:
-#      <subdomain>.vyramo.com →
+#      <subdomain>.{{ homelab_domain }} →
 #      <CF_TUNNEL_UUID>.cfargotunnel.com
 #   3. Update the consuming app's NetworkPolicy to allow
 #      ingress from the cloudflare-tunnel namespace
@@ -54,21 +53,21 @@ data:
       # E2EE — operator's vault is zero-knowledge encrypted
       # client-side per ADR 0024 D1 + identity.md. Cloudflare
       # sees only ciphertext for vault contents.
-      - hostname: vaultwarden.vyramo.com
+      - hostname: vaultwarden.{{ homelab_domain }}
         service: http://vaultwarden.vaultwarden.svc.cluster.local:80
 
       # ─── Jellyfin ─────────────────────────────────────
       # `internal-media` classification — non-personal
       # publishable assets. Cloudflare seeing media in
       # transit is acceptable per ADR 0024 D1.
-      - hostname: jellyfin.vyramo.com
+      - hostname: jellyfin.{{ homelab_domain }}
         service: http://jellyfin.jellyfin.svc.cluster.local:8096
 
       # ─── ntfy-e2ee-relay (when ready) ─────────────────
       # AES-256-GCM payload encryption — Cloudflare sees
       # only ciphertext. Uncomment when the relay layer is
       # bring-up-ready per ADR 0024 D1.
-      # - hostname: ntfy.vyramo.com
+      # - hostname: ntfy.{{ homelab_domain }}
       #   service: http://ntfy-e2ee-relay.ntfy-e2ee-relay.svc.cluster.local:80
 
       # ─── immich-public-proxy ──────────────────────────
@@ -76,7 +75,7 @@ data:
       # Per ADR 0024 D1; the proxy holds no creds and walks
       # only /share/* — Immich's admin UI / API stays
       # Tailscale-only. See apps/immich-public-proxy/.
-      - hostname: photos.vyramo.com
+      - hostname: photos.{{ homelab_domain }}
         service: http://immich-public-proxy.immich-public-proxy.svc.cluster.local:3000
 
       # ─── Catch-all (required) ─────────────────────────
