@@ -1,42 +1,83 @@
 # Falco + Falcosidekick — runtime HIDS per ADR 0021 D4 + D7.
-# Falco DaemonSet on all nodes (CO-RE eBPF probe; kmod
-# unavailable on Talos), Falcosidekick fans events to the
-# ntfy-e2ee-relay (per the audit TODO closure) + Loki +
-# Alertmanager when those layers land.
 #
-# Per ADR 0013 (Talos): kmod-based Falco probe is unavailable
-# on immutable node OS. Modern eBPF (CO-RE) is the only
-# option; legacy eBPF deprecated upstream.
-#
-# Rule source: upstream falcosecurity/rules pinned by chart
-# version + local overlay under rules/.
+# ╔══════════════════════════════════════════════════════════╗
+# ║  SUSPENDED 2026-06-03                                    ║
+# ║                                                          ║
+# ║  No Falco release on the shelf today loads on Talos      ║
+# ║  kernel 6.18.24-talos. Both paths exhausted:             ║
+# ║                                                          ║
+# ║  - modern_ebpf: libbpf v1.3.0 (pinned by libs 0.25.2,    ║
+# ║    shipped in Falco 0.44.0) emits raw bpf_probe_read#4   ║
+# ║    during CO-RE relocation; kernel 6.18+ verifier        ║
+# ║    rejects helper #4 for tracepoint program types.       ║
+# ║  - legacy ebpf: prebuilt 404 on download.falco.org for   ║
+# ║    this kernel; compile-fallback fails on Talos (no      ║
+# ║    /lib/modules headers, /sys/kernel/debug mount         ║
+# ║    denied).                                              ║
+# ║                                                          ║
+# ║  See homelab-docs/05-investigations/2026-06-02-falco-    ║
+# ║  on-talos-6-18.md (problem statement),                   ║
+# ║  2026-06-02-falco-verifier-response.md (independent      ║
+# ║  triple-reproduction), and -upstream-issue-draft.md +    ║
+# ║  -upstream-pr-draft.md (ready-to-file upstream fix).     ║
+# ║                                                          ║
+# ║  WAKEUP CRITERIA — resume when ANY of these flip true:   ║
+# ║                                                          ║
+# ║  1. falcosecurity/libs bumps libbpf pin to v1.4+ in      ║
+# ║     cmake/modules/libbpf.cmake (or accepts our PR).      ║
+# ║  2. A Falco release ships with libs ≥ post-libbpf-bump   ║
+# ║     AND a fresh single-pod POC of that image with        ║
+# ║     driver.kind=modern_ebpf reaches "Engine loaded"      ║
+# ║     without scap_init errors on the running cluster      ║
+# ║     kernel.                                              ║
+# ║  3. falcosecurity/kernel-crawler starts publishing       ║
+# ║     prebuilt drivers for `talos_<kernel>_<rev>` again    ║
+# ║     (verify via https://falcosecurity.github.io/         ║
+# ║     kernel-crawler/list/<driver-ver>/x86_64.txt — talos  ║
+# ║     key not present as of 2026-06-02).                   ║
+# ║  4. Operator decides to switch to Tetragon per ADR 0021  ║
+# ║     D4's named alternative (would replace this layer     ║
+# ║     entirely; ADR amendment needed).                     ║
+# ║                                                          ║
+# ║  RESUME PROCEDURE:                                       ║
+# ║                                                          ║
+# ║  - Uncomment the helmCharts block + dependent resources  ║
+# ║    below.                                                ║
+# ║  - Bump chart `version:` to whatever ships the fix.      ║
+# ║  - Flip values.yaml `driver.kind` back to `modern_ebpf`. ║
+# ║  - Remove the ADR 0021 D4 amendment in homelab-docs.     ║
+# ║  - kubectl delete the suspended-state marker ConfigMap   ║
+# ║    if you keep one.                                      ║
+# ║  - Watch the DS roll to 2/2 on all nodes; verify         ║
+# ║    `falco_events_total` metric advances in Prometheus    ║
+# ║    within 5 min.                                         ║
+# ╚══════════════════════════════════════════════════════════╝
 
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-helmCharts:
-  # Falco — DaemonSet + Falcosidekick subchart enabled inline.
-  - name: falco
-    repo: https://falcosecurity.github.io/charts
-    version: "8.0.5"  # OPERATOR PINS via Renovate.
-    # Rolled back 9.0.0 (Falco 0.44.0) → 8.0.5 (Falco 0.43.1) on
-    # 2026-06-02 because chart 9.0.0 dropped the legacy `ebpf`
-    # driver kind entirely. modern_ebpf is upstream-broken against
-    # Talos kernel 6.18.24 in libs ≤0.24.0 with two distinct bugs
-    # (bpf_loop SCC verifier limit in <0.24.0; bpf_probe_read
-    # helper-not-allowed in 0.24.0). Chart 8.x is the latest line
-    # that still exposes `driver.kind: ebpf` (legacy CO-RE-less
-    # probe), the only working path on this kernel today.
-    # See homelab-docs/99-journal/2026-06-02-falco-driver-fallback.md
-    # for the diagnosis chain and revert criterion.
-    # Upstream tracking: falcosecurity/falco#3813, libs#2893.
-    releaseName: falco
-    namespace: monitoring
-    valuesFile: values.yaml
-    includeCRDs: false  # falco chart ships no CRDs
+# --- SUSPENDED block (intentionally commented) ---
+#
+# helmCharts:
+#   # Falco — DaemonSet + Falcosidekick subchart enabled inline.
+#   - name: falco
+#     repo: https://falcosecurity.github.io/charts
+#     version: "8.0.5"  # OPERATOR PINS via Renovate.
+#     # See banner above for why 8.0.5 + history. When resuming,
+#     # bump to whatever release ships the libbpf v1.4+ fix.
+#     releaseName: falco
+#     namespace: monitoring
+#     valuesFile: values.yaml
+#     includeCRDs: false  # falco chart ships no CRDs
 
 resources:
+  # namespace.yaml stays — the `monitoring` ns is shared with
+  # Prometheus / Alloy / etc., not owned by this layer alone.
   - namespace.yaml
-  - networkpolicy.yaml
-  - servicemonitor.yaml
-  - rules-configmap.yaml
+  # The three resources below all target the falco DS / its
+  # pods. With the chart suspended they have no targets, so
+  # they get pruned. Re-enable in lockstep with the helmCharts
+  # block above when resuming.
+  # - networkpolicy.yaml
+  # - servicemonitor.yaml
+  # - rules-configmap.yaml
