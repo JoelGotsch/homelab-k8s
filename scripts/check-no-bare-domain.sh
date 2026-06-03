@@ -38,8 +38,9 @@ DOMAIN_LITERAL="vyramo.com"
 #   platform/authentik/blueprints/*.yaml — rendered by
 #     homelab-infra/ansible/playbooks/00-render-static.yml from
 #     ONE template (blueprints/_blueprint.yaml.j2) + an inventory
-#     file (platform/authentik/oidc-apps.yaml). No per-app .yaml.j2
-#     sibling exists by design; see Pick 5 in the workspace audit.
+#     file (homelab-infra/ansible/inventory/oidc-apps.yml). No
+#     per-app .yaml.j2 sibling exists by design; see Pick 5 in the
+#     workspace audit (and Pick 11 for the inventory-path move).
 ALLOWLIST_REGEX='^README\.md$|^.*/README\.md$|^platform/authentik/blueprints/[^/]+\.yaml$'
 
 err()  { echo "ERROR: $*" >&2; }
