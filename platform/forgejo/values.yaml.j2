@@ -23,6 +23,18 @@ image:
   rootless: true
   pullPolicy: IfNotPresent
 
+# Pod-level env injected into all 4 containers (3 init + main).
+# Holds the GITEA_ADMIN_EMAIL placeholder consumed by the
+# init Secret's `--email "${GITEA_ADMIN_EMAIL}"` array element
+# at configure-gitea startup. See gitea.admin.email below.
+deployment:
+  env:
+    - name: GITEA_ADMIN_EMAIL
+      valueFrom:
+        secretKeyRef:
+          name: forgejo-admin
+          key: email
+
 # Forgejo's app data (config, repos, runtime state) on
 # Longhorn — same shape as the rest of the cluster's stateful
 # workloads. Git data is cluster-replicated; NAS is for the
@@ -73,7 +85,19 @@ service:
 gitea:
   admin:
     existingSecret: forgejo-admin
-    email: "{{ operator_email }}"
+    # Email is NOT a real value — it's an env-var placeholder.
+    # The chart inlines `gitea.admin.email` verbatim into the
+    # init-Secret bash array (`--email "<value>"`), which means
+    # bash expands ${GITEA_ADMIN_EMAIL} at init-container start
+    # from the env var projected via deployment.env below.
+    # Real value lives in OpenBao kv/forgejo/admin#email +
+    # reaches the pod via the forgejo-admin Secret (templated by
+    # the ExternalSecret in externalsecret.yaml). This keeps the
+    # PII out of the rendered+committed values.yaml.
+    # Idempotent: the init script only consumes --email when
+    # creating the admin user on first install; subsequent
+    # syncs hit the "user exists, skip" branch.
+    email: "${GITEA_ADMIN_EMAIL}"
     username: forgejo-admin
 
   # External Postgres via CNPG — disable bundled chart deps.

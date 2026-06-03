@@ -39,7 +39,7 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 
 | Path | Field(s) | Source |
 |---|---|---|
-| `kv/data/forgejo/admin` | `password` | Random — initial admin account password (operator uses to log in once + create OIDC, then switches to OIDC-only). |
+| `kv/data/forgejo/admin` | `password`, `email` | Random password (operator uses to log in once + create OIDC, then switches to OIDC-only). Email = operator's contact address — projected into the `forgejo-admin` Secret via ESO template, then env-substituted into the chart's admin-create command at init-container start. Keeps operator PII out of git-committed values.yaml. |
 | `kv/data/forgejo/security-keys` | `secret_key`, `internal_token`, `jwt_secret`, `lfs_jwt_secret` | All random. Loss = forced re-login + LFS re-upload. |
 | `kv/data/forgejo/postgres` | `password` | CNPG-issued; operator copies from the auto-created `forgejo-pg-app` Secret. |
 | `kv/data/forgejo/oidc` | `client_id`, `client_secret` | From Authentik — operator creates the `forgejo` OIDC client in Authentik admin UI, then copies values. |
@@ -53,6 +53,14 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 homelab-infra/scripts/seed-random-secret.sh \
     --print --format base64 --size 32 \
     kv/forgejo/admin password
+
+# Admin email — operator's contact address. Patched onto the
+# existing kv/forgejo/admin entry; do NOT use `bao kv put` (it
+# would clobber the random password). Use `bao kv patch` so
+# both fields coexist.
+read -rs -p "Operator email: " OPERATOR_EMAIL && echo
+bao kv patch kv/forgejo/admin email="$OPERATOR_EMAIL"
+unset OPERATOR_EMAIL
 
 # Security keys — all 4 random.
 for f in secret_key internal_token jwt_secret lfs_jwt_secret; do
