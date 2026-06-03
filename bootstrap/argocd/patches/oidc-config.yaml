@@ -1,4 +1,8 @@
-# RENDERED FILE — DO NOT EDIT. Source: oidc-config.yaml.j2.
+# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
+# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
+#   ansible-playbook ansible/playbooks/00-render-static.yml
+# (from the homelab-infra repo root).
+# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # Authentik OIDC for Argo CD operator login.
 # Operator UN-COMMENTS the patches[] reference in the parent
 # kustomization.yaml when Authentik is up + the argocd OIDC

@@ -1,4 +1,8 @@
-# RENDERED FILE — DO NOT EDIT. Source: values.yaml.j2.
+# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
+# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
+#   ansible-playbook ansible/playbooks/00-render-static.yml
+# (from the homelab-infra repo root).
+# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # kube-prometheus-stack values. Per ADR 0021 D7 + D8.
 #
 # Major shape: Prometheus 30d retention on Longhorn-encrypted

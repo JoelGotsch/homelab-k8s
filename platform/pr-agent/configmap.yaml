@@ -1,4 +1,8 @@
-# RENDERED FILE — DO NOT EDIT. Source: configmap.yaml.j2.
+# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
+# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
+#   ansible-playbook ansible/playbooks/00-render-static.yml
+# (from the homelab-infra repo root).
+# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # Non-secret PR-Agent configuration. Secrets (Forgejo PAT,
 # webhook secret, gateway virtual-key) come via ExternalSecret.
 #

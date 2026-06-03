@@ -1,4 +1,8 @@
-# RENDERED FILE — DO NOT EDIT. Source: _blueprint.yaml.j2 (app: grafana). Re-render via homelab-infra/ansible/playbooks/00-render-static.yml.
+# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
+# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
+#   ansible-playbook ansible/playbooks/00-render-static.yml
+# (from the homelab-infra repo root).
+# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # Authentik blueprint — Grafana OIDC client.
 #
 # Provisions an OAuth2Provider + Application so Grafana can

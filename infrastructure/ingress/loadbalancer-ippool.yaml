@@ -1,4 +1,8 @@
-# RENDERED FILE — DO NOT EDIT. Source: loadbalancer-ippool.yaml.j2.
+# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
+# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
+#   ansible-playbook ansible/playbooks/00-render-static.yml
+# (from the homelab-infra repo root).
+# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # Cilium LB-IPAM pool — cluster Gateway VIP allocation.
 #
 # Cilium allocates IPs from this pool to LoadBalancer Services
