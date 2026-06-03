@@ -1,8 +1,7 @@
-# RENDERED FILE — DO NOT EDIT. Source: httproute.yaml.j2. Re-render with: cd ~/Desktop/joel/homelab/homelab-infra && ansible-playbook ansible/playbooks/00-render-static.yml
 # Woodpecker UI exposed via Cilium Gateway API HTTPRoute.
 # Tailscale-only, same shape as Forgejo's HTTPRoute.
 #
-# OPERATOR FILLS vyramo.com.
+# OPERATOR FILLS {{ homelab_domain }}.
 
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -15,7 +14,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "woodpecker.lab.vyramo.com"
+    - "woodpecker.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
   rules:
     - matches:
         - path:

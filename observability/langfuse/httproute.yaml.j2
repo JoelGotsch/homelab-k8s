@@ -1,13 +1,12 @@
-# RENDERED FILE — DO NOT EDIT. Source: httproute.yaml.j2. Re-render with: cd ~/Desktop/joel/homelab/homelab-infra && ansible-playbook ansible/playbooks/00-render-static.yml
 # Langfuse HTTPRoute via the Cilium Gateway.
 #
 # Phase 1 (today): Tailscale-only on
-#   langfuse.lab.vyramo.com
+#   langfuse.{{ homelab_internal_subdomain }}.{{ homelab_domain }}
 # Operator-only access for tracing the homelab's own LLM
 # pipeline; not exposed publicly (Langfuse holds raw prompts +
 # completions classified `internal`/`personal` per ADR 0003).
 #
-# Phase 2: stays Tailscale-only. There is no `langfuse.vyramo.com`
+# Phase 2: stays Tailscale-only. There is no `langfuse.{{ homelab_domain }}`
 # public route by design (ADR 0028 D7 — telemetry data does not
 # leave the trust boundary).
 
@@ -22,7 +21,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "langfuse.lab.vyramo.com"
+    - "langfuse.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
   rules:
     - matches:
         - path:

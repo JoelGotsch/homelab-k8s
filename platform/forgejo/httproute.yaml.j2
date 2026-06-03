@@ -1,10 +1,9 @@
-# RENDERED FILE — DO NOT EDIT. Source: httproute.yaml.j2. Re-render with: cd ~/Desktop/joel/homelab/homelab-infra && ansible-playbook ansible/playbooks/00-render-static.yml
 # Forgejo UI exposed via Cilium Gateway API HTTPRoute.
 # Internal-only — Tailscale-reachable per network.md (no
 # Cloudflare Tunnel; ADR 0024 D4 keeps the source-of-truth
 # off the public internet).
 #
-# OPERATOR FILLS vyramo.com.
+# OPERATOR FILLS {{ homelab_domain }}.
 
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -17,7 +16,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "forgejo.lab.vyramo.com"
+    - "forgejo.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
   rules:
     - matches:
         - path:

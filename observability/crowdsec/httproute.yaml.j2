@@ -1,9 +1,8 @@
-# RENDERED FILE — DO NOT EDIT. Source: httproute.yaml.j2. Re-render with: cd ~/Desktop/joel/homelab/homelab-infra && ansible-playbook ansible/playbooks/00-render-static.yml
 # LAPI HTTPRoute for OpenWrt CrowdSec router-side.
 #
 # Per 99-journal/2026-05-02-crowdsec-router-side.md:
 # Tailscale-only ingress (matches the rest of internal
-# services per ADR 0024 D3) on `crowdsec.lab.vyramo.com`.
+# services per ADR 0024 D3) on `crowdsec.{{ homelab_internal_subdomain }}.{{ homelab_domain }}`.
 # OpenWrt's CrowdSec agent + bouncer reach this hostname over
 # Tailscale (Flint 3 is on the tailnet) and authenticate to
 # the cluster LAPI via the operator-seeded machine-token +
@@ -15,7 +14,7 @@
 # via the advertised cluster-service CIDR; this HTTPRoute
 # becomes redundant at that point but stays harmless.
 #
-# OPERATOR FILLS vyramo.com.
+# OPERATOR FILLS {{ homelab_domain }}.
 
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -28,7 +27,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "crowdsec.lab.vyramo.com"
+    - "crowdsec.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
   rules:
     - matches:
         - path:

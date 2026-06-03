@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: httproute.yaml.j2. Re-render with: cd ~/Desktop/joel/homelab/homelab-infra && ansible-playbook ansible/playbooks/00-render-static.yml
 # LiteLLM proxy exposed via Cilium Gateway API HTTPRoute.
 # Internal-only — Tailscale-reachable. No Cloudflare Tunnel:
 # this is the egress chokepoint, not a public surface.
@@ -16,7 +15,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "llm.lab.vyramo.com"
+    - "llm.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
   rules:
     - matches:
         - path:

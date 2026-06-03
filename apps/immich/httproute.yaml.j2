@@ -1,12 +1,11 @@
-# RENDERED FILE — DO NOT EDIT. Source: httproute.yaml.j2. Re-render with: cd ~/Desktop/joel/homelab/homelab-infra && ansible-playbook ansible/playbooks/00-render-static.yml
 # Immich HTTPRoute via Cilium Gateway.
 #
 # Phase 1 (today): Tailscale-only on
-#   immich.lab.vyramo.com
+#   immich.{{ homelab_internal_subdomain }}.{{ homelab_domain }}
 # Phase 2: NEVER public on this hostname. Per ADR 0024 D1,
 # public album-sharing is delegated to the read-only
 # `apps/immich-public-proxy/` layer published at
-# `photos.vyramo.com` via Cloudflare Tunnel — Immich's
+# `photos.{{ homelab_domain }}` via Cloudflare Tunnel — Immich's
 # admin UI / API / mobile-backup endpoint stay Tailscale-only
 # at all times. See `04-guides/photo-management-with-immich.md`
 # §"Sharing albums with friends".
@@ -22,7 +21,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "immich.lab.vyramo.com"
+    - "immich.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
   rules:
     - matches:
         - path:

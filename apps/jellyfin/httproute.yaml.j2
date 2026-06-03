@@ -1,11 +1,10 @@
-# RENDERED FILE — DO NOT EDIT. Source: httproute.yaml.j2. Re-render with: cd ~/Desktop/joel/homelab/homelab-infra && ansible-playbook ansible/playbooks/00-render-static.yml
 # Jellyfin HTTPRoute via Cilium Gateway.
 #
 # Phase 1 (today): Tailscale-only on
-#   jellyfin.lab.vyramo.com
+#   jellyfin.{{ homelab_internal_subdomain }}.{{ homelab_domain }}
 # Phase 2 (when infrastructure/cloudflare-tunnel/ lands per
 # ADR 0024 D1): public-facing on
-#   jellyfin.vyramo.com
+#   jellyfin.{{ homelab_domain }}
 # via Cloudflare Tunnel. Per ADR 0024 D1, Jellyfin's
 # `internal-media` content classification permits CF TLS
 # termination.
@@ -21,7 +20,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "jellyfin.lab.vyramo.com"
+    - "jellyfin.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
   rules:
     - matches:
         - path:

@@ -1,11 +1,10 @@
-# RENDERED FILE — DO NOT EDIT. Source: httproute.yaml.j2. Re-render with: cd ~/Desktop/joel/homelab/homelab-infra && ansible-playbook ansible/playbooks/00-render-static.yml
 # HTTPRoute for Grafana — operator's dashboards UI.
 # Cluster-internal Cilium Gateway; Tailscale-fronted at phase 1.
 # Phase 2 (Cloudflare Tunnel) intentionally NOT planned per
 # ADR 0024 — Grafana stays Tailscale-only because dashboards
 # may surface internal-class data in graph titles + labels.
 #
-# OPERATOR FILLS vyramo.com at first commit; caught by
+# OPERATOR FILLS {{ homelab_domain }} at first commit; caught by
 # scripts/check-placeholders.sh.
 
 apiVersion: gateway.networking.k8s.io/v1
@@ -19,7 +18,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "grafana.lab.vyramo.com"
+    - "grafana.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
   rules:
     - matches:
         - path:
@@ -41,7 +40,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "alertmanager.lab.vyramo.com"
+    - "alertmanager.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
   rules:
     - matches:
         - path:
@@ -63,7 +62,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "prometheus.lab.vyramo.com"
+    - "prometheus.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
   rules:
     - matches:
         - path:

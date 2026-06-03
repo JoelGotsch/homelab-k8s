@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: httproute.yaml.j2. Re-render with: cd ~/Desktop/joel/homelab/homelab-infra && ansible-playbook ansible/playbooks/00-render-static.yml
 # Nextcloud HTTPRoute via Cilium Gateway.
 # Tailscale-only per ADR 0024 D5 — non-E2EE files /
 # calendar / contacts don't qualify for Cloudflare TLS
@@ -6,7 +5,7 @@
 # app investigation surfaces a viable encrypted-at-rest
 # story (per TODO.md "Investigate Nextcloud E2EE").
 #
-# OPERATOR FILLS vyramo.com.
+# OPERATOR FILLS {{ homelab_domain }}.
 
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -19,7 +18,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "nextcloud.lab.vyramo.com"
+    - "nextcloud.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
   rules:
     - matches:
         - path:

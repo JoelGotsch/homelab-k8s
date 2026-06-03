@@ -1,20 +1,19 @@
-# RENDERED FILE — DO NOT EDIT. Source: httproute.yaml.j2. Re-render with: cd ~/Desktop/joel/homelab/homelab-infra && ansible-playbook ansible/playbooks/00-render-static.yml
 # HTTPRoute for ntfy server.
 #
 # Phase 1 (current): cluster-internal only. The Cilium
-# Gateway routes `ntfy.lab.vyramo.com` to the ntfy
+# Gateway routes `ntfy.{{ homelab_internal_subdomain }}.{{ homelab_domain }}` to the ntfy
 # Service. Operator subscribes via the F-Droid app over
 # Tailscale (Tailscale → cluster Ingress) per
 # ADR 0024 D1 phase-1.
 #
 # Phase 2 (when relay + end-to-end-verify are complete):
-# Cloudflare Tunnel fronts `ntfy.vyramo.com`,
+# Cloudflare Tunnel fronts `ntfy.{{ homelab_domain }}`,
 # fanning out to subscribers regardless of network. The
 # E2EE relay's existence is the gate per ADR 0024 D1.
 # Phase-2 cutover doesn't change this manifest — only
 # the Cloudflare-side tunnel config + DNS records flip.
 #
-# OPERATOR FILLS vyramo.com at first commit; caught
+# OPERATOR FILLS {{ homelab_domain }} at first commit; caught
 # by scripts/check-placeholders.sh.
 
 apiVersion: gateway.networking.k8s.io/v1
@@ -28,7 +27,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "ntfy.lab.vyramo.com"
+    - "ntfy.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
   rules:
     - matches:
         - path:
