@@ -64,3 +64,14 @@ repos:
         # sibling — see homelab-docs/04-guides/cold-start.md §9c.1
         # and homelab-infra/ansible/playbooks/00-render-static.yml
         # cross_repo_renders block.
+
+      - id: check-no-operator-email
+        name: no hardcoded operator_email literal in tracked files without a .yaml.j2 sibling (Pick 3 D)
+        entry: scripts/check-no-operator-email.sh
+        language: script
+        pass_filenames: false
+        # Always-on; runs every commit. Mirror of check-no-bare-
+        # domain.sh for the operator_email var. Prevents regression
+        # of the 2026-06-03 PII audit (authentik.yml.example +
+        # scripts/README.md were leaking the literal). Allowlist
+        # lives at the top of the script.
