@@ -9,7 +9,22 @@ helmCharts:
   valuesFile: values.yaml
   includeCRDs: true
 resources:
-- bootstrap-sa.yaml
 - storageclasses.yaml
 - externalsecret.yaml
 - recurring-jobs.yaml
+# NOTE on fresh-install bootstrap:
+# Earlier this dir carried `bootstrap-sa.yaml` to pre-create
+# `longhorn-service-account` (+ ClusterRole/Binding) so the
+# chart's pre-install hook Job could find the SA before the
+# chart's own resources rendered. That worked for the initial
+# install but caused kustomize 5+ to fail manifest generation
+# with "id … exists; can not use behavior: unspecified" because
+# the chart ALSO renders an SA + CR of the same name (resource
+# collision between `helmCharts:` generator output and
+# `resources:`). Argo went Sync=Unknown/Degraded as a result.
+#
+# Since the cluster is past first-install, the bootstrap is no
+# longer required and has been removed. For a future fresh
+# install, re-introduce the bootstrap via a SEPARATE Argo
+# Application (sync-wave < -10) instead of bundling it here,
+# so the kustomize generators never collide.
