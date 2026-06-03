@@ -26,6 +26,123 @@ data:
       clusters:
       - "*"
 
+  # ---------------------------------------------------------
+  # Drift handling: SSA-first hybrid.
+  # ---------------------------------------------------------
+  # Background: ~30 Applications were chronically OutOfSync /
+  # Healthy across the cluster (2026-06-03 census: 84 of 114
+  # drifting resources were field-default class) because the
+  # API server / CRD admission controllers fill defaults the
+  # operator never wrote — HTTPRoute parentRefs[].group/kind,
+  # ExternalSecret remoteRef.conversionStrategy, StorageClass
+  # parameters.{allow_other,uid,gid} from CSI driver writeback,
+  # Gateway listeners[].tls.certificateRefs[].group, etc.
+  #
+  # Three-prong fix, layered:
+  #
+  #   1. Server-Side Diff (`serverSideDiff: true` below).
+  #      Kubernetes 1.22+ tags every managed field with the
+  #      manager that wrote it. Argo CD's server-side diff path
+  #      compares against a predicted live state derived from
+  #      its field-manager ownership. Eliminates drift where
+  #      the CRD declares per-field ownership granularity.
+  #      Per Argo CD docs:
+  #      https://argo-cd.readthedocs.io/en/stable/user-guide/diffing/#server-side-diff
+  #
+  #   2. Server-Side Apply at sync time (`ServerSideApply=true`
+  #      in each ApplicationSet's syncPolicy.syncOptions, see
+  #      bootstrap/applicationsets/*.yaml). Without this the
+  #      apply path uses client-side three-way-merge, which
+  #      strips fields Argo "doesn't own" — racing with the
+  #      controllers and re-creating drift.
+  #      https://argo-cd.readthedocs.io/en/stable/user-guide/sync-options/#server-side-apply
+  #
+  #   3. Narrow ignoreDifferences (below) for cases SSA can NOT
+  #      fix. The key blocker: many CRDs declare list fields as
+  #      `x-kubernetes-list-type: atomic` (e.g. ExternalSecret
+  #      spec.data, HTTPRoute spec.parentRefs and rules, Gateway
+  #      listeners). Atomic-list ownership means whoever wrote
+  #      the LIST owns ALL items within, including CRD defaults
+  #      the API server added — so SSA's "compare only Argo's
+  #      fields" filter does NOT exclude the defaults. Verified
+  #      2026-06-03 against immich-cnpg-s3 ExternalSecret:
+  #      argocd-controller manages `f:spec.f:data: {}` (empty
+  #      = atomic ownership of the whole array), so the
+  #      defaulted conversionStrategy/decodingStrategy/
+  #      metadataPolicy fields show as drift even with
+  #      serverSideDiff enabled.
+  resource.compareOptions: |
+    # Use server-side diff for all resources. Field-manager
+    # ownership decides what Argo's diff sees — gives the right
+    # answer for granular-ownership CRDs (most core kinds).
+    # Atomic-list CRDs still need ignoreDifferences below.
+    serverSideDiff: true
+
+  # ignoreDifferences entries below. Each suppresses CRD-default
+  # writeback the operator never declared. Validated 2026-06-03
+  # against live resources; SSA alone does not eliminate these
+  # because of atomic-list ownership semantics.
+  #
+  #   - HTTPRoute parentRefs[]/rules[].backendRefs[]: gateway-api
+  #     atomic-list, API server defaults group/kind/weight.
+  #   - Gateway listeners[].tls.certificateRefs[].group:
+  #     atomic-list, defaulted to "".
+  #   - ExternalSecret data[].remoteRef: atomic-list, ESO
+  #     defaults conversionStrategy/decodingStrategy/
+  #     metadataPolicy + target.deletionPolicy.
+  #   - StorageClass parameters: rclone CSI driver fills
+  #     allow_other/uid/gid from install-time values.yaml.
+  #   - ClusterPolicy (kyverno): CRD defaults admission/
+  #     background/emitWarning/validationFailureAction/
+  #     schemaValidation. Autogen rule writeback also conflicts
+  #     with SSA (upstream kyverno/kyverno around #11058).
+  #   - apps_Deployment: kube-prometheus-stack-grafana subchart
+  #     writes checksum/config annotations on every chart bump.
+  #   - Namespace tracking-id: kube-prom-stack monitoring ns
+  #     carries a legacy obs-falco-stack tracking-id; SSA
+  #     respects the existing annotation's owner and won't
+  #     overwrite it without manual annotation reset.
+  #
+  # Tested-NOT-needed (resolved by SSA alone, no entry here):
+  #   Service, ConfigMap, CiliumNetworkPolicy non-atomic specs,
+  #   StatefulSet (non-checksum drift), ServiceMonitor.
+  resource.customizations.ignoreDifferences.gateway.networking.k8s.io_HTTPRoute: |
+    jqPathExpressions:
+      - '.spec.parentRefs[].group'
+      - '.spec.parentRefs[].kind'
+      - '.spec.rules[].backendRefs[].group'
+      - '.spec.rules[].backendRefs[].kind'
+      - '.spec.rules[].backendRefs[].weight'
+  resource.customizations.ignoreDifferences.gateway.networking.k8s.io_Gateway: |
+    jqPathExpressions:
+      - '.spec.listeners[].tls.certificateRefs[].group'
+  resource.customizations.ignoreDifferences.external-secrets.io_ExternalSecret: |
+    jqPathExpressions:
+      - '.spec.data[].remoteRef.conversionStrategy'
+      - '.spec.data[].remoteRef.decodingStrategy'
+      - '.spec.data[].remoteRef.metadataPolicy'
+      - '.spec.target.deletionPolicy'
+  resource.customizations.ignoreDifferences.storage.k8s.io_StorageClass: |
+    jsonPointers:
+      - /parameters/allow_other
+      - /parameters/uid
+      - /parameters/gid
+  resource.customizations.ignoreDifferences.kyverno.io_ClusterPolicy: |
+    jsonPointers:
+      - /spec/admission
+      - /spec/background
+      - /spec/emitWarning
+      - /spec/validationFailureAction
+      - /spec/schemaValidation
+  resource.customizations.ignoreDifferences.apps_Deployment: |
+    jqPathExpressions:
+      - '.spec.template.metadata.annotations."checksum/config"'
+      - '.spec.template.metadata.annotations."checksum/dashboards-json-config"'
+      - '.spec.template.metadata.annotations."checksum/sc-dashboard-provider-config"'
+  resource.customizations.ignoreDifferences.Namespace: |
+    jqPathExpressions:
+      - '.metadata.annotations."argocd.argoproj.io/tracking-id"'
+
   # ssh.knownHosts: filled post-Forgejo-bring-up.
   # ssh.knownHosts: |
   #   forgejo.lab,<IP> ssh-ed25519 AAAA...
