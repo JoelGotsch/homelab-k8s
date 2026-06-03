@@ -1,3 +1,4 @@
+# RENDERED FILE — DO NOT EDIT. Source: nextcloud.yaml.j2.
 # Authentik blueprint — Nextcloud OIDC client.
 #
 # Provisions an OAuth2Provider + Application so Nextcloud can

@@ -1,46 +1,42 @@
-# RENDERED FILE — DO NOT EDIT. Source: jellyfin.yaml.j2.
-# Authentik blueprint — Jellyfin OIDC client.
+# Authentik blueprint — Grafana OIDC client.
 #
-# Provisions an OAuth2Provider + Application so Jellyfin can
-# delegate authn to Authentik via the community SSO-Auth plugin
-# (Jellyfin lacks native OIDC; operator installs the plugin
-# post-bring-up + wires it to the Secret produced by the
-# consumer-side ExternalSecret in apps/jellyfin/).
+# Provisions an OAuth2Provider + Application so Grafana can
+# delegate authn to Authentik via the generic_oauth integration.
 #
 # client_id + client_secret come from OpenBao via the
-# authentik-oidc-clients ExternalSecret (kv/jellyfin/oidc),
+# authentik-oidc-clients ExternalSecret (kv/grafana/oidc),
 # projected into the worker pod as env vars by global.envFrom.
 # Naming convention: AUTHENTIK_BOOTSTRAP_<APP>_CLIENT_{ID,SECRET}
 # matches upstream blueprint examples + makes the env source
 # unambiguous (these vars are read by !Env tags below, NOT by
 # Authentik itself).
 #
-# Same client_id/client_secret pair is also read by Jellyfin in
-# the jellyfin ns via a separate ExternalSecret pointing at the
-# same OpenBao path. Both pull from the same source-of-truth
+# Same client_id/client_secret pair is also read by Grafana in
+# the monitoring ns via a separate ExternalSecret pointing at
+# the same OpenBao path. Both pull from the same source-of-truth
 # so rotation only touches OpenBao.
 
 version: 1
 metadata:
-  name: jellyfin-oidc
+  name: grafana-oidc
   labels:
     blueprints.goauthentik.io/instantiate: "true"
 entries:
   # OAuth2Provider — issues tokens, defines redirect URI +
-  # signing key + scopes Jellyfin will request.
+  # signing key + scopes Grafana will request.
   - model: authentik_providers_oauth2.oauth2provider
-    id: jellyfin-provider
+    id: grafana-provider
     identifiers:
-      name: jellyfin
+      name: grafana
     attrs:
       authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       client_type: confidential
-      client_id: !Env AUTHENTIK_BOOTSTRAP_JELLYFIN_CLIENT_ID
-      client_secret: !Env AUTHENTIK_BOOTSTRAP_JELLYFIN_CLIENT_SECRET
+      client_id: !Env AUTHENTIK_BOOTSTRAP_GRAFANA_CLIENT_ID
+      client_secret: !Env AUTHENTIK_BOOTSTRAP_GRAFANA_CLIENT_SECRET
       redirect_uris:
         - matching_mode: strict
-          url: "https://jellyfin.lab.vyramo.com/sso/OID/redirect/authentik"
+          url: "https://grafana.{{ homelab_internal_subdomain }}.{{ homelab_domain }}/login/generic_oauth"
       signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
       sub_mode: hashed_user_id
       include_claims_in_id_token: true
@@ -53,11 +49,11 @@ entries:
   # bound to the provider above.
   - model: authentik_core.application
     identifiers:
-      slug: jellyfin
+      slug: grafana
     attrs:
-      name: Jellyfin
-      provider: !KeyOf jellyfin-provider
-      meta_launch_url: "https://jellyfin.lab.vyramo.com/"
-      meta_description: "Family media library"
-      group: "Media"
+      name: Grafana
+      provider: !KeyOf grafana-provider
+      meta_launch_url: "https://grafana.{{ homelab_internal_subdomain }}.{{ homelab_domain }}/"
+      meta_description: "Metrics + dashboards"
+      group: "Observability"
       policy_engine_mode: any

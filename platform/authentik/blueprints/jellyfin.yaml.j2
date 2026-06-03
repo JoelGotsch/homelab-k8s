@@ -1,4 +1,3 @@
-# RENDERED FILE — DO NOT EDIT. Source: jellyfin.yaml.j2.
 # Authentik blueprint — Jellyfin OIDC client.
 #
 # Provisions an OAuth2Provider + Application so Jellyfin can
@@ -40,7 +39,7 @@ entries:
       client_secret: !Env AUTHENTIK_BOOTSTRAP_JELLYFIN_CLIENT_SECRET
       redirect_uris:
         - matching_mode: strict
-          url: "https://jellyfin.lab.vyramo.com/sso/OID/redirect/authentik"
+          url: "https://jellyfin.{{ homelab_internal_subdomain }}.{{ homelab_domain }}/sso/OID/redirect/authentik"
       signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
       sub_mode: hashed_user_id
       include_claims_in_id_token: true
@@ -57,7 +56,7 @@ entries:
     attrs:
       name: Jellyfin
       provider: !KeyOf jellyfin-provider
-      meta_launch_url: "https://jellyfin.lab.vyramo.com/"
+      meta_launch_url: "https://jellyfin.{{ homelab_internal_subdomain }}.{{ homelab_domain }}/"
       meta_description: "Family media library"
       group: "Media"
       policy_engine_mode: any

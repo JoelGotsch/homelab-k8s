@@ -1,3 +1,4 @@
+# RENDERED FILE — DO NOT EDIT. Source: immich.yaml.j2.
 # Authentik blueprint — Immich OIDC client.
 #
 # Provisions an OAuth2Provider + Application so Immich can

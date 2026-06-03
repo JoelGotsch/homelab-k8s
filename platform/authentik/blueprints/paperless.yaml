@@ -1,3 +1,4 @@
+# RENDERED FILE — DO NOT EDIT. Source: paperless.yaml.j2.
 # Authentik blueprint — Paperless-ngx OIDC client.
 #
 # Provisions an OAuth2Provider + Application so Paperless can

@@ -1,3 +1,4 @@
+# RENDERED FILE — DO NOT EDIT. Source: forgejo.yaml.j2.
 # Authentik blueprint — Forgejo OIDC client.
 #
 # Provisions an OAuth2Provider + Application so Forgejo can

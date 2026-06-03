@@ -1,3 +1,4 @@
+# RENDERED FILE — DO NOT EDIT. Source: argocd.yaml.j2.
 # Authentik blueprint — Argo CD OIDC client.
 #
 # Provisions an OAuth2Provider + Application so Argo CD can

@@ -1,46 +1,47 @@
-# RENDERED FILE — DO NOT EDIT. Source: jellyfin.yaml.j2.
-# Authentik blueprint — Jellyfin OIDC client.
+# Authentik blueprint — Argo CD OIDC client.
 #
-# Provisions an OAuth2Provider + Application so Jellyfin can
-# delegate authn to Authentik via the community SSO-Auth plugin
-# (Jellyfin lacks native OIDC; operator installs the plugin
-# post-bring-up + wires it to the Secret produced by the
-# consumer-side ExternalSecret in apps/jellyfin/).
+# Provisions an OAuth2Provider + Application so Argo CD can
+# delegate operator-login authn to Authentik via the OIDC config
+# in bootstrap/argocd/patches/oidc-config.yaml (operator
+# un-comments that patch + fills <AUTHENTIK_CLIENT_ID_ARGOCD>
+# post-bring-up).
 #
 # client_id + client_secret come from OpenBao via the
-# authentik-oidc-clients ExternalSecret (kv/jellyfin/oidc),
+# authentik-oidc-clients ExternalSecret (kv/argocd/oidc),
 # projected into the worker pod as env vars by global.envFrom.
 # Naming convention: AUTHENTIK_BOOTSTRAP_<APP>_CLIENT_{ID,SECRET}
 # matches upstream blueprint examples + makes the env source
 # unambiguous (these vars are read by !Env tags below, NOT by
 # Authentik itself).
 #
-# Same client_id/client_secret pair is also read by Jellyfin in
-# the jellyfin ns via a separate ExternalSecret pointing at the
+# Same client_id/client_secret pair is also read by Argo CD in
+# the argocd ns via a separate ExternalSecret pointing at the
 # same OpenBao path. Both pull from the same source-of-truth
 # so rotation only touches OpenBao.
 
 version: 1
 metadata:
-  name: jellyfin-oidc
+  name: argocd-oidc
   labels:
     blueprints.goauthentik.io/instantiate: "true"
 entries:
   # OAuth2Provider — issues tokens, defines redirect URI +
-  # signing key + scopes Jellyfin will request.
+  # signing key + scopes Argo CD will request. `groups` scope
+  # is required for the requestedIDTokenClaims `groups`
+  # essential claim in argocd-cm's oidc.config block.
   - model: authentik_providers_oauth2.oauth2provider
-    id: jellyfin-provider
+    id: argocd-provider
     identifiers:
-      name: jellyfin
+      name: argocd
     attrs:
       authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       client_type: confidential
-      client_id: !Env AUTHENTIK_BOOTSTRAP_JELLYFIN_CLIENT_ID
-      client_secret: !Env AUTHENTIK_BOOTSTRAP_JELLYFIN_CLIENT_SECRET
+      client_id: !Env AUTHENTIK_BOOTSTRAP_ARGOCD_CLIENT_ID
+      client_secret: !Env AUTHENTIK_BOOTSTRAP_ARGOCD_CLIENT_SECRET
       redirect_uris:
         - matching_mode: strict
-          url: "https://jellyfin.lab.vyramo.com/sso/OID/redirect/authentik"
+          url: "https://argocd.{{ homelab_internal_subdomain }}.{{ homelab_domain }}/auth/callback"
       signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
       sub_mode: hashed_user_id
       include_claims_in_id_token: true
@@ -53,11 +54,11 @@ entries:
   # bound to the provider above.
   - model: authentik_core.application
     identifiers:
-      slug: jellyfin
+      slug: argocd
     attrs:
-      name: Jellyfin
-      provider: !KeyOf jellyfin-provider
-      meta_launch_url: "https://jellyfin.lab.vyramo.com/"
-      meta_description: "Family media library"
-      group: "Media"
+      name: ArgoCD
+      provider: !KeyOf argocd-provider
+      meta_launch_url: "https://argocd.{{ homelab_internal_subdomain }}.{{ homelab_domain }}/"
+      meta_description: "GitOps reconciler"
+      group: "Platform"
       policy_engine_mode: any
