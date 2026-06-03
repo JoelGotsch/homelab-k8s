@@ -51,3 +51,16 @@ repos:
         pass_filenames: false
         # Always-on; runs every commit. Cheap (single git grep over
         # tracked files); allowlist-by-path inside the script.
+
+      - id: check-no-bare-domain
+        name: no hardcoded homelab_domain literal in .yaml without a .yaml.j2 sibling (Pick 3)
+        entry: scripts/check-no-bare-domain.sh
+        language: script
+        pass_filenames: false
+        files: '\.(yaml|yml)$'
+        # Prevents regression of the 45-file Pick-3 templating
+        # work (2026-06-03 session). Every .yaml containing the
+        # operator's homelab_domain literal must have a .yaml.j2
+        # sibling — see homelab-docs/04-guides/cold-start.md §9c.1
+        # and homelab-infra/ansible/playbooks/00-render-static.yml
+        # cross_repo_renders block.
