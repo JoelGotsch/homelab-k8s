@@ -196,21 +196,6 @@ gitea:
     cron:
       ENABLED: "true"
 
-  # Mount the LFS + Packages NFS PVCs at the paths above.
-  additionalVolumes:
-    - name: lfs
-      persistentVolumeClaim:
-        claimName: forgejo-lfs
-    - name: packages
-      persistentVolumeClaim:
-        claimName: forgejo-packages
-
-  additionalVolumeMounts:
-    - name: lfs
-      mountPath: /data/lfs
-    - name: packages
-      mountPath: /data/packages
-
   # Forgejo reads INI keys from env vars (FORGEJO__<section>__<KEY>)
   # via environment-to-ini. These MUST live under
   # gitea.additionalConfigFromEnvs — the chart (forgejo 10.0.0) has
@@ -271,3 +256,19 @@ resources:
     memory: 512Mi
   limits:
     memory: 2Gi
+
+# Mount the LFS + Packages NFS PVCs at the paths declared in
+# gitea.config.lfs.PATH + gitea.config.packages.PATH above.
+extraVolumes:
+  - name: lfs
+    persistentVolumeClaim:
+      claimName: forgejo-lfs
+  - name: packages
+    persistentVolumeClaim:
+      claimName: forgejo-packages
+
+extraContainerVolumeMounts:
+  - name: lfs
+    mountPath: /data/lfs
+  - name: packages
+    mountPath: /data/packages

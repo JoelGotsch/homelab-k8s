@@ -1,6 +1,7 @@
 # cert-manager Helm values.
 
-installCRDs: true
+crds:
+  enabled: true
 
 # Enable Vault/OpenBao issuer
 extraArgs:

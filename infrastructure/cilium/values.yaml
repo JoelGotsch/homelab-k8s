@@ -70,7 +70,8 @@ l2announcements:
 
 # Enables neighbor discovery / ARP-resolution path on host —
 # precondition for L2 announcer to install ARP entries.
-enableL2NeighDiscovery: true
+l2NeighDiscovery:
+  enabled: true
 
 # Allow LoadBalancer Services to share IPs with externalIPs in
 # the IPPool — required when LB-IPAM is the IP source.
