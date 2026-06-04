@@ -135,7 +135,7 @@ spec:
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: woodpecker
-            app.kubernetes.io/component: server
+            app.kubernetes.io/name: server
       toPorts:
         - ports:
             - port: "8000"
