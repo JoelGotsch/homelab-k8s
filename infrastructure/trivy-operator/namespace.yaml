@@ -1,0 +1,41 @@
+# Dedicated namespace for the Trivy Operator (Aqua Security).
+#
+# Per ADR 0019 D2: the operator scans the actually-deployed
+# images across the cluster on a schedule + on workload change,
+# emitting findings via VulnerabilityReport / ConfigAuditReport /
+# ExposedSecretReport CRDs in each workload's namespace. The
+# OPERATOR ITSELF lives here.
+#
+# Scan jobs (the short-lived Pods that pull each image and run
+# trivy) ALSO run here by default (chart flag
+# trivyOperator.scanJobsInSameNamespace=false, kept as default).
+# That keeps scan-job RBAC scoped to a single namespace + means
+# this ns is the one place that needs egress to all the registries
+# we pull from. The cost: scan jobs cannot read private-registry
+# imagePullSecrets directly from the workload ns — the chart's
+# operator.accessGlobalSecretsAndServiceAccount=true flag (kept
+# on) makes the operator copy needed pull-secrets here at
+# scan-time. All homelab images are public + on mirror.gcr.io /
+# ghcr.io / docker.io today; revisit if that changes.
+#
+# Pod-security level: baseline.
+# - Scan jobs run with the chart's locked-down securityContext
+#   (non-root, readOnlyRootFilesystem, drop ALL caps) so
+#   restricted would also pass for them.
+# - The operator itself, per chart-default securityContext, is
+#   also restricted-compatible.
+# - BUT operator.accessGlobalSecretsAndServiceAccount needs the
+#   operator pod to be able to read secrets cluster-wide via its
+#   SA; nothing about that is privileged. We pick baseline only
+#   because we may later add scan-job templates with extra mounts
+#   for private-registry CAs and don't want to repaper a label.
+#   If we never do, this can drop to restricted.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: trivy-system
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

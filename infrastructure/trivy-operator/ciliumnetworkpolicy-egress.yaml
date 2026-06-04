@@ -1,0 +1,151 @@
+# FQDN-aware egress for trivy-system.
+#
+# Plain K8s NetworkPolicy can't FQDN-match; Cilium L7 DNS
+# proxy + toFQDNs is the recurring pattern in this repo (see
+# apps/signal-bridge/ciliumnetworkpolicy-egress.yaml for the
+# canonical example).
+#
+# Two egress flows are FQDN-gated here:
+#
+#   1. Operator + scan jobs both download:
+#      - trivy-db                 ghcr.io/aquasecurity/trivy-db
+#      - trivy-java-db            ghcr.io/aquasecurity/trivy-java-db
+#      - trivy-checks bundle      mirror.gcr.io/aquasec/trivy-checks
+#      - operator image           mirror.gcr.io/aquasec/trivy-operator
+#      - trivy image              mirror.gcr.io/aquasec/trivy
+#
+#   2. Scan jobs additionally pull the image-under-test from
+#      whichever registry it came from. The homelab today uses:
+#      - mirror.gcr.io        (most chart-default images)
+#      - ghcr.io              (forgejo, woodpecker, langfuse, etc.)
+#      - registry-1.docker.io (auth endpoint for docker.io)
+#      - index.docker.io      (manifest endpoint)
+#      - quay.io              (cert-manager, prom-stack subcharts)
+#      - public.ecr.aws       (a couple of AWS-mirrored images)
+#      - registry.k8s.io      (kube-state-metrics, etc.)
+#
+# If a future workload pulls from a registry not in this list,
+# its scan job will fail with a connection-refused / DNS-block
+# in Cilium's L7 DNS proxy log; add the FQDN here.
+#
+# kube-DNS is dual-gated: the L7 DNS rule below makes Cilium
+# observe responses + populate the FQDN cache; the vanilla
+# NetworkPolicy in networkpolicy.yaml allows the L3/L4 packet.
+# Both must pass.
+
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: trivy-egress-fqdn
+  namespace: trivy-system
+  labels:
+    app.kubernetes.io/name: trivy-operator
+    app.kubernetes.io/component: egress-policy
+spec:
+  # Match both the operator pod AND scan-job pods. We use
+  # `endpointSelector: {}` with matchExpressions to OR the two
+  # label sets — the simplest correct match.
+  endpointSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [trivy-operator]
+      # No need to also enumerate the scan-job label here: the
+      # operator pod gets app.kubernetes.io/name=trivy-operator,
+      # and the scan-job Pods set app.kubernetes.io/managed-by=
+      # trivy-operator but NOT app.kubernetes.io/name. We need a
+      # SECOND CCNP for scan jobs — see the second policy below
+      # in this file.
+  egress:
+    # L7 DNS — let Cilium observe responses for these FQDNs +
+    # populate the FQDN cache. matchPattern is narrow to the
+    # registries the operator reaches.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # FQDN allow: trivy-db + checks-bundle + operator image.
+    - toFQDNs:
+        - matchName: "ghcr.io"
+        - matchPattern: "*.githubusercontent.com"   # ghcr blob storage
+        - matchName: "mirror.gcr.io"
+        - matchPattern: "*.googleapis.com"          # GAR blob storage
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # kube-API. Cilium policies are intersection-deny — if a CCNP
+    # selects this endpoint at all, every egress destination must
+    # be explicitly allowed by SOME rule. The vanilla NetworkPolicy
+    # alone is not sufficient because the CCNP also flips Cilium's
+    # endpoint into default-deny-egress. Use `toEntities: [kube-apiserver]`
+    # — the Cilium reserved entity that resolves to the actual API
+    # server endpoints regardless of how they're labeled (matches
+    # Talos's static-pod control plane just as well as kubeadm's).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+
+---
+# Second CCNP — scan-job egress to the registries the
+# image-under-test was pulled from. Separate from the operator
+# CCNP only because the endpointSelector differs.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: trivy-scanjobs-egress-fqdn
+  namespace: trivy-system
+  labels:
+    app.kubernetes.io/name: trivy-operator
+    app.kubernetes.io/component: scanjob-egress-policy
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: trivy-operator
+  egress:
+    # L7 DNS for FQDN cache.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # Registries the homelab pulls from + trivy-db host.
+    - toFQDNs:
+        - matchName: "ghcr.io"
+        - matchPattern: "*.githubusercontent.com"
+        - matchName: "mirror.gcr.io"
+        - matchPattern: "*.googleapis.com"
+        - matchName: "registry-1.docker.io"
+        - matchName: "index.docker.io"
+        - matchName: "auth.docker.io"
+        - matchPattern: "*.docker.io"
+        - matchPattern: "*.cloudfront.net"          # docker.io blob CDN
+        - matchName: "quay.io"
+        - matchName: "cdn.quay.io"
+        - matchPattern: "*.quay.io"
+        - matchName: "registry.k8s.io"
+        - matchPattern: "*.pkg.dev"                  # GAR
+        - matchName: "public.ecr.aws"
+        - matchPattern: "*.amazonaws.com"            # ECR blob storage
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

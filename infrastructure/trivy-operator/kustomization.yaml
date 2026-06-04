@@ -1,0 +1,44 @@
+# Trivy Operator — continuous CVE scanning of running images.
+# Per ADR 0019 D2 ("Supply-chain & vulnerability hygiene").
+#
+# - Standalone mode: the operator runs `trivy` directly in each
+#   scan job. Simpler than ClientServer (which adds a long-lived
+#   trivy StatefulSet + shared DB cache) and adequate for a small
+#   image count. Reconsider if scan-job churn pulls the trivy-db
+#   more than ~hourly.
+# - Scanners enabled: vulnerability, exposed-secret, config-audit,
+#   RBAC assessment. DISABLED: infraAssessment + clusterCompliance
+#   — both depend on the node-collector DaemonSet which mounts
+#   hostPath /var/lib/etcd, /var/lib/kubelet, /etc/kubernetes
+#   etc. Talos restricts host filesystem access (read-only root,
+#   ephemeral overlays, no `/var/lib/etcd` to mount) and Talos
+#   intentionally treats node CIS-K8s-Benchmark compliance as the
+#   Talos team's contract, not ours. ADR 0019 D2 explicitly
+#   scopes us to "VulnerabilityReport / ConfigAuditReport /
+#   ExposedSecretReport CRDs", so node-collector is out of scope.
+# - excludeNamespaces: ci-woodpecker (ephemeral CI pods churn
+#   too fast for a per-revision scan to be useful + signal-to-
+#   noise of reports on tear-down-in-2-minutes pods is awful).
+#   Per ADR 0019 D2 ("Skip scanning ephemeral CI pods in
+#   ci-woodpecker").
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: trivy-system
+
+helmCharts:
+  - name: trivy-operator
+    repo: https://aquasecurity.github.io/helm-charts/
+    version: "0.33.1"  # OPERATOR PINS via Renovate
+    releaseName: trivy-operator
+    namespace: trivy-system
+    valuesFile: values.yaml
+    includeCRDs: true
+
+resources:
+  - namespace.yaml
+  - networkpolicy.yaml
+  - ciliumnetworkpolicy-egress.yaml
+  - servicemonitor.yaml
+  - prometheusrule.yaml

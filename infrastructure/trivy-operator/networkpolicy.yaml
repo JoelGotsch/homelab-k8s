@@ -1,0 +1,116 @@
+# NetworkPolicies for trivy-system.
+#
+# Two policies in one file:
+#   1. trivy-operator: the long-lived operator Deployment.
+#   2. trivy-operator-scanjobs: the short-lived scan-job Pods
+#      the operator spawns to actually run trivy against each
+#      image.
+#
+# Both default-deny by their podSelector → policyTypes
+# [Ingress, Egress] + an explicit allow list. External
+# (off-cluster) registry egress is handled by the sibling
+# CiliumNetworkPolicy at ciliumnetworkpolicy-egress.yaml because
+# the trivy-db + image pulls are FQDN-based (ghcr.io, mirror.gcr.io,
+# index.docker.io); plain K8s NetworkPolicy can't FQDN-match.
+# Both layers must allow for traffic to flow — Cilium's CCNP
+# AND vanilla NP are L3/L4 deny-unless-allowed and they intersect.
+
+# ----------------------------------------------------------------
+# 1. Operator pod.
+# ----------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: trivy-operator
+  namespace: trivy-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: trivy-operator
+      app.kubernetes.io/instance: trivy-operator
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Prometheus scrape from monitoring ns (metrics port 8080
+    # on the operator pod; Service maps it to :80).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # kube-API: the operator watches workloads cluster-wide +
+    # creates Jobs/ConfigMaps/Reports. Cilium socket-LB DNATs
+    # the kubernetes.default.svc:443 hop to the API server
+    # listener on :6443, so allow both ports (per the
+    # CNPG-on-Cilium memo).
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              component: kube-apiserver
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+---
+# ----------------------------------------------------------------
+# 2. Scan-job pods.
+# ----------------------------------------------------------------
+# Scan jobs are short-lived Pods the operator creates in the
+# trivy-system namespace (scanJobsInSameNamespace=false) to run
+# `trivy image <ref>` against each cluster-wide image. They need:
+#   - DNS
+#   - egress to external image registries + the trivy-db host
+#     (FQDN-gated by the CCNP)
+#   - egress to private-registry-cache services in-cluster IF
+#     we add one later (none today)
+# They never serve traffic, so ingress is empty (= deny-all
+# ingress).
+#
+# Selector matches trivy-operator's job labels — set on the
+# Pod template by the operator. The selector is conservative
+# (both label keys) to avoid catching unrelated workloads.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: trivy-operator-scanjobs
+  namespace: trivy-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: trivy-operator
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    # kube-DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP

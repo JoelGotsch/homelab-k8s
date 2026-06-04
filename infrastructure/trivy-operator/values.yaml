@@ -1,0 +1,207 @@
+# Trivy Operator values — overrides only. See
+#   helm show values aqua/trivy-operator --version 0.33.1
+# for the full chart-default surface.
+#
+# Scope per ADR 0019 D2: VulnerabilityReport, ConfigAuditReport,
+# ExposedSecretReport, RbacAssessmentReport. Skip the node-
+# centric infra/compliance scanners (require hostPath, Talos
+# blocks). Skip ci-woodpecker (ephemeral CI pods).
+
+# ----------------------------------------------------------------
+# Scan scope.
+# ----------------------------------------------------------------
+# Empty targetNamespaces = cluster-wide watch (chart default).
+targetNamespaces: ""
+# Exclude ci-woodpecker per ADR 0019 D2. trivy-system also
+# excluded so we don't recursively scan our own scan jobs.
+excludeNamespaces: "ci-woodpecker,trivy-system"
+
+# ----------------------------------------------------------------
+# Operator settings.
+# ----------------------------------------------------------------
+operator:
+  replicas: 1
+  # Scan only the current revision of each Deployment / DS / etc.
+  # Without this every rollout doubles the live VulnerabilityReport
+  # count (one for old ReplicaSet, one for new) for ~scannerReportTTL.
+  vulnerabilityScannerScanOnlyCurrentRevisions: true
+  configAuditScannerScanOnlyCurrentRevisions: true
+
+  # CRD scanners. Per ADR 0019 D2:
+  #   IN  scope: vulnerability, exposed-secret, config-audit,
+  #              RBAC assessment.
+  #   OUT scope: infra assessment + cluster compliance — both
+  #              need the node-collector DaemonSet with hostPath
+  #              mounts of /var/lib/etcd, /var/lib/kubelet,
+  #              /etc/kubernetes, etc. Talos's read-only root +
+  #              minimal host fs means those paths either don't
+  #              exist or can't be mounted into a Pod. The
+  #              CIS-K8s benchmark on Talos is the Talos team's
+  #              contract; we don't double-score it.
+  vulnerabilityScannerEnabled: true
+  exposedSecretScannerEnabled: true
+  configAuditScannerEnabled: true
+  rbacAssessmentScannerEnabled: true
+  infraAssessmentScannerEnabled: false
+  clusterComplianceEnabled: false
+
+  # SBOM generation is needed for the per-workload Vulnerability
+  # Report flow we want. Cluster-wide SBOM CACHE (a separate
+  # ClusterSbomReport CRD) is off — adds CRD volume without a
+  # consumer in our observability stack.
+  sbomGenerationEnabled: true
+  clusterSbomCacheEnabled: false
+
+  # Let the operator copy private-registry pull secrets out of
+  # workload namespaces at scan time. All homelab images are
+  # public today (mirror.gcr.io / ghcr.io / docker.io) so this
+  # is a no-op now; flipping it on costs nothing and unblocks
+  # the day we add a private registry without a values change.
+  accessGlobalSecretsAndServiceAccount: true
+
+  # Reports auto-expire — keeps etcd from growing unboundedly
+  # for short-lived workloads. 24h matches the chart default.
+  scannerReportTTL: "24h"
+
+  # Operator-side metrics. We turn on the FINDING-counter metric
+  # (one series per (severity, namespace, image, workload)). We
+  # do NOT turn on per-CVE-id metrics — cardinality blows up
+  # the Prometheus TSDB on a real-world image (hundreds of CVEs
+  # per image x dozens of images x hours of retention).
+  metricsFindingsEnabled: true
+  metricsVulnIdEnabled: false
+  metricsExposedSecretInfo: false
+  metricsConfigAuditInfo: false
+  metricsRbacAssessmentInfo: false
+  metricsInfraAssessmentInfo: false
+  metricsImageInfo: false
+  metricsClusterComplianceInfo: false
+
+# ----------------------------------------------------------------
+# Service + Prometheus integration.
+# ----------------------------------------------------------------
+# We define our own ServiceMonitor in servicemonitor.yaml so the
+# release label + namespace land where kube-prometheus-stack's
+# Prometheus actually selects (labels matchLabels release:
+# kube-prometheus-stack). Chart-rendered ServiceMonitor off.
+serviceMonitor:
+  enabled: false
+
+service:
+  type: ClusterIP
+  metricsPort: 80
+
+# ----------------------------------------------------------------
+# Operator pod security + resources.
+# ----------------------------------------------------------------
+# The chart already locks the operator pod down — readOnlyRootFilesystem,
+# drop ALL caps, no privilege escalation. We leave that intact
+# (don't merge `securityContext: {}` over it) and just add
+# resource bounds.
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# ----------------------------------------------------------------
+# Trivy (the scanner itself) settings.
+# ----------------------------------------------------------------
+trivy:
+  createConfig: true
+  # Standalone: each scan job runs trivy + pulls trivy-db.
+  mode: Standalone
+
+  # Slow mode trades wall time for CPU/memory — fine on a homelab
+  # where scans can take minutes and we'd rather not contend with
+  # apps for cores.
+  slow: true
+
+  # Report all severities. Alert thresholds (CRITICAL / HIGH) live
+  # in prometheusrule.yaml, not here, so reports stay complete.
+  severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+
+  # Report fixed-only? No — we want to see unfixed CVEs too;
+  # those are the ones that need policy decisions (accept risk,
+  # vendor pressure, image swap).
+  ignoreUnfixed: false
+
+  # Image-cache size; default 5Gi default is far more than we
+  # need for the homelab image count, but the chart defaults to
+  # PVC-backed in ClientServer mode only. In Standalone the
+  # storageClassEnabled value is unused at runtime — leave at
+  # default.
+  storageClassEnabled: false
+
+  timeout: "10m0s"
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# ----------------------------------------------------------------
+# trivyOperator (scan-job template).
+# ----------------------------------------------------------------
+trivyOperator:
+  vulnerabilityReportsPlugin: "Trivy"
+  configAuditReportsPlugin: "Trivy"
+  # Scan jobs in the trivy-system ns (chart default). Keeps
+  # NetworkPolicy + RBAC scoped here. Workload namespaces only
+  # receive the resulting *Report CRDs.
+  scanJobsInSameNamespace: false
+  scanJobCompressLogs: true
+
+# ----------------------------------------------------------------
+# Node collector — DISABLED.
+# ----------------------------------------------------------------
+# The node-collector DaemonSet hostPath-mounts /var/lib/etcd,
+# /var/lib/kubelet, /var/lib/kube-scheduler, /var/lib/kube-
+# controller-manager, /etc/systemd, /lib/systemd, /etc/kubernetes,
+# /etc/cni/net.d. Talos doesn't expose those paths to Pods
+# (read-only root + minimal /etc + Talos-managed kubelet config).
+# With infraAssessment + clusterCompliance off the operator
+# won't try to create node-collector jobs, but we make the
+# intent explicit by emptying the volume lists in case a chart
+# bump flips a scanner default on.
+nodeCollector:
+  useNodeSelector: true
+  volumeMounts: []
+  volumes: []
+  excludeNodes: ""
+
+# ----------------------------------------------------------------
+# Policy bundle (built-in Trivy checks for config audit).
+# ----------------------------------------------------------------
+# Pulled from mirror.gcr.io by default — matches our existing
+# Cilium FQDN egress rules for image pulls.
+policiesBundle:
+  registry: mirror.gcr.io
+  repository: aquasec/trivy-checks
+  tag: 1
+
+# ----------------------------------------------------------------
+# Compliance specs.
+# ----------------------------------------------------------------
+# With clusterComplianceEnabled=false above, the controller never
+# evaluates these specs — but the chart still renders the 4 default
+# spec CRs (k8s-cis-1.23, k8s-nsa-1.0, k8s-pss-baseline-0.1,
+# k8s-pss-restricted-0.1). Empty the list so we don't ship inert
+# CRs into etcd (and don't trip Argo CD on chart-version-driven
+# spec churn).
+compliance:
+  specs: []
+
+# ----------------------------------------------------------------
+# Storage backend.
+# ----------------------------------------------------------------
+# Default: reports stored as CRDs in etcd. Stay on default —
+# the alternateReportStorage (PVC, JSON files) defeats the
+# Prometheus-via-CRD pipeline we want.
+alternateReportStorage:
+  enabled: false

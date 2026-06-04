@@ -1,0 +1,32 @@
+# Prometheus scrape of trivy-operator's /metrics.
+#
+# kube-prometheus-stack selects ServiceMonitor by
+# `release: kube-prometheus-stack` (verified 2026-06-04 via
+# `kubectl get prometheus -n monitoring -o
+# jsonpath='{.items[0].spec.serviceMonitorSelector}'`).
+#
+# We disable the chart-rendered ServiceMonitor (values.yaml
+# serviceMonitor.enabled=false) so this hand-rolled one is the
+# only source.
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: trivy-operator
+  namespace: trivy-system
+  labels:
+    app.kubernetes.io/name: trivy-operator
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: trivy-operator
+      app.kubernetes.io/instance: trivy-operator
+  namespaceSelector:
+    matchNames:
+      - trivy-system
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 60s
+      honorLabels: true

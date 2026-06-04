@@ -1,0 +1,127 @@
+# Alerts on CVE findings the trivy-operator surfaces.
+#
+# Metric source: the operator's findings-counter family,
+# emitted because `operator.metricsFindingsEnabled: true` in
+# values.yaml. The series is
+#   trivy_image_vulnerabilities{namespace, name, image_registry,
+#                               image_repository, image_tag,
+#                               severity}
+# where `severity` is one of UNKNOWN/LOW/MEDIUM/HIGH/CRITICAL.
+# Value is the count of CVEs at that severity in that image.
+#
+# Verify after first deploy (post-DB-download, ~5-10 min):
+#   kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus 9090
+#   curl -sG localhost:9090/api/v1/query \
+#     --data-urlencode 'query=trivy_image_vulnerabilities'
+# If the metric name shifts in a chart bump, regrep:
+#   kubectl logs -n trivy-system deploy/trivy-operator | grep -i metric
+# and adjust.
+#
+# Routing (per kube-prometheus-stack alertmanager-config):
+#   severity: warning  → ntfy only
+#   severity: critical → ntfy AND approval-channel (Signal)
+# `component: trivy` is operator-side filter only.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: trivy-operator
+  namespace: trivy-system
+  labels:
+    app.kubernetes.io/name: trivy-operator
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: trivy-operator-cves
+      interval: 1m
+      rules:
+        # ANY CRITICAL CVE on a deployed image → critical alert.
+        # Per ADR 0019 D2 explicit ask ("Wire Prometheus alerts
+        # for CRITICAL CVEs found on a deployed image"). Threshold
+        # 0 means "even one CRITICAL is reportable" — homelab
+        # scale; a small operator can act on each finding.
+        #
+        # `for: 30m` debounces: scan-job race conditions, in-
+        # flight image swaps, and the trivy-db-warmup window
+        # can show transient CRITICALs that go away on the next
+        # scan cycle. 30m is well under the operator's expected
+        # response window + still flags real findings the same
+        # workday.
+        - alert: TrivyCriticalCVEOnDeployedImage
+          expr: |
+            max by (namespace, name, image_repository, image_tag)
+              (trivy_image_vulnerabilities{severity="Critical"}) > 0
+          for: 30m
+          labels:
+            severity: critical
+            component: trivy
+          annotations:
+            summary: "Critical CVE on deployed image {{ $labels.image_repository }}:{{ $labels.image_tag }}"
+            description: |
+              Trivy Operator found {{ $value }} CRITICAL CVE(s) on
+              image {{ $labels.image_repository }}:{{ $labels.image_tag }}
+              deployed as workload {{ $labels.namespace }}/{{ $labels.name }}.
+
+              Triage:
+                kubectl -n {{ $labels.namespace }} get vulnerabilityreport \
+                  -l trivy-operator.resource.name={{ $labels.name }} \
+                  -o yaml | yq '.items[].report.vulnerabilities[] |
+                                  select(.severity=="CRITICAL")'
+
+              Options (in order of preference per ADR 0019):
+                1. Pin a fixed digest (renovate will pick up on the
+                   next chart bump).
+                2. Apply a `.trivyignore` entry IF the CVE is
+                   confirmed inapplicable to the deployed path.
+                3. Swap to an upstream-maintained alternative
+                   image.
+                4. Accept + document in 99-journal/ with
+                   review-by date.
+
+        # HIGH-severity sustained finding → warning alert.
+        # Lower urgency; folded into batch triage at the next
+        # operator-attended window. Threshold 5+ HIGH to avoid
+        # the warning channel becoming wallpaper.
+        - alert: TrivyManyHighCVEOnDeployedImage
+          expr: |
+            max by (namespace, name, image_repository, image_tag)
+              (trivy_image_vulnerabilities{severity="High"}) > 5
+          for: 2h
+          labels:
+            severity: warning
+            component: trivy
+          annotations:
+            summary: ">5 HIGH CVEs on image {{ $labels.image_repository }}:{{ $labels.image_tag }}"
+            description: |
+              Trivy Operator finds {{ $value }} HIGH-severity CVEs
+              on image {{ $labels.image_repository }}:{{ $labels.image_tag }}
+              for workload {{ $labels.namespace }}/{{ $labels.name }}.
+              Fold into the next operator-attended triage.
+
+        # Operator-health alert: VulnerabilityReports stop arriving.
+        # Detects "trivy-db can't pull" (rate-limit, FQDN policy
+        # drift) and "operator crash-looping". The metric
+        # trivy_resources_count gives a count of *Report CRDs the
+        # operator has ever produced; a flat or zero value for
+        # 6h on a cluster with workloads = operator broken.
+        - alert: TrivyOperatorNoReports
+          expr: |
+            sum(trivy_resources_count{report_kind="VulnerabilityReport"}) == 0
+          for: 6h
+          labels:
+            severity: warning
+            component: trivy
+          annotations:
+            summary: "Trivy Operator produced zero VulnerabilityReports in 6h"
+            description: |
+              No VulnerabilityReport CRDs exist cluster-wide for 6h.
+              Likely causes:
+                1. trivy-db pull blocked (Cilium FQDN egress drift —
+                   check `kubectl -n trivy-system logs <scan-job>`
+                   for a TLS/DNS error against ghcr.io).
+                2. Operator crash-looping
+                   (`kubectl -n trivy-system get deploy trivy-operator`).
+                3. ghcr.io rate-limited the trivy-db OCI download.
+                   Mitigation: set a GITHUB_TOKEN secret per
+                   chart `trivy.githubToken` (see values.yaml +
+                   README cold-start notes).
