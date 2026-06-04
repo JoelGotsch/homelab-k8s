@@ -1,0 +1,53 @@
+---
+# Mutating policy for ci-woodpecker step pods: force dnsConfig.options.ndots=1.
+#
+# Why: cluster pods inherit resolv.conf from the kubelet, which carries
+# the node's search domains. Talos nodes are joined to the homelab tailnet
+# so their search list contains `tail<tailnet>.ts.net`. With the K8s
+# default ndots=5, glibc walks the search list for any name with <5 dots
+# (which is every name we use — forgejo.lab.vyramo.com has 3).
+# For each search-suffix, glibc fires BOTH A and AAAA queries. The AAAA
+# query for `forgejo.lab.vyramo.com.tail<tailnet>.ts.net` returns SERVFAIL
+# from tailscale's auth-DNS; glibc treats SERVFAIL as fatal and aborts
+# before trying the bare FQDN. git clone in plugin-git fails with
+# "DNS server returned general failure"; pipelines stuck at clone.
+#
+# Setting ndots=1 makes glibc skip search-list walking for ANY name with
+# at least one dot — i.e. every FQDN we use. Cluster-internal short names
+# (e.g. `forgejo-pg-rw`) would still need search-list walking, but step
+# pods only ever talk to external-style FQDNs (Forgejo via its public-ish
+# hostname, registry endpoints, public PyPI for pip install, etc.). Loss
+# of short-name resolution is acceptable for CI pods.
+#
+# This is a workaround for [[feedback_dns_search_list_trap_webhook_delivery]]
+# applied at the consumer namespace level. The proper architectural fix
+# (Talos kubelet --resolv-conf pointing at a tailnet-free file) is queued
+# but out of scope for this session.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: ci-woodpecker-dns-ndots
+  annotations:
+    policies.kyverno.io/title: "ci-woodpecker step pods: ndots=1"
+    policies.kyverno.io/category: "DNS Workarounds"
+    policies.kyverno.io/severity: "low"
+    policies.kyverno.io/description: |
+      Forces dnsConfig.options.ndots=1 on every pod in ci-woodpecker so
+      glibc skips search-list walking for FQDNs, avoiding the
+      tailnet-search-domain AAAA SERVFAIL trap.
+spec:
+  background: false   # only mutate at admission (not background reconcile)
+  rules:
+    - name: set-ndots-1
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [ci-woodpecker]
+      mutate:
+        patchStrategicMerge:
+          spec:
+            dnsConfig:
+              options:
+                - name: ndots
+                  value: "1"
