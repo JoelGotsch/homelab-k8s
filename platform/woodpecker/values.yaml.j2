@@ -37,9 +37,27 @@ server:
     WOODPECKER_LOG_LEVEL: "info"
     # JSON logs for Loki ingestion per ADR 0021.
     WOODPECKER_LOG_FORMAT: "json"
-    # Disable webhooks-to-public; Forgejo + Woodpecker are
-    # in-cluster.
-    WOODPECKER_WEBHOOK_HOST: "https://woodpecker.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
+    # Webhook URL embedded in newly-registered Forgejo hooks. Cluster-
+    # internal Service URL with trailing-dot FQDN so Forgejo's pod can
+    # reach Woodpecker without (a) hairpinning through the public
+    # Cilium Gateway and (b) tripping the tailscale-search-list DNS
+    # trap that NXDOMAINs `woodpecker.<sub>.<domain>.tail<net>.ts.net.`
+    # before glibc tries the bare FQDN. See
+    # feedback_dns_search_list_trap_webhook_delivery for the rationale.
+    # Was https://woodpecker.<sub>.<domain> until 2026-06-04; the
+    # post-hoc PATCH in provision-woodpecker-repo.sh now becomes a
+    # no-op for new repos (it's still kept for already-activated repos
+    # whose webhook was installed before this change).
+    WOODPECKER_WEBHOOK_HOST: "http://woodpecker-server.woodpecker.svc.cluster.local."
+    # Privileged plugins — explicit allowlist required since
+    # Woodpecker 3.x (formerly all plugins ran privileged by default).
+    # docker-buildx needs privileged to mount the host docker socket
+    # / run BuildKit-in-pod for multi-arch builds. Each entry is an
+    # image reference (registry/repo, no tag). Per ADR 0019 D3 the
+    # eventual cosign-signing plugin will land here too. Audit this
+    # list with the same scrutiny as a `trusted: true` repo (privileged
+    # plugins can read host files + escape the step pod sandbox).
+    WOODPECKER_PLUGINS_PRIVILEGED: "woodpeckerci/plugin-docker-buildx"
     # Database: SQLite on Longhorn for the server's job state.
     # Forgejo's CNPG handles the source-of-truth metadata;
     # Woodpecker's DB is just pipeline-execution state — recovery
