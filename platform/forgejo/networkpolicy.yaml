@@ -112,6 +112,21 @@ spec:
               protocol: TCP
             - port: "9443"
               protocol: TCP
+    # Cilium Gateway egress — Forgejo needs to call OUT to
+    # `https://woodpecker.lab.<HOMELAB-DOMAIN>/api/hook` to deliver
+    # webhooks on push/PR events. The webhook URL resolves to the
+    # cluster's own Cilium Gateway IP; Gateway endpoints carry the
+    # reserved `ingress` identity (NOT the source namespace, per
+    # feedback_cilium_gateway_ingress_identity). Without this rule,
+    # webhook delivery silently fails with curl exit 6 / connect
+    # timeout and no pipeline ever triggers. Added 2026-06-04 after
+    # the first-CI-run smoke test surfaced empty ci-woodpecker ns.
+    - toEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
 # NAS NFS egress is NOT allowed from Forgejo pods — per
 # ADR 0030 §D1 the csi-rclone driver in `csi-rclone` ns is
 # the only thing that talks to the NAS. Forgejo sees the
