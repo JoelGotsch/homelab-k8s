@@ -115,6 +115,18 @@ server:
           # `getaddrinfo EAI_AGAIN database` on every startup
           # (CrashLoopBackOff). Same wrong-chart-key class as the PSS fix
           # above. Moved 2026-06-02; see TODO §"NAS-encryption follow-ups".
+          resources:
+            # Resource budget for the server container.
+            # Moved here from root-level `resources:` (audit 2026-06-04,
+            # finding #13): the immich chart uses the bjw-s common library;
+            # root-level `resources:` is not a chart key → silently dropped.
+            # Correct path: server.controllers.main.containers.main.resources.
+            # Sized for ~100k photos, 2-3 simultaneous mobile-backup uploads.
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              memory: 4Gi
           env:
             # CNPG-issued user creds — Secret name comes from CNPG's
             # role-binding on the immich-pg cluster.
@@ -269,13 +281,15 @@ machine-learning:
 # so DB_HOSTNAME fell back to the chart-default "database" and the server
 # CrashLoopBackOff'd with `getaddrinfo EAI_AGAIN`. Moved + removed 2026-06-02.)
 
-# Don't expose Service externally — Cilium HTTPRoute owns
-# ingress (httproute.yaml).
-service:
-  type: ClusterIP
-
-ingress:
-  enabled: false
+# service.type, ingress.enabled, and resources at root level are NOT chart
+# keys for the bjw-s common library (audit 2026-06-04, finding #13):
+#   - service.type: the chart hardcodes service.main.type=ClusterIP in
+#     immich/templates/server.yaml — root-level `service:` is silently dropped.
+#   - ingress.enabled: chart default is disabled — root-level `ingress:` is dropped.
+#   - resources: must nest under server.controllers.main.containers.main.resources
+#     (now set there above). Root-level `resources:` is silently dropped.
+# All three removed 2026-06-04. Service remains ClusterIP (Cilium HTTPRoute
+# owns ingress via httproute.yaml). Resources moved to the correct path.
 
 # (Pod- and container-level security context now live nested under
 # server.controllers.main.{pod,containers.main}.securityContext +
@@ -284,13 +298,3 @@ ingress:
 # and `securityContext:` blocks here were NOT chart keys → silently
 # dropped at render, PSS-restricted enforcement rejected both deployments.
 # Moved + removed 2026-06-01.)
-
-# Resource budget for server + microservices. Sized for
-# ~100k photos library, 2-3 simultaneous mobile-backup
-# uploads, ML jobs running in the background.
-resources:
-  requests:
-    cpu: 200m
-    memory: 512Mi
-  limits:
-    memory: 4Gi
