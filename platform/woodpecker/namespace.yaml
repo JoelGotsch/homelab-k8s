@@ -19,7 +19,32 @@ kind: Namespace
 metadata:
   name: ci-woodpecker
   labels:
-    pod-security.kubernetes.io/enforce: restricted
+    # PSS = privileged on this ns. Woodpecker's k8s backend auto-
+    # generates step Pod specs without the explicit securityContext
+    # fields restricted demands (allowPrivilegeEscalation:false,
+    # capabilities.drop:[ALL], seccompProfile.type, runAsNonRoot).
+    # Even when step images themselves run as non-root, kube-apiserver
+    # rejects admission before the pod starts → clone-stage failure
+    # for every pipeline. There's no values.yaml knob on the chart
+    # that gets the auto-generated pod spec to restricted-compliance.
+    #
+    # Trade-off: we already opted-in privileged plugins via
+    # WOODPECKER_PLUGINS_PRIVILEGED=woodpeckerci/plugin-docker-buildx
+    # (the docker-buildx step needs privileged:true on tag events).
+    # ci-woodpecker is mitigated via:
+    #   - dedicated ns + ResourceQuota + LimitRange (quota.yaml)
+    #   - scoped ServiceAccount with no kube-API access (rbac.yaml)
+    #   - default-deny NetworkPolicy + FQDN-allowlist egress
+    #     (networkpolicy.yaml)
+    #   - per-ADR-0023-D5 isolation
+    # Per the homelab threat model this is an acceptable trade — the
+    # cluster's most sensitive workloads still run under enforce=restricted
+    # in their own namespaces. CI pods are short-lived + restricted-
+    # blast-radius.
+    #
+    # Audit stays at restricted so noncompliant step images surface
+    # warnings in the audit log without blocking admission.
+    pod-security.kubernetes.io/enforce: privileged
     pod-security.kubernetes.io/audit: restricted
     # Tag for Cilium policies that match traffic from the
     # CI ns specifically.
