@@ -1,0 +1,108 @@
+# NetworkPolicy for Spegel.
+#
+# Spegel's traffic shape:
+#   - Registry (5000 TCP): peer-to-peer image pulls. Triggered
+#     by containerd on a peer node when its local mirror config
+#     points at the cluster Service. Source pods can be ANY
+#     Spegel pod across the cluster (via the headless Service).
+#   - Router (5001 TCP): libp2p mesh — peer announcements +
+#     content discovery between Spegel pods.
+#   - Metrics (9090 TCP): scraped by Prometheus.
+#   - Bootstrap: DNS SRV lookups against the headless
+#     `spegel-bootstrap` Service to discover peers; needs
+#     kube-DNS egress.
+#
+# What is INTENTIONALLY NOT here:
+#   - hostPort 30020 traffic from the node's own containerd
+#     does NOT traverse a Pod NetworkPolicy (it terminates on
+#     the pod via host-loopback). No allow needed.
+#   - nodePort 30021 cross-node fallback traffic enters via
+#     kube-proxy/Cilium socket-LB and IS subject to policy;
+#     covered by the peer-ingress rule (port 5000) because the
+#     nodePort backend is the pod's 5000.
+#   - Egress to upstream container registries — Spegel does
+#     NOT pull from upstream; containerd does. Spegel only
+#     serves what's already in containerd's content store via
+#     the read-only mounted content path.
+#
+# Default-deny is set by the explicit policyTypes + the empty
+# egress/ingress fallthrough; per Cilium's CCNP-default-deny
+# semantics (memory feedback_cilium_ccnp_default_deny.md), any
+# policy targeting an endpoint flips it to default-deny in
+# that direction.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: spegel
+  namespace: spegel
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: spegel
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Peer-to-peer registry pulls (containerd on any node hits
+    # any Spegel pod on :5000) and peer router traffic on
+    # :5001. Allow from any Spegel pod in this ns.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: spegel
+      ports:
+        - port: 5000
+          protocol: TCP
+        - port: 5001
+          protocol: TCP
+    # Cross-node nodePort path: traffic arrives sourced from
+    # the host network (post socket-LB / kube-proxy DNAT). In
+    # Cilium with kube-proxy-replacement this maps to the
+    # `host` reserved identity; allow from any namespace as
+    # the targetPort 5000 + 5001 are not credential-sensitive
+    # (image bytes; auth is enforced at upstream).
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: 5000
+          protocol: TCP
+        - port: 5001
+          protocol: TCP
+    # Prometheus scrape (kube-prometheus-stack in `monitoring`).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 9090
+          protocol: TCP
+  egress:
+    # kube-DNS for headless-Service SRV lookups (peer bootstrap).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Peer router/registry traffic outbound to other Spegel pods.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: spegel
+      ports:
+        - port: 5000
+          protocol: TCP
+        - port: 5001
+          protocol: TCP
+    # No kube-apiserver egress required — Spegel v0.3.0 uses
+    # DNS-based bootstrap (--bootstrap-kind=dns against the
+    # spegel-bootstrap headless Service), not the K8s API.
+    # Confirmed against the rendered DaemonSet args.

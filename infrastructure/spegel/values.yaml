@@ -1,0 +1,145 @@
+# Spegel — peer-to-peer container image cache.
+# Per ADR 0019 D4. Mitigates the homelab's 1 GbE WAN-link
+# during mass-restart / image-pull bursts: first node to pull
+# an image serves it to peers over cluster network instead of
+# every node racing back to the upstream registry.
+#
+# Talos-specific configuration (CRITICAL):
+# ----------------------------------------
+# Talos exposes containerd's CRI registry-config dir at
+#   /etc/cri/conf.d/hosts
+# rather than the chart-default `/etc/containerd/certs.d`.
+# Talos's containerd is rendered from
+#   /etc/cri/conf.d/{00-base,01-registries,20-customization}.part
+# and the merged `/etc/cri/conf.d/cri.toml` pins
+#   [plugins.'io.containerd.cri.v1.images'.registry]
+#     config_path = '/etc/cri/conf.d/hosts'
+# (verified on Talos v1.13.0 / containerd 2.2.3 — see README).
+#
+# Spegel writes one subdir per mirrored registry into that path
+# (e.g. `/etc/cri/conf.d/hosts/docker.io/hosts.toml`) and
+# containerd picks the mirror up without restart.
+#
+# NO machine-config patch is required on Talos for this path
+# to be writable: `/etc/cri/conf.d/hosts` is a tmpfs-backed
+# directory that Spegel's initContainer creates entries in via
+# the hostPath mount; the chart-default DirectoryOrCreate
+# volume type handles the bootstrap.
+
+image:
+  repository: ghcr.io/spegel-org/spegel
+  pullPolicy: IfNotPresent
+  # Pinned by digest via Renovate per ADR 0019 update-policy.
+  # Chart pins its own image digest in Chart's values; allow the
+  # chart-managed digest to flow through.
+
+# Run on every node — control-plane included — so CP-pulled
+# images (cilium, kube-prometheus-stack, openbao …) participate
+# in the peer cache too. The chart's default tolerations
+# already include NoSchedule/NoExecute/CriticalAddonsOnly, so
+# CP-tainted nodes are tolerated out of the box.
+tolerations:
+  - key: CriticalAddonsOnly
+    operator: Exists
+  - effect: NoExecute
+    operator: Exists
+  - effect: NoSchedule
+    operator: Exists
+
+nodeSelector:
+  kubernetes.io/os: linux
+
+# Pod resource budget. 128Mi is the upstream default and has
+# been adequate at 6-node, ~100-image homelab scale per
+# upstream guidance.
+resources:
+  requests:
+    cpu: 25m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+priorityClassName: system-node-critical
+
+# ServiceMonitor — scraped by kube-prometheus-stack which
+# selects via `release: kube-prometheus-stack` (observability
+# layer convention). Chart-managed SM keeps endpoint/port
+# wiring in sync with chart upgrades.
+serviceMonitor:
+  enabled: true
+  interval: 60s
+  scrapeTimeout: 30s
+  labels:
+    release: kube-prometheus-stack
+
+# Grafana dashboard via sidecar discovery (kube-prometheus-stack
+# Grafana runs the dashboards sidecar with label selector
+# `grafana_dashboard: "1"`).
+grafanaDashboard:
+  enabled: true
+  sidecarLabel: grafana_dashboard
+  sidecarLabelValue: "1"
+
+spegel:
+  logLevel: INFO
+
+  # ---- Talos-specific path overrides ----
+  # See header for the Talos containerd path lineage.
+  containerdSock: /run/containerd/containerd.sock
+  containerdNamespace: k8s.io
+  containerdRegistryConfigPath: /etc/cri/conf.d/hosts
+  containerdContentPath: /var/lib/containerd/io.containerd.content.v1.content
+
+  # Spegel writes the mirror config on first start (init
+  # container). Nothing else writes to /etc/cri/conf.d/hosts
+  # in this cluster — no Talos machine.registries config —
+  # so it's safe for Spegel to own that directory fully.
+  containerdMirrorAdd: true
+
+  # Empty = mirror all registries (chart default). With a
+  # single-cluster homelab the cache-hit math favors mirroring
+  # the full pull set; per-registry filters are only useful at
+  # multi-tenant scale.
+  mirroredRegistries: []
+
+  # Resolve tags to digests so peer cache hits work even when
+  # the upstream registry's tag→digest mapping is unavailable.
+  resolveTags: true
+  resolveLatestTag: true
+
+  # Keep Spegel's mirror config additive. If a Talos
+  # machine.registries.mirrors block is ever added (e.g. to
+  # point a registry through a corporate proxy), Spegel will
+  # prepend rather than replace.
+  prependExisting: true
+
+  # Mirror-resolve budget: 3 retries × 20ms is enough at LAN
+  # latency. If a peer doesn't have the layer in <60ms total,
+  # fall through to upstream — sub-second pull-failure is the
+  # goal here.
+  mirrorResolveRetries: 3
+  mirrorResolveTimeout: "20ms"
+
+  # Debug web UI on the registry port — useful for manual
+  # cache inspection (`kubectl port-forward ds/spegel 30020`).
+  # Bound to the registry hostPort 30020 → no extra surface.
+  debugWebEnabled: true
+
+service:
+  registry:
+    port: 5000
+    nodePort: 30021
+    hostPort: 30020
+    topologyAwareHintsEnabled: true
+  router:
+    port: 5001
+  metrics:
+    port: 9090
+  cleanup:
+    port: 8080
+
+# VPA off — 128-256Mi static budget is well-bounded and Spegel
+# is on the critical path of every image pull; predictable
+# resource shape is preferable to autotuned shape here.
+verticalPodAutoscaler:
+  enabled: false

@@ -1,0 +1,20 @@
+# Spegel namespace — peer-to-peer OCI image cache DaemonSet
+# per ADR 0019 D4.
+#
+# privileged PSA because the DaemonSet hostPath-mounts:
+#   - /run/containerd/containerd.sock   (containerd CRI socket)
+#   - /var/lib/containerd/io.containerd.content.v1.content
+#                                        (read-only content store)
+#   - /etc/cri/conf.d/hosts             (Talos containerd registry
+#                                        config_path — see README)
+#   - /var/lib/spegel                   (P2P identity persistence)
+# and runs hostPort 30020 (registry) — none of which pass the
+# restricted profile.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spegel
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: privileged
