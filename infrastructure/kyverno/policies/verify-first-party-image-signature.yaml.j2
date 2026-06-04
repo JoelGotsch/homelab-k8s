@@ -1,0 +1,224 @@
+# Kyverno ClusterPolicy — verify cosign signatures on every
+# first-party image. Per ADR 0019 D3.
+#
+# Restores the policy that was REMOVED 2026-05-23 (see the
+# 70-line comment block in ../clusterpolicies.yaml) now that
+# Forgejo Packages + Woodpecker CI + the cosign-sign step are
+# operational and producing signed images. The restoration
+# differs from that comment's sketch in three deliberate ways:
+#
+#   1. Static-key attestor (NOT keyless).
+#      Reason: the homelab doesn't run Fulcio / Rekor and the
+#      preference (operator + ADR 0019 D3 audit) is explicit
+#      static-key over keyless for a single-operator one-
+#      cluster lab. Also sidesteps the schema issue named in
+#      the 05-23 removal comment (keyless attestor requires
+#      `rekor.url` even in Audit mode; the static `keys:`
+#      attestor has no such constraint).
+#   2. Public key via Secret-ref (NOT inline string).
+#      Reason: the keypair lives in OpenBao at
+#      kv/shared/cosign/key; the public half is projected
+#      into the kyverno ns Secret `cosign-public-key` by the
+#      sibling ExternalSecret. Rotation = `bao kv put` →
+#      ESO sync → Kyverno picks up automatically. Inline-
+#      string attestors would force a repo edit + ArgoCD
+#      sync on every rotation.
+#   3. mutateDigest: true.
+#      Kyverno rewrites the Pod spec's image reference to
+#      the pinned digest at admission time. Combines with
+#      the require-first-party-image-digest sibling policy:
+#      tag-based references are accepted at submission, but
+#      the workload that actually runs is the digest the
+#      signature was produced against. Per ADR 0019 D3's
+#      "unsigned images don't run" property.
+#
+# MATCH SHAPE
+#
+#   imageReferences uses glob-syntax. The two patterns cover:
+#     - registry.homelab.internal/* — the ADR 0019 D1-option-b
+#       CNAME alias used by the CI pipeline today.
+#     - forgejo.{{ homelab_internal_subdomain }}.{{ homelab_domain }}/forgejo-admin/* — the apex
+#       endpoint, for any manifest that bypasses the alias
+#       (e.g. operator-pinned full path in a values.yaml).
+#   Other first-party Forgejo orgs would need additional
+#   entries; today only `forgejo-admin` hosts first-party
+#   image repositories.
+#
+# THIRD-PARTY EXCEPTION LIST
+#
+#   This policy intentionally does NOT include third-party
+#   images. ADR 0019 D3's "exception list" framing flips the
+#   default for third-party from match→exclude rather than
+#   excluded→include. Concretely: the sibling
+#   audit-third-party-image-digest policy (in
+#   ../clusterpolicies.yaml) provides visibility on third-
+#   party images; a future verify-third-party-image-signature
+#   policy would name specific upstream images we trust by
+#   key (e.g. `ghcr.io/grafana/loki:* signed by Grafana's
+#   keyless identity`). That's deferred until at least one
+#   upstream image we run is keyless-signed and we've decided
+#   to verify it.
+#
+# REKOR / TRANSPARENCY LOG
+#
+#   The cosign-sign step in CI passes `--tlog-upload=false`
+#   (see homelab-infra/scripts/templates/woodpecker-cosign-
+#   step.yml). The signature artifact in Forgejo Packages
+#   has no Rekor entry to look up. Symmetric setting on the
+#   verify side is `rekor.ignoreTlog: true`. Both sides
+#   MUST agree.
+#
+# FAILURE ACTION
+#
+#   Starts in Audit. Per the infra-apply discipline (minimal
+#   blast radius for any first real apply): the first tagged
+#   build of llm-gateway with the cosign-sign step might
+#   produce a signature with subtly wrong digest-pinning or
+#   key-format; flipping straight to Enforce would block
+#   that workload from rolling out. After one successful
+#   end-to-end signed-image deploy is observed (PolicyReport
+#   shows `pass` for the llm-gateway Pod), edit this file:
+#   verifyImages[0].failureAction → Enforce, commit, ArgoCD
+#   sync. The Audit-mode PolicyReport entries are visible
+#   via:
+#     kubectl get policyreport -A | grep verify-first-party
+#
+#   NOTE on Kyverno schema: failureAction lives PER
+#   verifyImages-entry (not at policy spec level — that's
+#   `validationFailureAction`, which controls validate rules,
+#   not verifyImages rules). This is the gotcha that needs
+#   reading the v1.10+ CRD schema closely; previously folks
+#   would set spec.validationFailureAction and wonder why
+#   verifyImages didn't switch to Enforce.
+#
+# WEBHOOK FAILURE POLICY
+#
+#   `webhookConfiguration.failurePolicy: Fail` (the default
+#   in Kyverno 1.11+). If Kyverno itself is down, admissions
+#   for first-party-image Pods are rejected — which is the
+#   correct stance for a supply-chain gate: a broken
+#   verifier MUST fail closed, not silently admit. The
+#   tradeoff is a hard dependency on Kyverno being healthy
+#   for any first-party-image deploy. Acceptable in homelab
+#   scale; first-party workloads are not on the
+#   cluster-bringup critical path (Kyverno + ESO + the
+#   verify policy must be up first).
+#
+# VERIFICATION ONCE LIVE
+#
+#   Pass case — first-party signed image:
+#     kubectl apply -f - <<'YAML'
+#     apiVersion: v1
+#     kind: Pod
+#     metadata: {name: signed-test, namespace: default}
+#     spec:
+#       containers:
+#         - name: app
+#           image: registry.homelab.internal/llm-gateway@sha256:<digest>
+#     YAML
+#   → admitted. PolicyReport entry `result: pass`.
+#
+#   No-match case — unsigned third-party image:
+#     kubectl run nginx-unsigned --image=docker.io/library/nginx:1.25
+#   → admitted (does not match first-party imageReferences
+#     glob). Per ADR 0019 D3 framing, this is correct: third-
+#     party images don't pass through THIS policy.
+#
+#   Fail case — first-party image WITHOUT a signature
+#   (forced by bypassing the signing step):
+#     kubectl run llm-gateway-unsigned \
+#       --image=registry.homelab.internal/llm-gateway:nosig
+#   → Audit mode: PolicyReport `result: fail`, Pod admitted
+#     (admin sees the violation in policyreport).
+#     Enforce mode: admission webhook rejects with the
+#     verifyImages failureMessage.
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-first-party-image-signature
+  annotations:
+    policies.kyverno.io/category: Supply Chain
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Every first-party container image (registry.homelab.internal/*
+      and forgejo.{{ homelab_internal_subdomain }}.{{ homelab_domain }}/forgejo-admin/*) MUST be cosign-
+      signed by the homelab's signing key. The signature is
+      produced by the cosign-sign step in each first-party
+      .woodpecker.yml (template:
+      homelab-infra/scripts/templates/woodpecker-cosign-step.yml)
+      and stored as an OCI artifact alongside the image in
+      Forgejo Packages. The verification public key is sourced
+      from the `cosign-public-key` Secret in the kyverno
+      namespace, projected by the sibling ExternalSecret from
+      OpenBao kv/shared/cosign/key field `public`.
+spec:
+  # background: false — verifyImages rules CAN run in
+  # background, but only as an audit pass; running them on
+  # the foreground admission path is what produces the
+  # "unsigned images don't run" property. Leaving background
+  # off avoids redundant PolicyReport churn on every
+  # background scan tick.
+  background: false
+  webhookConfiguration:
+    # Fail-closed: if Kyverno is unhealthy, first-party Pod
+    # admissions are rejected (rather than silently admitted
+    # without signature check). See file header.
+    failurePolicy: Fail
+  rules:
+    - name: verify-cosign-static-key
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      verifyImages:
+        - imageReferences:
+            - "registry.homelab.internal/*"
+            - "forgejo.{{ homelab_internal_subdomain }}.{{ homelab_domain }}/forgejo-admin/*"
+          # failureAction lives HERE on the verifyImages
+          # entry, not at the policy spec level. See file
+          # header gotcha note.
+          failureAction: Audit
+          # mutateDigest must be FALSE while failureAction
+          # is Audit — Kyverno's admission webhook rejects
+          # mutateDigest: true + Audit as inconsistent
+          # ("mutateDigest must be set to false for 'Audit'
+          # failure action"). Flip both together when
+          # promoting:
+          #   failureAction: Enforce
+          #   mutateDigest:  true
+          # Discovered by `kubectl apply --dry-run=server`
+          # against the live Kyverno admission webhook
+          # 2026-06-04.
+          mutateDigest: false
+          # `required: true` → the rule MUST find a matching
+          # signature. Default is false (which would let
+          # unsigned images through silently — wrong shape
+          # for a "no unsigned images" policy).
+          required: true
+          # verifyDigest re-pins from the signature manifest
+          # at every evaluation. Safe to leave on regardless
+          # of mutateDigest — verifyDigest is the audit-side
+          # check; mutateDigest is the rewrite side.
+          verifyDigest: true
+          attestors:
+            - count: 1
+              entries:
+                - keys:
+                    # Per-rule Secret reference. The Secret
+                    # MUST live in the kyverno namespace and
+                    # MUST contain a field named `cosign.pub`
+                    # holding the PEM-encoded public key.
+                    # The sibling ExternalSecret writes
+                    # exactly that shape.
+                    secret:
+                      name: cosign-public-key
+                      namespace: kyverno
+                    # No Rekor transparency log (the
+                    # cosign-sign step writes signatures
+                    # with --tlog-upload=false). Symmetric
+                    # setting on verify.
+                    rekor:
+                      ignoreTlog: true

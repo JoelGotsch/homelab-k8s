@@ -73,34 +73,13 @@ spec:
             containers:
               - image: "*@sha256:*"
 
-# verify-first-party-image-signature policy REMOVED 2026-05-23
-# — restore when Forgejo + Woodpecker signing pipeline is up.
-#
-# Why removed (vs an Audit-mode flip): kyverno's schema
-# validation rejects the keyless attestor because it requires
-# either a `rekor.url` or explicit `roots` cert, even for an
-# Audit-mode policy. The homelab doesn't run a local Rekor
-# yet (Forgejo's not deployed); plumbing public sigstore.dev
-# would be a kludge for a policy whose only job is to run
-# against a registry that doesn't exist yet.
-#
-# When Forgejo + Woodpecker are operational + producing
-# signed images, restore the policy with the correct attestor
-# shape:
-#   verifyImages:
-#     - imageReferences: ["forgejo.lab/homelab/*",
-#                         "registry.homelab.internal/*"]
-#       attestors:
-#         - count: 1
-#           entries:
-#             - keyless:
-#                 subject: "https://forgejo.lab/homelab/*"
-#                 issuer: "https://forgejo.lab"
-#                 rekor:
-#                   url: <local-rekor-or-sigstore-public>
-#       mutateDigest: true
-#       required: true
-# Per homelab-docs/TODO.md Phase-1 follow-ups.
+# verify-first-party-image-signature policy RESTORED
+# 2026-06-04 in a sibling file: policies/verify-first-party-
+# image-signature.yaml. The 2026-05-23 removal note kept here
+# for historical context; the restoration differs from the
+# sketch in three ways (static-key not keyless, Secret-ref
+# not inline string, mutateDigest: true). See the restored
+# file's header for the full rationale.
 
 # === Third-party: digest-pinning visibility (Audit only) ===
 ---
