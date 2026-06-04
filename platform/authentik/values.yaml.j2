@@ -1,6 +1,14 @@
-# Authentik IdP helm values — server + worker + bundled Redis,
-# external CNPG Postgres, Tailscale-only HTTPRoute via Cilium
-# Gateway.
+# Authentik IdP helm values — server + worker, external CNPG
+# Postgres, Tailscale-only HTTPRoute via Cilium Gateway.
+#
+# Redis note: Authentik 2026.x removed Redis entirely. The app
+# uses django_postgres_cache + django_channels_postgres +
+# django_dramatiq_postgres — all Postgres-backed. No Redis
+# dependency or configuration exists in the 2026.2.0 chart
+# (Chart.yaml has no redis subchart; values.yaml has no redis
+# key). Any redis:/authentik.redis.* values.yaml keys are
+# silently dropped at render. See settings.py in the upstream
+# source for confirmation.
 #
 # Per identity.md (Authentik enforces WebAuthn as primary
 # factor for internal services) + ADR 0024 D3 (Tailscale-only
@@ -55,26 +63,10 @@ blueprints:
   configMaps:
     - authentik-blueprints
 
-# Use external CNPG Postgres + bundled Redis (default).
 # Authentik chart's bundled Postgres dependency is disabled
 # in favour of the cluster-pattern CNPG.
 postgresql:
   enabled: false
-
-# Bundled Redis: keep on. Authentik's task queue + cache
-# layer is Redis-bound; a separate Redis layer would add
-# ops surface for negligible architectural gain at homelab
-# scale. Persistence on by default (small footprint).
-redis:
-  enabled: true
-  architecture: standalone
-  auth:
-    enabled: false
-  master:
-    persistence:
-      enabled: true
-      storageClass: longhorn-replica2
-      size: 5Gi
 
 # Server replica count — single replica matches the
 # Forgejo posture (HA via backup, not clustering).
@@ -93,11 +85,6 @@ authentik:
     name: authentik
     user: authentik
     port: 5432
-
-  # Bundled Redis from chart.
-  redis:
-    host: "{{ .Release.Name }}-redis-master"
-    password: ""
 
   log_level: info
 

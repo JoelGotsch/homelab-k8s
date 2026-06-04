@@ -7,6 +7,13 @@
 #      runs as a Deployment, not a DaemonSet.
 #   F: ConfigMap-driven allowlist → see allowlist-configmap.yaml
 #      mounted at the path the chart's whitelist module expects.
+#
+# Bouncer registration (decision B): the chart has NO `lapi.bouncers[]`
+# key (audit 2026-06-04). The cilium-bouncer API key is managed
+# entirely out-of-chart: the cidrgroup-sync CronJob reads the key from
+# the crowdsec-cilium-bouncer Secret (ExternalSecret-sourced) and the
+# operator registers it once via `cscli bouncers add cilium-bouncer`
+# in the LAPI pod on first install. No chart value is needed.
 
 # === Combined LAPI + agent in one release ===
 #
@@ -17,6 +24,7 @@ agent:
   # Single-replica Deployment — agent is stateless from the
   # operator's POV; LAPI carries the durable state.
   replicas: 1
+  isDeployment: true
 
   # Loki-API acquisition. Per decision E: clean composability
   # over real-time at this layer; reconsider-trigger if
@@ -43,28 +51,24 @@ agent:
       since: 1h
       delay_for: 10s
 
-  # CrowdSec hub modules to install. The chart pulls from the
-  # hub at first start. Pin a specific hub commit via
-  # config.hub_commit if reproducibility matters; default is
-  # latest.
-  hub:
-    collections:
-      - crowdsecurity/linux
-      - crowdsecurity/base-http-scenarios
-      - crowdsecurity/http-cve
-      # Operator extends as workload-specific scenarios emerge
-      # (e.g. crowdsecurity/vaultwarden, crowdsecurity/grafana
-      # if Authentik fronts those after landing).
-    parsers:
+  # CrowdSec hub modules to install at agent startup.
+  # Chart v0.24.0 schema: no `agent.hub.*` key (audit 2026-06-04).
+  # Correct mechanism: `agent.env` with COLLECTIONS / PARSERS /
+  # SCENARIOS env vars — the CrowdSec container's entrypoint reads
+  # these and installs hub items on first start. Verified against
+  # https://github.com/crowdsecurity/helm-charts/blob/crowdsec-0.24.0/charts/crowdsec/values.yaml
+  env:
+    - name: COLLECTIONS
+      value: >-
+        crowdsecurity/linux
+        crowdsecurity/base-http-scenarios
+        crowdsecurity/http-cve
+    - name: PARSERS
       # Generic envoy access-log parser — written by the
       # operator per the README §Parsers section, since
       # Cilium Gateway emits envoy logs that don't match
       # the chart's nginx default.
-      - crowdsecurity/envoy-logs
-    scenarios:
-      # Pulled in by the collections above; explicit list
-      # for documentation. Each scenario fires on a rate-
-      # over-window match.
+      value: "crowdsecurity/envoy-logs"
 
 # === LAPI ===
 lapi:
@@ -72,29 +76,40 @@ lapi:
 
   # External Postgres — CNPG cluster `crowdsec-lapi` in this
   # ns (see cnpg-cluster.yaml).
-  database:
-    type: postgresql
-    host: crowdsec-lapi-rw.crowdsec.svc.cluster.local
-    port: 5432
-    name: crowdsec
-    user: crowdsec
-    # Password from the LAPI_POSTGRES_PASSWORD secret key
-    # in crowdsec-secrets (ExternalSecret-managed; sourced
-    # from kv/crowdsec/lapi). Operator copies the CNPG-
-    # issued password from the cluster's own creds Secret
-    # at first install.
-    existingSecret: crowdsec-secrets
-    secretKey: LAPI_POSTGRES_PASSWORD
+  # Chart v0.24.0 has NO `lapi.database.*` key (audit 2026-06-04).
+  # Correct paths (verified against chart values.yaml at tag):
+  #   1. `lapi.envFrom` — injects LAPI_POSTGRES_PASSWORD from Secret
+  #   2. `config."config.yaml.local"` db_config stanza — references
+  #      DB_PASSWORD via env-var expansion in the crowdsec config.
+  envFrom:
+    - secretRef:
+        name: crowdsec-secrets
+        # crowdsec-secrets carries: LAPI_POSTGRES_PASSWORD (DB password)
+        # and CONSOLE_ENROLL_KEY (console enrollment). The cilium
+        # bouncer key lives in a SEPARATE Secret crowdsec-cilium-bouncer
+        # (key BOUNCER_API_KEY) — consumed by cidrgroup-sync and by
+        # the bouncer-register Job (bouncer-register-job.yaml).
 
-  # Pre-create the cilium-bouncer at first start using the
-  # API key from crowdsec-cilium-bouncer Secret. Without
-  # this, operator runs `cscli bouncers add cilium-bouncer`
-  # manually after first LAPI start.
-  bouncers:
-    - name: cilium-bouncer
-      key:
-        secretName: crowdsec-cilium-bouncer
-        secretKey: BOUNCER_API_KEY
+  # Allowlist ConfigMap mount.
+  # Chart v0.24.0 has NO root-level `volumeMounts:` / `volumes:` keys
+  # (audit 2026-06-04). Root-level volume keys are ignored — they apply
+  # to no workload. Correct keys: `lapi.extraVolumes` / `lapi.extraVolumeMounts`.
+  # The allowlist is a LAPI-side concern (the agent parser stage runs in
+  # the agent pod, but s02-enrich whitelists are evaluated in LAPI for
+  # global allow-listing per CrowdSec docs). If the allowlist also needs
+  # to be in the agent pod, add a parallel `agent.extraVolumes` block.
+  extraVolumeMounts:
+    - name: allowlist
+      mountPath: /etc/crowdsec/parsers/s02-enrich/whitelists.yaml
+      subPath: whitelists.yaml
+      readOnly: true
+  extraVolumes:
+    - name: allowlist
+      configMap:
+        name: crowdsec-allowlist
+        items:
+          - key: whitelists.yaml
+            path: whitelists.yaml
 
   # Disable the LAPI dashboard — Grafana is the cluster's
   # observability UI; LAPI metrics + decisions surface via
@@ -103,36 +118,50 @@ lapi:
   dashboard:
     enabled: false
 
-# === Console enrollment for community blocklist ===
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+# === Console enrollment + DB config ===
+# Chart v0.24.0 has NO `config.console.enrollKey.*` key (audit 2026-06-04).
+# Correct paths:
+#   - CONSOLE_ENROLL_KEY → injected via `lapi.envFrom` secretRef above
+#     (crowdsec-secrets carries the key).
+#   - console enrollment → `config."console.yaml"` string with
+#     `enroll_key: ${CONSOLE_ENROLL_KEY}` (crowdsec container expands
+#     env vars in config files via envsubst-style processing).
+#   - DB config → `config."config.yaml.local"` db_config stanza with
+#     `${LAPI_POSTGRES_PASSWORD}` referencing the env var from envFrom.
 config:
-  console:
-    enrollKey:
-      existingSecret: crowdsec-secrets
-      secretKey: CONSOLE_ENROLL_KEY
-    # Enable just the parts needed for the blocklist
-    # subscription — share custom scenarios with the
-    # community is opt-in only.
+  "console.yaml": |
+    enroll_key: ${CONSOLE_ENROLL_KEY}
     share_custom: false
     share_manual_decisions: false
     share_tainted: false
     share_context: false
 
-# === Allowlist (operator-managed) ===
-# The chart mounts /etc/crowdsec/parsers/s02-enrich/whitelists.yaml
-# from the `crowdsec-allowlist` ConfigMap. See
-# allowlist-configmap.yaml for the rendered content.
-volumeMounts:
-  - name: allowlist
-    mountPath: /etc/crowdsec/parsers/s02-enrich/whitelists.yaml
-    subPath: whitelists.yaml
-    readOnly: true
-volumes:
-  - name: allowlist
-    configMap:
-      name: crowdsec-allowlist
-      items:
-        - key: whitelists.yaml
-          path: whitelists.yaml
+  "config.yaml.local": |
+    api:
+      server:
+        auto_registration:
+          enabled: true
+          token: "${REGISTRATION_TOKEN}"
+          allowed_ranges:
+            - "127.0.0.1/32"
+            - "192.168.0.0/16"
+            - "10.0.0.0/8"
+            - "172.16.0.0/12"
+    db_config:
+      type: postgresql
+      user: crowdsec
+      password: ${LAPI_POSTGRES_PASSWORD}
+      db_name: crowdsec
+      host: crowdsec-lapi-rw.crowdsec.svc.cluster.local
+      port: 5432
+      sslmode: require
 
 # === Self-metrics ===
 # Both LAPI + agent expose Prometheus on :6060. Chart-default
@@ -145,28 +174,17 @@ metrics:
                     # convention; servicemonitor.yaml ships our own.
 
 # === Resources ===
-resources:
-  agent:
-    requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      memory: 512Mi
-  lapi:
-    requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      memory: 512Mi
+# Note: chart v0.24.0 keys are `lapi.resources` and `agent.resources`
+# (nested under the component), NOT a root-level `resources.lapi` /
+# `resources.agent` map (those are silently dropped). lapi.resources
+# is set above; agent resources default (250Mi/500m) is acceptable
+# for the Loki-pull workload.
 
 # === Pod security ===
-securityContext:
-  runAsNonRoot: true
-  runAsUser: 1000
-  runAsGroup: 1000
-  fsGroup: 1000
-containerSecurityContext:
-  allowPrivilegeEscalation: false
-  capabilities:
-    drop: [ALL]
-  readOnlyRootFilesystem: true
+# Note: chart v0.24.0 keys are `lapi.podSecurityContext` /
+# `lapi.securityContext` and `agent.podSecurityContext` /
+# `agent.securityContext` — NOT root-level `securityContext` /
+# `containerSecurityContext` (those are silently dropped).
+# The chart's default `securityContext.allowPrivilegeEscalation: false`
+# is sufficient for our threat model at this layer. Operator extends
+# if PSS-restricted enforcement is added to the crowdsec namespace.

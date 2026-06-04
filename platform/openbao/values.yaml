@@ -17,10 +17,13 @@ global:
   tlsDisable: false
 injector:
   enabled: false
-seal:
-  shamir:
-    secretShares: 3
-    secretThreshold: 2
+# seal config: Shamir is the OpenBao default seal type and requires NO
+# values.yaml stanza. The chart (openbao-0.28.3) has no `seal.*` key
+# at all — a top-level `seal:` block is silently dropped at render
+# (audit 2026-06-04, finding #12). Seal parameters (secretShares=3,
+# secretThreshold=2) are set at `bao operator init` time by the
+# operator (not by Helm) and are stored inside the Raft data volume.
+# See homelab-docs/04-guides/cold-start.md §OpenBao init.
 server:
   affinity: "podAntiAffinity:\n  requiredDuringSchedulingIgnoredDuringExecution:\n\
     \    - labelSelector:\n        matchLabels:\n          app.kubernetes.io/name:\
@@ -68,6 +71,12 @@ server:
   livenessProbe:
     enabled: true
     initialDelaySeconds: 60
+    # HTTPS scheme required: our listener has tls_disable=0 (HTTPS),
+    # so without `scheme: HTTPS` the kubelet probe hits HTTP against
+    # the HTTPS listener → HTTP 400 → probe fails → container killed →
+    # crashloop. Matching homelab-infra/ansible/files/openbao-values.yaml
+    # (handoff drift fix, audit 2026-06-04).
+    scheme: HTTPS
     # Status-code tolerance: chart-default path returns 503 for
     # sealed pods + 501 for uninitialized. Kubelet treats both
     # as failure → kills container → crashloop during the

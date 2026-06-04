@@ -116,11 +116,15 @@ cronjob:
 persistence:
   enabled: true
   existingClaim: nextcloud-hot
-  subPath:
-    config: /config
-    customApps: /custom_apps
-    themes: /themes
-    tmp: /tmp
+  # subPath is a SCALAR STRING prefix, not a map (audit 2026-06-04, finding #14).
+  # The chart template (nextcloud-5.5.0 templates/deployment.yaml) uses it as:
+  #   subPath: {{ ternary "html" (printf "%s/html" .Values.persistence.subPath) (empty .Values.persistence.subPath) }}
+  # and similarly for root, config, custom_apps, themes sub-mounts.
+  # Passing a YAML map caused the `empty` check to evaluate to false (non-nil map)
+  # and `printf "%s/html"` on a map object → garbled mount path. Leave empty:
+  # the chart then uses bare dir names (html, config, custom_apps, themes) as
+  # the subPath within the PVC — correct for a flat single-PVC layout.
+  subPath: ""
 
 nextcloud:
   # Main 'nextcloud' container. The apache image entrypoint runs as root

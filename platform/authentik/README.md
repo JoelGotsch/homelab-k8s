@@ -8,10 +8,13 @@ Vaultwarden, Langfuse, ...) authenticate against. Per
 WebAuthn as the primary factor") + [ADR 0024](../../../homelab-docs/02-decisions/0024-external-access-for-internal-services.md)
 D3 (Tailscale-only ingress for internal services).
 
-Single-replica server + worker on Longhorn; external CNPG
-Postgres for relational data; bundled Redis (chart's) for
-task queue + cache. Cilium HTTPRoute on
-`auth.lab.<HOMELAB-DOMAIN>` reachable only via Tailscale.
+Single-replica server + worker; external CNPG Postgres for
+all persistent state (cache, task queue, channel layer, and
+relational data — Authentik 2026.x removed Redis entirely,
+replacing it with `django_postgres_cache` /
+`django_channels_postgres` / `django_dramatiq_postgres`).
+Cilium HTTPRoute on `auth.lab.<HOMELAB-DOMAIN>` reachable
+only via Tailscale.
 
 The companion [`templates/`](templates/) directory holds the
 reusable per-app OIDC-client pattern — every consuming app
@@ -23,11 +26,11 @@ copies + adapts that template into its own manifests.
 |---|---|
 | `namespace.yaml` | `authentik` ns; PSA restricted. |
 | `kustomization.yaml` | Authentik helm chart `2026.2.0`; resource list below. |
-| `values.yaml` | Server + worker, external CNPG, bundled Redis, JSON logs, telemetry/error-reporting disabled, readonly rootfs, dropped caps. |
+| `values.yaml` | Server + worker, external CNPG (Postgres-backed cache + queue — no Redis), JSON logs, telemetry/error-reporting disabled, readonly rootfs, dropped caps. |
 | `cnpg-cluster.yaml` | 2-instance CNPG `authentik-pg` on `longhorn-replica3`; barman → MinIO; **90d retention** (longer than other apps — operator-identity data warrants longer recovery window). |
 | `externalsecret.yaml` | 4 ExternalSecrets: secret-key, postgres, bootstrap (admin), cnpg-s3. |
 | `httproute.yaml` | Cilium HTTPRoute for `auth.lab.<HOMELAB-DOMAIN>`; Tailscale-only. |
-| `networkpolicy.yaml` | Server ingress: Cilium Gateway + Prometheus + every OIDC consumer ns (forgejo, woodpecker, vaultwarden, monitoring, langfuse, llm-gateway, nextcloud, jellyfin, argocd). Egress: kube-DNS + CNPG + Redis + OpenBao. Worker: same egress + outbound to OIDC consumers for token push. |
+| `networkpolicy.yaml` | Server ingress: Cilium Gateway + Prometheus + every OIDC consumer ns (forgejo, woodpecker, vaultwarden, monitoring, langfuse, llm-gateway, nextcloud, jellyfin, argocd). Egress: kube-DNS + CNPG + OpenBao (no Redis — removed in 2026.x). Worker: same egress + outbound to OIDC consumers for token push. |
 | `servicemonitor.yaml` | Prometheus scrape on `:9300`. |
 | `templates/` | Reusable OIDC-client pattern for consuming apps. Copy + adapt per app. Pre-existing; kept under this layer because Authentik owns the pattern. |
 
@@ -88,7 +91,7 @@ homelab-infra/scripts/provision-minio-svcacct.sh \
 | Argo sync `infrastructure/cert-manager/` | TLS certs available. |
 | Argo sync `infrastructure/minio-on-nas/` | `homelab-backups-cluster` bucket pre-created. |
 | Argo sync `platform/openbao/` | OpenBao + ESO ready; operator runs the seed snippet above. |
-| Argo sync this layer | CNPG `authentik-pg` Cluster up (90s); bundled Redis up; server + worker Deployments Ready; HTTPRoute reconciled. |
+| Argo sync this layer | CNPG `authentik-pg` Cluster up (90s); server + worker Deployments Ready; HTTPRoute reconciled. |
 | Operator: `/if/flow/initial-setup/` | First-admin flow completes; `akadmin` user created with `bootstrap_password`. |
 | Operator: enrol Nitrokey as WebAuthn credential | Per [`identity.md` §Authentik](../../../homelab-docs/01-architecture/identity.md). |
 | Operator: create OIDC clients per consuming app | Forgejo + Woodpecker + Grafana + Vaultwarden + ... — each per the pattern in [`templates/oidc-client.template.yaml`](templates/oidc-client.template.yaml). |
@@ -149,11 +152,16 @@ The pattern is repetitive (same shape per app) — see
    recover — 90d barman retention (vs the 30d default for
    other CNPG-using services) reflects that.
 
-2. **Bundled Redis.** Standalone, persistent on
-   `longhorn-replica2`. At homelab scale this is fine; if
-   Redis becomes a bottleneck, switch to a managed Redis
-   layer (Bitnami operator). Loss of Redis = task-queue
-   reset + cache misses; no permanent data loss.
+2. **No Redis — Postgres-backed cache/queue.** Authentik
+   2026.x replaced Redis with `django_postgres_cache` +
+   `django_channels_postgres` + `django_dramatiq_postgres`.
+   The chart has no Redis subchart and no `redis:` values
+   key; the previously configured `redis:` + `authentik.redis`
+   blocks were dead config silently dropped at render. Loss
+   of Postgres = full service outage (cache, queue, AND
+   relational data are all on the same CNPG cluster). CNPG
+   HA (2 instances) + 90d barman retention is the resilience
+   story.
 
 3. **Bootstrap creds stay in OpenBao after first-admin
    flow.** They're inert (Authentik no longer reads them
