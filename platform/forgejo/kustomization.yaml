@@ -30,6 +30,7 @@ resources:
   - pvc.yaml
   - externalsecret.yaml
   - httproute.yaml
+  - httproute-registry.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml
 

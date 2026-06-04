@@ -1,0 +1,47 @@
+# `registry.homelab.internal` → Forgejo Packages OCI registry.
+# Per ADR 0019 D1 (Forgejo = first-party OCI registry); operator
+# option (b): keep the hardcoded `registry.homelab.internal`
+# hostname in every `.woodpecker.yml` + `image:` ref across the
+# apps repos, alias DNS+TLS to Forgejo's HTTP host on the
+# cluster Gateway.
+#
+# Forgejo serves the OCI v2 endpoint on the same HTTP host as
+# the UI — any path under `/v2/...` is routed to the Packages
+# registry handler. So we route ALL paths to `forgejo-http:3000`
+# (same backend the UI route uses).
+#
+# parentRefs.sectionName = `https-registry` — the dedicated
+# HTTPS listener added in infrastructure/ingress/gateway.yaml,
+# bound to the homelab-internal-CA-issued cert
+# `registry-homelab-internal-tls`. We also attach to
+# `http-registry` so plain-HTTP probes (e.g. local development,
+# initial bring-up) reach the backend; production clients are
+# Talos containerd + crane, both prefer HTTPS first.
+#
+# Pre-existing CiliumNetworkPolicy `forgejo` already permits
+# `fromEntities: [ingress]` to port 3000 (see networkpolicy.yaml),
+# so no policy change is needed.
+
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: registry-homelab-internal
+  namespace: forgejo
+spec:
+  parentRefs:
+    - name: homelab-gateway
+      namespace: ingress
+      sectionName: https-registry
+    - name: homelab-gateway
+      namespace: ingress
+      sectionName: http-registry
+  hostnames:
+    - "registry.homelab.internal"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: forgejo-http
+          port: 3000

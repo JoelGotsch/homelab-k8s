@@ -38,6 +38,43 @@ spec:
       allowedRoutes:
         namespaces:
           from: All
+    # HTTPS + HTTP listeners for `registry.homelab.internal` —
+    # the alias under which Forgejo Packages OCI registry is
+    # reached from inside the homelab (per ADR 0019 D1; operator
+    # option (b): keep the hardcoded hostname in every
+    # .woodpecker.yml + image: ref, make DNS+TLS resolve to
+    # Forgejo's HTTP host on this Gateway).
+    #
+    # `.homelab.internal` is not Let's-Encrypt-issuable, so this
+    # listener uses a cert from the homelab-internal-issuer
+    # (OpenBao PKI) — see `registry-homelab-internal-tls`
+    # Certificate below. trust-manager distributes the root CA
+    # cluster-wide; Talos nodes get it via the machine-config
+    # patch in homelab-infra/talos/patches/common.yaml.
+    #
+    # DNS: registry.homelab.internal A {{ cluster_ingress_ip }}
+    # served by OpenWrt unbound — see
+    # homelab-infra/ansible/roles/openwrt-config/templates/unbound.conf.j2.
+    - name: https-registry
+      port: 443
+      protocol: HTTPS
+      hostname: registry.homelab.internal
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: registry-homelab-internal-tls
+            namespace: ingress
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: http-registry
+      port: 80
+      protocol: HTTP
+      hostname: registry.homelab.internal
+      allowedRoutes:
+        namespaces:
+          from: All
 ---
 # Wildcard cert for *.lab.<homelab-domain>, issued by
 # Let's Encrypt via cert-manager (Cloudflare DNS-01 solver).
@@ -72,3 +109,42 @@ spec:
   # manager behavior, but pin explicitly so it's not opaque).
   duration: 2160h     # 90 days
   renewBefore: 720h   # 30 days remaining
+---
+# Leaf cert for `registry.homelab.internal`, signed by the
+# homelab-internal CA (OpenBao PKI → cert-manager via the
+# `homelab-internal-issuer` ClusterIssuer).
+#
+# `*.homelab.internal` is unreachable on the public internet
+# so LE / ACME cannot validate it. The homelab CA cert is
+# distributed in-cluster via trust-manager
+# (infrastructure/trust-manager/bundles.yaml) and to Talos
+# containerd via the machine-config patch in
+# homelab-infra/talos/patches/common.yaml.
+#
+# Per ADR 0019 D1 (Forgejo = registry) + D5 (Talos trusts the
+# homelab CA); identity.md.
+#
+# Prerequisite: the OpenBao PKI role `homelab-internal-issuer`
+# allowed_domains list must include `homelab.internal`. Patch
+# applied to homelab-infra/ansible/playbooks/09b-argocd-bootstrap.yml.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: registry-homelab-internal-tls
+  namespace: ingress
+spec:
+  secretName: registry-homelab-internal-tls
+  issuerRef:
+    name: homelab-internal-issuer
+    kind: ClusterIssuer
+  commonName: registry.homelab.internal
+  dnsNames:
+    - registry.homelab.internal
+  # OpenBao PKI role caps max_ttl=2160h with default ttl=720h
+  # per 09b-argocd-bootstrap.yml. cert-manager auto-renews.
+  duration: 720h     # 30 days
+  renewBefore: 240h  # 10 days remaining
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
