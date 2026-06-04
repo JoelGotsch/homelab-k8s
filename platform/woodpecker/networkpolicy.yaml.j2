@@ -177,14 +177,15 @@ spec:
     - toFQDNs:
         # Forgejo (git clone via public hostname).
         # Step pods clone using `WOODPECKER_FORGEJO_URL`
-        # (https://forgejo.lab.vyramo.com), which resolves to
-        # the Cilium Gateway VIP. Traffic egresses to the
-        # gateway and re-enters the cluster to Forgejo.
-        # `ci-woodpecker-default` allows the in-cluster
-        # forgejo-ns shortcut, but Woodpecker hardcodes the
-        # public clone URL from Forgejo's ROOT_URL, so we
-        # also need it here for FQDN-based egress to work.
-        - matchName: "forgejo.lab.vyramo.com"
+        # (https://forgejo.<internal-subdomain>.<domain>),
+        # which resolves to the Cilium Gateway VIP. Traffic
+        # egresses to the gateway and re-enters the cluster
+        # to Forgejo. `ci-woodpecker-default` allows the
+        # in-cluster forgejo-ns shortcut, but Woodpecker
+        # hardcodes the public clone URL from Forgejo's
+        # ROOT_URL, so we also need the public FQDN here
+        # for L7 DNS proxy resolution + egress.
+        - matchName: "forgejo.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
         # Container registries
         - matchName: "registry-1.docker.io"
         - matchName: "auth.docker.io"
