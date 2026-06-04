@@ -139,9 +139,15 @@ agent:
     WOODPECKER_BACKEND_K8S_STORAGE_CLASS: "longhorn-replica2"
     WOODPECKER_BACKEND_K8S_VOLUME_SIZE: "10G"
     WOODPECKER_BACKEND_K8S_STORAGE_RWX: "false"
-    # Step pod security defaults — restricted PSA.
+    # Step pod security defaults. SECCTX_NONROOT was true until
+    # 2026-06-04 — kubelet rejected woodpeckerci/plugin-git (and most
+    # canonical CI step images) at start-time with "container has
+    # runAsNonRoot and image will run as root." pinning to false lets
+    # the canonical images run; ci-woodpecker ns isolation
+    # (ResourceQuota + LimitRange + scoped SA + default-deny NetPol)
+    # is the layered defense per ADR 0023 D5.
     WOODPECKER_BACKEND_K8S_POD_NODE_SELECTOR: ""
-    WOODPECKER_BACKEND_K8S_SECCTX_NONROOT: "true"
+    WOODPECKER_BACKEND_K8S_SECCTX_NONROOT: "false"
     # How many pipeline steps the agent runs in parallel.
     # Bound to keep node pressure manageable at homelab scale.
     WOODPECKER_MAX_WORKFLOWS: "4"
