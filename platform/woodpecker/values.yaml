@@ -21,7 +21,7 @@ server:
 
   image:
     # OPERATOR PINS via Renovate.
-    tag: "v3.4.0"
+    tag: "v3.15.0"
     pullPolicy: IfNotPresent
 
   env:
@@ -115,7 +115,7 @@ agent:
   enabled: true
 
   image:
-    tag: "v3.4.0"
+    tag: "v3.15.0"
     pullPolicy: IfNotPresent
 
   # One agent replica is fine at homelab scale (concurrency
