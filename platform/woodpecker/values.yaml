@@ -44,7 +44,10 @@ server:
     WOODPECKER_LOG_FORMAT: "json"
     # Disable webhooks-to-public; Forgejo + Woodpecker are
     # in-cluster.
-    WOODPECKER_WEBHOOK_HOST: "https://woodpecker.lab.vyramo.com"
+    WOODPECKER_WEBHOOK_HOST: "http://woodpecker-server.woodpecker.svc.cluster.local."
+    # Privileged plugins — explicit allowlist required since
+    # Woodpecker 3.x (formerly all plugins ran privileged by default).
+    WOODPECKER_PLUGINS_PRIVILEGED: "woodpeckerci/plugin-docker-buildx"
     # Database: SQLite on Longhorn for the server's job state.
     # Forgejo's CNPG handles the source-of-truth metadata;
     # Woodpecker's DB is just pipeline-execution state — recovery
