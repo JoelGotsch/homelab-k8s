@@ -42,3 +42,4 @@ resources:
   - servicemonitor.yaml
   - prometheusrule.yaml
   - httproute.yaml
+  - bouncer-register-job.yaml

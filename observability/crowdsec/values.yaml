@@ -84,9 +84,11 @@ lapi:
   envFrom:
     - secretRef:
         name: crowdsec-secrets
-        # crowdsec-secrets carries: LAPI_POSTGRES_PASSWORD (DB password),
-        # CONSOLE_ENROLL_KEY (console enrollment), and BOUNCER_API_KEY
-        # (cilium bouncer — consumed by cidrgroup-sync, not the LAPI).
+        # crowdsec-secrets carries: LAPI_POSTGRES_PASSWORD (DB password)
+        # and CONSOLE_ENROLL_KEY (console enrollment). The cilium
+        # bouncer key lives in a SEPARATE Secret crowdsec-cilium-bouncer
+        # (key BOUNCER_API_KEY) — consumed by cidrgroup-sync and by
+        # the bouncer-register Job (bouncer-register-job.yaml).
 
   # Allowlist ConfigMap mount.
   # Chart v0.24.0 has NO root-level `volumeMounts:` / `volumes:` keys
