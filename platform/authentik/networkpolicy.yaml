@@ -13,11 +13,14 @@
 #   Prometheus scrape + every in-cluster OIDC consumer
 #   (Forgejo, Woodpecker, Vaultwarden, Grafana, Langfuse,
 #   etc.) hitting the OIDC discovery + token endpoints.
-# - Server egress: kube-DNS + CNPG + Redis (same ns) +
-#   OpenBao (ESO).
-# - Worker egress: kube-DNS + CNPG + Redis (same ns) +
-#   OpenBao + outbound to OIDC clients (for token refresh
-#   + outpost reconciliation).
+# - Server egress: kube-DNS + CNPG + OpenBao (ESO).
+# - Worker egress: kube-DNS + CNPG + OpenBao + outbound
+#   to OIDC clients (for token refresh + outpost reconciliation).
+#
+# No Redis egress: Authentik 2026.x removed Redis entirely,
+# replacing it with Postgres-backed cache + channel + task
+# queue (django_postgres_cache / django_channels_postgres /
+# django_dramatiq_postgres).
 
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -91,14 +94,6 @@ spec:
         - ports:
             - port: "5432"
               protocol: TCP
-    # Bundled Redis (same ns).
-    - toEndpoints:
-        - matchLabels:
-            app.kubernetes.io/name: redis
-      toPorts:
-        - ports:
-            - port: "6379"
-              protocol: TCP
     # OpenBao for ESO refreshes.
     - toEndpoints:
         - matchLabels:
@@ -136,13 +131,6 @@ spec:
       toPorts:
         - ports:
             - port: "5432"
-              protocol: TCP
-    - toEndpoints:
-        - matchLabels:
-            app.kubernetes.io/name: redis
-      toPorts:
-        - ports:
-            - port: "6379"
               protocol: TCP
     - toEndpoints:
         - matchLabels:
