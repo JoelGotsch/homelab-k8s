@@ -32,11 +32,13 @@ metadata:
   namespace: observability-crowdsec
   labels:
     app.kubernetes.io/name: crowdsec
-    app.kubernetes.io/component: agent
+    k8s-app: crowdsec
+    type: agent
 spec:
   endpointSelector:
     matchLabels:
-      app.kubernetes.io/component: agent
+      k8s-app: crowdsec
+      type: agent
   egress:
     # DNS via kube-DNS, with L7 inspection so the FQDN cache
     # populates from observed responses. matchPattern is
@@ -69,11 +71,13 @@ metadata:
   namespace: observability-crowdsec
   labels:
     app.kubernetes.io/name: crowdsec
-    app.kubernetes.io/component: lapi
+    k8s-app: crowdsec
+    type: lapi
 spec:
   endpointSelector:
     matchLabels:
-      app.kubernetes.io/component: lapi
+      k8s-app: crowdsec
+      type: lapi
   egress:
     # DNS via kube-DNS, scoped to crowdsec.net subdomains.
     - toEndpoints:
