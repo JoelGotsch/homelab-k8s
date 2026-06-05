@@ -75,12 +75,19 @@ server:
     accessModes:
       - ReadWriteOnce
 
-  # RWO PVC + replicaCount: 1 deadlocks RollingUpdate. Use
-  # Recreate so the old pod terminates before the new one
-  # tries to attach. See known-caveats §"Helm-chart rollouts
-  # on RWO PVCs" (2026-05-25).
+  # RWO PVC + replicaCount: 1 deadlocks RollingUpdate. On a
+  # StatefulSet (which is what the woodpecker-server chart
+  # renders), use `OnDelete` — the kube-apiserver rejects
+  # `Recreate` here because that strategy is Deployment-only
+  # ("StatefulSet ... spec.updateStrategy: Invalid value
+  #   {\"Type\":\"Recreate\",\"RollingUpdate\":null}: must be
+  #   RollingUpdate or OnDelete" — verified 2026-06-05).
+  # With OnDelete the operator runs `kubectl -n woodpecker
+  # delete pod woodpecker-server-0` post-upgrade; the pod
+  # terminates, releases the PVC, and the StatefulSet
+  # controller spins up the replacement which attaches cleanly.
   updateStrategy:
-    type: Recreate
+    type: OnDelete
 
   service:
     type: ClusterIP
