@@ -59,7 +59,12 @@ agent:
       # Replay the last hour at first start; afterwards
       # follows the live tail.
       since: 1h
-      delay_for: 10s
+      # CrowdSec's loki datasource validator allows delay_for
+      # ∈ [1s, 5s] only (verified 2026-06-05: agent fatals with
+      # "delay_for should be a value between 1s and 5s"). 5s is
+      # the chart's documented max and matches the per-tick
+      # acquisition cadence; we pick the top of the window.
+      delay_for: 5s
 
   # CrowdSec hub modules to install at agent startup.
   # Chart v0.24.0 schema: no `agent.hub.*` key (audit 2026-06-04).
