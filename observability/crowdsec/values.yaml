@@ -73,12 +73,16 @@ agent:
         crowdsecurity/linux
         crowdsecurity/base-http-scenarios
         crowdsecurity/http-cve
-    - name: PARSERS
-      # Generic envoy access-log parser — written by the
-      # operator per the README §Parsers section, since
-      # Cilium Gateway emits envoy logs that don't match
-      # the chart's nginx default.
-      value: "crowdsecurity/envoy-logs"
+    # PARSERS env intentionally omitted. The Cilium Gateway envoy
+    # access-log format doesn't match any parser shipped in the
+    # CrowdSec Hub (verified 2026-06-05: agent fatal on
+    # `cscli parsers install crowdsecurity/envoy-logs` — "can't
+    # find in parsers", hub.index suggestions: exim-logs, unifi-logs).
+    # Custom parser is operator-written later per README §Parsers,
+    # mounted via a ConfigMap at /etc/crowdsec/parsers/s01-parse/
+    # cilium-envoy.yaml. Without that mounted parser the agent runs
+    # but the Loki acquisition stream goes unparsed — buckets fire
+    # nothing until the parser lands.
 
 # === LAPI ===
 lapi:
