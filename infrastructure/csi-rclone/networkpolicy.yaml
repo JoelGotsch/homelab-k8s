@@ -71,7 +71,7 @@ spec:
             dns:
               - matchPattern: "*"
     - toCIDR:
-        - "<NAS_IP>/32"
+        - "10.10.40.2/32"
       toPorts:
         - ports:
             - port: "2049"
