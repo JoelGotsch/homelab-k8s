@@ -6,8 +6,14 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# gatewayclass.yaml is intentionally NOT listed here — the
+# Cilium chart ships its own GatewayClass `cilium` with
+# controllerName: io.cilium/gateway-controller (gated by
+# infrastructure/cilium/values.yaml gatewayAPI.enabled: true).
+# Declaring it from this directory created a SharedResourceWarning
+# in Argo: the live object's tracking-id is infra-cilium, so
+# infra-ingress always saw the resource as OutOfSync.
 resources:
-  - gatewayclass.yaml
   - gateway.yaml
   - loadbalancer-ippool.yaml
   - l2announcement.yaml
