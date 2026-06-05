@@ -96,11 +96,17 @@ spec:
           type: RuntimeDefault
       containers:
         - name: register
-          # Bitnami sunset their free docker.io/bitnami/* images in 2025;
-          # bitnami/kubectl:* tags now 404. Use the bitnamilegacy archive
-          # (same tags). Matches the canonical fix used in
-          # infrastructure/kyverno/values.yaml (Kyverno cleanup jobs).
-          image: bitnamilegacy/kubectl:1.36
+          # alpine/k8s carries kubectl + curl + jq in a single small
+          # image; same family the sibling cidrgroup-sync CronJob uses
+          # (cidrgroup-sync-cronjob.yaml). Tag matches the cluster's
+          # Kubernetes minor (1.36). Renovate pins.
+          #
+          # History: previous bitnami/kubectl:1.36 ImagePullBackOff'd
+          # after Bitnami sunset docker.io/bitnami/* in 2025; the
+          # bitnamilegacy archive uses Bitnami's compound tag scheme
+          # (e.g. 1.33.4-debian-12-r0), not bare upstream-k8s versions,
+          # so it has no `:1.36` tag at all. alpine/k8s does.
+          image: "alpine/k8s:1.36.0"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
