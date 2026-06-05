@@ -43,3 +43,40 @@ resources:
   - prometheusrule.yaml
   - httproute.yaml
   - bouncer-register-job.yaml
+
+# Inject ndots:1 into the agent + LAPI pods. The chart's agent
+# template has no `dnsConfig` extension point (`tolerations`,
+# `affinity`, `nodeSelector` are the only pod-level escape
+# hatches it surfaces), so we patch the rendered Deployment.
+# Same musl getaddrinfo + Tailscale-search-domain race that the
+# cidrgroup-sync CronJob mitigates inline — when ndots:5 is in
+# effect, libc resolution of `loki.monitoring.svc.cluster.local`
+# tries `…cluster.local.tail824179.ts.net` first, hits SERVFAIL,
+# and the agent fatals on "Error checking if Loki is ready:
+# context deadline exceeded". Setting ndots:1 forces literal
+# resolution of the FQDN.
+patches:
+  - target:
+      kind: Deployment
+      name: crowdsec-agent
+    patch: |
+      - op: add
+        path: /spec/template/spec/dnsConfig
+        value:
+          options:
+            - name: ndots
+              value: "1"
+            - name: single-request
+            - name: single-request-reopen
+  - target:
+      kind: Deployment
+      name: crowdsec-lapi
+    patch: |
+      - op: add
+        path: /spec/template/spec/dnsConfig
+        value:
+          options:
+            - name: ndots
+              value: "1"
+            - name: single-request
+            - name: single-request-reopen
