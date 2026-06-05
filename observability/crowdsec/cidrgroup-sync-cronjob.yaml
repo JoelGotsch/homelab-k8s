@@ -114,17 +114,23 @@ spec:
         spec:
           serviceAccountName: crowdsec-cidrgroup-sync
           restartPolicy: OnFailure
-          # alpine/k8s rides musl libc, whose getaddrinfo issues A +
-          # AAAA in parallel and fails the whole resolution if the
-          # AAAA arrives with SERVFAIL/NXDOMAIN before A succeeds —
-          # observed 2026-06-05 as intermittent "Could not resolve
-          # host" while nslookup (busybox path) worked from the
-          # same pod. `single-request` forces sequential A→AAAA
-          # which sidesteps the race. `single-request-reopen` opens
-          # a fresh socket per query so a stuck UDP fd can't poison
-          # subsequent lookups.
+          # alpine/k8s rides musl libc, whose getaddrinfo fails the
+          # whole resolution when any search-domain expansion of a
+          # >=ndots-dot name returns SERVFAIL/timeout. With the
+          # cluster's auto-injected search domains
+          # (`tail824179.ts.net`, `lan`) one of the trailing
+          # candidates SERVFAILs every time → curl reports
+          # "Could not resolve host" even though kube-DNS resolved
+          # the actual FQDN correctly (verified 2026-06-05 via
+          # busybox nslookup vs musl getaddrinfo).
+          # `ndots: 1` treats anything with ≥1 dot as absolute, so
+          # the FQDN gets queried directly and no search-domain
+          # round-trip can poison the resolution. single-request*
+          # are belt-and-braces for the parallel-A+AAAA case.
           dnsConfig:
             options:
+              - name: ndots
+                value: "1"
               - name: single-request
               - name: single-request-reopen
           securityContext:
