@@ -26,6 +26,16 @@ agent:
   replicas: 1
   isDeployment: true
 
+  # ndots:1 in dnsConfig (kustomize patch) means anything with
+  # ≥1 dot is queried as absolute. Chart defaults for LAPI_HOST
+  # / LAPI_URL use the short form `crowdsec-service.<ns>` (1 dot)
+  # which then NXDOMAINs because search-domain fallback is
+  # suppressed. Override with the FQDN form so both the
+  # init container's `nc` probe and the main container's
+  # cscli register reach LAPI.
+  lapiHost: "crowdsec-service.observability-crowdsec.svc.cluster.local"
+  lapiURL: "http://crowdsec-service.observability-crowdsec.svc.cluster.local:8080"
+
   # Loki-only acquisition (decision E) means no node-log
   # tailing — strip the chart's default hostPath mounts so
   # the agent pod passes the namespace's PSA `baseline`
