@@ -26,6 +26,16 @@ agent:
   replicas: 1
   isDeployment: true
 
+  # Loki-only acquisition (decision E) means no node-log
+  # tailing — strip the chart's default hostPath mounts so
+  # the agent pod passes the namespace's PSA `baseline`
+  # enforcement (hostPath volumes are baseline-forbidden).
+  # Without `hostVarLog: false` the chart adds volume
+  # `varlog` (hostPath /var/log); without the top-level
+  # `container_runtime` block also being set away from
+  # `docker` it would add `varlibdockercontainers` too.
+  hostVarLog: false
+
   # Loki-API acquisition. Per decision E: clean composability
   # over real-time at this layer; reconsider-trigger if
   # credential-stuffing slips past the auth-layer rate limit.
@@ -188,3 +198,17 @@ metrics:
 # The chart's default `securityContext.allowPrivilegeEscalation: false`
 # is sufficient for our threat model at this layer. Operator extends
 # if PSS-restricted enforcement is added to the crowdsec namespace.
+
+# === Container runtime ===
+# The chart's `container_runtime` value selects which host
+# log-directories the agent mounts:
+#   - `docker`     → mounts /var/log + /var/lib/docker/containers
+#   - `containerd` → mounts /var/log only
+# Loki acquisition needs NEITHER — but the chart's default
+# is `docker`, so the second hostPath would be rendered
+# even after `agent.hostVarLog: false`. Set explicitly to
+# `containerd` (cluster is Talos + containerd) so the
+# `/var/lib/docker/containers` mount disappears too; the
+# remaining `/var/log` mount is already gated by
+# `agent.hostVarLog: false`.
+container_runtime: containerd
