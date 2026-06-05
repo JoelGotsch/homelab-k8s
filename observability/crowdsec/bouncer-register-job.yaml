@@ -75,9 +75,19 @@ kind: Job
 metadata:
   name: crowdsec-bouncer-register-cilium
   namespace: observability-crowdsec
+  # Was an Argo CD PostSync hook (2026-06-05) but that deadlocked
+  # repeatedly when LAPI was mid-rolling: Argo blocks the sync
+  # waiting for the hook Job, the Job blocks on `kubectl wait
+  # deploy/crowdsec-lapi --for=Available`, and LAPI can't roll
+  # because Argo hasn't applied the dependent CNP changes yet.
+  # As a plain resource the Job applies in the regular Sync wave
+  # — it still self-gates on `kubectl wait` so a slow LAPI just
+  # delays the Job's own success, never the rest of the sync.
   annotations:
-    argocd.argoproj.io/hook: PostSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    # Replace the running Job on every reconcile so a spec update
+    # (image, namespace selector, script) doesn't get blocked by
+    # Kubernetes' Job-spec immutability — Argo deletes + recreates.
+    argocd.argoproj.io/sync-options: Replace=true,Force=true
 spec:
   backoffLimit: 3
   ttlSecondsAfterFinished: 3600
