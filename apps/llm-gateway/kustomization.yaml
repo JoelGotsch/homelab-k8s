@@ -38,3 +38,13 @@ resources:
   - httproute.yaml
   - networkpolicy.yaml
   - presidio-deployment.yaml
+
+# Strategic-merge patch on the chart-rendered migrations Job —
+# adds the PSA-restricted-compliant pod-level securityContext
+# fields the upstream chart omits. See migrations-job-psa-patch.yaml
+# for the full reasoning.
+patches:
+  - path: migrations-job-psa-patch.yaml
+    target:
+      kind: Job
+      name: llm-gateway-litellm-migrations
