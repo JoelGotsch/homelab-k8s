@@ -39,12 +39,28 @@ resources:
   - networkpolicy.yaml
   - presidio-deployment.yaml
 
-# Strategic-merge patch on the chart-rendered migrations Job —
-# adds the PSA-restricted-compliant pod-level securityContext
-# fields the upstream chart omits. See migrations-job-psa-patch.yaml
-# for the full reasoning.
+# Two patches on the chart-rendered migrations Job:
+#   (1) Strategic-merge — add the PSA-restricted-compliant
+#       pod-level securityContext fields (see patch file).
+#   (2) JSON-6902 — strip the policies ConfigMap mount that
+#       the chart attaches by default. The migration container
+#       only runs Prisma schema deltas, never reads the policies
+#       file; and the ConfigMap is in the regular Sync wave while
+#       the Job is a PreSync hook, so kubelet loops on
+#       "MountVolume.SetUp failed: configmap llm-gateway-policies
+#       not found" forever. Strategic-merge can't reliably zero
+#       a list (would inherit), so a JSON patch with explicit
+#       `op: remove` is the cleanest way.
 patches:
   - path: migrations-job-psa-patch.yaml
     target:
       kind: Job
       name: llm-gateway-litellm-migrations
+  - target:
+      kind: Job
+      name: llm-gateway-litellm-migrations
+    patch: |
+      - op: remove
+        path: /spec/template/spec/containers/0/volumeMounts
+      - op: remove
+        path: /spec/template/spec/volumes

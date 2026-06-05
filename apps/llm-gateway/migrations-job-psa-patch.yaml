@@ -35,3 +35,7 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      # The policies-ConfigMap volume mount is stripped via a
+      # separate JSON-6902 patch in kustomization.yaml — strategic
+      # merge inherits sibling list items so it can't reliably
+      # zero `volumes`/`volumeMounts`.
