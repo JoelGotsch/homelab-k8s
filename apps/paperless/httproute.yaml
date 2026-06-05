@@ -30,5 +30,9 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: paperless
+        # Service name is `paperless-paperless-ngx` (chart pattern:
+        # `<release>-<chart>`). Using just `paperless` made the
+        # Gateway controller flag `BackendNotFound` and Argo
+        # rolled the whole app up to Degraded.
+        - name: paperless-paperless-ngx
           port: 8000
