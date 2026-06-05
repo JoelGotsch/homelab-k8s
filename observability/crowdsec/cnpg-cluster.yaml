@@ -16,7 +16,7 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
   name: crowdsec-lapi
-  namespace: crowdsec
+  namespace: observability-crowdsec
 spec:
   instances: 2
 

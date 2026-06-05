@@ -20,7 +20,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: crowdsec-allowlist
-  namespace: crowdsec
+  namespace: observability-crowdsec
   labels:
     app.kubernetes.io/name: crowdsec
     app.kubernetes.io/component: allowlist

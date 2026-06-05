@@ -159,7 +159,7 @@ config:
       user: crowdsec
       password: ${LAPI_POSTGRES_PASSWORD}
       db_name: crowdsec
-      host: crowdsec-lapi-rw.crowdsec.svc.cluster.local
+      host: crowdsec-lapi-rw.observability-crowdsec.svc.cluster.local
       port: 5432
       sslmode: require
 

@@ -23,7 +23,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: crowdsec-cidrgroup-sync-script
-  namespace: crowdsec
+  namespace: observability-crowdsec
 data:
   sync.sh: |
     #!/bin/sh
@@ -32,7 +32,7 @@ data:
     # → same applied YAML → kubectl reports "unchanged".
     set -eu
 
-    LAPI_URL="${LAPI_URL:-http://crowdsec-service.crowdsec.svc.cluster.local:8080}"
+    LAPI_URL="${LAPI_URL:-http://crowdsec-service.observability-crowdsec.svc.cluster.local:8080}"
     BOUNCER_KEY="${BOUNCER_API_KEY:?BOUNCER_API_KEY env required}"
 
     # Decisions API: returns array of {duration, scope, type, value, ...}
@@ -84,7 +84,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: crowdsec-cidrgroup-sync
-  namespace: crowdsec
+  namespace: observability-crowdsec
   labels:
     app.kubernetes.io/name: crowdsec
     app.kubernetes.io/component: cidrgroup-sync
@@ -125,7 +125,7 @@ spec:
                       name: crowdsec-cilium-bouncer
                       key: BOUNCER_API_KEY
                 - name: LAPI_URL
-                  value: "http://crowdsec-service.crowdsec.svc.cluster.local:8080"
+                  value: "http://crowdsec-service.observability-crowdsec.svc.cluster.local:8080"
               volumeMounts:
                 - name: script
                   mountPath: /scripts

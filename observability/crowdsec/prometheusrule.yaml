@@ -8,7 +8,7 @@
 #
 # Metric names match CrowdSec's standard /metrics exposition.
 # Operator verifies at first deploy via:
-#   kubectl -n crowdsec port-forward svc/crowdsec-service 6060
+#   kubectl -n observability-crowdsec port-forward svc/crowdsec-service 6060
 #   curl localhost:6060/metrics | grep ^cs_
 # and tunes the queries if a chart bump renames metrics.
 #
@@ -24,7 +24,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: crowdsec-decisions
-  namespace: crowdsec
+  namespace: observability-crowdsec
   labels:
     app.kubernetes.io/name: crowdsec
     release: kube-prometheus-stack
@@ -53,7 +53,7 @@ spec:
               Either an active attack/scan is in progress, or a
               recently-added scenario is over-firing on legitimate
               traffic. Triage:
-                kubectl -n crowdsec exec deploy/crowdsec-agent -- \
+                kubectl -n observability-crowdsec exec deploy/crowdsec-agent -- \
                   cscli decisions list --limit 50
               If false-positive: add the offending IP/CIDR to
               the allowlist ConfigMap, commit, Argo reconciles.
@@ -82,8 +82,8 @@ spec:
               agent), parser broken (lines arrive but don't
               extract fields), scenarios not firing on the
               traffic shape. Diagnose:
-                kubectl -n crowdsec logs deploy/crowdsec-agent --tail 100
-                kubectl -n crowdsec exec deploy/crowdsec-agent -- \
+                kubectl -n observability-crowdsec logs deploy/crowdsec-agent --tail 100
+                kubectl -n observability-crowdsec exec deploy/crowdsec-agent -- \
                   cscli metrics
 
         # LAPI unreachable — bouncer (sync CronJob) can't
@@ -105,10 +105,10 @@ spec:
               decisions; new bans will not reach the CCNP.
               Existing bans (already in CIDRGroup) stay
               enforced. Check LAPI pod state:
-                kubectl -n crowdsec get pods -l app.kubernetes.io/component=lapi
-                kubectl -n crowdsec describe pod <lapi-pod>
+                kubectl -n observability-crowdsec get pods -l app.kubernetes.io/component=lapi
+                kubectl -n observability-crowdsec describe pod <lapi-pod>
               + CNPG cluster health (LAPI's database):
-                kubectl -n crowdsec get cluster crowdsec-lapi
+                kubectl -n observability-crowdsec get cluster crowdsec-lapi
 
         # CIDRGroup sync CronJob has not run successfully
         # recently. The CronJob fires every 5min; missing
@@ -127,7 +127,7 @@ spec:
               Bans are no longer propagating to CCNP enforcement
               even though LAPI may be issuing them. Check the
               latest Job's logs:
-                kubectl -n crowdsec logs job/<latest-crowdsec-cidrgroup-sync-pod>
+                kubectl -n observability-crowdsec logs job/<latest-crowdsec-cidrgroup-sync-pod>
               Common causes: LAPI bouncer-key rotated without
               reseeding OpenBao; LAPI ingress NetworkPolicy
               misconfig; kube-API auth issue with the

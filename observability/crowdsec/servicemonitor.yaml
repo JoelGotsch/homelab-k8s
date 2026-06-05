@@ -10,7 +10,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: crowdsec-lapi
-  namespace: crowdsec
+  namespace: observability-crowdsec
   labels:
     app.kubernetes.io/name: crowdsec
     app.kubernetes.io/component: lapi
@@ -29,7 +29,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: crowdsec-agent
-  namespace: crowdsec
+  namespace: observability-crowdsec
   labels:
     app.kubernetes.io/name: crowdsec
     app.kubernetes.io/component: agent

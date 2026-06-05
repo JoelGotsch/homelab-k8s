@@ -54,7 +54,7 @@ every 5 minutes from LAPI's decision list by the CronJob).
 | File | Purpose |
 |---|---|
 | `kustomization.yaml` | helm chart pin (`crowdsecurity/crowdsec` 0.13.5) + resource list. |
-| `namespace.yaml` | `crowdsec` ns; PSA baseline. |
+| `namespace.yaml` | `observability-crowdsec` ns; PSA baseline. |
 | `cnpg-cluster.yaml` | CNPG Cluster CR for the LAPI Postgres (2 instances, longhorn-replica3, MinIO WAL+base backup). |
 | `cnpg-s3-externalsecret.yaml` | MinIO creds for CNPG backup. |
 | `externalsecret.yaml` | Console enroll key + LAPI Postgres password + cilium-bouncer API key. |
@@ -102,7 +102,7 @@ homelab-infra/scripts/provision-minio-svcacct.sh \
 # auto-issued Secret) — seed manually:
 bao kv put kv/crowdsec/console enroll_key="<paste-from-app.crowdsec.net>"
 bao kv put kv/crowdsec/lapi \
-    postgres_password="$(kubectl -n crowdsec get secret \
+    postgres_password="$(kubectl -n observability-crowdsec get secret \
         crowdsec-lapi-app -o jsonpath='{.data.password}' | base64 -d)"
 ```
 

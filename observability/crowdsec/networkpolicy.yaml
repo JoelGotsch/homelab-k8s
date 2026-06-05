@@ -27,7 +27,7 @@ apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
   name: crowdsec-lapi
-  namespace: crowdsec
+  namespace: observability-crowdsec
 spec:
   endpointSelector:
     matchLabels:
@@ -101,7 +101,7 @@ apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
   name: crowdsec-agent
-  namespace: crowdsec
+  namespace: observability-crowdsec
 spec:
   endpointSelector:
     matchLabels:
@@ -155,7 +155,7 @@ apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
   name: crowdsec-cidrgroup-sync
-  namespace: crowdsec
+  namespace: observability-crowdsec
 spec:
   endpointSelector:
     matchLabels:
