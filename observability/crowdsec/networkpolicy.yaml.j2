@@ -26,12 +26,14 @@ metadata:
 spec:
   endpointSelector:
     matchLabels:
-      app.kubernetes.io/component: lapi
+      k8s-app: crowdsec
+      type: lapi
   ingress:
     # Agent in same ns.
     - fromEndpoints:
         - matchLabels:
-            app.kubernetes.io/component: agent
+            k8s-app: crowdsec
+            type: agent
       toPorts:
         - ports:
             - port: "8080"
@@ -100,7 +102,8 @@ metadata:
 spec:
   endpointSelector:
     matchLabels:
-      app.kubernetes.io/component: agent
+      k8s-app: crowdsec
+      type: agent
   ingress:
     # Prometheus scrape.
     - fromEndpoints:
@@ -126,7 +129,8 @@ spec:
     # LAPI (same ns).
     - toEndpoints:
         - matchLabels:
-            app.kubernetes.io/component: lapi
+            k8s-app: crowdsec
+            type: lapi
       toPorts:
         - ports:
             - port: "8080"
@@ -171,7 +175,8 @@ spec:
     # LAPI (read decisions list).
     - toEndpoints:
         - matchLabels:
-            app.kubernetes.io/component: lapi
+            k8s-app: crowdsec
+            type: lapi
       toPorts:
         - ports:
             - port: "8080"
