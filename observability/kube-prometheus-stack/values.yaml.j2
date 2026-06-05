@@ -63,8 +63,22 @@ prometheus:
 
     # Ingest the additional-scrape-configs Secret if present
     # (per observability/prometheus/external-hosts/).
+    #
+    # Disabled 2026-06-05 — the Secret manifest at
+    # observability/prometheus/external-hosts/additional-scrape-configs.yaml
+    # still carries a `<MAC_STUDIO_INFERENCE_IP>` placeholder
+    # and the obs-prometheus Application's source path doesn't
+    # actually include external-hosts/ in any kustomization, so
+    # the Secret never materializes in the `monitoring` ns. The
+    # Prometheus operator's reconcile loop reports
+    # "creating config failed: loading additional scrape
+    #  configs from Secret failed: secrets
+    #  prometheus-additional-scrape-configs not found"
+    # which marks the Prometheus CR (and the whole Argo app)
+    # Degraded. Re-enable once the Mac Studio's inference IP is
+    # filled in and the Secret is plumbed through Argo.
     additionalScrapeConfigsSecret:
-      enabled: true
+      enabled: false
       name: prometheus-additional-scrape-configs
       key: prometheus-additional.yaml
 
