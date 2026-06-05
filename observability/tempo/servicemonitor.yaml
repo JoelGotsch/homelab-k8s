@@ -2,7 +2,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: tempo
-  namespace: monitoring
+  namespace: observability-tempo
   labels:
     app.kubernetes.io/name: tempo
     release: kube-prometheus-stack

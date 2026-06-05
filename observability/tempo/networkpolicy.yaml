@@ -8,16 +8,21 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: tempo-allow
-  namespace: monitoring
+  namespace: observability-tempo
 spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: tempo
   policyTypes: [Ingress, Egress]
   ingress:
-    # OTel Collector gateway in same ns.
+    # OTel Collector gateway (lives in `monitoring` per
+    # kube-prometheus-stack — cross-ns now that tempo moved
+    # to observability-tempo).
     - from:
-        - podSelector:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
             matchLabels:
               app.kubernetes.io/name: opentelemetry-collector
               app.kubernetes.io/component: gateway
@@ -26,17 +31,23 @@ spec:
           protocol: TCP
         - port: 4318   # OTLP HTTP
           protocol: TCP
-    # Grafana (data source queries).
+    # Grafana (data source queries) — lives in `monitoring`.
     - from:
-        - podSelector:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
             matchLabels:
               app.kubernetes.io/name: grafana
       ports:
         - port: 3200   # Tempo HTTP query API
           protocol: TCP
-    # Prometheus (self-metrics scrape).
+    # Prometheus (self-metrics scrape) — lives in `monitoring`.
     - from:
-        - podSelector:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
             matchLabels:
               app.kubernetes.io/name: prometheus
       ports:
