@@ -50,6 +50,22 @@ spec:
       ports:
         - port: 3100
           protocol: TCP
+    # CrowdSec agent (cross-ns, Loki-API acquisition per ADR 0021 D6
+    # decision E — agent reads cilium-gateway envoy access logs from
+    # Loki and runs scenarios). NetworkPolicy is cross-ns, so we
+    # match on the observability-crowdsec namespace label rather than
+    # a pod selector.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability-crowdsec
+          podSelector:
+            matchLabels:
+              k8s-app: crowdsec
+              type: agent
+      ports:
+        - port: 3100
+          protocol: TCP
   egress:
     # kube-DNS.
     - to:
