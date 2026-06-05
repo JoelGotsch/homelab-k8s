@@ -56,9 +56,14 @@ spec:
             dns:
               - matchPattern: "*.crowdsec.net"
               - matchName: "hub.crowdsec.net"
-    # FQDN allow for the Hub (parser/scenario fetch).
+              - matchName: "version.crowdsec.net"
+    # FQDN allow for the Hub (parser/scenario fetch) + the
+    # version probe (cscli calls version.crowdsec.net at startup
+    # before any Hub call — the agent fatals with "unable to
+    # retrieve latest crowdsec version" if blocked).
     - toFQDNs:
         - matchName: "hub.crowdsec.net"
+        - matchName: "version.crowdsec.net"
       toPorts:
         - ports:
             - port: "443"
@@ -93,13 +98,15 @@ spec:
               - matchPattern: "*.crowdsec.net"
               - matchName: "api.crowdsec.net"
               - matchName: "app.crowdsec.net"
+              - matchName: "version.crowdsec.net"
     # FQDN allow for Console + community blocklist.
-    # api.crowdsec.net — telemetry + decisions API
-    # app.crowdsec.net — Console UI auth flow + blocklist
-    #                    subscription
+    # api.crowdsec.net      — telemetry + decisions API
+    # app.crowdsec.net      — Console UI auth flow + blocklist
+    # version.crowdsec.net  — cscli's startup version probe
     - toFQDNs:
         - matchName: "api.crowdsec.net"
         - matchName: "app.crowdsec.net"
+        - matchName: "version.crowdsec.net"
       toPorts:
         - ports:
             - port: "443"
