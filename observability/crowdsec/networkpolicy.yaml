@@ -52,7 +52,7 @@ spec:
     # Prometheus scrape.
     - fromEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: monitoring
+            io.kubernetes.pod.namespace: monitoring
             app.kubernetes.io/name: prometheus
       toPorts:
         - ports:
@@ -73,7 +73,7 @@ spec:
     # kube-DNS.
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: kube-system
+            io.kubernetes.pod.namespace: kube-system
             k8s-app: kube-dns
       toPorts:
         - ports:
@@ -110,7 +110,7 @@ spec:
     # Prometheus scrape.
     - fromEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: monitoring
+            io.kubernetes.pod.namespace: monitoring
             app.kubernetes.io/name: prometheus
       toPorts:
         - ports:
@@ -120,7 +120,7 @@ spec:
     # kube-DNS.
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: kube-system
+            io.kubernetes.pod.namespace: kube-system
             k8s-app: kube-dns
       toPorts:
         - ports:
@@ -139,7 +139,7 @@ spec:
     # Loki (acquisition source per decision E).
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: monitoring
+            io.kubernetes.pod.namespace: monitoring
             app.kubernetes.io/name: loki
       toPorts:
         - ports:
@@ -165,7 +165,7 @@ spec:
     # kube-DNS.
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: kube-system
+            io.kubernetes.pod.namespace: kube-system
             k8s-app: kube-dns
       toPorts:
         - ports:
