@@ -81,6 +81,17 @@ spec:
       ports:
         - port: 9000
           protocol: TCP
+    # Tempo (chunk storage for trace blocks) — moved out of
+    # `monitoring` to its own observability-tempo namespace
+    # 2026-06-05 as part of the kustomize-helm-namespace-divergence
+    # cleanup that previously landed on crowdsec.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability-tempo
+      ports:
+        - port: 9000
+          protocol: TCP
   egress:
     # kube-DNS for service resolution.
     - to:
