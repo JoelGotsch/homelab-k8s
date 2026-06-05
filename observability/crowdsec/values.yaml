@@ -132,6 +132,24 @@ lapi:
   dashboard:
     enabled: false
 
+  # Disable the LAPI config PVC. Chart-default true points the
+  # ephemeral config-mount root at /etc/crowdsec_data, which
+  # causes the chart to mount `config.yaml.local` at
+  # /etc/crowdsec_data/config.yaml.local — but CrowdSec's
+  # auto-merge for `<config_dir>/config.yaml.local` reads from
+  # /etc/crowdsec/ (config_paths.config_dir), so the rendered
+  # auto_registration block silently never applies. With this
+  # disabled, $crowdsecConfig becomes /etc/crowdsec/ and the
+  # mount lands where the loader can find it.
+  #
+  # We don't lose durable state — LAPI's bouncer keys / machine
+  # records live in the CNPG-backed Postgres; the only thing
+  # the config PVC held was /etc/crowdsec_data/local_api_credentials.yaml,
+  # which the chart regenerates on every pod start anyway.
+  persistentVolume:
+    config:
+      enabled: false
+
   resources:
     requests:
       cpu: 50m
