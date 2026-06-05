@@ -139,6 +139,16 @@ data:
       - /spec/emitWarning
       - /spec/validationFailureAction
       - /spec/schemaValidation
+    # Kyverno's admission controller injects per-rule defaults
+    # `skipBackgroundRequests: true` and `validate.allowExistingViolations: true`
+    # on every reconcile — jsonPointers can't wildcard array
+    # indices so those defaults register as persistent drift
+    # and trigger heal-loop churn (autoHealAttemptsCount=6
+    # observed 2026-06-05). jqPathExpressions handle array
+    # wildcards correctly.
+    jqPathExpressions:
+      - '.spec.rules[].skipBackgroundRequests'
+      - '.spec.rules[].validate.allowExistingViolations'
   resource.customizations.ignoreDifferences.apps_Deployment: |
     jqPathExpressions:
       - '.spec.template.metadata.annotations."checksum/config"'
