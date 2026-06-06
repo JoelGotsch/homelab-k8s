@@ -44,8 +44,14 @@ spec:
       matchLabels:
         homelab.lab/inject-ca: "true"
 ---
-# Operator stages this Secret with the actual root-ca.cert.pem
-# content from the PKI ceremony.
+# Stages the OpenBao PKI engine root certificate — the runtime
+# root of `homelab-internal-issuer` per ADR 0034 D2. Source-of-
+# truth: `vault read -field=certificate pki/cert/ca` (or the
+# unauthenticated `GET /v1/pki/ca/pem` against any OpenBao pod).
+# Content below was extracted live 2026-06-06; fingerprint
+# SHA1:9F:0B:04:8C:FA:DE:97:BE:28:B8:A9:85:0A:BC:04:04:BF:BD:B2:88,
+# CN=homelab.internal, valid 2026-05-23 → 2036-05-20. Same root
+# baked into homelab-infra/talos/patches/containerd-registry.yaml.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -55,7 +61,24 @@ type: Opaque
 stringData:
   ca.crt: |
     -----BEGIN CERTIFICATE-----
-    <OPERATOR-FILLS-FROM-pki/ca-ceremony.md-OUTPUT>
+    MIIDRTCCAi2gAwIBAgIUFP2Tu5zO15s8dipZU6vKCYwTdNcwDQYJKoZIhvcNAQEL
+    BQAwGzEZMBcGA1UEAxMQaG9tZWxhYi5pbnRlcm5hbDAeFw0yNjA1MjMxNjMyNDRa
+    Fw0zNjA1MjAxNjMzMTRaMBsxGTAXBgNVBAMTEGhvbWVsYWIuaW50ZXJuYWwwggEi
+    MA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDXa6y2IDfKjTriz+lXqYakXvF0
+    bwsxgD+zF8xoCcaMcnAgtJ8+GK07CeN/ozC12qEeLKJXQz4wSy3FZWRsy/pZwm7G
+    2zORdWF6uscpC9ynAOLSG+hyHHcZbGlc/l4LVYR2RDIjcAQNxlWOpvTjXK5VS3bK
+    SAejIz/xJ+G+fCNxEoowE5q3R2hDDrmhFQl1eOnDsaDX1Adl/naCa/KNCFKglGZ2
+    l5DO311oxQQmjIFPBuORhZYgQX6RX2iiVpauFyH4KC6fe+XCEKFg0B0JMiXMr9BH
+    qYdZLzSQ2J5vabUEx1PbN2nCTSP83lxeDH2//d6K9Eo1FIDhZgwwbVv9rOONAgMB
+    AAGjgYAwfjAOBgNVHQ8BAf8EBAMCAQYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4E
+    FgQU4+PXEr0JRtTRhtTqmY5WZdYlt10wHwYDVR0jBBgwFoAU4+PXEr0JRtTRhtTq
+    mY5WZdYlt10wGwYDVR0RBBQwEoIQaG9tZWxhYi5pbnRlcm5hbDANBgkqhkiG9w0B
+    AQsFAAOCAQEAKiae8Pe1Zi5SRT61XXfAM9aEw99Vc9rUMRGaI5Qy5DW5mzqHfQX0
+    wjPwnnTKfaxVOyDSKSbMgrwCoLF92oxPpv25blcMaUmaiJSv7Mi9By2kVfoAr4eq
+    MALEZELbaGByPB1BsE4d4/rRHKA/wCdx915qfNgnVopXIB2r14PCPynm0pGlCduT
+    oWFI5xMjSBHdcB8PlbW8DXm3ePKlnozkrADiaLlPCX8bpZsZlmwwa3P972F3B4J4
+    5zg8AeDW5zCzWm/L9Siu311pe8QM1UwjldkYNFN1x0NNHKqc9ct+GJXP4LIfTqRp
+    aeKY1JBomzA6UcE46jlN84XOqNmYEmVy7w==
     -----END CERTIFICATE-----
 ---
 apiVersion: v1
