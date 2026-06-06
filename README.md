@@ -71,7 +71,7 @@ Search for `<` placeholders and replace before applying:
 | `<CLUSTER-VIP>` | `infrastructure/cilium/values.yaml` | Cluster API VIP — fills post-cluster |
 | `<HOMELAB-DOMAIN>` | `infrastructure/ingress/gateway.yaml`, `platform/openbao/httproute.yaml`, etc. | Operator's domain |
 | `<NAS-IP>` | `infrastructure/nfs-csi/storageclasses.yaml` | NAS IP on `storage` VLAN |
-| Root CA cert | `infrastructure/trust-manager/bundles.yaml` | `pki/ca-ceremony.md` Step 7 output |
+| Root CA cert | `infrastructure/trust-manager/bundles.yaml` | OpenBao PKI root — `vault read -field=certificate pki/cert/ca` per ADR 0034 D2 (the `pki/ca-ceremony.md` path is DEFERRED per ADR 0034 D6) |
 | OpenBao bootstrap CA | `infrastructure/cert-manager/openbao-pki-secret.yaml`, `infrastructure/external-secrets/clustersecretstore.yaml`, `infrastructure/trust-manager/bundles.yaml` | `homelab-infra/scripts/generate-openbao-bootstrap-tls.sh` output |
 
 These are NOT templated via Jinja (no Argo-side templating

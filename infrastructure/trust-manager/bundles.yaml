@@ -1,11 +1,27 @@
 # homelab Root CA bundle — distributed to every namespace
 # as a ConfigMap so apps trust internal-CA-issued certs.
 #
-# Source: the `homelab-root-ca` Secret in trust-manager
-# namespace, populated either by:
-#   - Operator at first commit: paste root-ca.cert.pem (from
-#     pki/ca-ceremony.md Step 7) into the Secret stringData.
-#   - Or via ExternalSecret pulling from openbao kv/prod/pki/root-ca.
+# Source: the `homelab-root-ca` Secret in trust-manager namespace.
+# Populated from OpenBao's PKI engine root certificate — the runtime
+# root of the `homelab-internal-issuer` ClusterIssuer per ADR 0034
+# D1+D2 (Hybrid LE + OpenBao-PKI; no offline Nitrokey-rooted
+# ceremony on the standard bring-up path).
+#
+# Two equivalent fill paths:
+#   1. ExternalSecret pulling `kv/prod/pki/root-ca` (or whichever
+#      kv path the operator seeds OpenBao's `pki` engine root
+#      certificate to during 09b — see ADR 0034 D2's
+#      `vault read -field=certificate pki/cert/ca`).
+#   2. Operator one-shot at first commit (when ESO isn't up yet):
+#      paste the output of
+#         vault read -field=certificate pki/cert/ca
+#      into the Secret stringData below.
+#
+# Earlier drafts of this comment pointed at `pki/ca-ceremony.md
+# Step 7` output (`root-ca.cert.pem`). That runbook is the
+# DEFERRED Nitrokey-rooted offline-CA path retained as historical
+# reference; ADR 0034 D6 took it off the standard bring-up path.
+# Do not run the ceremony for this fill.
 
 apiVersion: trust.cert-manager.io/v1alpha1
 kind: Bundle
