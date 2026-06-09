@@ -12,6 +12,42 @@ resources:
 - storageclasses.yaml
 - externalsecret.yaml
 - recurring-jobs.yaml
+
+# Post-render patch: Longhorn chart 1.7.2 does not expose a
+# `longhornManager.resources` values key (only `log`, `priorityClass`,
+# `tolerations`, `nodeSelector`, `serviceAnnotations`). The longhorn-
+# manager DaemonSet ships with `resources: {}` — no requests, no
+# limits — which makes it the largest cgroup victim for Talos's node
+# OOM-controller under memory pressure. Cascade #1–#4 in
+# 99-journal/2026-06-09-recurring-worker-cascades.md (commit 1b405df)
+# all start with the manager dying mid-reconcile, taking VAs with it.
+#
+# Targets from the RCA §"Recommended fixes" #1:
+#   requests: {memory: 256Mi, cpu: 100m}
+#   limits:   {memory: 1Gi}
+# The 256Mi floor gives kubelet's eviction manager a guarantee to
+# defend; 1Gi cap is well above steady-state RSS (~80MB observed on
+# this cluster) but tolerates worst-case CRD reconcile spikes.
+patches:
+- target:
+    kind: DaemonSet
+    name: longhorn-manager
+  patch: |-
+    apiVersion: apps/v1
+    kind: DaemonSet
+    metadata:
+      name: longhorn-manager
+    spec:
+      template:
+        spec:
+          containers:
+            - name: longhorn-manager
+              resources:
+                requests:
+                  memory: 256Mi
+                  cpu: 100m
+                limits:
+                  memory: 1Gi
 # NOTE on fresh-install bootstrap:
 # Earlier this dir carried `bootstrap-sa.yaml` to pre-create
 # `longhorn-service-account` (+ ClusterRole/Binding) so the

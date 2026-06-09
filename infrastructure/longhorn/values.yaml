@@ -28,3 +28,19 @@ csi:
   provisionerReplicaCount: 2
   resizerReplicaCount: 2
   snapshotterReplicaCount: 2
+
+# Per 2026-06-09 OOM-cascade RCA
+# (homelab-docs/99-journal/2026-06-09-recurring-worker-cascades.md, commit
+# 1b405df): elevate longhorn-manager from the chart's `longhorn-critical`
+# PriorityClass to the built-in `system-node-critical`. Even when a worker
+# crosses Talos's node-OOM threshold, the controller should pick
+# instance-managers or app pods first — never the per-node manager whose
+# loss tears down every VolumeAttachment on the node.
+#
+# Resource requests + limits for the longhorn-manager DaemonSet are NOT
+# exposed by chart 1.7.2's `longhornManager` values key (only `log`,
+# `priorityClass`, `tolerations`, `nodeSelector`, `serviceAnnotations`);
+# they are applied via a kustomize JSON-strategic-merge patch in
+# `kustomization.yaml`.
+longhornManager:
+  priorityClass: system-node-critical
