@@ -27,8 +27,17 @@ spec:
     labels:
       recurring-job-group.longhorn.io/internal: "enabled"
 
+  # 5Gi → 15Gi 2026-06-09: WAL accumulated locally since 2026-06-05 when
+  # S3 archiving started failing; PV hit 6.01 GB actual against the 5 GiB
+  # spec, and CNPG's `Detected low-disk space condition` pre-flight
+  # blocked postgres from booting — cascade: no postgres → no
+  # crowdsec-lapi-rw endpoints → LAPI bootstrap "no route to host" →
+  # agent fatals on "performing jwt auth" → ~788 restarts. Longhorn-
+  # replica3 supports online expansion + the chart has
+  # resizeInUseVolumes: true so this resizes in place. Diagnosis in
+  # 99-journal/2026-06-09-cluster-state-survey.md §CrowdSec.
   storage:
-    size: 5Gi
+    size: 15Gi
     storageClass: longhorn-replica3
 
   monitoring:
