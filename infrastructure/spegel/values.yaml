@@ -121,15 +121,24 @@ spegel:
   mirrorResolveTimeout: "20ms"
 
   # Debug web UI on the registry port — useful for manual
-  # cache inspection (`kubectl port-forward ds/spegel 30020`).
-  # Bound to the registry hostPort 30020 → no extra surface.
+  # cache inspection (`kubectl port-forward ds/spegel 29020`).
   debugWebEnabled: true
 
 service:
   registry:
     port: 5000
     nodePort: 30021
-    hostPort: 30020
+    # hostPort must NOT fall inside the NodePort range
+    # (30000-32767). Cilium kube-proxy-replacement explicitly
+    # refuses to program hostPort entries colliding with
+    # NodePort, logging "The requested hostPort is colliding
+    # with the configured NodePort range. Ignoring." The
+    # original `30020` had been silently dark cluster-wide
+    # since chart install (5d12h before discovery 2026-06-10);
+    # containerd's mirror fallback to NodePort 30021 + upstream
+    # masked it until pr-agent's upstream 404 forced both legs
+    # to fail. Diagnosis at 99-journal/2026-06-10-spegel-worker1-down.md.
+    hostPort: 29020
     topologyAwareHintsEnabled: true
   router:
     port: 5001
