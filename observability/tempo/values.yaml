@@ -83,18 +83,37 @@ tempo:
 
 # PVC for WAL — Longhorn replica2 matches Loki's pattern.
 # Chunks live in MinIO; this is just the WAL window.
+# Chart key is `storageClassName`, NOT `storageClass` — the latter is
+# silently dropped (verified 2026-06-09; same wrong-chart-key class as
+# Langfuse / Vaultwarden 2026-05-31 saga). The keys below sit at
+# top-level `persistence:` per the chart's monolithic schema.
 persistence:
   enabled: true
   size: 10Gi
-  storageClass: longhorn-replica2
+  storageClassName: longhorn-replica2
 
 # Resource limits — modest for the 6-worker cluster.
-resources:
-  requests:
-    cpu: 50m
-    memory: 256Mi
-  limits:
-    memory: 1Gi
+# Chart key for tempo monolithic is `tempo.resources`, NOT a top-level
+# `resources:`. The top-level form is silently dropped (chart-key audit
+# 2026-06-09). Moved under `tempo:` above.
+tempo:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+  # Container security posture matches the rest of observability/.
+  # Chart key is `tempo.securityContext`, NOT a top-level
+  # `containerSecurityContext`. Without this nesting the PSS warning at
+  # admission ("must set allowPrivilegeEscalation=false" + "must drop
+  # ALL capabilities") fires every pod restart (chart-key audit
+  # 2026-06-09).
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
 
 # Self-metrics scrape via the kube-prometheus-stack release.
 # Chart's bundled ServiceMonitor uses a different label
@@ -103,10 +122,9 @@ resources:
 serviceMonitor:
   enabled: false
 
-# (S3 cred env moved under tempo.extraEnv above — the chart ignores a
-# top-level extraEnv:, which left ${ACCESS_KEY_ID} empty.)
-
-# Container security posture matches the rest of observability/.
+# Pod-level security — top-level `securityContext` was working before
+# (only `containerSecurityContext` was silently dropped per the
+# 2026-06-09 chart-key audit). Left as-is.
 securityContext:
   runAsNonRoot: true
   runAsUser: 1000
@@ -114,8 +132,3 @@ securityContext:
   fsGroup: 1000
   seccompProfile:
     type: RuntimeDefault
-containerSecurityContext:
-  allowPrivilegeEscalation: false
-  capabilities:
-    drop: [ALL]
-  readOnlyRootFilesystem: true
