@@ -1,0 +1,175 @@
+# PrometheusRules for the three blind-spots surfaced by the 2026-06-09
+# recurring-worker-OOM-cascade investigation
+# (homelab-docs/99-journal/2026-06-09-recurring-worker-cascades.md,
+# commit 1b405df). Per RCA §"Recommended fixes" #5: the existing
+# `KubeNodeNotReady` / `KubeletDown` rules did NOT fire during cascades
+# 2–4 because every recovery was <1 min, below their `for:` threshold.
+# Three new signals fill that gap.
+#
+# Routing follows the convention captured in
+# `infrastructure/cnpg/archiving-rules.yaml` (commit ebae0fd) — all
+# routed at `severity: warning` (kube-prometheus-stack alertmanager
+# config → ntfy-via-relay → ntfy). Operators can re-tier to critical
+# after a few weeks of signal review if any of the three turns out to
+# be the workday-paging case.
+#
+# Metric sources:
+# - `node_vmstat_oom_kill` is exposed by node-exporter (chart-default
+#   on this kube-prometheus-stack install). One scalar per node; counts
+#   the kernel's `oom_kill` vmstat counter — incremented whenever the
+#   kernel OR Talos's node-level OOMController kills a cgroup. This is
+#   the closest available signal to the RCA-named
+#   `talos_oom_killer_total` (Talos does not yet ship a dedicated
+#   metric; node_vmstat captures the same event from the kernel side).
+# - `node_boot_time_seconds` is also node-exporter; jumps on kernel
+#   reboot.
+# - `kube_pod_container_status_restarts_total` is kube-state-metrics
+#   (chart-default).
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: worker-cascade-signals
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: worker-cascade-signals
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: worker-cascade-signals
+      interval: 1m
+      rules:
+        # ===== Fix 5a — TalosOOMControllerFiring =====
+        # Node-level OOM kill observed in the last minute. Captures
+        # both kernel OOMs and Talos's node-OOMController kills —
+        # the cascades #1–#4 root signal. Fires immediately (no `for`
+        # gate) because the OOMController kill is the event we want
+        # to know about; suppressing under 1m would hide it (which is
+        # exactly what KubeNodeNotReady did).
+        #
+        # Inhibition is handled at AM layer via the standard severity
+        # rules; no per-rule inhibit needed.
+        - alert: TalosOOMControllerFiring
+          expr: |
+            increase(node_vmstat_oom_kill[1m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+            component: talos
+          annotations:
+            summary: "OOM kill on node {{ $labels.instance }}"
+            description: |
+              `node_vmstat_oom_kill` incremented on {{ $labels.instance }}
+              in the last minute — either the Linux kernel OOM killer
+              or Talos's node-level OOMController selected a victim
+              cgroup. Per the 2026-06-09 RCA the most common victim is
+              `longhorn-manager` or a Longhorn instance-manager; loss
+              of either tears down VolumeAttachments cluster-wide and
+              re-triggers the cascade.
+
+              Triage (read-only):
+                talosctl --nodes <node-ip> dmesg | grep -i 'oom\|killer\|victim'
+                kubectl get pod -A --field-selector status.phase!=Running \
+                  -o wide | grep {{ $labels.instance }}
+                kubectl -n longhorn-system get pod -o wide \
+                  | grep {{ $labels.instance }}
+
+              Reference: 2026-06-09 RCA §"Root cause assessment" #1.
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/phase_1_bring_up/99-journal/2026-06-09-recurring-worker-cascades.md"
+
+        # ===== Fix 5b — NodeRebootedUnexpected =====
+        # `node_boot_time_seconds` is the Unix epoch of the running
+        # kernel's boot — it changes ONLY on kernel reboot. We sample
+        # the change over 10m and fire if there is one.
+        #
+        # Cascade #4 included a worker1 kernel reboot at 19:46:21Z
+        # that the operator's earlier "boot IDs stable" check missed
+        # (the talosctl `bootid` resource is not registered on this
+        # version — see RCA TL;DR). This rule closes that observability
+        # gap.
+        #
+        # "no scheduled-maintenance annotation" suppression is left as
+        # a manual operator silence in AM rather than a label match
+        # here, because we don't ship a standard maintenance label
+        # across the fleet yet. A planned reboot is a 2-click AM
+        # silence rather than a code change.
+        - alert: NodeRebootedUnexpected
+          expr: |
+            changes(node_boot_time_seconds[10m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+            component: talos
+          annotations:
+            summary: "Node {{ $labels.instance }} rebooted"
+            description: |
+              `node_boot_time_seconds` on {{ $labels.instance }} changed
+              within the last 10 minutes — the kernel rebooted. If this
+              was not a planned maintenance, the most-likely cause per
+              the 2026-06-09 RCA is a watchdog reset under sustained
+              CPU+memory pressure from an OOM storm (cascade #4
+              precedent on worker1).
+
+              Triage (read-only):
+                talosctl --nodes <node-ip> dmesg | head -30
+                talosctl --nodes <node-ip> get machineconfig
+                kubectl get node {{ $labels.instance }} -o yaml \
+                  | grep -E 'bootID|machineID|operatingSystem'
+
+              If planned: silence this alert in Alertmanager for the
+              maintenance window. We do not yet ship a fleet-wide
+              `maintenance` annotation; revisit if reboot cadence
+              picks up.
+
+              Reference: 2026-06-09 RCA TL;DR + §"Root cause" #3.
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/phase_1_bring_up/99-journal/2026-06-09-recurring-worker-cascades.md"
+
+        # ===== Fix 5c — LonghornManagerRestarting =====
+        # Per-pod, per-container restart counter delta. The cascade-#4
+        # observation: each cascade increments restartCount by 1–2 on
+        # every longhorn-manager pod across the fleet within minutes.
+        # Steady state is `0 restarts/hour` — anything above 1/hour is
+        # the cascade signature.
+        #
+        # `> 1` (not `> 0`) because a single benign restart (e.g.
+        # operator-initiated rollout of a new image) is expected on
+        # bump days; the cascade pattern is 2+ within an hour. The AM
+        # inhibition + `for: 5m` keeps the rule from flapping during
+        # the rollout window.
+        - alert: LonghornManagerRestarting
+          expr: |
+            increase(
+              kube_pod_container_status_restarts_total{
+                namespace="longhorn-system",
+                container="longhorn-manager"
+              }[1h]
+            ) > 1
+          for: 5m
+          labels:
+            severity: warning
+            component: longhorn
+          annotations:
+            summary: "longhorn-manager {{ $labels.namespace }}/{{ $labels.pod }} restarting (>1 in 1h)"
+            description: |
+              The longhorn-manager container in {{ $labels.pod }} has
+              restarted more than once in the last hour. Per the
+              2026-06-09 RCA, this is the canonical cascade signature:
+              Talos OOMController kills the manager (exit 137), kubelet
+              restarts it, the init-time CRD reconcile re-fails because
+              the surrounding VolumeAttachment graph is still wedged,
+              and the pod exit-loops.
+
+              Triage (read-only):
+                kubectl -n longhorn-system get pod {{ $labels.pod }} \
+                  -o jsonpath='{.status.containerStatuses[0].lastState.terminated}'
+                kubectl -n longhorn-system logs {{ $labels.pod }} \
+                  --previous --tail=80
+                kubectl -n longhorn-system get volumeattachment \
+                  --no-headers | wc -l
+
+              If VA count is much higher than the running PVC count,
+              the cascade is in progress — see RCA §"Cascading via
+              VolumeAttachment surface".
+
+              Reference: 2026-06-09 RCA §"Fatal-exit reasons".
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/phase_1_bring_up/99-journal/2026-06-09-recurring-worker-cascades.md"

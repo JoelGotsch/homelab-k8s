@@ -30,3 +30,4 @@ resources:
   - alertmanager-config.yaml
   - networkpolicy.yaml
   - httproute.yaml
+  - worker-cascade-rules.yaml
