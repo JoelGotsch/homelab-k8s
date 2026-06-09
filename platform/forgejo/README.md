@@ -177,6 +177,110 @@ Per [`forgejo/github-mirror-setup.md`](../../../homelab-docs/03-runbooks/forgejo
 (TBD). Direction: Forgejo → GitHub, unidirectional. Public +
 internal repos only per ADR 0023 D14 + ADR 0003.
 
+## First-party image pulls
+
+Forgejo Packages doubles as the homelab's private OCI image
+registry (`registry.homelab.internal` via the
+`platform/forgejo/httproute-registry.yaml` Gateway alias of
+`forgejo.lab.<HOMELAB-DOMAIN>`). Packages are intentionally
+**private** — neither package nor repo visibility is flipped
+to public; consumer pods authenticate every pull.
+
+### Bot account — `ci-packages` (dual-use)
+
+A single Forgejo bot, `ci-packages`, services both pipelines:
+
+| Side | Operation | Auth |
+|---|---|---|
+| Woodpecker CI | `docker push` to `registry.homelab.internal/<name>:<tag>` | Basic auth, PAT from OpenBao |
+| Cluster pods | kubelet pull (image-pull cred) | Basic auth, same PAT, projected via ESO dockerconfigjson |
+
+**Why one bot, not two:** at homelab scale a separate
+pull-only bot (`ci-packages-pull` with `read:package` only)
+buys minimal real-world isolation — only one push pipeline
+exists and any incident-response flow rotates the shared
+PAT anyway. The refactor trigger is "the first additional
+pull consumer whose trust profile genuinely differs from
+the Woodpecker pusher" — then split into
+`ci-packages-push` (write scope, single namespace) and
+`ci-packages-pull` (read scope, many namespaces) under
+distinct OpenBao paths.
+
+### OpenBao path
+
+```
+kv/data/shared/forgejo-packages/ci
+  username = ci-packages
+  token    = <Forgejo PAT, scopes: read:package + write:package>
+```
+
+Seeded once per `homelab-infra/scripts/provision-forgejo-bot-pat.sh`.
+Rotation = re-run the script (PATCH bot password → POST token
+endpoint → re-seed the kv path; ESO refresh + kubelet cred
+re-read happen automatically within the ES `refreshInterval`).
+
+### Secret name convention
+
+Every consuming namespace renders a Secret named
+**`registry-homelab-internal-pull`** (type
+`kubernetes.io/dockerconfigjson`) via an ExternalSecret that
+templates `.dockerconfigjson` from the bot's `username` +
+`token`. The Secret is attached to the namespace's `default`
+ServiceAccount, so every pod that uses the default SA
+inherits the pull cred — no per-Deployment edits needed.
+
+Files per namespace (two-file pattern):
+
+```
+registry-pull-secret.yaml   ExternalSecret → dockerconfigjson Secret
+sa-default.yaml             ServiceAccount/default with imagePullSecrets
+```
+
+The ExternalSecret uses ESO v2 templating
+(`template.engineVersion: v2`, `template.type:
+kubernetes.io/dockerconfigjson`) with
+`{{ printf "%s:%s" .username .password | b64enc }}` for the
+`auth` field; rendered Secret value never traverses the
+operator's shell.
+
+### Adding a new namespace to the pull-enabled list
+
+1. Copy `apps/approval-channel/registry-pull-secret.yaml`
+   and `apps/approval-channel/sa-default.yaml` into the new
+   namespace's directory. Edit the `metadata.namespace` field
+   in both files (the ES `targetSecret` name + the SA name
+   stay `default`).
+2. Add both filenames to the namespace's `kustomization.yaml`
+   under `resources:`.
+3. Argo syncs → ESO materializes the Secret → kubelet picks
+   it up on next pull attempt.
+
+**Mixed-image safety:** kubelet scopes dockerconfigjson lookups
+by registry host, so adding the pull cred to a namespace that
+also pulls third-party images (e.g., llm-gateway pulls
+`mcr.microsoft.com/presidio-*` for the Presidio sidecars) is
+safe — the third-party pulls remain anonymous.
+
+**Mixed-trust SAs:** if a namespace has workloads with
+divergent trust requirements (e.g., one Deployment that
+must NOT have access to the registry credential), create
+dedicated ServiceAccounts and attach `imagePullSecrets` per
+workload instead of on `default`. None of the current four
+pull-enabled namespaces (`llm-gateway`, `approval-channel`,
+`ntfy-e2ee-relay`, `pr-agent`) have that constraint.
+
+### Adjacent — Kyverno digest-pinning
+
+The `require-first-party-image-digest` ClusterPolicy in
+`infrastructure/kyverno/clusterpolicies.yaml` requires
+`registry.homelab.internal/*` and `forgejo.lab/*` images to
+be referenced by `@sha256:...` digest. It is currently
+`validationFailureAction: Audit` (per the bring-up note in
+that file). When flipped back to `Enforce` per ADR 0019 D3,
+all four consumer Deployments above need to switch from
+`:<tag>` to `@sha256:<digest>` image refs — tracked
+separately in TODO.md.
+
 ## Caveats
 
 1. **Single-replica Forgejo.** No HA at the app layer; pod

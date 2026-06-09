@@ -11,3 +11,7 @@ resources:
   - deployment.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml
+  # Forgejo Packages pull cred + default-SA wiring. Per
+  # platform/forgejo/README.md §"First-party image pulls".
+  - registry-pull-secret.yaml
+  - sa-default.yaml

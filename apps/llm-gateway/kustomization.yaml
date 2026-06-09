@@ -38,6 +38,10 @@ resources:
   - httproute.yaml
   - networkpolicy.yaml
   - presidio-deployment.yaml
+  # Forgejo Packages pull cred + default-SA wiring. Per
+  # platform/forgejo/README.md §"First-party image pulls".
+  - registry-pull-secret.yaml
+  - sa-default.yaml
 
 # Two patches on the chart-rendered migrations Job:
 #   (1) Strategic-merge — add the PSA-restricted-compliant

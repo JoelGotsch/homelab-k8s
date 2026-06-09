@@ -1,0 +1,12 @@
+# Default SA with imagePullSecrets for the Forgejo Packages
+# registry. Per platform/forgejo/README.md
+# §"First-party image pulls". See llm-gateway/sa-default.yaml
+# for the "re-declare vs patch" rationale.
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: ntfy-e2ee-relay
+imagePullSecrets:
+  - name: registry-homelab-internal-pull
