@@ -165,6 +165,19 @@ agent:
   # auto-created woodpecker-default-agent-secret (both server + agent
   # reference it). A custom `envFrom` here is ignored by the chart (wrong
   # key) and unnecessary. Removed 2026-05-29.
+  #
+  # 2026-06-09 addition: Woodpecker 3.x dropped auto-registration via
+  # the global secret — agents must exist in the server DB. The
+  # 2026-06-06 saga rebuilt the server DB; the chart-default secret
+  # alone now fails with "individual agent not found by token". The
+  # operator created `agent-0` via the UI and seeded the resulting
+  # per-agent token to kv/woodpecker/agent-token; the
+  # `woodpecker-agent-token` Secret (ExternalSecret-projected) carries
+  # it as WOODPECKER_AGENT_TOKEN. The chart's correct key for adding
+  # extra secret envFroms is `extraSecretNamesForEnvFrom` (verified
+  # against the server block's working use of the same key 2026-05-29).
+  extraSecretNamesForEnvFrom:
+    - woodpecker-agent-token
 
   resources:
     requests:
