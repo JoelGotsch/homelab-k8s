@@ -37,9 +37,9 @@ git checkout v0.34   # OPERATOR PINS the upstream tag
 docker build \
   -f docker/Dockerfile \
   --target gitea_app \
-  -t registry.homelab.internal/pr-agent:gitea_app-0.34 \
+  -t registry.homelab.internal/forgejo-admin/pr-agent:gitea_app-0.34 \
   .
-docker push registry.homelab.internal/pr-agent:gitea_app-0.34
+docker push registry.homelab.internal/forgejo-admin/pr-agent:gitea_app-0.34
 ```
 
 The `deployment.yaml` `image:` ref is pinned to this tag.

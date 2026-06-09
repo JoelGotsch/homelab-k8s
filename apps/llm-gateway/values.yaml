@@ -10,8 +10,20 @@
 replicaCount: 2
 
 image:
-  repository: registry.homelab.internal/llm-gateway
-  tag: "0.1.0"  # OPERATOR PINS via Renovate
+  # Forgejo Packages OCI registry namespaces images by owner. The bot
+  # `ci-packages` is in the `forgejo-admin` user namespace, so its
+  # `llm-gateway` package lives at `forgejo-admin/llm-gateway`. The
+  # leading `forgejo-admin/` was missing 2026-06-09 and caused
+  # kubelet auth-but-404 against `/v2/llm-gateway/manifests/0.1.0`;
+  # confirmed via registry catalog showing only
+  # `forgejo-admin/llm-gateway` with tags [latest, v0.0.1].
+  # Tag bumped 0.1.0 → v0.0.1 to match what CI actually published
+  # at the time of 2026-06-04 (operator wired Renovate after; the
+  # 0.1.0 tag never existed). Renovate digest-pin lands per ADR 0019
+  # D3 + Kyverno require-first-party-image-digest enforce mode on
+  # the next CI push.
+  repository: registry.homelab.internal/forgejo-admin/llm-gateway
+  tag: "v0.0.1"  # OPERATOR PINS via Renovate
   pullPolicy: IfNotPresent
 
 # The chart consumes a Secret with key `masterkey`. We point it
