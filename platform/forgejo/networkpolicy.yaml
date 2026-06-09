@@ -70,6 +70,23 @@ spec:
         - ports:
             - port: "3000"
               protocol: TCP
+    # SSH-over-LoadBalancer (forgejo-ssh Service, 10.10.30.51:22):
+    # the Service port 22 DNATs to pod port 2222, and with
+    # externalTrafficPolicy: Cluster the L2-announcer node SNATs
+    # the client IP to its node IP — so the pod observes source
+    # identity `remote-node` (the announcer, currently worker2;
+    # any cluster node may win the election). Port at the pod
+    # is the post-DNAT pod port 2222, NOT the Service port 22
+    # (Cilium socket-LB rewrites before policy lookup — see
+    # feedback_gateway_500_503_triage). Without this rule, all
+    # external SSH clones land as policy-verdict:none DENIED in
+    # Hubble, browser/git just hangs to TCP timeout.
+    - fromEntities:
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "2222"
+              protocol: TCP
   egress:
     # kube-DNS.
     - toEndpoints:
