@@ -70,12 +70,18 @@ metadata:
   name: openbao-raft-snapshot
   namespace: openbao
 spec:
-  schedule: "0 3 * * *"  # 03:00 daily
+  schedule: "5 3 * * *"  # 03:05 daily (offset within the hour per
+  # 2026-06-09 OOM-cascade RCA §"Recommended fixes" #3 / commit 1b405df).
+  # Original `0 3 * * *` collided with every other on-the-hour cronjob.
   # Hardening per 2026-06-08 + 2026-06-09 OpenBao incidents (see sibling
   # raft-snapshot-hourly.yaml): same wedged-Longhorn-VA failure mode
-  # applies here, so the same Replace / activeDeadlineSeconds / ttl /
-  # startingDeadlineSeconds bounds are applied.
-  concurrencyPolicy: Replace
+  # applies here, so the same activeDeadlineSeconds / ttl /
+  # startingDeadlineSeconds bounds are applied. concurrencyPolicy is
+  # `Forbid` (not Replace) per RCA §3: under a cascade Replace would
+  # kill the previous pod mid-snapshot-save, leaving a half-flushed file
+  # and re-triggering the same VA churn that started the cascade.
+  # Forbid skips overlapping runs instead.
+  concurrencyPolicy: Forbid
   startingDeadlineSeconds: 60
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 1
@@ -132,6 +138,19 @@ spec:
               envFrom:
                 - secretRef:
                     name: hetzner-sb-creds
+              # Per 2026-06-09 OOM-cascade RCA §"Recommended fixes" #4
+              # (commit 1b405df): every cronjob pod whose container
+              # execs `bao` / `kubectl` against the cluster gets a
+              # 64Mi/128Mi floor+cap so it cannot anonymously pad up
+              # a tight worker's memory profile and trigger the
+              # Talos OOM-controller. 128Mi is enough for raft
+              # snapshot save + scp upload (steady ~25MB RSS).
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi
               volumeMounts:
                 - name: tls
                   mountPath: /vault/userconfig/openbao-tls

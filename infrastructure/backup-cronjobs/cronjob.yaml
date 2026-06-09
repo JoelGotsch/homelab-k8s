@@ -30,7 +30,11 @@ metadata:
     app.kubernetes.io/name: restic-tier-3
     app.kubernetes.io/component: backup-pipeline
 spec:
-  schedule: "0 2 * * *"
+  # Schedule: 02:15 UTC daily. Per 2026-06-09 OOM-cascade RCA
+  # §"Recommended fixes" #3 (commit 1b405df) the backup-cronjob slot
+  # within the staggered hour-offset allocation is `:15`. Original
+  # `0 2 * * *` collided with every other on-the-hour job.
+  schedule: "15 2 * * *"
   concurrencyPolicy: Forbid  # never overlap; missed run skipped
   startingDeadlineSeconds: 3600  # if scheduler is late >1h, skip
   successfulJobsHistoryLimit: 3
