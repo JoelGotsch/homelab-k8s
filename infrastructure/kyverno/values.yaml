@@ -11,29 +11,73 @@ policyReportsCleanup:
   image:
     repository: bitnamilegacy/kubectl
 
+# Spread the admission stack across workers. Without this, the chart's
+# default `preferred` podAntiAffinity (weight=1) is too weak — in the
+# 2026-06-08 OpenBao incident, all 8 Kyverno pods (admission/background/
+# cleanup/reports × 2 replicas) had landed on worker1. When worker1
+# went briefly NotReady, every cluster write that traverses the
+# admission webhook stalled until worker1 recovered, which is what
+# wedged longhorn-manager and stuck the OpenBao VolumeAttachments.
+# Full incident at 99-journal/2026-06-08-openbao-degradation.md and
+# the root-cause analysis in TODO.md §Open incidents.
+#
+# topologySpreadConstraints with whenUnsatisfiable=ScheduleAnyway is
+# soft enough that scheduling never blocks during a worker disruption
+# (we keep availability even if only one worker is up), but strong
+# enough that under normal conditions the scheduler keeps the
+# per-controller replicas on distinct hosts.
+
 admissionController:
   replicas: 2
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {memory: 512Mi}
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/component: admission-controller
 
 backgroundController:
   replicas: 2
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {memory: 512Mi}
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/component: background-controller
 
 cleanupController:
   replicas: 2
   resources:
     requests: {cpu: 25m, memory: 64Mi}
     limits: {memory: 256Mi}
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/component: cleanup-controller
 
 reportsController:
   replicas: 2
   resources:
     requests: {cpu: 25m, memory: 64Mi}
     limits: {memory: 256Mi}
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/component: reports-controller
 
 config:
   resourceFiltersExcludeNamespaces:
