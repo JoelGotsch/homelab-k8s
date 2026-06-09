@@ -81,39 +81,33 @@ tempo:
     search:
       max_duration: 0s                # unlimited query window
 
-# PVC for WAL — Longhorn replica2 matches Loki's pattern.
-# Chunks live in MinIO; this is just the WAL window.
-# Chart key is `storageClassName`, NOT `storageClass` — the latter is
-# silently dropped (verified 2026-06-09; same wrong-chart-key class as
-# Langfuse / Vaultwarden 2026-05-31 saga). The keys below sit at
-# top-level `persistence:` per the chart's monolithic schema.
-persistence:
-  enabled: true
-  size: 10Gi
-  storageClassName: longhorn-replica2
-
-# Resource limits — modest for the 6-worker cluster.
-# Chart key for tempo monolithic is `tempo.resources`, NOT a top-level
-# `resources:`. The top-level form is silently dropped (chart-key audit
-# 2026-06-09). Moved under `tempo:` above.
-tempo:
+  # Resources + container-level securityContext go INSIDE the `tempo:`
+  # block per the chart's template (verified 2026-06-09 by reading
+  # tempo-1.10.1/charts/tempo/templates/statefulset.yaml):
+  #   resources:        toYaml .Values.tempo.resources       (container)
+  #   securityContext:  toYaml .Values.tempo.securityContext (container)
+  # A top-level `resources:` / `containerSecurityContext:` is silently
+  # dropped — same chart-key class as Langfuse / Vaultwarden 05-31 saga.
   resources:
     requests:
       cpu: 50m
       memory: 256Mi
     limits:
       memory: 1Gi
-  # Container security posture matches the rest of observability/.
-  # Chart key is `tempo.securityContext`, NOT a top-level
-  # `containerSecurityContext`. Without this nesting the PSS warning at
-  # admission ("must set allowPrivilegeEscalation=false" + "must drop
-  # ALL capabilities") fires every pod restart (chart-key audit
-  # 2026-06-09).
   securityContext:
     allowPrivilegeEscalation: false
     capabilities:
       drop: [ALL]
     readOnlyRootFilesystem: true
+
+# PVC for WAL — Longhorn replica2 matches Loki's pattern.
+# Chunks live in MinIO; this is just the WAL window.
+# Chart key is `storageClassName`, NOT `storageClass` — the latter is
+# silently dropped (verified 2026-06-09).
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClassName: longhorn-replica2
 
 # Self-metrics scrape via the kube-prometheus-stack release.
 # Chart's bundled ServiceMonitor uses a different label
@@ -122,9 +116,11 @@ tempo:
 serviceMonitor:
   enabled: false
 
-# Pod-level security — top-level `securityContext` was working before
-# (only `containerSecurityContext` was silently dropped per the
-# 2026-06-09 chart-key audit). Left as-is.
+# Pod-level securityContext — per the chart template this top-level
+# `securityContext:` is applied at podSpec level (`nindent 8`), so
+# runAsUser / fsGroup / seccompProfile land correctly here. Container-
+# level fields (allowPrivilegeEscalation, capabilities) belong under
+# `tempo.securityContext` above.
 securityContext:
   runAsNonRoot: true
   runAsUser: 1000
