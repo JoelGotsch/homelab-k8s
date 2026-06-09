@@ -62,22 +62,44 @@ redis:
 redis-cluster:
   enabled: false
 
-# Service: ClusterIP only. Cilium Gateway HTTPRoute exposes
-# externally; no LoadBalancer needed at the Service level.
+# Service: HTTP is ClusterIP behind the Cilium Gateway
+# HTTPRoute; SSH is its own LoadBalancer Service on a
+# separate IP in the homelab-ingress pool. Cilium v1.19
+# CiliumGatewayClassConfig.spec.service has no `annotations`
+# field, so we cannot share the Gateway's LB IP via
+# `lbipam.cilium.io/sharing-key` on the auto-Service —
+# Cilium would reconcile the annotation away. A dedicated IP
+# is the only clean option at this Cilium version.
+# IP: 10.10.30.51 (next free in homelab-ingress pool,
+# .50 is the Gateway). DNS: `ssh.forgejo.{{ homelab_internal_subdomain }}.{{ homelab_domain }}`
+# in unbound (homelab-infra/.../unbound.conf.j2) overrides
+# the *.{{ homelab_internal_subdomain }}.{{ homelab_domain }} wildcard. The `homelab.io/l2-announce`
+# label is matched by the relaxed CiliumL2AnnouncementPolicy
+# selector in infrastructure/ingress/l2announcement.yaml so
+# this IP is ARP-announced on the servers VLAN.
 service:
   http:
     type: ClusterIP
     port: 3000
   ssh:
-    type: ClusterIP
+    type: LoadBalancer
     port: 22
-    # SSH-over-Tailscale: operator clones via Tailscale's
-    # tailnet IP; we don't expose SSH publicly. The cluster
-    # Gateway is HTTP/HTTPS only; SSH egress to Forgejo's
-    # cluster IP is via Tailscale-routed traffic landing on
-    # the Gateway-LB IP for HTTPS, and a separate Service
-    # for SSH. Operator can also use HTTPS git push instead
-    # of SSH — both work.
+    loadBalancerIP: 10.10.30.51
+    labels:
+      homelab.io/l2-announce: "true"
+    annotations:
+      lbipam.cilium.io/ips: "10.10.30.51"
+      # The pre-existing Service is headless ClusterIP
+      # (clusterIP: None); flipping to LoadBalancer cannot be
+      # done by apply because clusterIP is an immutable field.
+      # Replace=true + Force=true tells Argo to use
+      # `kubectl replace --force` for this resource, which
+      # deletes + recreates and clears the immutable-field
+      # transition. Pattern: observability/crowdsec/bouncer-
+      # register-job.yaml. Could be removed once the live
+      # Service has been recreated as LoadBalancer, but it
+      # is harmless to leave (forgejo-ssh rarely changes).
+      argocd.argoproj.io/sync-options: Replace=true,Force=true
 
 # OPERATOR FILLS {{ homelab_domain }}. Forgejo's full URLs in
 # emails, OAuth callbacks, and the UI's clone URLs derive

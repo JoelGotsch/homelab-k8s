@@ -36,3 +36,31 @@ spec:
     - "^enp[0-9]+s0$"
   externalIPs: true
   loadBalancerIPs: true
+---
+# Secondary policy: announce any LoadBalancer Service that
+# opts in via the `homelab.io/l2-announce: "true"` label.
+# Cannot extend `homelab-ingress` above with `matchExpressions`
+# OR-semantics — Kubernetes label selectors are AND-only. The
+# Cilium Gateway auto-Service carries `io.cilium.gateway/...`
+# and is owned by the gateway controller (we can't add labels
+# to it), so dedicated services like `forgejo-ssh` get a
+# label of their own + this companion policy.
+#
+# Same node/interface/IP settings as homelab-ingress —
+# any deviation just means the announcement happens on the
+# wrong NIC or wrong nodes, hence kept identical on purpose.
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: homelab-labeled
+spec:
+  serviceSelector:
+    matchLabels:
+      homelab.io/l2-announce: "true"
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/os: linux
+  interfaces:
+    - "^enp[0-9]+s0$"
+  externalIPs: true
+  loadBalancerIPs: true
