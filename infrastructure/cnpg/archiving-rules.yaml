@@ -1,0 +1,105 @@
+# PrometheusRules for the CNPG operator's per-cluster barman WAL
+# archive path.
+#
+# Closes the deferred follow-up in
+# 99-journal/2026-06-09-cluster-state-survey.md
+# §CrowdSec barman-cloud archive audit → "Follow-ups":
+#   "The pre-flight failure was visible in the cluster condition for
+#    4 days without paging — ContinuousArchivingFailing should be
+#    an alertmanager rule."
+#
+# Metric source: the CNPG instance manager's metrics endpoint at
+# :9187, scraped via the cnpg-cloudnative-pg PodMonitor (operator
+# values.yaml monitoring.podMonitorEnabled=true). Per-cluster
+# instance-level metrics are surfaced because the per-Cluster
+# `monitoring.enablePodMonitor: true` is the convention in
+# `infrastructure/cnpg/README.md` skeleton (and every existing
+# Cluster CRD in the repo sets it).
+#
+# Metric names verified on 2026-06-09 against `crowdsec-lapi-1`
+# (CNPG 1.25.0 / chart 0.23.0). No `cnpg_collector_continuous_-
+# archiving_failing` gauge exists at this version; the operative
+# signals are the `cnpg_pg_stat_archiver_*` family, which mirror
+# PostgreSQL's own `pg_stat_archiver` view. The rule below uses
+# `last_failed_time > last_archived_time` as the canonical
+# "most recent archive attempt failed" condition — exactly what
+# the cluster `ContinuousArchivingFailing` condition tracks.
+#
+# Routing (per kube-prometheus-stack alertmanager-config.yaml):
+#   severity: warning  → ntfy only
+#   severity: critical → ntfy AND approval-channel (Signal bridge)
+# `component: cnpg` is an operator-side filter only; not matched
+# by AM routes today.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cnpg-continuous-archiving
+  namespace: cnpg-system
+  labels:
+    app.kubernetes.io/name: cloudnative-pg
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: cnpg-continuous-archiving
+      interval: 1m
+      rules:
+        # Most recent archive attempt failed AND the failure is more
+        # recent than the most recent success — i.e. the archive
+        # path is broken right now, not just intermittently flapping.
+        #
+        # `for: 15m` is the gate the operator-facing audit
+        # explicitly named ("more than 15 minutes" follow-up). It
+        # absorbs:
+        #   - The ~60s barman retry cycle on a single transient
+        #     network blip.
+        #   - The post-pod-restart window where the archiver hasn't
+        #     yet recorded a fresh success.
+        #   - MinIO endpoint flaps during minio-on-nas pod restarts.
+        # And it still fires well inside the operator's normal
+        # response window, so a real `Expected empty archive` /
+        # credential / endpoint failure pages on the same workday.
+        #
+        # warning (not critical) per convention with the existing
+        # CrowdSec + Trivy rules: the LAPI / app keeps serving live
+        # traffic, only WAL backup is stalled. RPO degradation is
+        # serious but not service-down. Operator triages via
+        # cluster-rebuild.md when the failure is the
+        # stale-barman-prefix class observed 2026-06-09.
+        - alert: CNPGContinuousArchivingFailing
+          expr: |
+            cnpg_pg_stat_archiver_last_failed_time
+              > cnpg_pg_stat_archiver_last_archived_time
+          for: 15m
+          labels:
+            severity: warning
+            component: cnpg
+          annotations:
+            summary: "CNPG WAL archive failing for cluster {{ $labels.namespace }}/{{ $labels.cluster }}"
+            description: |
+              The CNPG instance manager reports that the most recent
+              `archive_command` invocation failed AND no successful
+              archive has happened since. WAL is accumulating on the
+              local PV; if this continues for hours the PV will fill
+              and Postgres will refuse to start
+              (`Detected low-disk space condition`), per the
+              2026-06-09 CrowdSec cascade.
+
+              Triage:
+                kubectl -n {{ $labels.namespace }} get cluster.postgresql.cnpg.io \
+                  -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.conditions[?(@.type=="ContinuousArchiving")].message}{"\n"}{end}'
+                kubectl -n {{ $labels.namespace }} logs {{ $labels.pod }} -c postgres --tail=50 \
+                  | grep -i 'barman\|archive'
+
+              Common causes (in observed order):
+                1. Stale barman prefix from a prior Cluster instance
+                   sharing the same `serverName` + `destinationPath`
+                   — fix via runbook
+                   homelab-docs/03-runbooks/cnpg/cluster-rebuild.md.
+                2. ExternalSecret/<app>-cnpg-s3 desynced — check
+                   `kubectl -n {{ $labels.namespace }} get externalsecret`.
+                3. MinIO endpoint unreachable — check
+                   `kubectl -n minio-on-nas get pods`.
+                4. S3 credentials rotated without reseeding OpenBao
+                   `kv/cnpg/<app>/s3-creds`.
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/phase_1_bring_up/03-runbooks/cnpg/cluster-rebuild.md"
