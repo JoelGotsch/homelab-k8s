@@ -71,12 +71,19 @@ metadata:
   namespace: openbao
 spec:
   schedule: "0 3 * * *"  # 03:00 daily
-  concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 5
+  # Hardening per 2026-06-08 + 2026-06-09 OpenBao incidents (see sibling
+  # raft-snapshot-hourly.yaml): same wedged-Longhorn-VA failure mode
+  # applies here, so the same Replace / activeDeadlineSeconds / ttl /
+  # startingDeadlineSeconds bounds are applied.
+  concurrencyPolicy: Replace
+  startingDeadlineSeconds: 60
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 2
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 300
       template:
         spec:
           restartPolicy: OnFailure

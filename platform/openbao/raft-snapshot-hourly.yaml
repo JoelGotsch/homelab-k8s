@@ -41,12 +41,20 @@ metadata:
   namespace: openbao
 spec:
   schedule: "5 * * * *"  # hourly at :05 (offset from daily 03:00 to avoid overlap)
-  concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 5
+  # Hardening per 2026-06-08 + 2026-06-09 OpenBao incidents: a wedged
+  # Longhorn VolumeAttachment kept the snapshot pod in ContainerCreating;
+  # its finalizer blocked fresh VAs and the operator had to force-delete
+  # the pod each time. Replace + activeDeadlineSeconds bounds the wedge,
+  # ttl + startingDeadlineSeconds prevent pod / missed-run accumulation.
+  concurrencyPolicy: Replace
+  startingDeadlineSeconds: 60
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       backoffLimit: 2
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 300
       template:
         spec:
           restartPolicy: OnFailure
