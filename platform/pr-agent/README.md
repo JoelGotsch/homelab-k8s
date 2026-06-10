@@ -25,26 +25,25 @@ expose; operator interaction is via PR comments).
 ## Image build
 
 PR-Agent's `gitea_app` Docker target is upstream-defined but
-not published as a tagged image. Build it from the
-`qodo-ai/pr-agent` repo and push to `registry.homelab.internal`.
+not published as a tagged image. The build runs inside Woodpecker
+via the dedicated wrapper repo
+[`forgejo-admin/pr-agent-build`](https://forgejo.lab.vyramo.com/forgejo-admin/pr-agent-build)
+— see that repo's README for the wrapper-pattern rationale and the
+manual bump procedure. Replaces the operator-on-Tier-A
+`docker build && docker push` recipe that previously lived here
+(removed 2026-06-10).
 
-```sh
-# One-time on a Tier A workstation with docker + push creds.
-git clone https://github.com/qodo-ai/pr-agent.git
-cd pr-agent
-git checkout v0.34   # OPERATOR PINS the upstream tag
+Quick bump flow:
 
-docker build \
-  -f docker/Dockerfile \
-  --target gitea_app \
-  -t registry.homelab.internal/forgejo-admin/pr-agent:gitea_app-0.34 \
-  .
-docker push registry.homelab.internal/forgejo-admin/pr-agent:gitea_app-0.34
-```
-
-The `deployment.yaml` `image:` ref is pinned to this tag.
-Renovate's `pr-agent` package rule tracks upstream tags; on a
-new release the operator rebuilds + repins.
+1. Renovate opens a PR against `forgejo-admin/pr-agent-build`
+   bumping `.upstream-tag`.
+2. Merge to `main`.
+3. Tag the wrapper repo with the matching plain version (e.g.
+   wrapper tag `0.35` for upstream `v0.35`); Woodpecker builds +
+   publishes `registry.homelab.internal/forgejo-admin/pr-agent:gitea_app-0.35`.
+4. Bump the `image:` line in [deployment.yaml](deployment.yaml) to
+   match (Renovate can manage this too, given the standard image-
+   reference format).
 
 ## OpenBao paths to seed
 
