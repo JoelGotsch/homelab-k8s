@@ -49,6 +49,17 @@ spec:
           ports:
             - containerPort: 3000
               name: http
+          env:
+            # Cap gunicorn worker count. Upstream's gunicorn.conf.py
+            # autoscales to nproc*2+1, which on a 16-core worker
+            # becomes 33+ workers; each loads litellm/openai/tiktoken
+            # + tokenizers at ~50–80 MiB resident, blowing past any
+            # sane memory limit (observed OOMKilled at 1 GiB on the
+            # first successful pull, 2026-06-11). pr-agent is a
+            # webhook handler doing a few PRs/min — 2 workers is
+            # plenty and keeps total memory bounded.
+            - name: WEB_CONCURRENCY
+              value: "2"
           envFrom:
             - configMapRef:
                 name: pr-agent-config
