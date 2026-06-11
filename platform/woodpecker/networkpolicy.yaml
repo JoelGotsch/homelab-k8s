@@ -221,6 +221,18 @@ spec:
         - matchName: "deb.debian.org"
         - matchName: "security.debian.org"
         - matchName: "dl-cdn.alpinelinux.org"
+        # CDN backends. Build containers spawned by buildkit get
+        # `dockerd --dns <pod-IP>` instead of the cluster Service
+        # DNS, so Cilium's L7 FQDN proxy doesn't follow CNAME chains
+        # — when apt asks for `deb.debian.org` it gets the Fastly
+        # CNAME, queries again, and the resolved IPs aren't tagged
+        # against the original matchName. Explicit pattern coverage
+        # for the Debian mirror CDN (verified 2026-06-11 during
+        # pr-agent-build pipeline #6 — "Could not connect to
+        # debian.map.fastlydns.net:80"). Same pattern applies to
+        # Cloudflare/CloudFront for Alpine + Docker mirrors but
+        # those are already covered via the registry block above.
+        - matchPattern: "*.fastlydns.net"
       toPorts:
         - ports:
             - port: "443"
