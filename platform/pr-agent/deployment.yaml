@@ -35,15 +35,16 @@ spec:
           type: RuntimeDefault
       containers:
         - name: pr-agent
-          # OPERATOR PINS via Renovate. See README §"Image build"
-          # for the build recipe; tag is `gitea_app-<upstream-tag>`.
-          # Forgejo Packages OCI namespaces images by owner — the
-          # `ci-packages` bot belongs to `forgejo-admin`, so the
-          # image lives at `forgejo-admin/pr-agent`. README's build
-          # recipe was updated 2026-06-09 to push to the namespaced
-          # path; older builds at the un-namespaced path don't
-          # exist in Forgejo Packages.
-          image: "registry.homelab.internal/forgejo-admin/pr-agent:gitea_app-0.34"
+          # OPERATOR PINS via Renovate. Image is built by the
+          # `forgejo-admin/pr-agent-build` wrapper repo via
+          # Woodpecker on every tag push; tag is
+          # `gitea_app-<upstream-tag>`. Forgejo Packages OCI
+          # namespaces images by owner and Forgejo only allows the
+          # token-holder to push to its own namespace, so the
+          # `ci-packages` bot pushes here (its own namespace), NOT
+          # to `forgejo-admin/*`. Pull-side is fine because the
+          # cluster's registry-pull Secret uses the same bot.
+          image: "registry.homelab.internal/ci-packages/pr-agent:gitea_app-0.34"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
