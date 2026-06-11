@@ -239,3 +239,24 @@ spec:
               protocol: TCP
             - port: "80"
               protocol: TCP
+    # CIDR fallback for Fastly's anycast block. The FQDN
+    # matchPattern above SHOULD cover *.fastlydns.net but Cilium's
+    # FQDN proxy doesn't track CNAME chains when the build pod's
+    # DNS resolution goes through buildkit's embedded dockerd
+    # resolver rather than directly through kube-dns — so the
+    # resolved IPs never get associated with the matched FQDN.
+    # 151.101.0.0/16 is Fastly's main anycast block (covers
+    # debian-cdn, alpine, npm-cdn, etc.). 199.232.0.0/16 is its
+    # secondary range. Verified 2026-06-11 by pipeline #7 still
+    # timing out on 151.101.66.132 even with the matchPattern in
+    # place. Narrower than ideal — revisit if Cilium L7 DNS proxy
+    # learns CNAME-chain tracking, but it's a small CIDR.
+    - toCIDR:
+        - "151.101.0.0/16"
+        - "199.232.0.0/16"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "80"
+              protocol: TCP
