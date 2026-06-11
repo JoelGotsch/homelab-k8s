@@ -189,6 +189,15 @@ spec:
         - matchName: "registry-1.docker.io"
         - matchName: "auth.docker.io"
         - matchName: "production.cloudflare.docker.com"
+        # Docker Hub migrated buildkit blob serving from Cloudflare
+        # to CloudFront in 2026 (verified 2026-06-11 during the
+        # pr-agent-build pipeline's first docker-buildx run, which
+        # pulled moby/buildkit:buildx-stable-1 fine but failed
+        # fetching the layer blob with "dial tcp 99.84.91.38:443:
+        # i/o timeout" — that IP is a CloudFront edge node). Keep
+        # the cloudflare line too; Docker still uses it for some
+        # blob requests during the same build session.
+        - matchName: "production.cloudfront.docker.com"
         - matchName: "ghcr.io"
         - matchName: "pkg-containers.githubusercontent.com"
         - matchName: "registry.k8s.io"
