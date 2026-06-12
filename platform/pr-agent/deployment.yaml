@@ -71,6 +71,18 @@ spec:
             # standard WEB_CONCURRENCY is NOT read by their conf.
             - name: GUNICORN_WORKERS
               value: "2"
+            # Re-home XDG/dotfile paths to /tmp. The azure-devops
+            # Python lib (pulled in transitively by pr-agent's
+            # multi-provider git layer) mkdirs ~/.azure-devops at
+            # import time; with readOnlyRootFilesystem: true and
+            # the container running as uid 1000 with HOME=/, that
+            # resolves to /.azure-devops and OSError(EROFS) takes
+            # the worker down before it can serve a request.
+            # /tmp is mounted as a writable emptyDir below, so
+            # /tmp/.azure-devops + any other ~/.cache/... paths
+            # from sibling libs all land somewhere sane.
+            - name: HOME
+              value: /tmp
           envFrom:
             - configMapRef:
                 name: pr-agent-config
