@@ -92,15 +92,21 @@ spec:
                 name: pr-agent-webhook
             - secretRef:
                 name: pr-agent-llm-gateway
+          # Probes are TCP, not HTTP. The gitea_app FastAPI surface
+          # only mounts POST /api/v1/gitea_webhooks — there is no `/`
+          # route and no health endpoint, so an HTTP GET probe gets a
+          # 404 and kubelet kills the pod ~60s after boot. Upstream
+          # has not added a healthcheck route as of gitea_app-0.34.
+          # A TCP-connect probe verifies gunicorn is bound and is
+          # the correct liveness signal for "the webhook listener is
+          # up"; the webhook itself is the only real workload.
           livenessProbe:
-            httpGet:
-              path: /
+            tcpSocket:
               port: http
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 30
           readinessProbe:
-            httpGet:
-              path: /
+            tcpSocket:
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
