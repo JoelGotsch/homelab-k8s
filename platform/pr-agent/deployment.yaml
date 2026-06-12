@@ -50,15 +50,26 @@ spec:
             - containerPort: 3000
               name: http
           env:
-            # Cap gunicorn worker count. Upstream's gunicorn.conf.py
-            # autoscales to nproc*2+1, which on a 16-core worker
+            # Cap gunicorn worker count. Upstream's gunicorn_config
+            # .py autoscales to nproc*2+1, which on a 16-core worker
             # becomes 33+ workers; each loads litellm/openai/tiktoken
-            # + tokenizers at ~50–80 MiB resident, blowing past any
-            # sane memory limit (observed OOMKilled at 1 GiB on the
-            # first successful pull, 2026-06-11). pr-agent is a
-            # webhook handler doing a few PRs/min — 2 workers is
-            # plenty and keeps total memory bounded.
-            - name: WEB_CONCURRENCY
+            # + tokenizers at ~150 MiB resident, blowing past any
+            # sane memory limit (OOMKilled at 1 GiB, 2026-06-11).
+            #
+            # The worker class is uvicorn.workers.UvicornWorker
+            # (async), so the cores*2+1 formula upstream uses is
+            # actually the gunicorn recommendation for SYNC workers
+            # — async workers each run an asyncio event loop and
+            # serve up to worker_connections=1000 concurrent
+            # requests per process. Gunicorn docs say 2-4 async
+            # workers total regardless of core count. pr-agent here
+            # is a Forgejo PR-webhook handler making LLM calls; 2
+            # workers cover liveness-probe headroom while one is
+            # mid-LLM-call.
+            #
+            # NB: the env var name is upstream-custom — gunicorn's
+            # standard WEB_CONCURRENCY is NOT read by their conf.
+            - name: GUNICORN_WORKERS
               value: "2"
           envFrom:
             - configMapRef:
