@@ -63,6 +63,8 @@ spec:
               mountPath: /etc/vector
             - name: sink
               mountPath: /sink
+            - name: data
+              mountPath: /var/lib/vector
           resources:
             requests:
               cpu: 50m
@@ -87,12 +89,32 @@ spec:
             capabilities:
               drop: ["ALL"]
             readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65534
+            # Run as root so hostPath /var/log/talos-log-sink
+            # creation works regardless of host-side
+            # ownership. The container has no write access
+            # to anything else (read-only rootfs, dropped
+            # caps) so the blast radius is bounded.
+            runAsNonRoot: false
+            runAsUser: 0
       volumes:
         - name: config
           configMap:
             name: talos-log-sink
+        # Sink writes to a node-local hostPath under
+        # /var/log/talos-log-sink — Talos's ephemeral
+        # partition persists across reboots and is
+        # independent of Longhorn (which depends on the
+        # CP being healthy to attach volumes — exactly the
+        # failure mode we're trying to be resilient to).
+        # Each node has its own log file, lost only if
+        # the node's disk dies. Acceptable: a node losing
+        # its own crash logs is no worse than today's
+        # in-memory-only state.
         - name: sink
-          persistentVolumeClaim:
-            claimName: talos-log-sink
+          hostPath:
+            path: /var/log/talos-log-sink
+            type: DirectoryOrCreate
+        # Vector's internal state dir (no checkpoints
+        # in this config, but Vector wants the path).
+        - name: data
+          emptyDir: {}

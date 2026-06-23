@@ -9,7 +9,6 @@ namespace: monitoring
 
 resources:
   - configmap.yaml
-  - pvc.yaml
   - daemonset.yaml
   - service.yaml
   - networkpolicy.yaml
