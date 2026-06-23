@@ -153,7 +153,18 @@ spec:
             claimName: signal-bridge-data
         - name: tmp
           emptyDir:
-            sizeLimit: 64Mi
+            # signal-cli writes protocol-buffer caches + scratch under
+            # /tmp on every send and receive. At one-message-per-
+            # minute (openbao-seal-watchdog), 64Mi filled within ~14
+            # minutes and kubelet evicted the pod with `Usage of
+            # EmptyDir volume "tmp" exceeds the limit "64Mi"`. Each
+            # eviction killed the live Signal protocol session mid-
+            # flight, leaving subsequent HTTP-201-accepted messages
+            # in a broken-session state that never reached the
+            # operator's phone. 512Mi gives ~hours of headroom even
+            # under sustained alert storms; signal-cli compacts on
+            # restart so steady-state usage is well below.
+            sizeLimit: 512Mi
         - name: run
           emptyDir:
             sizeLimit: 16Mi
