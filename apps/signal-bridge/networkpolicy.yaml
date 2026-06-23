@@ -46,6 +46,17 @@ spec:
       ports:
         - port: 8080
           protocol: TCP
+    # openbao-seal-watchdog CronJob (same namespace) — direct
+    # signal dispatch path that bypasses Alertmanager for the
+    # OpenBao-sealed circular-dependency case. See
+    # openbao-seal-watchdog-cronjob.yaml for the rationale.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openbao-seal-watchdog
+      ports:
+        - port: 8080
+          protocol: TCP
   egress:
     # kube-DNS for Signal hostname resolution.
     - to:
@@ -65,3 +76,50 @@ spec:
     # ciliumnetworkpolicy-egress.yaml (toFQDNs: *.signal.org).
     # Vanilla NetPol cannot match on hostname; the L7-aware
     # gate lives in the CCNP.
+---
+# NetworkPolicy for the openbao-seal-watchdog CronJob — egress
+# to OpenBao :8200 (seal-status probe) + signal-bridge :8080
+# (alert dispatch) + DNS. Ingress: none (CronJob has no
+# listening sockets).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openbao-seal-watchdog
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: openbao-seal-watchdog
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbao-seal-watchdog
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # OpenBao seal-status probe — every replica in the openbao ns.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openbao
+      ports:
+        - port: 8200
+          protocol: TCP
+    # signal-bridge in same namespace — alert dispatch.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: signal-bridge
+      ports:
+        - port: 8080
+          protocol: TCP
