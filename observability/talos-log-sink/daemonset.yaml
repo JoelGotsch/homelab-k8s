@@ -1,0 +1,98 @@
+# Vector DaemonSet receiving Talos machine.logging.destinations
+# output. One pod per node so node-local TCP writes (from the
+# Talos config endpoint resolving to <service>:6514) land on
+# the same-node pod via hostPort short-circuit.
+#
+# Tolerations: every taint, because we need a pod on every
+# node — including control planes — to receive their kernel/
+# machined streams.
+#
+# Image: Vector official, pinned. Renovate will bump.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: talos-log-sink
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: talos-log-sink
+    app.kubernetes.io/component: receiver
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: talos-log-sink
+  updateStrategy:
+    # RollingUpdate with one-at-a-time so we don't lose all
+    # node receivers simultaneously during an upgrade — at
+    # least 5 of 6 nodes can still ship logs.
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: talos-log-sink
+        app.kubernetes.io/component: receiver
+    spec:
+      # Schedule on every node including CPs.
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+        - effect: NoExecute
+          operator: Exists
+      # No host networking — hostPort is enough and keeps the
+      # blast radius bounded.
+      containers:
+        - name: vector
+          image: timberio/vector:0.51.0-distroless-libc
+          args: ["--config-dir", "/etc/vector"]
+          ports:
+            - name: talos-tcp
+              containerPort: 6514
+              hostPort: 6514
+              protocol: TCP
+          env:
+            # Tag forensic lines with the receiving node, so
+            # we can tell which peer caught them when reading
+            # the merged PVC files later.
+            - name: VECTOR_NODE
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vector
+            - name: sink
+              mountPath: /sink
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              # Generous-ish ceiling; under steady-state
+              # Vector idles around ~20 MiB on a 6-node feed.
+              cpu: 200m
+              memory: 256Mi
+          readinessProbe:
+            tcpSocket:
+              port: 6514
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 6514
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+      volumes:
+        - name: config
+          configMap:
+            name: talos-log-sink
+        - name: sink
+          persistentVolumeClaim:
+            claimName: talos-log-sink

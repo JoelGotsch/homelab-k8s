@@ -1,0 +1,30 @@
+# ClusterIP service so the Talos config can target
+# `talos-log-sink.monitoring.svc.cluster.local:6514`.
+#
+# With hostPort 6514 on every node, a Talos write actually
+# resolves to the same-node pod (Cilium short-circuits the
+# Service VIP → local hostPort). We keep the Service so
+# Talos has a stable name to dial without hardcoding 6 node
+# IPs, and so we can `kubectl port-forward svc/...` for
+# debugging.
+apiVersion: v1
+kind: Service
+metadata:
+  name: talos-log-sink
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: talos-log-sink
+spec:
+  type: ClusterIP
+  # InternalTrafficPolicy=Local means a same-node client
+  # always sees the local pod, never a peer. That's exactly
+  # the property we want for forensic logs — a node's logs
+  # land on its own peer pod.
+  internalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: talos-log-sink
+  ports:
+    - name: talos-tcp
+      port: 6514
+      targetPort: 6514
+      protocol: TCP

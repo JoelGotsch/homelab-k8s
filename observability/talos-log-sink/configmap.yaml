@@ -1,0 +1,69 @@
+# Vector config for the Talos log sink.
+#
+# Talos ships `json_lines` over TCP. Vector's `socket` source
+# in mode=tcp with codec=json reads exactly that.
+#
+# Output: a daily-rotated file at /sink/talos-YYYY-MM-DD.log,
+# one JSON object per line. Forensic-grade, not query-grade —
+# this is meant to be `grep`'d during an incident, not powering
+# dashboards. Alloy → Loki remains the steady-state pipeline.
+#
+# Per ADR 0021 (observability) + the worker1 2026-06-22
+# spontaneous-reboot evidence-gap incident.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: talos-log-sink
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: talos-log-sink
+    app.kubernetes.io/component: receiver
+data:
+  vector.yaml: |
+    # Vector self-monitoring: expose its own metrics so
+    # kube-prometheus-stack's auto-discovery picks them up.
+    api:
+      enabled: false  # no UI on the public side
+    sources:
+      talos:
+        type: socket
+        mode: tcp
+        address: 0.0.0.0:6514
+        decoding:
+          codec: json
+        # No TLS, no auth — node-local hop, blocked at
+        # NetworkPolicy. Adding TLS would require a CA at
+        # patch-apply time (chicken-and-egg before OpenBao
+        # PKI is healthy).
+        keepalive:
+          time_secs: 60
+    transforms:
+      # Stamp ingest time so we can distinguish "Talos sent
+      # this" vs "receiver received this" during forensics.
+      enrich:
+        type: remap
+        inputs: [talos]
+        source: |
+          .received_at = now()
+    sinks:
+      # Primary: write to PVC, one file per day. Forensic-
+      # grade, not query-grade.
+      file:
+        type: file
+        inputs: [enrich]
+        path: /sink/talos-%Y-%m-%d.log
+        encoding:
+          codec: json
+        # Flush often so a node-down-soon event is on disk
+        # within a few hundred ms of being received.
+        buffer:
+          type: memory
+          max_events: 1000
+          when_full: drop_newest
+      # Tee to stdout so `kubectl logs ds/talos-log-sink`
+      # works during initial bring-up debugging.
+      console:
+        type: console
+        inputs: [enrich]
+        encoding:
+          codec: json

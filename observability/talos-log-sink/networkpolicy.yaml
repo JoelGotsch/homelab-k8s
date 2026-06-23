@@ -1,0 +1,42 @@
+# Allow Talos nodes to push log lines on 6514/tcp.
+#
+# Source is the SERVERS VLAN (10.10.30.0/24), the node host
+# network — NOT the pod CIDR — because the writer is
+# `machined` on the node, not a pod.
+#
+# Egress: none required for the steady-state receiver path
+# (writes go to PVC). Allow DNS to keep `kubectl exec` /
+# diagnostics working.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: talos-log-sink
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: talos-log-sink
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 10.10.30.0/24
+      ports:
+        - protocol: TCP
+          port: 6514
+  egress:
+    # DNS to kube-dns.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
