@@ -39,6 +39,15 @@ image:
   repository: registry.homelab.internal/ci-packages/minio
   tag: RELEASE.2024-12-18T13-15-44Z  # OPERATOR PINS via Renovate
 
+# The MinIO chart creates its own ServiceAccount (`minio-sa`)
+# rather than using the namespace's `default`, so attaching the
+# pull cred to `default` (via sa-default.yaml) is not enough.
+# The chart exposes a top-level `imagePullSecrets` value that
+# is rendered onto the pod spec directly — use that for the
+# chart-managed Deployment + post-install Job pods.
+imagePullSecrets:
+  - name: registry-homelab-internal-pull
+
 # Single-replica MinIO on an RWO PVC (minio-data) — a RollingUpdate
 # deadlocks (the new pod can't attach the volume while the old still
 # holds it; hit across the cluster's RWO charts on 2026-05-25). The
