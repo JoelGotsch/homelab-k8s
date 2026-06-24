@@ -123,3 +123,31 @@ spec:
       ports:
         - port: 8080
           protocol: TCP
+---
+# Cilium-side egress allow for kube-apiserver. The watchdog's
+# Phase 4 (state-CM PATCH) needs to talk to the API server to
+# persist `last_sent_ts` for dedup. Standard NetworkPolicy can
+# only match on pod/namespace selectors, but the apiserver
+# lives on the control-plane nodes (not as a pod from the
+# cluster's perspective), so we need Cilium's `kube-apiserver`
+# reserved entity. Without this, the PATCH times out, state
+# stays at 0, and the dedup window never engages.
+#
+# Discovered 2026-06-24 after the cross-account + dedup
+# amendment landed and the operator observed the watchdog
+# log: `curl: (28) Connection timed out after 10001 ms` on
+# the PATCH call following a successful send.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: openbao-seal-watchdog-apiserver
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: openbao-seal-watchdog
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbao-seal-watchdog
+  egress:
+    - toEntities:
+        - kube-apiserver
