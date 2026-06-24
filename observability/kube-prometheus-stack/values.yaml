@@ -116,11 +116,34 @@ alertmanager:
       limits:
         memory: 256Mi
 
-  # The chart-shipped default config is replaced by our
-  # AlertmanagerConfig CRD via alertmanagerConfigSelector
-  # above. Set `enabled: false` here to avoid the chart's
-  # default ConfigMap overriding.
-  config: null
+  # Minimal base config the prometheus-operator merges with
+  # routes from the AlertmanagerConfig CRD selected by
+  # `alertmanagerConfigSelector` above. The operator REQUIRES
+  # a valid top-level `route` + `receivers` here — `config: null`
+  # ships a literal "null" into the alertmanager-...-generated
+  # Secret and the operator refuses with "no route provided in
+  # config", which blocks STS creation entirely (root cause of
+  # the 2026-05-23 → 2026-06-24 outage where every non-OpenBao
+  # alert was silently dropped).
+  #
+  # The default route here is a no-op `null-receiver`; real
+  # routing happens via the AlertmanagerConfig CRD sub-routes
+  # in alertmanager-config.yaml. The operator namespaces those
+  # sub-route matchers and grafts them under this top-level
+  # route, so any alert that matches a CRD sub-route reaches
+  # ntfy-via-relay / approval-channel-alert / approval-channel-
+  # deception; anything else falls through to null-receiver.
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: 'null-receiver'
+      group_by: ['alertname', 'namespace', 'severity']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 12h
+    receivers:
+      - name: 'null-receiver'
 
 # ---------- Grafana ----------
 grafana:
