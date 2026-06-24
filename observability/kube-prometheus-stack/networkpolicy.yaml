@@ -79,6 +79,9 @@ spec:
           protocol: TCP
         - port: 9105
           protocol: TCP
+        - port: 9093   # Alertmanager API (Prometheus → AM alert
+          protocol: TCP   # delivery). Added 2026-06-24 after AM STS
+                          # came up (task #54); previously absent.
         - port: 80   # ntfy server
           protocol: TCP
         - port: 8000   # ntfy-e2ee-relay
