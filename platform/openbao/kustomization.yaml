@@ -25,3 +25,36 @@ resources:
   - raft-snapshot-cronjob.yaml
   - raft-snapshot-hourly.yaml
   - httproute.yaml
+
+# Patch the chart-rendered StatefulSet: switch
+# podManagementPolicy from the chart's hardcoded OrderedReady
+# to Parallel. Per ADR 0018 D11 (amendment 2026-06-24): the
+# default OrderedReady policy amplified the 2026-06-22 single-
+# pod failure into a 26h cluster-wide outage — openbao-2's pod
+# never came back because openbao-0 was sealed, even though
+# openbao-2's PVCs were intact. With Parallel, quorum can re-
+# establish as soon as any two pods are unsealed regardless of
+# ordinal-N-1 readiness.
+#
+# podManagementPolicy is IMMUTABLE on a live StatefulSet. The
+# cutover requires `kubectl delete sts openbao --cascade=orphan`
+# to drop the old SS without touching pods/PVCs, then this
+# patched SS gets created by Argo and ADOPTS the existing pods
+# via label match.
+#
+# The openbao-helm 0.28.3 chart has no values override for
+# this field (verified via `helm template` 2026-06-24), hence
+# the patch.
+patches:
+  - target:
+      group: apps
+      version: v1
+      kind: StatefulSet
+      name: openbao
+    patch: |-
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: openbao
+      spec:
+        podManagementPolicy: Parallel
