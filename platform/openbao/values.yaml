@@ -17,19 +17,13 @@ global:
   tlsDisable: false
 injector:
   enabled: false
-# seal config: pre-2026-06-24 used the OpenBao default Shamir
-# seal type (no values.yaml stanza, init-time parameters). Per
-# ADR 0018 D10 amendment 2026-06-24, migrated to `seal "static"`.
-# The `seal "static" { ... }` HCL block is embedded INSIDE the
-# raft.config string below (alongside listener / storage / etc.),
-# because the chart's top-level `seal:` key is silently dropped
-# at render (audit 2026-06-04, finding #12). Migration from
-# Shamir → static was a one-time `bao operator unseal -migrate`
-# operation; current Shamir shares now serve as recovery keys
-# only (cannot unseal pods; authorize generate-root and future
-# seal-migration only). See:
-# - homelab-docs/02-decisions/0018-openbao-deployment-shape.md D10
-# - homelab-docs/03-runbooks/openbao/initial-setup.md §Section C
+# seal config: Shamir is the OpenBao default seal type and requires NO
+# values.yaml stanza. The chart (openbao-0.28.3) has no `seal.*` key
+# at all — a top-level `seal:` block is silently dropped at render
+# (audit 2026-06-04, finding #12). Seal parameters (secretShares=3,
+# secretThreshold=2) are set at `bao operator init` time by the
+# operator (not by Helm) and are stored inside the Raft data volume.
+# See homelab-docs/04-guides/cold-start.md §OpenBao init.
 server:
   affinity: "podAntiAffinity:\n  requiredDuringSchedulingIgnoredDuringExecution:\n\
     \    - labelSelector:\n        matchLabels:\n          app.kubernetes.io/name:\
@@ -54,78 +48,23 @@ server:
   extraVolumes:
   - name: openbao-tls
     type: secret
-  # ADR 0018 D10: 32-byte static-seal key delivered as K8s Secret,
-  # mounted at /openbao/userconfig/openbao-static-seal/unseal.key.
-  # The Secret is created ONE-TIME by the operator (see
-  # 03-runbooks/openbao/initial-setup.md §C2) — not declared in
-  # Git, not Renovate-rotatable. Rotation = re-init seal-type +
-  # restart, per the same runbook.
-  - name: openbao-static-seal
-    type: secret
   ha:
     enabled: true
     raft:
-      # Rewritten as a YAML literal block scalar 2026-06-24 for
-      # readability when adding the `seal "static"` block per
-      # ADR 0018 D10. Semantically identical to the previous
-      # escape-encoded form for everything except the new seal
-      # block. Bootstrap parity tracked at
-      # homelab-infra/ansible/files/openbao-values.yaml.
-      config: |
-        cluster_addr = "https://POD_IP:8201"
-        api_addr = "https://POD_IP:8200"
-
-        listener "tcp" {
-          tls_disable = 0
-          address = "[::]:8200"
-          cluster_address = "[::]:8201"
-          tls_cert_file = "/openbao/userconfig/openbao-tls/tls.crt"
-          tls_key_file  = "/openbao/userconfig/openbao-tls/tls.key"
-        }
-
-        storage "raft" {
-          path = "/openbao/data"
-
-          retry_join {
-            leader_api_addr = "https://openbao-0.openbao-internal:8200"
-            leader_ca_cert_file = "/openbao/userconfig/openbao-tls/ca.crt"
-          }
-          retry_join {
-            leader_api_addr = "https://openbao-1.openbao-internal:8200"
-            leader_ca_cert_file = "/openbao/userconfig/openbao-tls/ca.crt"
-          }
-          retry_join {
-            leader_api_addr = "https://openbao-2.openbao-internal:8200"
-            leader_ca_cert_file = "/openbao/userconfig/openbao-tls/ca.crt"
-          }
-
-          autopilot {
-            cleanup_dead_servers = true
-            last_contact_threshold = "10s"
-            min_quorum = 2
-            server_stabilization_time = "10s"
-          }
-        }
-
-        # ADR 0018 D10: static-seal auto-unseal. 32-byte AES-256-GCM
-        # key delivered via the openbao-static-seal Secret (see
-        # extraVolumes above), mounted at this exact path. Migration
-        # from Shamir → static was a one-time `bao operator unseal
-        # -migrate` operation on 2026-06-24. current_key_id is
-        # rotation-tracking metadata only; OpenBao doesn't use it
-        # internally except to distinguish current vs previous keys
-        # during a rotation event.
-        seal "static" {
-          current_key_id = "20260624-1"
-          current_key    = "file:///openbao/userconfig/openbao-static-seal/unseal.key"
-        }
-
-        service_registration "kubernetes" {}
-
-        telemetry {
-          prometheus_retention_time = "30s"
-          disable_hostname = true
-        }
+      config: "cluster_addr = \"https://POD_IP:8201\"\napi_addr = \"https://POD_IP:8200\"\
+        \n\nlistener \"tcp\" {\n  tls_disable = 0\n  address = \"[::]:8200\"\n  cluster_address\
+        \ = \"[::]:8201\"\n  tls_cert_file = \"/openbao/userconfig/openbao-tls/tls.crt\"\
+        \n  tls_key_file  = \"/openbao/userconfig/openbao-tls/tls.key\"\n}\n\nstorage\
+        \ \"raft\" {\n  path = \"/openbao/data\"\n\n  retry_join {\n    leader_api_addr\
+        \ = \"https://openbao-0.openbao-internal:8200\"\n    leader_ca_cert_file =\
+        \ \"/openbao/userconfig/openbao-tls/ca.crt\"\n  }\n  retry_join {\n    leader_api_addr\
+        \ = \"https://openbao-1.openbao-internal:8200\"\n    leader_ca_cert_file =\
+        \ \"/openbao/userconfig/openbao-tls/ca.crt\"\n  }\n  retry_join {\n    leader_api_addr\
+        \ = \"https://openbao-2.openbao-internal:8200\"\n    leader_ca_cert_file =\
+        \ \"/openbao/userconfig/openbao-tls/ca.crt\"\n  }\n\n  autopilot {\n    cleanup_dead_servers\
+        \ = true\n    last_contact_threshold = \"10s\"\n    min_quorum = 2\n    server_stabilization_time\
+        \ = \"10s\"\n  }\n}\n\nservice_registration \"kubernetes\" {}\n\ntelemetry\
+        \ {\n  prometheus_retention_time = \"30s\"\n  disable_hostname = true\n}\n"
       enabled: true
       setNodeId: true
     replicas: 3
