@@ -83,16 +83,30 @@
       schedule: ["before 06:00 on saturday"],
     },
 
-    // The MinIO `mc` image uses date-stamped tags
+    // The MinIO `mc` and server images use date-stamped tags
     // (RELEASE.YYYY-MM-DDTHH-MM-SS-Z), not semver. Tell
-    // Renovate to treat it as `loose` versioning so it
+    // Renovate to treat them as `loose` versioning so it
     // bumps to the latest RELEASE tag rather than failing
     // to parse semver.
     //
     // Per the caveat flagged in
     // 99-journal/2026-04-29-restic-tier-3-cronjob.md.
+    //
+    // Both images are pulled from the Forgejo Packages mirror
+    // (`registry.homelab.internal/ci-packages/{minio,mc}`) per
+    // ADR 0035 D2. The upstream paths are kept in the match
+    // list so Renovate still picks up RELEASE tags from the
+    // upstream repos (Forgejo Packages mirror is push-on-
+    // demand, not an auto-sync); the operator re-pulls + re-
+    // pushes when a new pinned tag is accepted.
     {
-      matchPackageNames: ["minio/mc", "quay.io/minio/mc"],
+      matchPackageNames: [
+        "minio/mc",
+        "quay.io/minio/mc",
+        "registry.homelab.internal/ci-packages/mc",
+        "quay.io/minio/minio",
+        "registry.homelab.internal/ci-packages/minio",
+      ],
       versioning: "loose",
     },
   ],

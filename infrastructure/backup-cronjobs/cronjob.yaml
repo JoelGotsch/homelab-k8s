@@ -62,7 +62,13 @@ spec:
           # backed up an empty dir."
           initContainers:
             - name: mirror-minio
-              image: minio/mc:RELEASE.2025-04-08T15-39-49Z  # OPERATOR PINS via Renovate
+              # Pulled from the Forgejo Packages mirror (ADR 0035 D2)
+              # rather than docker.io to close the upstream-registry
+              # single-point-of-failure for the tier-2/3 replication
+              # path. See platform/forgejo/README.md §"First-party
+              # image pulls" for the registry-homelab-internal-pull
+              # Secret + default-SA pull-cred wiring.
+              image: registry.homelab.internal/ci-packages/mc:RELEASE.2025-04-08T15-39-49Z  # OPERATOR PINS via Renovate
               imagePullPolicy: IfNotPresent
               command:
                 - /bin/sh

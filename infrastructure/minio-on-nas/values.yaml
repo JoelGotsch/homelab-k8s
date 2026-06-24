@@ -18,6 +18,27 @@
 
 mode: standalone
 
+# Image pinned to the Forgejo Packages mirror of the upstream
+# quay.io tag. Per ADR 0035 D2: D1 ("stay on pinned MinIO OSS
+# image") is provisional until the image is mirrored off quay.io
+# — without this mirror the cluster is one quay.io retention-
+# policy change away from a fire drill (trigger #1 in ADR 0035).
+# Tag preserves the upstream `RELEASE.YYYY-MM-DDTHH-MM-SS-Z`
+# shape so Renovate keeps tracking it (renovate.json5 §"MinIO
+# `mc` image uses date-stamped tags" — analogous package match
+# rule may be added for `ci-packages/minio` if Renovate's
+# default loose-versioning doesn't pick it up).
+#
+# Bot:    ci-packages (push+pull, dual-use; per
+#                       platform/forgejo/README.md §"First-party
+#                       image pulls"). Kubelet authenticates via
+#                       the registry-homelab-internal-pull
+#                       dockerconfigjson Secret attached to the
+#                       namespace's `default` ServiceAccount.
+image:
+  repository: registry.homelab.internal/ci-packages/minio
+  tag: RELEASE.2024-12-18T13-15-44Z  # OPERATOR PINS via Renovate
+
 # Single-replica MinIO on an RWO PVC (minio-data) — a RollingUpdate
 # deadlocks (the new pod can't attach the volume while the old still
 # holds it; hit across the cluster's RWO charts on 2026-05-25). The

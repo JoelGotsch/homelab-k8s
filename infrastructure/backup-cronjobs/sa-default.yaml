@@ -1,0 +1,16 @@
+# Default SA with imagePullSecrets for the Forgejo Packages
+# registry. Per platform/forgejo/README.md
+# §"First-party image pulls". See llm-gateway/sa-default.yaml
+# for the "re-declare vs patch" rationale.
+#
+# Required for the restic-minio-to-hetzner CronJob's init
+# container to pull `mc` from
+# registry.homelab.internal/ci-packages/mc (ADR 0035 D2).
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: backup-cronjobs
+imagePullSecrets:
+  - name: registry-homelab-internal-pull

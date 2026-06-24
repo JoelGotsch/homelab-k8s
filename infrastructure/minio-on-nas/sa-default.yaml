@@ -1,0 +1,15 @@
+# Default SA with imagePullSecrets for the Forgejo Packages
+# registry. Per platform/forgejo/README.md
+# §"First-party image pulls". See llm-gateway/sa-default.yaml
+# for the "re-declare vs patch" rationale.
+#
+# Required for the MinIO chart's pods to pull from
+# registry.homelab.internal/ci-packages/minio (ADR 0035 D2).
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: minio-on-nas
+imagePullSecrets:
+  - name: registry-homelab-internal-pull
