@@ -117,8 +117,26 @@ data:
   DEDUP_WINDOW_SECONDS: "1800"
 ---
 # State ConfigMap holding the last-page timestamp. Patched by
-# the watchdog on every successful send. Seeded with "0" so the
-# very first firing is unthrottled.
+# the watchdog on every successful send.
+#
+# CRITICAL: do NOT declare last_sent_ts in `data` here.
+# ApplicationSet `apps` has automated.selfHeal=true and the
+# operator-driven PATCH from the CronJob would get reverted on
+# every reconciliation cycle. Discovered 2026-06-24: with
+# `last_sent_ts: "0"` declared, ArgoCD's selfHeal reset the
+# value to "0" within seconds of every CronJob PATCH, breaking
+# the 30-min dedup window entirely.
+#
+# Solution: declare `data: {}` (empty). The CronJob's PATCH
+# adds last_sent_ts; ArgoCD's apply with empty data leaves
+# the operator-added field alone (SSA semantics — argocd-
+# controller doesn't own a field it never declared). On a
+# fresh deploy the CM is empty; the script reads LAST_SENT as
+# "" → defaults to 0 → elapsed huge → first firing sends and
+# PATCHes the field. Steady state: ArgoCD compares `data: {}`
+# in declared vs `data: {last_sent_ts: ...}` in cluster; with
+# the ServerSideApply sync-option it does NOT remove fields
+# it doesn't own.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -127,12 +145,8 @@ metadata:
   labels:
     app.kubernetes.io/name: openbao-seal-watchdog
   annotations:
-    # ArgoCD ignores operator-driven updates to .data so the
-    # state isn't reverted on every sync. The CronJob's PATCH
-    # is the source of truth for last_sent_ts.
-    argocd.argoproj.io/sync-options: ServerSideApply=true,Replace=false
-data:
-  last_sent_ts: "0"
+    argocd.argoproj.io/sync-options: ServerSideApply=true
+data: {}
 ---
 # Minimal RBAC: the watchdog SA can only get + patch its own
 # state ConfigMap by name. Nothing else.
