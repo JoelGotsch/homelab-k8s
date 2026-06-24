@@ -3,10 +3,18 @@
 # operator-owned code), so this is just operator-edited config
 # referenced in the Deployment via configMap or env-var refs.
 
-# Image — built by Woodpecker from the sibling repo
-# `ntfy-e2ee-relay/` per cold-start.md Step 13b.
+# Image — built by Woodpecker on tag-push to the source repo
+# forgejo-admin/ntfy-e2ee-relay (.woodpecker.yml added 2026-06-24).
+#
+# Namespace `ci-packages/` (not bare `ntfy-e2ee-relay`) because
+# Forgejo Packages OCI namespaces images by owner and the
+# ci-packages bot can only push to its own namespace — matches
+# the pr-agent + llm-gateway precedent. The bare path didn't
+# exist as the Deployment had been ImagePullBackOff for ~31d
+# (pre-2026-06-24); the first successful build landed at this
+# path via pipeline #5 (commit 7d16e8d6, tag 0.1.0).
 image:
-  repository: registry.homelab.internal/ntfy-e2ee-relay
+  repository: registry.homelab.internal/ci-packages/ntfy-e2ee-relay
   tag: "0.1.0"  # OPERATOR PINS via Renovate
   pullPolicy: IfNotPresent
 
