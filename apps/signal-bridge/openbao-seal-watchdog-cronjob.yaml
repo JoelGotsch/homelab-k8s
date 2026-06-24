@@ -39,6 +39,39 @@
 #     (per apps/signal-bridge/README.md) — no OpenBao
 #     dependency at send-time.
 #
+# Amended 2026-06-24 (two issues surfaced after initial deploy):
+#
+#   (A) Sender / recipient separation. Initial deploy used the
+#       operator's Signal number as BOTH the sender (signal-cli's
+#       registered account) and the recipient — Note-to-Self
+#       semantics. The operator's phone had never been linked as
+#       a secondary device on that Signal account, so the
+#       messages only existed inside the signal-cli container
+#       and never reached the operator. Fixed by separating
+#       SOURCE_SIGNAL_NUMBER (the bridge's registered account,
+#       still +4367763692243) from OPERATOR_SIGNAL_NUMBER (the
+#       operator's actual personal Signal number, a different
+#       account). The send is now cross-account, lands in a
+#       real conversation thread on the operator's phone.
+#       (Long-term: ADR-track a dedicated bridge number — see
+#       task #64. Sender being the bridge's-own-number is the
+#       transitional state.)
+#
+#   (B) Throttle / dedup. Initial design fired every minute
+#       while sealed, producing one Signal message per minute
+#       — fine for a 5-min outage, hostile for a multi-hour
+#       sealed-state. Added a 30-min dedup window: the
+#       openbao-seal-watchdog-state ConfigMap holds a
+#       last_sent_ts; subsequent firings within the window
+#       observe-but-skip with a log line. First firing after
+#       the window expires sends, regardless of whether the
+#       state changed in between. Persists across CronJob
+#       pods (state is in the cluster, not the pod). When
+#       OpenBao becomes unsealed, ANY_SEALED=false and the
+#       script exits before touching state — so state stays
+#       at last-page time, naturally throttling any flap-
+#       resealed-soon-after case to the same window.
+#
 # The operator's Signal number is committed in the
 # openbao-seal-watchdog-config ConfigMap (not a secret —
 # it's the operator's published Signal contact, and the
@@ -67,13 +100,78 @@ data:
   # signal-bridge is in the same namespace; the Service named
   # `signal-bridge` resolves to the rest-api pod on :8080.
   SIGNAL_BRIDGE_URL: http://signal-bridge.signal-bridge.svc.cluster.local:8080
-  # Operator's registered Signal number. Same number used for
-  # source + recipient (operator self-pages — single-operator
-  # homelab per ADR 0021 D7).
-  OPERATOR_SIGNAL_NUMBER: "+4367763692243"
+  # The Signal account signal-cli is registered AS. Becomes the
+  # `number` field on the /v2/send payload (the sender). Same
+  # number signal-bridge has been registered to since 2026-05-27.
+  SOURCE_SIGNAL_NUMBER: "+4367763692243"
+  # The operator's actual personal Signal number. Becomes the
+  # recipient. MUST be different from SOURCE_SIGNAL_NUMBER or
+  # we're back to the broken Note-to-Self pattern that issue
+  # (A) in the header documents.
+  OPERATOR_SIGNAL_NUMBER: "+436606825354"
   # Severity classification — surfaced in the message body so
   # the operator can filter at Signal-app level if noisy.
   ALERT_SEVERITY: critical
+  # Dedup window in seconds. Subsequent firings within this
+  # window observe-but-skip while sealed. 1800 = 30 min.
+  DEDUP_WINDOW_SECONDS: "1800"
+---
+# State ConfigMap holding the last-page timestamp. Patched by
+# the watchdog on every successful send. Seeded with "0" so the
+# very first firing is unthrottled.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbao-seal-watchdog-state
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: openbao-seal-watchdog
+  annotations:
+    # ArgoCD ignores operator-driven updates to .data so the
+    # state isn't reverted on every sync. The CronJob's PATCH
+    # is the source of truth for last_sent_ts.
+    argocd.argoproj.io/sync-options: ServerSideApply=true,Replace=false
+data:
+  last_sent_ts: "0"
+---
+# Minimal RBAC: the watchdog SA can only get + patch its own
+# state ConfigMap by name. Nothing else.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-seal-watchdog
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: openbao-seal-watchdog
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: openbao-seal-watchdog-state
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: openbao-seal-watchdog
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["openbao-seal-watchdog-state"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: openbao-seal-watchdog-state
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: openbao-seal-watchdog
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: openbao-seal-watchdog-state
+subjects:
+  - kind: ServiceAccount
+    name: openbao-seal-watchdog
+    namespace: signal-bridge
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -85,7 +183,9 @@ metadata:
 spec:
   # Every minute. OpenBao seal events are operator-triggered
   # (unseal key entry) or pod-restart triggered; either way 1m
-  # latency to the operator's pocket is the right SLO.
+  # latency to the operator's pocket is the right SLO. The
+  # dedup window inside the script handles the "don't spam me
+  # every minute for hours" case.
   schedule: "* * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
@@ -105,6 +205,7 @@ spec:
             app.kubernetes.io/name: openbao-seal-watchdog
         spec:
           restartPolicy: Never
+          serviceAccountName: openbao-seal-watchdog
           # Same security context style as the rest of the
           # cluster (Talos PSA-restricted nodes require
           # explicit non-root + seccomp + cap-drop).
@@ -137,6 +238,8 @@ spec:
               args:
                 - |
                   set -eu
+
+                  # --- Phase 1: probe OpenBao seal status -----------------
                   ALERT_MSG=""
                   for TARGET in $OPENBAO_TARGETS; do
                     # -k: OpenBao serves a self-signed cert with
@@ -155,17 +258,42 @@ spec:
                     echo "all OpenBao replicas healthy + unsealed"
                     exit 0
                   fi
-                  # Build the Signal message. Signal-app renders
-                  # the leading line as the notification preview,
-                  # so put severity + alertname there.
-                  MSG="[OpenBaoSealed | severity=${ALERT_SEVERITY}] One or more OpenBao replicas are sealed or uninitialized.\n\nReplicas:\n${ALERT_MSG}\nClusterSecretStore + every ESO-backed Secret is degraded until unsealed. Run the unseal runbook (03-runbooks/openbao/unseal.md).\n\n(Dispatched by openbao-seal-watchdog CronJob — bypasses Alertmanager.)"
+
+                  # --- Phase 2: dedup gate -------------------------------
+                  # Read last_sent_ts from the state ConfigMap via the
+                  # kube-apiserver using the SA token. If we sent within
+                  # DEDUP_WINDOW_SECONDS, skip — observe-but-don't-page.
+                  TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+                  CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+                  NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+                  API="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS}"
+                  STATE_CM=openbao-seal-watchdog-state
+                  NOW=$(date +%s)
+
+                  STATE_BODY=$(curl -sS --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" -m 10 \
+                    "$API/api/v1/namespaces/$NS/configmaps/$STATE_CM" 2>/dev/null || echo '{}')
+                  LAST_SENT=$(echo "$STATE_BODY" | grep -oE '"last_sent_ts":[[:space:]]*"[0-9]*"' | head -1 | grep -oE '[0-9]+' | tail -1)
+                  LAST_SENT=${LAST_SENT:-0}
+                  ELAPSED=$((NOW - LAST_SENT))
+
+                  if [ "$ELAPSED" -lt "$DEDUP_WINDOW_SECONDS" ]; then
+                    REMAINING=$((DEDUP_WINDOW_SECONDS - ELAPSED))
+                    echo "OpenBao sealed but dedup window active (last page ${ELAPSED}s ago, throttled to ${DEDUP_WINDOW_SECONDS}s). Skip — next page eligible in ${REMAINING}s."
+                    exit 0
+                  fi
+
+                  # --- Phase 3: build + send -----------------------------
+                  # Signal-app renders the leading line as the notification
+                  # preview, so put severity + alertname there.
+                  MSG="[OpenBaoSealed | severity=${ALERT_SEVERITY}] One or more OpenBao replicas are sealed or uninitialized.\n\nReplicas:\n${ALERT_MSG}\nClusterSecretStore + every ESO-backed Secret is degraded until unsealed. Run the unseal runbook (03-runbooks/openbao/unseal.md).\n\n(Dispatched by openbao-seal-watchdog CronJob — bypasses Alertmanager. Throttled to 1 page per ${DEDUP_WINDOW_SECONDS}s while sealed.)"
                   # signal-bridge /v2/send accepts JSON.
-                  # Escape backslash-n into literal newlines via printf.
+                  # Sender = SOURCE_SIGNAL_NUMBER (bridge account),
+                  # recipient = OPERATOR_SIGNAL_NUMBER (operator phone).
                   PAYLOAD=$(printf '{"number":"%s","recipients":["%s"],"message":"%s"}' \
-                    "$OPERATOR_SIGNAL_NUMBER" \
+                    "$SOURCE_SIGNAL_NUMBER" \
                     "$OPERATOR_SIGNAL_NUMBER" \
                     "$(printf %b "$MSG" | sed 's/"/\\"/g' | awk 'BEGIN{ORS="\\n"}{print}')")
-                  echo "Dispatching Signal alert via signal-bridge..."
+                  echo "Dispatching Signal alert via signal-bridge (from $SOURCE_SIGNAL_NUMBER to $OPERATOR_SIGNAL_NUMBER)..."
                   HTTP=$(curl -sS -m 30 -o /tmp/resp.json -w "%{http_code}" -X POST \
                     -H 'Content-Type: application/json' \
                     --data "$PAYLOAD" \
@@ -173,12 +301,26 @@ spec:
                   echo "signal-bridge response: HTTP $HTTP"
                   cat /tmp/resp.json || true
                   echo
-                  # 201/200 indicate success; anything else fails
-                  # the Job → CronJob.failedJobsHistoryLimit
-                  # surface, which the operator can spot via
-                  # `kubectl get jobs -n signal-bridge`.
+
+                  # --- Phase 4: persist dedup state on successful send ---
                   case "$HTTP" in
-                    200|201) exit 0 ;;
+                    200|201)
+                      PATCH=$(printf '{"data":{"last_sent_ts":"%s"}}' "$NOW")
+                      PATCH_HTTP=$(curl -sS --cacert "$CACERT" -H "Authorization: Bearer $TOKEN" -m 10 \
+                        -X PATCH -H 'Content-Type: application/strategic-merge-patch+json' \
+                        -o /tmp/patch-resp.json -w "%{http_code}" \
+                        --data "$PATCH" \
+                        "$API/api/v1/namespaces/$NS/configmaps/$STATE_CM")
+                      echo "state patch response: HTTP $PATCH_HTTP"
+                      case "$PATCH_HTTP" in
+                        200|201) exit 0 ;;
+                        # Send succeeded but state patch failed — don't fail
+                        # the Job since the page DID land; next firing will
+                        # just re-page (no harm, dedup window resets on next
+                        # successful patch). Log so it's visible.
+                        *) echo "WARN: page sent but state patch failed (HTTP $PATCH_HTTP); next minute may re-page"; exit 0 ;;
+                      esac
+                      ;;
                     *) exit 1 ;;
                   esac
               volumeMounts:
