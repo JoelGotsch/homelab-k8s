@@ -41,7 +41,14 @@ spec:
           type: RuntimeDefault
       containers:
         - name: relay
-          image: "registry.homelab.internal/ntfy-e2ee-relay:0.1.0"  # OPERATOR PINS via Renovate
+          # Namespace `ci-packages/` (not bare `ntfy-e2ee-relay`)
+          # because Forgejo Packages OCI namespaces images by owner
+          # and the ci-packages bot can only push to its own
+          # namespace — matches the pr-agent + llm-gateway
+          # precedent. First successful CI build landed 2026-06-24
+          # (Woodpecker pipeline #5 on the source repo
+          # forgejo-admin/ntfy-e2ee-relay, tag 0.1.0).
+          image: "registry.homelab.internal/ci-packages/ntfy-e2ee-relay:0.1.0"  # OPERATOR PINS via Renovate
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
