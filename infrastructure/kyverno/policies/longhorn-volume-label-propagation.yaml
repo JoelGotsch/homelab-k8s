@@ -1,0 +1,139 @@
+---
+# RBAC: Kyverno's background + admission controllers run with a minimal
+# default ClusterRole. Mutating a non-stock CR like longhorn.io/Volume
+# requires explicit get/list/watch/update permission on that resource.
+# Kyverno aggregates extra rules at runtime via the labels
+# `rbac.kyverno.io/aggregate-to-{background,admission}-controller=true`.
+# Without these the policy CREATE is denied by Kyverno's own admission
+# webhook ("auth check fails, additional privileges are required for
+# the service account ...").
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno:longhorn-volume-mutate
+  labels:
+    app.kubernetes.io/component: background-controller
+    app.kubernetes.io/instance: kyverno
+    app.kubernetes.io/part-of: kyverno
+    rbac.kyverno.io/aggregate-to-background-controller: "true"
+    rbac.kyverno.io/aggregate-to-admission-controller: "true"
+    rbac.kyverno.io/aggregate-to-reports-controller: "true"
+rules:
+  - apiGroups: ["longhorn.io"]
+    resources: ["volumes"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # The mutate-existing path needs to read PVs + PVCs that the policy's
+  # apiCall context blocks fetch; the default kyverno role already has
+  # core/* read, but state it explicitly so RBAC is self-documenting.
+  - apiGroups: [""]
+    resources: ["persistentvolumes", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+---
+# Mutating policy: propagate `recurring-job-group.longhorn.io/*` and
+# `recurring-job.longhorn.io/*` labels from a PVC onto the corresponding
+# Longhorn Volume CR.
+#
+# Why: Longhorn's recurring-job selection is keyed on labels on the
+# `Volume` CR, not the PVC. For user-managed PVCs we set those labels
+# at the PVC level and Longhorn's CSI provisioner copies them through.
+# CNPG (postgresql.cnpg.io) and the Altinity ClickHouseInstallation
+# operator both materialise PVCs from a `volumeClaimTemplates`-style
+# source, and CNPG's `inheritedMetadata.labels` does NOT propagate
+# down into Longhorn's `Volume` CR — it only labels Pods/PVCs.
+#
+# Result: a CNPG cluster carrying
+#   inheritedMetadata.labels.recurring-job-group.longhorn.io/secret-personal: "enabled"
+# silently falls through to the `default` recurring-job-group, which has
+# retain=100 hourly snapshots. The snapshot deltas accumulate on the
+# Longhorn volume's actualSize (NOT the Postgres data dir size), and the
+# volume eventually exceeds its declared PVC capacity even though the
+# real DB data is tiny. This was the root cause of the 2026-06-25 PG /
+# ClickHouse PVC-bloat incident (#73).
+#
+# This ClusterPolicy mutates Volume CRs on CREATE/UPDATE to mirror the
+# recurring-job labels of the corresponding PVC, so the selector
+# plumbing actually works.
+#
+# Resolution chain:
+#   Longhorn Volume.metadata.name (= PV name)
+#     → PersistentVolume of the same name (Volume.metadata.name == PV name)
+#     → PV.spec.claimRef.{namespace,name}
+#     → PVC
+#     → PVC.metadata.labels (filtered to recurring-job labels)
+#
+# Volume.status.kubernetesStatus.pvName is *also* the PV name, but
+# `metadata.name` is reliable from the moment Volume is created, while
+# the status block is populated asynchronously by longhorn-manager.
+# Using metadata.name avoids ordering issues.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: longhorn-volume-label-propagation
+  annotations:
+    policies.kyverno.io/title: "Longhorn Volume: mirror PVC recurring-job labels"
+    policies.kyverno.io/category: "Storage / Longhorn"
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "Volume (longhorn.io/v1beta2)"
+    policies.kyverno.io/description: |
+      Copies `recurring-job-group.longhorn.io/*` and
+      `recurring-job.longhorn.io/*` labels from the backing PVC onto
+      the Longhorn Volume CR. Fixes the CNPG / ClickHouseInstallation
+      operator gap where volumeClaimTemplates labels don't reach the
+      Volume CR, causing selectors to fall through to the `default`
+      recurring-job-group.
+spec:
+  background: true
+  # Mutate-existing rules need the kyverno mutate webhook to talk to
+  # longhorn.io API; declare it explicitly so dry-run on a fresh
+  # cluster surfaces the right RBAC errors.
+  mutateExistingOnPolicyUpdate: true
+  rules:
+    - name: copy-recurring-job-labels-from-pvc
+      match:
+        any:
+          - resources:
+              kinds:
+                - longhorn.io/v1beta2/Volume
+      context:
+        # 1. Look up the PV by name (Volume.metadata.name == PV name).
+        - name: pv
+          apiCall:
+            urlPath: "/api/v1/persistentvolumes/{{ request.object.metadata.name }}"
+            jmesPath: "@"
+        # 2. Resolve the bound PVC via spec.claimRef.
+        - name: pvc
+          apiCall:
+            urlPath: "/api/v1/namespaces/{{ pv.spec.claimRef.namespace }}/persistentvolumeclaims/{{ pv.spec.claimRef.name }}"
+            jmesPath: "@"
+        # 3. Pull the recurring-job labels out of the PVC. We can't
+        # do a dynamic-key wildcard in JSONPatch, so explode the
+        # PVC label map into a JSON object that we'll merge below.
+        - name: rjLabels
+          variable:
+            jmesPath: |
+              merge(
+                items(pvc.metadata.labels || `{}`)[?starts_with(key, 'recurring-job-group.longhorn.io/')] | from_items(@),
+                items(pvc.metadata.labels || `{}`)[?starts_with(key, 'recurring-job.longhorn.io/')] | from_items(@)
+              )
+            default: {}
+      preconditions:
+        all:
+          - key: "{{ pv.spec.claimRef.namespace || '' }}"
+            operator: NotEquals
+            value: ""
+          - key: "{{ length(keys(rjLabels)) }}"
+            operator: GreaterThan
+            value: 0
+      mutate:
+        # `targets` is required for mutate-existing; without it Kyverno
+        # only mutates the admission request. Volumes can also be
+        # *updated* by longhorn-manager later (e.g. when the PVC label
+        # set changes), and we want the labels to stay in sync.
+        targets:
+          - apiVersion: longhorn.io/v1beta2
+            kind: Volume
+            name: "{{ request.object.metadata.name }}"
+            namespace: longhorn-system
+        patchStrategicMerge:
+          metadata:
+            labels: "{{ rjLabels }}"

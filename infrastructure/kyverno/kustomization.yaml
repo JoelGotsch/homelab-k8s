@@ -22,3 +22,8 @@ resources:
   # explicitly confirmed via probes.homelab.internal/root-route-confirmed
   # annotation. Surfaces the pr-agent-style silent kill-loop trap.
   - policies/audit-root-route-http-probes.yaml
+  # Mutating: propagate `recurring-job-group.longhorn.io/*` labels
+  # from PVCs onto the corresponding Longhorn Volume CRs. Fixes CNPG's
+  # inheritedMetadata-doesn't-reach-Volume gap that caused the
+  # 2026-06-25 PG/ClickHouse snapshot-delta PVC-bloat (#73).
+  - policies/longhorn-volume-label-propagation.yaml
