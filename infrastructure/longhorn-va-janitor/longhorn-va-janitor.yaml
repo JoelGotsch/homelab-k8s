@@ -251,10 +251,16 @@ spec:
                       | select((.metadata.finalizers // [])[0] == $finalizer)
                       # Emit pipe-separated row. age_seconds is
                       # pre-computed in jq (which has proper
-                      # fromdateiso8601) — the shell's busybox
-                      # `date -d` does NOT accept ISO8601 with T/Z,
-                      # so doing the arithmetic in jq is the
-                      # portable path.
+                      # fromdateiso8601) because the busybox
+                      # `date -d` shipped in alpine does NOT
+                      # accept ISO8601 with T/Z (parses fail to
+                      # epoch 0). Computing in jq is the portable
+                      # path. NB: do NOT add an apostrophe (s) in
+                      # this comment block — the whole jq filter
+                      # is in a single-quoted shell argument and
+                      # an inner apostrophe closes the quote, the
+                      # shell then mis-parses the pipes that
+                      # follow.
                       | "\(.metadata.name)|\(.metadata.deletionTimestamp)|\(.spec.source.persistentVolumeName // "?")|\(.spec.nodeName // "?")|\($now - (.metadata.deletionTimestamp | fromdateiso8601))"
                     ')
 
