@@ -37,7 +37,7 @@ spec:
   # resizeInUseVolumes: true so this resizes in place. Diagnosis in
   # 99-journal/2026-06-09-cluster-state-survey.md §CrowdSec.
   storage:
-    size: 15Gi
+    size: 25Gi
     storageClass: longhorn-replica3
 
   monitoring:
