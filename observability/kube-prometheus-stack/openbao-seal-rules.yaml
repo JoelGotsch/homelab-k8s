@@ -1,0 +1,313 @@
+# PrometheusRules for OpenBao seal-status observability (task #58).
+#
+# Why this exists:
+# The 2026-06-22 → 2026-06-23 incident (openbao-0 sealed for ~26h
+# undetected, see apps/signal-bridge/openbao-seal-watchdog-cronjob.yaml
+# header for the four-stack-deep RCA) closed with TWO complementary
+# defenses:
+#
+#   (1) signal-bridge/openbao-seal-watchdog CronJob — the *paging*
+#       path. Bypasses Prometheus + Alertmanager entirely because
+#       every credential in that pipeline (AM webhooks, ntfy-e2ee-
+#       relay tokens, approval-channel auth) is sourced from OpenBao
+#       via ExternalSecret. When OpenBao is sealed, ESO can't fetch
+#       — the dispatch path that needs to fire about sealed-OpenBao
+#       depends on OpenBao. Watchdog breaks that circular dep by
+#       reading /v1/sys/seal-status directly (unauth) and POSTing
+#       to signal-bridge (PVC-backed registration, no OpenBao
+#       dependency at send-time).
+#
+#   (2) THIS PrometheusRule — the *observability* path. Reflects
+#       sealed-state on Prometheus + Grafana + Alertmanager history.
+#       Routes through the standard AM pipeline (ntfy-via-relay).
+#       Operators get a second signal that survives even if the
+#       Signal watchdog itself is broken (signal-bridge POD down,
+#       Signal account rate-limited, etc.). Coexists intentionally
+#       with the watchdog — they fail independently.
+#
+# Metric source — kube_pod_labels (not vault_core_unsealed):
+# OpenBao 0.28.3 chart enables `service_registration "kubernetes"`
+# in raft.config (platform/openbao/values.yaml line ~66). OpenBao
+# stamps four labels on its own pods that flip in real-time as
+# state changes:
+#   - openbao-sealed       = "true" | "false"
+#   - openbao-active       = "true" | "false"  (HA leader)
+#   - openbao-initialized  = "true" | "false"
+#   - openbao-perf-standby = "true" | "false"
+#
+# Verified on the live cluster 2026-06-25:
+#   kubectl get pod -n openbao --show-labels
+#   → openbao-sealed=false,openbao-active=true,openbao-initialized=true,...
+#
+# kube-state-metrics exposes these as `kube_pod_labels` series with
+# `label_openbao_sealed`, `label_openbao_active`, etc. (KSM mangles
+# `-` → `_`). No auth, no ServiceMonitor on the openbao service
+# required — we read seal state through the same channel kubectl
+# uses, which OpenBao keeps writing throughout sealed state.
+#
+# The chart-native metric `vault_core_unsealed` (the OpenBao
+# binary still uses HashiCorp's `vault_` prefix in 2.5.4 — the
+# bundled grafana dashboard at
+# platform/openbao/charts/openbao-0.28.3/openbao/grafana/dashboards/
+# dashboard.json references `${metrics_prefix}_core_unsealed`) is
+# the *direct* signal but `/v1/sys/metrics?format=prometheus`
+# requires authentication (verified: returns HTTP 400 on
+# unauthenticated wget). Adding tokenized scrape requires a
+# ServiceMonitor + a static OpenBao token in the scrape config,
+# which itself becomes a credential-rotation dependency on
+# OpenBao — partial circular dependency. `kube_pod_labels`
+# sidesteps this entirely. Future work (task #65?): add a
+# tokenized ServiceMonitor for the rest of the OpenBao metric
+# surface (request latencies, raft consensus, audit-log
+# backlog) — that pipeline does NOT need to be the seal-status
+# path because the labels-based rule below already covers it.
+#
+# Routing:
+# `release: kube-prometheus-stack` label matches the
+# chart's ruleSelector (verified
+# `kubectl -n monitoring get prometheus -o yaml`). Alerts inherit
+# the default route in alertmanager-config.yaml → ntfy-e2ee-relay
+# (matches the pattern in worker-cascade-rules.yaml).
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbao-seal-status
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: openbao-seal-status
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: openbao-seal-status
+      interval: 1m
+      rules:
+        # ===== OpenBaoReplicaSealed (warning) =====
+        # At least one replica reports sealed for ≥ 5m, but not all
+        # three. Quorum (2/3) may still be holding — ESO + apps
+        # remain available — but durability margin is reduced
+        # (a second pod loss would seal the cluster).
+        #
+        # `for: 5m` matches typical operator unseal window (the
+        # runbook target is unseal-within-5m on planned restarts);
+        # transient pod-restart unseal-pending state shorter than
+        # this is expected and doesn't page.
+        #
+        # The expression counts pods where the seal label is "true".
+        # `kube_pod_labels` series carry value `1` per pod always;
+        # the label-equality filter restricts to sealed pods, then
+        # `count` counts them. `> 0 < 3` selects the partial-seal
+        # range — 3 falls through to the critical rule below.
+        - alert: OpenBaoReplicaSealed
+          expr: |
+            count(
+              kube_pod_labels{
+                namespace="openbao",
+                label_app_kubernetes_io_name="openbao",
+                label_openbao_sealed="true"
+              }
+            ) > 0
+            and
+            count(
+              kube_pod_labels{
+                namespace="openbao",
+                label_app_kubernetes_io_name="openbao",
+                label_openbao_sealed="true"
+              }
+            ) < 3
+          for: 5m
+          labels:
+            severity: warning
+            component: openbao
+          annotations:
+            summary: "OpenBao replica(s) sealed: {{ $value }}/3"
+            description: |
+              {{ $value }} of 3 OpenBao replicas have reported
+              `openbao-sealed=true` for ≥ 5 minutes. The cluster
+              may still have Raft quorum (2 unsealed) but
+              durability margin is degraded — a second pod loss
+              would seal the cluster cluster-wide.
+
+              ESO + applications backed by OpenBao secrets are
+              still functional but the next reconciliation that
+              hits the sealed replica will fail; over time the
+              partial-seal state drifts toward full-seal.
+
+              Triage (read-only):
+                kubectl get pod -n openbao -o wide
+                kubectl get pod -n openbao -L openbao-sealed,openbao-active,openbao-initialized
+                kubectl logs -n openbao -l app.kubernetes.io/name=openbao --tail=30
+
+              Action: unseal the sealed replica using the
+              cold-start runbook §"Unseal procedure".
+
+              Note: this alert complements the Signal page from
+              the openbao-seal-watchdog CronJob in signal-bridge
+              ns. Both should fire; the watchdog Signal arrives
+              within 1m, this AM-routed alert within 5m.
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/cold-start.md#openbao-unseal"
+
+        # ===== OpenBaoAllReplicasSealed (critical) =====
+        # All 3 replicas sealed → cluster-wide outage. Every
+        # ExternalSecret reconcile fails; ESO-backed Secret
+        # contents stale, but live Secrets do NOT disappear (ESO
+        # only refreshes on its interval). Apps already running
+        # keep running until a credential rotation lands;
+        # newly-scheduled pods relying on a brand-new Secret
+        # cannot start.
+        #
+        # `for: 5m` matches the warning rule — at the 5m mark we
+        # transition warning → critical based on count.
+        # In practice these fire roughly simultaneously: the
+        # warning at 5m for partial seal, the critical at 5m for
+        # full seal. AM inhibition by `component:openbao` +
+        # severity rule supersedes warning when critical present.
+        - alert: OpenBaoAllReplicasSealed
+          expr: |
+            count(
+              kube_pod_labels{
+                namespace="openbao",
+                label_app_kubernetes_io_name="openbao",
+                label_openbao_sealed="true"
+              }
+            ) >= 3
+          for: 5m
+          labels:
+            severity: critical
+            component: openbao
+          annotations:
+            summary: "OpenBao cluster fully sealed — all 3 replicas down"
+            description: |
+              All 3 OpenBao replicas are sealed for ≥ 5 minutes.
+              The cluster is offline for any new credential
+              fetch. Every ExternalSecret reconcile is failing.
+              Applications stay running with their cached
+              Secrets but cannot rotate.
+
+              This is the worst-case state — the openbao-seal-
+              watchdog CronJob should already have paged via
+              Signal (apps/signal-bridge/openbao-seal-watchdog-
+              cronjob.yaml runs every 1m). If that page did NOT
+              arrive, the operator has a stacked-failure scenario
+              and must investigate the watchdog itself:
+                kubectl -n signal-bridge get cronjob,jobs
+                kubectl -n signal-bridge logs job/openbao-seal-watchdog-<recent> --all-containers
+
+              Recovery:
+                Unseal each replica using the cold-start runbook.
+                Order does not matter (the chart now patches
+                podManagementPolicy=Parallel per ADR 0018 D11).
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/cold-start.md#openbao-unseal"
+
+        # ===== OpenBaoMissingReplica =====
+        # Fewer than 3 openbao pods Running. Catches the scenario
+        # this rule's parent task #58 references explicitly:
+        # 2026-06-22 → 2026-06-23 openbao-2 stuck OutOfPods because
+        # the chart's hardcoded podManagementPolicy=OrderedReady
+        # blocked scheduling while openbao-0 was sealed. ADR 0018
+        # D11 patched the StatefulSet to `Parallel`; this rule
+        # provides early warning if that patch ever regresses OR if
+        # a real resource exhaustion / node failure prevents a pod
+        # from coming up.
+        #
+        # `for: 10m` — generous: a pod-restart cycle (terminate +
+        # schedule + image pull + readiness) on this cluster
+        # typically completes inside 2m; 10m means the pod is
+        # genuinely stuck.
+        - alert: OpenBaoMissingReplica
+          expr: |
+            count(
+              kube_pod_status_phase{
+                namespace="openbao",
+                phase="Running"
+              } == 1
+            ) < 3
+          for: 10m
+          labels:
+            severity: critical
+            component: openbao
+          annotations:
+            summary: "OpenBao has fewer than 3 Running pods ({{ $value }}/3)"
+            description: |
+              Only {{ $value }} of 3 OpenBao pods are in phase
+              Running for ≥ 10 minutes. The StatefulSet should
+              maintain replicas=3 at all times. A pod is failing
+              to schedule (node resource pressure, PVC bind
+              failure), failing readiness, or stuck Pending.
+
+              Critical regression check: if openbao-N is missing
+              and openbao-(N-1) is sealed, this is the exact
+              2026-06-22 cascade pattern that ADR 0018 D11
+              patched. Verify podManagementPolicy=Parallel still
+              applies:
+                kubectl get sts openbao -n openbao -o jsonpath='{.spec.podManagementPolicy}'
+                # expect: Parallel  (NOT OrderedReady)
+
+              Triage:
+                kubectl get pod -n openbao -o wide
+                kubectl describe pod -n openbao <missing-pod>
+                kubectl get events -n openbao --sort-by=.lastTimestamp | tail -20
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/cold-start.md#openbao-unseal"
+
+        # ===== OpenBaoNoActiveLeader =====
+        # Zero replicas report `openbao-active=true` for ≥ 2m. Raft
+        # always has exactly one leader when quorum holds; absence
+        # of any active pod means:
+        #   - sealed cluster (covered by AllReplicasSealed too),
+        #     OR
+        #   - leader election failure (split-brain, network
+        #     partition, autopilot stabilization stuck).
+        #
+        # `for: 2m` — Raft leader election + autopilot
+        # stabilization (server_stabilization_time = "10s" in
+        # raft.config) completes well under 30s in steady state.
+        # 2m gives plenty of headroom for a leader handoff during
+        # a rolling restart while still catching genuine no-leader
+        # scenarios fast.
+        - alert: OpenBaoNoActiveLeader
+          expr: |
+            count(
+              kube_pod_labels{
+                namespace="openbao",
+                label_app_kubernetes_io_name="openbao",
+                label_openbao_active="true"
+              }
+            ) == 0
+            or
+            absent(
+              kube_pod_labels{
+                namespace="openbao",
+                label_app_kubernetes_io_name="openbao",
+                label_openbao_active="true"
+              }
+            ) == 1
+          for: 2m
+          labels:
+            severity: critical
+            component: openbao
+          annotations:
+            summary: "OpenBao has no active Raft leader"
+            description: |
+              No OpenBao pod has reported `openbao-active=true`
+              for ≥ 2 minutes. Raft cluster has no leader —
+              writes are unavailable cluster-wide. Reads from
+              standbys may still work depending on consistency
+              mode, but ESO writes (token renewal, secret
+              creation) will fail.
+
+              Common causes:
+                - All replicas sealed (cross-check
+                  OpenBaoAllReplicasSealed).
+                - Raft autopilot is mid-stabilization after a
+                  pod restart (clears within stabilization
+                  window — see raft.config
+                  `server_stabilization_time = "10s"`).
+                - Network partition between Raft peers
+                  (check NetworkPolicy + CNI on workers).
+
+              Triage:
+                kubectl get pod -n openbao -L openbao-active,openbao-sealed
+                kubectl exec -n openbao openbao-0 -c openbao -- \
+                  bao operator raft list-peers
+                kubectl logs -n openbao openbao-0 --tail=50 | grep -i 'raft\|leader\|election'
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/cold-start.md#openbao-unseal"

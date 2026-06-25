@@ -1,0 +1,132 @@
+# Audit-only ClusterPolicy: flag workloads whose liveness/readiness/startup
+# probes use `httpGet path: /` but whose container almost certainly does
+# NOT serve a root route — the silent "probe-induced kill loop" trap.
+#
+# === Why this exists ===
+# 2026-06-12: pr-agent crashlooped because both probes were `httpGet path: /`,
+# but the FastAPI surface (`gitea_app`) only mounts `POST /api/v1/gitea_webhooks`
+# — no `/`, no `/health`. Every probe 404'd, the kubelet killed pods ~60s
+# after boot, and the pod looked deceptively healthy:
+#
+#   status.phase: Running
+#   lastState.terminated.reason: Completed
+#   lastState.terminated.exitCode: 0
+#
+# Exit 0 + reason=Completed is what kubelet writes when it SIGTERMs a pod
+# because of probe failure and the app shuts down cleanly. There is no
+# "Error" / "OOMKilled" signal that this is a crash — it looks like a
+# graceful exit. That's what made it dangerous.
+#
+# Root cause documented in:
+#   homelab-docs/99-journal/2026-06-22-openbao-seal-cascade-and-pipeline-rebuild.md
+#   § "Concrete debugging mistakes worth recording" item #1.
+#
+# The pr-agent fix landed in commit `99eada9` — switched both probes to
+# `tcpSocket: http` (port-open is sufficient signal; FastAPI binds
+# immediately, no L7 dependency).
+#
+# === Why audit-only ===
+# Some workloads legitimately serve `/` (nginx, hubble-ui frontend, OTel
+# collector's :13133 healthcheck, node-exporter's /). Enforcing on those
+# would block legitimate Helm chart deploys. Audit gives operator-visible
+# PolicyReport entries via `kubectl get policyreport -A` without blocking
+# admission. The annotation override
+#
+#     probes.homelab.internal/root-route-confirmed: "true"
+#
+# silences the report for a workload that legitimately serves `/`. This
+# preserves the homelab convention of operator-acknowledgement annotations
+# in the `homelab.internal/` domain (see require-first-party-image-digest
+# for the analogous pattern).
+#
+# === Migration path ===
+# Flip `validationFailureAction: Enforce` once every existing offender is
+# either annotated or has been switched to tcpSocket / a real healthcheck
+# path. See the journal entry for the per-workload triage list.
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: audit-root-route-http-probes
+  annotations:
+    policies.kyverno.io/title: "audit: probes at httpGet path / without operator confirmation"
+    policies.kyverno.io/category: "Workload Hygiene"
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/description: |
+      Surfaces workloads whose liveness/readiness/startup probes target
+      `httpGet path: /` without the operator annotation
+      `probes.homelab.internal/root-route-confirmed: "true"`. The
+      pattern silently crashloops apps whose HTTP surface has no root
+      route (kubelet kills pods that 404 the probe; pod looks like
+      "exit 0 / Completed", not a crash). See the 2026-06-22 journal
+      entry, item #1, for the pr-agent incident that motivated this.
+spec:
+  # Audit during the bring-up window. Operator reviews PolicyReport
+  # entries; flips to Enforce once all existing offenders are either
+  # annotated or migrated to tcpSocket probes.
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: probe-must-not-be-root-without-confirmation
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          # System namespaces ship probes via their own upgrade cadence
+          # (kubelet, CNI agents, etc.). The point of this policy is to
+          # catch the homelab's first-party + chart-managed-app pattern,
+          # not to police kube-system.
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+          # Operator escape hatch: the annotation
+          # `probes.homelab.internal/root-route-confirmed: "true"` on the
+          # Pod (which propagates from Deployment.spec.template.metadata)
+          # marks the workload as legitimately serving `/`. Audit silenced.
+          - resources:
+              annotations:
+                probes.homelab.internal/root-route-confirmed: "true"
+      validate:
+        # Explicit allow-existing so background scan reports current
+        # offenders without erroring the policy.
+        allowExistingViolations: true
+        message: |
+          One or more probes (liveness/readiness/startup) target
+          `httpGet path: /`. This is the chart-default copy-paste shape
+          that silently crashlooped pr-agent on 2026-06-12 (the FastAPI
+          surface had no root route; probes 404'd; kubelet SIGTERMed
+          every ~60s; the pod showed exit-code 0 / reason=Completed,
+          which looks like graceful exit, not a crash).
+
+          If THIS workload genuinely serves `/`, add the annotation
+            probes.homelab.internal/root-route-confirmed: "true"
+          to the Pod template (Deployment/StatefulSet/DaemonSet
+          .spec.template.metadata.annotations) to silence this report.
+
+          Otherwise, switch the probe to `tcpSocket: { port: http }`
+          (sufficient: process binding the port proves it started) or
+          to a real healthcheck path that the app actually mounts.
+
+          Background:
+          homelab-docs/99-journal/2026-06-22-openbao-seal-cascade-and-pipeline-rebuild.md
+          § "Concrete debugging mistakes worth recording" item #1.
+        # `pattern` with X-(not) prefix on a value means "must NOT equal".
+        # We assert that for every container, NONE of the three probes
+        # have httpGet.path == "/". Containers without httpGet probes
+        # have no `path` key and trivially satisfy the constraint.
+        pattern:
+          spec:
+            containers:
+              - =(livenessProbe):
+                  =(httpGet):
+                    =(path): "!/"
+                =(readinessProbe):
+                  =(httpGet):
+                    =(path): "!/"
+                =(startupProbe):
+                  =(httpGet):
+                    =(path): "!/"

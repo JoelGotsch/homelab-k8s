@@ -18,3 +18,7 @@ resources:
   # ADR 0019 D3 — cosign verification.
   - externalsecret-cosign-public-key.yaml
   - policies/verify-first-party-image-signature.yaml
+  # Audit-only: workloads with `httpGet path: /` probes that aren't
+  # explicitly confirmed via probes.homelab.internal/root-route-confirmed
+  # annotation. Surfaces the pr-agent-style silent kill-loop trap.
+  - policies/audit-root-route-http-probes.yaml

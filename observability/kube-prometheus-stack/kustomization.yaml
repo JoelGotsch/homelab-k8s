@@ -31,3 +31,4 @@ resources:
   - networkpolicy.yaml
   - httproute.yaml
   - worker-cascade-rules.yaml
+  - openbao-seal-rules.yaml
