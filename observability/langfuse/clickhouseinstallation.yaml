@@ -81,13 +81,21 @@ spec:
                 # writes config + temporary files to the rootfs at startup.
                 # Volume mounts cover /var/lib/clickhouse + /var/log/clickhouse.
     volumeClaimTemplates:
+      # data-volume bumped 50Gi → 90Gi 2026-06-25: actual usage was
+      # 56.71 GiB (over declared) — ClickHouse holds ~1.6 GiB of real
+      # trace data; the rest is Longhorn snapshot delta accumulation
+      # under the `default` recurring-job-group at retain=100. The
+      # ClickHouseInstallation CR's volumeClaimTemplates labels do
+      # not flow to Longhorn Volume CRs (same as CNPG; Kyverno
+      # mutation at infrastructure/kyverno/policies/longhorn-volume-label-propagation.yaml
+      # plus UI snapshot prune are the root-cause fix). Re ADR 0028 / #73.
       - name: data-volume
         spec:
           accessModes: [ReadWriteOnce]
           storageClassName: longhorn-replica2
           resources:
             requests:
-              storage: 50Gi
+              storage: 90Gi
       - name: log-volume
         spec:
           accessModes: [ReadWriteOnce]
