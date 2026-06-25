@@ -17,13 +17,25 @@ global:
   tlsDisable: false
 injector:
   enabled: false
-# seal config: Shamir is the OpenBao default seal type and requires NO
-# values.yaml stanza. The chart (openbao-0.28.3) has no `seal.*` key
-# at all — a top-level `seal:` block is silently dropped at render
-# (audit 2026-06-04, finding #12). Seal parameters (secretShares=3,
-# secretThreshold=2) are set at `bao operator init` time by the
-# operator (not by Helm) and are stored inside the Raft data volume.
-# See homelab-docs/04-guides/cold-start.md §OpenBao init.
+# seal config: ADR 0018 D10 — migrated to OpenBao `static` seal
+# auto-unseal 2026-06-25 per the validated procedure in
+# initial-setup.md §C. Empty `seal "static" {}` HCL stanza is the
+# wrapper-load trigger (configless mode doesn't work). The key
+# material is projected from the openbao-static-seal Secret via
+# `extraSecretEnvironmentVars` below — BAO_STATIC_SEAL_CURRENT_KEY
+# (44-char base64 of 32 raw bytes) and BAO_STATIC_SEAL_CURRENT_KEY_ID
+# (rotation tracker). Read by the OpenBao static wrapper plugin at
+# go-kms-wrapping/wrappers/static/v2.1.1/static.go.
+#
+# Per-restart, pods auto-unseal against the static key — no operator
+# touch needed. Shamir shares from the original 2026-04-23 init are
+# RETIRED to recovery-key role (per D10 amendment) and only used
+# for generate-root or future seal migrations.
+#
+# IMPORTANT: file:// and env:// URI schemes in the HCL DO NOT work
+# on OpenBao 2.5.4 (docs are aspirational; binary doesn't implement
+# them — source verification 2026-06-25). Only the env-var pattern
+# above + empty HCL stanza work in combination.
 server:
   affinity: "podAntiAffinity:\n  requiredDuringSchedulingIgnoredDuringExecution:\n\
     \    - labelSelector:\n        matchLabels:\n          app.kubernetes.io/name:\
@@ -45,45 +57,91 @@ server:
     # the bootstrap TLS cert is self-signed (not in the pod's
     # CA bundle). Skip-verify keeps readiness probe working.
     BAO_SKIP_VERIFY: "true"
+  # ADR 0018 D10: project the static-seal key + key-id from the
+  # `openbao-static-seal` Secret as env vars. The OpenBao static
+  # wrapper plugin reads these names exactly; do NOT rename.
+  extraSecretEnvironmentVars:
+    - envName: BAO_STATIC_SEAL_CURRENT_KEY
+      secretName: openbao-static-seal
+      secretKey: current_key
+    - envName: BAO_STATIC_SEAL_CURRENT_KEY_ID
+      secretName: openbao-static-seal
+      secretKey: current_key_id
   extraVolumes:
   - name: openbao-tls
     type: secret
   ha:
     enabled: true
     raft:
-      config: "cluster_addr = \"https://POD_IP:8201\"\napi_addr = \"https://POD_IP:8200\"\
-        \n\nlistener \"tcp\" {\n  tls_disable = 0\n  address = \"[::]:8200\"\n  cluster_address\
-        \ = \"[::]:8201\"\n  tls_cert_file = \"/openbao/userconfig/openbao-tls/tls.crt\"\
-        \n  tls_key_file  = \"/openbao/userconfig/openbao-tls/tls.key\"\n}\n\nstorage\
-        \ \"raft\" {\n  path = \"/openbao/data\"\n\n  retry_join {\n    leader_api_addr\
-        \ = \"https://openbao-0.openbao-internal:8200\"\n    leader_ca_cert_file =\
-        \ \"/openbao/userconfig/openbao-tls/ca.crt\"\n  }\n  retry_join {\n    leader_api_addr\
-        \ = \"https://openbao-1.openbao-internal:8200\"\n    leader_ca_cert_file =\
-        \ \"/openbao/userconfig/openbao-tls/ca.crt\"\n  }\n  retry_join {\n    leader_api_addr\
-        \ = \"https://openbao-2.openbao-internal:8200\"\n    leader_ca_cert_file =\
-        \ \"/openbao/userconfig/openbao-tls/ca.crt\"\n  }\n\n  autopilot {\n    cleanup_dead_servers\
-        \ = true\n    last_contact_threshold = \"10s\"\n    min_quorum = 2\n    server_stabilization_time\
-        \ = \"10s\"\n  }\n}\n\nservice_registration \"kubernetes\" {}\n\ntelemetry\
-        \ {\n  prometheus_retention_time = \"30s\"\n  disable_hostname = true\n}\n"
+      # Rewritten as YAML literal block scalar 2026-06-25 for
+      # readability when adding the empty `seal "static" {}` block.
+      # Otherwise semantically identical to the prior escape-encoded
+      # form. Bootstrap parity tracked at homelab-infra/ansible/
+      # files/openbao-values.yaml.
+      config: |
+        cluster_addr = "https://POD_IP:8201"
+        api_addr = "https://POD_IP:8200"
+
+        listener "tcp" {
+          tls_disable = 0
+          address = "[::]:8200"
+          cluster_address = "[::]:8201"
+          tls_cert_file = "/openbao/userconfig/openbao-tls/tls.crt"
+          tls_key_file  = "/openbao/userconfig/openbao-tls/tls.key"
+        }
+
+        storage "raft" {
+          path = "/openbao/data"
+
+          retry_join {
+            leader_api_addr = "https://openbao-0.openbao-internal:8200"
+            leader_ca_cert_file = "/openbao/userconfig/openbao-tls/ca.crt"
+          }
+          retry_join {
+            leader_api_addr = "https://openbao-1.openbao-internal:8200"
+            leader_ca_cert_file = "/openbao/userconfig/openbao-tls/ca.crt"
+          }
+          retry_join {
+            leader_api_addr = "https://openbao-2.openbao-internal:8200"
+            leader_ca_cert_file = "/openbao/userconfig/openbao-tls/ca.crt"
+          }
+
+          autopilot {
+            cleanup_dead_servers = true
+            last_contact_threshold = "10s"
+            min_quorum = 2
+            server_stabilization_time = "10s"
+          }
+        }
+
+        # ADR 0018 D10 — wrapper-load trigger. EMPTY block is correct;
+        # current_key + current_key_id are provided via env vars from
+        # the openbao-static-seal Secret (see extraSecretEnvironmentVars
+        # above). DO NOT put `current_key = "..."` here — the validated
+        # working form is empty stanza + env-var injection.
+        seal "static" {}
+
+        service_registration "kubernetes" {}
+
+        telemetry {
+          prometheus_retention_time = "30s"
+          disable_hostname = true
+        }
       enabled: true
       setNodeId: true
     replicas: 3
+  # DISABLED FOR D10 MIGRATION WINDOW 2026-06-25. The HTTP
+  # /v1/sys/health probe doesn't tolerate the transient
+  # `Seal Migration in Progress` + barrier-type-mismatch state.
+  # Restored to the original HTTP form in a separate commit
+  # AFTER the migration completes (initial-setup.md §C9).
+  # Original probe shape preserved here for the restore commit:
+  #   enabled: true
+  #   initialDelaySeconds: 60
+  #   scheme: HTTPS
+  #   path: "/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"
   livenessProbe:
-    enabled: true
-    initialDelaySeconds: 60
-    # HTTPS scheme required: our listener has tls_disable=0 (HTTPS),
-    # so without `scheme: HTTPS` the kubelet probe hits HTTP against
-    # the HTTPS listener → HTTP 400 → probe fails → container killed →
-    # crashloop. Matching homelab-infra/ansible/files/openbao-values.yaml
-    # (handoff drift fix, audit 2026-06-04).
-    scheme: HTTPS
-    # Status-code tolerance: chart-default path returns 503 for
-    # sealed pods + 501 for uninitialized. Kubelet treats both
-    # as failure → kills container → crashloop during the
-    # operator-attended unseal window (or before init). Tell
-    # OpenBao to return 204 (success) for both. See homelab-
-    # infra/ansible/files/openbao-values.yaml for context.
-    path: "/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"
+    enabled: false
   logFormat: json
   logLevel: info
   readinessProbe:
