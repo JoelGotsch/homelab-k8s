@@ -192,7 +192,7 @@ spec:
               # jsonpath. We DO need jq for date-arithmetic on
               # the deletionTimestamp, so use an image that has
               # both: alpine/k8s ships kubectl + jq.
-              image: docker.io/alpine/k8s:1.30.5@sha256:cdcb84ccc7da90d2200ff0c01f4adb1d3df56e260e35db28e9b16ffc24cab94f
+              image: docker.io/alpine/k8s:1.30.5@sha256:0d03af14f8539df28e51e8afc12ee6d78891c630b88226243307f08a6fab3538
               imagePullPolicy: IfNotPresent
               envFrom:
                 - configMapRef:
@@ -249,7 +249,13 @@ spec:
                       # longhorn one. Anything else and we bail.
                       | select((.metadata.finalizers // []) | length == 1)
                       | select((.metadata.finalizers // [])[0] == $finalizer)
-                      | "\(.metadata.name)|\(.metadata.deletionTimestamp)|\(.spec.source.persistentVolumeName // "?")|\(.spec.nodeName // "?")"
+                      # Emit pipe-separated row. age_seconds is
+                      # pre-computed in jq (which has proper
+                      # fromdateiso8601) — the shell's busybox
+                      # `date -d` does NOT accept ISO8601 with T/Z,
+                      # so doing the arithmetic in jq is the
+                      # portable path.
+                      | "\(.metadata.name)|\(.metadata.deletionTimestamp)|\(.spec.source.persistentVolumeName // "?")|\(.spec.nodeName // "?")|\($now - (.metadata.deletionTimestamp | fromdateiso8601))"
                     ')
 
                   if [ -z "$CANDIDATES" ]; then
@@ -264,10 +270,10 @@ spec:
                   # [step 4-6] iterate, log, patch, verify.
                   RC=0
                   IDX=0
-                  echo "$CANDIDATES" | while IFS='|' read -r NAME DELTS PV NODE; do
+                  echo "$CANDIDATES" | while IFS='|' read -r NAME DELTS PV NODE AGE; do
                     IDX=$((IDX + 1))
-                    DEL_EPOCH=$(date -u -d "$DELTS" +%s 2>/dev/null || echo 0)
-                    AGE=$((NOW_TS - DEL_EPOCH))
+                    # AGE comes from jq (criterion 3 filter), so
+                    # it's always a positive integer of seconds.
                     AGE_H=$((AGE / 3600))
                     AGE_M=$(((AGE % 3600) / 60))
 
