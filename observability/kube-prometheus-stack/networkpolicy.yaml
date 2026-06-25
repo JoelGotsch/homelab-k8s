@@ -104,6 +104,36 @@ spec:
         - port: 9101
           protocol: TCP
 ---
+# CiliumNetworkPolicy sibling — Prometheus → kube-apiserver. Without
+# this, Prometheus's `dial tcp 10.96.0.1:443: i/o timeout` errors mean
+# 0 active scrape targets (kube-state-metrics + every other
+# auto-discovered target depends on listing pods/svcs via the
+# apiserver). Standard NetworkPolicy can't match a non-pod target
+# like the cluster apiserver; Cilium's reserved entity is the right
+# primitive — same pattern as the openbao-seal-watchdog egress fix
+# (commit 8494b91, 2026-06-23).
+#
+# Discovered 2026-06-25 by the #58 PrometheusRule subagent: the new
+# rule sat at health=unknown because Prometheus had 0 active targets.
+# Trace: kubectl -n monitoring exec prometheus-... -- wget --spider
+# https://10.96.0.1:443 returns 'Connecting...' then hangs to
+# command timeout. After applying this CNP, scrape targets recover
+# and every metrics-based rule starts evaluating.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: prometheus-apiserver
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  egress:
+    - toEntities:
+        - kube-apiserver
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
