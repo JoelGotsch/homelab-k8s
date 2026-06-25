@@ -22,12 +22,27 @@ resources:
 # 99-journal/2026-06-09-recurring-worker-cascades.md (commit 1b405df)
 # all start with the manager dying mid-reconcile, taking VAs with it.
 #
-# Targets from the RCA §"Recommended fixes" #1:
-#   requests: {memory: 256Mi, cpu: 100m}
-#   limits:   {memory: 1Gi}
-# The 256Mi floor gives kubelet's eviction manager a guarantee to
-# defend; 1Gi cap is well above steady-state RSS (~80MB observed on
-# this cluster) but tolerates worst-case CRD reconcile spikes.
+# Targets — limit bumped 2026-06-25 after a separate failure mode
+# from cascade #1-#4. Original #34 fix targeted Talos OOMController
+# kills under node-wide pressure (largest cgroup victim). New failure
+# mode 2026-06-25: per-pod cgroup OOMKilled (exit 137) on worker2
+# (89 replicas) + worker3 (47 replicas) every ~2-3 min, while worker1
+# (70 replicas) is stable. Manager memory profile correlates loosely
+# with on-node replica count + concurrent reconcile work; the 1 GiB
+# cap from #34 was tuned to steady-state RSS (~80 MB) but doesn't
+# tolerate the worst-case reconcile spike actually observed on the
+# higher-replica nodes.
+#
+# Bumping to 2Gi based on:
+#   - Worker2 + worker3 hit the 1Gi ceiling and OOM-loop;
+#     2Gi gives 2x headroom which should cover the spike.
+#   - Each worker has ~31 GB total + ~8 GB free even at current
+#     load, so 2Gi cap is comfortable from the node-perspective.
+#   - Talos OOMController kicks in at ~85% node-mem util;
+#     longhorn-manager at 2Gi is 6.3% of a 31 GB worker, well
+#     below any node-OOM threshold. The #34 cascade-prevention
+#     intent is preserved.
+# Request unchanged at 256 MiB.
 patches:
 - target:
     kind: DaemonSet
@@ -47,7 +62,7 @@ patches:
                   memory: 256Mi
                   cpu: 100m
                 limits:
-                  memory: 1Gi
+                  memory: 2Gi
 # NOTE on fresh-install bootstrap:
 # Earlier this dir carried `bootstrap-sa.yaml` to pre-create
 # `longhorn-service-account` (+ ClusterRole/Binding) so the
