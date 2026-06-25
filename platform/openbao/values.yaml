@@ -130,18 +130,11 @@ server:
       enabled: true
       setNodeId: true
     replicas: 3
-  # DISABLED FOR D10 MIGRATION WINDOW 2026-06-25. The HTTP
-  # /v1/sys/health probe doesn't tolerate the transient
-  # `Seal Migration in Progress` + barrier-type-mismatch state.
-  # Restored to the original HTTP form in a separate commit
-  # AFTER the migration completes (initial-setup.md §C9).
-  # Original probe shape preserved here for the restore commit:
-  #   enabled: true
-  #   initialDelaySeconds: 60
-  #   scheme: HTTPS
-  #   path: "/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"
   livenessProbe:
-    enabled: false
+    enabled: true
+    initialDelaySeconds: 60
+    scheme: HTTPS
+    path: "/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"
   logFormat: json
   logLevel: info
   readinessProbe:
