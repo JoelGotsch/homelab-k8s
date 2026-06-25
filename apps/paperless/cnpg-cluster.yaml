@@ -19,8 +19,17 @@ spec:
     labels:
       recurring-job-group.longhorn.io/secret-personal: "enabled"
 
+  # Bumped 10Gi → 20Gi 2026-06-25: actual usage was 12.85 GiB on pg-2
+  # (vs. ~13 MB real DB data) due to Longhorn snapshot delta
+  # accumulation under the `default` recurring-job-group at retain=100.
+  # CNPG's inheritedMetadata.labels does NOT propagate to Longhorn
+  # Volume CRs, so the secret-personal selector silently fell through
+  # to default. Kyverno mutation
+  # (infrastructure/kyverno/policies/longhorn-volume-label-propagation.yaml)
+  # plus a Longhorn-UI snapshot prune are the root-cause fix; this
+  # bump is the headroom needed while that lands. Re ADR 0016 / #73.
   storage:
-    size: 10Gi
+    size: 20Gi
     storageClass: longhorn-replica3
 
   monitoring:
