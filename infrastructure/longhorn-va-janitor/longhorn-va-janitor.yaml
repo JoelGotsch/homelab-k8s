@@ -1,0 +1,338 @@
+# Longhorn VolumeAttachment janitor — auto-clears stuck VAs.
+#
+# Why this exists (task #65):
+# In the last 48h (sessions 2026-06-23 cluster-recovery and
+# 2026-06-24 D10 attempt) the operator manually cleared the
+# same stuck-VA pattern 3 times, each time taking ~10min of
+# diagnostic work. The pattern:
+#
+#   * a VolumeAttachment has metadata.deletionTimestamp set
+#     (sometimes hours/days ago)
+#   * the Longhorn finalizer `external-attacher/driver-longhorn-io`
+#     never gets removed by the external-attacher sidecar
+#   * the VA persists, and any new pod that needs to mount the
+#     same PV hangs in ContainerCreating with `FailedAttachVolume:
+#     volume attachment is being deleted`
+#
+# Confirmed instances this 48h window:
+#   - 2026-06-23 — openbao-raft-snapshots PVC VA stuck since
+#     2026-06-22T08:05:32Z (~31h)
+#   - 2026-06-24 — audit-openbao-2 PVC VA stuck similarly
+#   - earlier sessions per the journal
+#
+# Manual fix (per the task #23 runbook):
+#   kubectl patch volumeattachment X \
+#     -p '{"metadata":{"finalizers":null}}' --type=merge
+# The kube-controller-manager then completes deletion within
+# seconds. This CronJob automates that.
+#
+# ============================================================
+# DETECTION CRITERIA (ALL must hold before we touch a VA).
+# ============================================================
+# This is the safety boundary. Reviewer: read this carefully.
+#
+#   (1) `spec.attacher == driver.longhorn.io`
+#       — never touch a non-Longhorn VA. Out of scope; not
+#         the failure mode we're chasing.
+#
+#   (2) `metadata.deletionTimestamp` is set (non-null).
+#       — only act on VAs the API has been asked to delete.
+#         Never strip a finalizer from a live VA.
+#
+#   (3) deletionTimestamp is OLDER than STUCK_THRESHOLD_SECONDS
+#       (default 600 = 10 min).
+#       — A legitimate Longhorn detach can take 30–90s; the
+#         external-attacher sidecar's normal "remove finalizer
+#         after successful ControllerUnpublishVolume" path
+#         completes within ~2min in healthy conditions. 10min
+#         is ~5x that p99, comfortably past the legitimate-
+#         slow-detach band but still fast enough that a new
+#         pod scheduled after the operator notices a problem
+#         self-clears within 1–2 CronJob ticks (CronJob runs
+#         every 5min, so worst-case 15min from stuck to clear).
+#       — Tunable via env: STUCK_THRESHOLD_SECONDS.
+#
+#   (4) finalizers == ["external-attacher/driver-longhorn-io"]
+#       EXACTLY (length == 1 AND that one entry).
+#       — if a second finalizer is present (e.g., a Kyverno
+#         policy finalizer, a future Longhorn protection
+#         finalizer, an operator-added test marker), we MUST
+#         leave the VA alone. Stripping all finalizers would
+#         bypass whatever the second finalizer was guarding.
+#       — checked structurally; we don't try to "selectively"
+#         remove just the longhorn one because the patch we
+#         apply (finalizers:null) is all-or-nothing, and
+#         re-patching with a filtered list is racy.
+#
+# Patch action (only after all four pass):
+#   PATCH /apis/storage.k8s.io/v1/volumeattachments/<name>
+#     {"metadata":{"finalizers":null}}
+#     Content-Type: application/merge-patch+json
+#
+# We do NOT issue DELETE. The kube-controller already has the
+# delete in flight (deletionTimestamp is set); removing the
+# last finalizer is enough to let GC complete. This keeps the
+# RBAC verb set narrow: get, list, patch — no delete.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: longhorn-va-janitor
+  labels:
+    app.kubernetes.io/name: longhorn-va-janitor
+    # PSA: this workload runs unprivileged (nobody:nobody, no caps,
+    # read-only root). `restricted` is the right baseline.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: longhorn-va-janitor
+  namespace: longhorn-va-janitor
+  labels:
+    app.kubernetes.io/name: longhorn-va-janitor
+---
+# RBAC: cluster-scoped because VolumeAttachment is a cluster-scoped
+# resource. Verbs scoped to the minimum we actually need:
+#   - get/list: discover stuck VAs and read their current spec
+#   - patch:    clear the finalizers (merge-patch with finalizers:null)
+# NO delete (the kube-controller deletes after finalizers clear).
+# NO create/update/watch (we poll on a schedule, not reactive).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: longhorn-va-janitor
+  labels:
+    app.kubernetes.io/name: longhorn-va-janitor
+rules:
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattachments"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: longhorn-va-janitor
+  labels:
+    app.kubernetes.io/name: longhorn-va-janitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: longhorn-va-janitor
+subjects:
+  - kind: ServiceAccount
+    name: longhorn-va-janitor
+    namespace: longhorn-va-janitor
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: longhorn-va-janitor-config
+  namespace: longhorn-va-janitor
+  labels:
+    app.kubernetes.io/name: longhorn-va-janitor
+data:
+  # Age (in seconds) a VA's deletionTimestamp must exceed before
+  # we consider it stuck. See criterion (3) in the header for
+  # the safety-margin reasoning.
+  STUCK_THRESHOLD_SECONDS: "600"
+  # The exact finalizer string we expect (and require to be the
+  # only one) before patching. Pinned here so a future Longhorn
+  # rename (e.g., the v1.8 chart changes the string) shows up
+  # as "no stuck VAs found" — fail-safe-closed.
+  LONGHORN_FINALIZER: "external-attacher/driver-longhorn-io"
+  # spec.attacher value we match on (criterion 1).
+  LONGHORN_ATTACHER: "driver.longhorn.io"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: longhorn-va-janitor
+  namespace: longhorn-va-janitor
+  labels:
+    app.kubernetes.io/name: longhorn-va-janitor
+spec:
+  # Every 5 minutes. The pattern is "stuck for hours-to-days"
+  # (per the confirmed instances above), so a 5min poll is well
+  # inside the latency tolerance. Faster polling (e.g., every
+  # 1m) would not change operator experience but would multiply
+  # apiserver list-VAs traffic 5x for no benefit.
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 120
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: longhorn-va-janitor
+        spec:
+          restartPolicy: Never
+          serviceAccountName: longhorn-va-janitor
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: janitor
+              # kubectl + jq combo. Use the same image family as
+              # other infra cronjobs would (bitnami/kubectl plus
+              # inline jq via curl) — but to keep it single-image
+              # we use a kubectl image and call the apiserver
+              # directly with curl-style logic via kubectl get -o
+              # jsonpath. We DO need jq for date-arithmetic on
+              # the deletionTimestamp, so use an image that has
+              # both: alpine/k8s ships kubectl + jq.
+              image: docker.io/alpine/k8s:1.30.5@sha256:cdcb84ccc7da90d2200ff0c01f4adb1d3df56e260e35db28e9b16ffc24cab94f
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - configMapRef:
+                    name: longhorn-va-janitor-config
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 64Mi
+                limits:
+                  memory: 192Mi
+              command: [/bin/sh, -c]
+              args:
+                - |
+                  set -eu
+                  echo "[step 1] longhorn-va-janitor starting (schedule */5 * * * *)"
+                  echo "[step 1] criteria: attacher=$LONGHORN_ATTACHER, finalizer=$LONGHORN_FINALIZER, threshold=${STUCK_THRESHOLD_SECONDS}s"
+
+                  # [step 2] List all VolumeAttachments cluster-wide.
+                  # Output is JSON; jq filters in step 3 do the
+                  # actual selection. Single list call keeps
+                  # apiserver load minimal (one query per 5min).
+                  echo "[step 2] listing all VolumeAttachments via apiserver..."
+                  ALL_VA_JSON=$(kubectl get volumeattachments -o json)
+                  TOTAL=$(echo "$ALL_VA_JSON" | jq '.items | length')
+                  echo "[step 2] found $TOTAL VolumeAttachments total"
+
+                  # [step 3] Filter to stuck-candidates. ALL FOUR
+                  # criteria from the header must pass; jq does
+                  # them in one pipeline so the filter logic is
+                  # auditable as a single expression.
+                  NOW_TS=$(date -u +%s)
+                  echo "[step 3] filtering stuck-VA candidates (now=$NOW_TS)..."
+                  CANDIDATES=$(echo "$ALL_VA_JSON" | jq -r \
+                    --argjson now "$NOW_TS" \
+                    --argjson threshold "$STUCK_THRESHOLD_SECONDS" \
+                    --arg attacher "$LONGHORN_ATTACHER" \
+                    --arg finalizer "$LONGHORN_FINALIZER" '
+                      .items[]
+                      # criterion (1): Longhorn attacher only
+                      | select(.spec.attacher == $attacher)
+                      # criterion (2): being deleted
+                      | select(.metadata.deletionTimestamp != null)
+                      # criterion (3): older than threshold
+                      | select(
+                          ($now - (.metadata.deletionTimestamp | fromdateiso8601))
+                          > $threshold
+                        )
+                      # criterion (4): exactly one finalizer, the
+                      # longhorn one. Anything else and we bail.
+                      | select((.metadata.finalizers // []) | length == 1)
+                      | select((.metadata.finalizers // [])[0] == $finalizer)
+                      | "\(.metadata.name)|\(.metadata.deletionTimestamp)|\(.spec.source.persistentVolumeName // "?")|\(.spec.nodeName // "?")"
+                    ')
+
+                  if [ -z "$CANDIDATES" ]; then
+                    echo "[step 3] no stuck VAs found (all $TOTAL VAs healthy or within ${STUCK_THRESHOLD_SECONDS}s grace)"
+                    echo "[step 7] done — no action needed"
+                    exit 0
+                  fi
+
+                  COUNT=$(echo "$CANDIDATES" | wc -l | tr -d ' ')
+                  echo "[step 3] $COUNT stuck VA(s) match ALL four criteria"
+
+                  # [step 4-6] iterate, log, patch, verify.
+                  RC=0
+                  IDX=0
+                  echo "$CANDIDATES" | while IFS='|' read -r NAME DELTS PV NODE; do
+                    IDX=$((IDX + 1))
+                    DEL_EPOCH=$(date -u -d "$DELTS" +%s 2>/dev/null || echo 0)
+                    AGE=$((NOW_TS - DEL_EPOCH))
+                    AGE_H=$((AGE / 3600))
+                    AGE_M=$(((AGE % 3600) / 60))
+
+                    echo "[step 4][$IDX/$COUNT] STUCK VA detected: name=$NAME pv=$PV node=$NODE deletionTimestamp=$DELTS age=${AGE_H}h${AGE_M}m"
+
+                    # [step 5] patch finalizers to null. merge-patch
+                    # semantics: setting finalizers to null
+                    # removes the field; the kube-controller-manager
+                    # garbage-collector then completes the in-flight
+                    # delete within seconds.
+                    echo "[step 5][$IDX/$COUNT] patching finalizers:null on $NAME ..."
+                    if kubectl patch volumeattachment "$NAME" \
+                         --type=merge \
+                         -p '{"metadata":{"finalizers":null}}' >/dev/null 2>&1; then
+                      echo "[step 5][$IDX/$COUNT] patch OK on $NAME"
+                    else
+                      # Non-fatal: the VA may have just self-cleared
+                      # between list and patch. Log and continue;
+                      # exit non-zero at end so the Job surfaces
+                      # the partial failure for operator review.
+                      echo "[step 5][$IDX/$COUNT] WARN: patch failed on $NAME (already gone? rbac? see kubectl error)"
+                      kubectl patch volumeattachment "$NAME" \
+                        --type=merge \
+                        -p '{"metadata":{"finalizers":null}}' || true
+                      RC=1
+                      continue
+                    fi
+
+                    # [step 6] verify the kube-controller GC'd it.
+                    # Give it up to ~10s. If it's still there, log
+                    # but don't loop forever — next CronJob tick
+                    # will retry if needed.
+                    GONE=0
+                    for _ in 1 2 3 4 5; do
+                      sleep 2
+                      if ! kubectl get volumeattachment "$NAME" >/dev/null 2>&1; then
+                        GONE=1
+                        break
+                      fi
+                    done
+                    if [ "$GONE" = "1" ]; then
+                      echo "[step 6][$IDX/$COUNT] VA $NAME deleted after patch (kube-controller GC)"
+                    else
+                      echo "[step 6][$IDX/$COUNT] VA $NAME still present after 10s — kube-controller will reap on its own, OR a second finalizer raced in; next tick will re-evaluate"
+                    fi
+                  done
+
+                  echo "[step 7] janitor pass complete"
+                  exit $RC
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                - name: kube-cache
+                  mountPath: /.kube
+                - name: cache
+                  mountPath: /.cache
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 16Mi
+            # kubectl writes a discovery cache here; with
+            # readOnlyRootFilesystem we need a writable mount.
+            - name: kube-cache
+              emptyDir:
+                sizeLimit: 32Mi
+            - name: cache
+              emptyDir:
+                sizeLimit: 32Mi

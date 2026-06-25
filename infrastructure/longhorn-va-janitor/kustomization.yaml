@@ -1,0 +1,21 @@
+# Longhorn VolumeAttachment janitor.
+#
+# Auto-clears VAs stuck on the external-attacher/driver-longhorn-io
+# finalizer pattern. Replaces the manual `kubectl patch
+# volumeattachment X -p '{"metadata":{"finalizers":null}}'` that
+# the operator ran 3x in the 48h ending 2026-06-24 (task #65).
+#
+# Single manifest (longhorn-va-janitor.yaml) holds: Namespace,
+# ServiceAccount, ClusterRole, ClusterRoleBinding, ConfigMap,
+# CronJob. See the long header in that file for the detection-
+# criteria safety reasoning.
+#
+# ArgoCD picks this up via the infrastructure ApplicationSet
+# (bootstrap/applicationsets/infrastructure.yaml,
+# `path: infrastructure/*`).
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - longhorn-va-janitor.yaml
