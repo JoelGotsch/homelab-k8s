@@ -55,29 +55,45 @@ spec:
               namespaces:
                 - minio-on-nas
                 - backup-cronjobs
-      # Kyverno's `foreach` validates against every container in
-      # the spec (regular + init + ephemeral). Single negative
-      # rules each in their own block so the message tells you
-      # which container type failed.
+      # foreach iterates containers (regular + init + ephemeral)
+      # and validates each. Per-foreach message can reference
+      # `element.*`; the policy-level message must use only
+      # request.* / globals. Discovered 2026-06-26: Kyverno
+      # admission rejects `{{ element.* }}` at validate.message
+      # outside a foreach block.
       validate:
-        message: |
-          Pods in {{ request.object.metadata.namespace }} must
-          reference images by digest (image:tag@sha256:...).
-          Container `{{ element.name }}` uses `{{ element.image }}`
-          which is not digest-pinned.
-
-          To fix, append `@sha256:...` to the image. Generate
-          the digest via:
-              crane digest <image>:<tag>
-          Renovate (with pinDigests: true) keeps this synced
-          automatically going forward.
         foreach:
           - list: "request.object.spec.containers || `[]`"
             pattern:
               image: "*@sha256:*"
+            preconditions:
+              all:
+                - key: "{{ element.image || '' }}"
+                  operator: NotEquals
+                  value: ""
           - list: "request.object.spec.initContainers || `[]`"
             pattern:
               image: "*@sha256:*"
+            preconditions:
+              all:
+                - key: "{{ element.image || '' }}"
+                  operator: NotEquals
+                  value: ""
           - list: "request.object.spec.ephemeralContainers || `[]`"
             pattern:
               image: "*@sha256:*"
+            preconditions:
+              all:
+                - key: "{{ element.image || '' }}"
+                  operator: NotEquals
+                  value: ""
+        message: |
+          Pods in {{ request.object.metadata.namespace }} must
+          reference every container image by digest
+          (image:tag@sha256:...). One or more containers do not.
+
+          Generate the digest via `crane digest <image>:<tag>`
+          and append `@sha256:...` to the manifest. Renovate
+          with `pinDigests: true` keeps this synced.
+
+          See homelab-docs/04-guides/digest-pin-enforce-allowlist.md.
