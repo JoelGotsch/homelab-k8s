@@ -71,7 +71,12 @@ data:
         type: remap
         inputs: [enrich]
         source: |
-          .severity = downcase(string!(.["talos-level"] || .level || "info"))
+          # VRL: hyphenated keys via `.["talos-level"]`; the
+          # `|| .level || "info"` short-circuit needs `??` for
+          # type-safe fallback. to_string + ?? handles
+          # null/missing without panicking.
+          raw, _err = to_string(.["talos-level"] || .level || "info")
+          .severity = downcase(raw)
           .is_signal =
             .severity == "warn" || .severity == "warning" ||
             .severity == "error" || .severity == "err" ||
