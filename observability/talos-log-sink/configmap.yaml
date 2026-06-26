@@ -71,12 +71,12 @@ data:
         type: remap
         inputs: [enrich]
         source: |
-          # VRL: hyphenated keys via `.["talos-level"]`; the
-          # `|| .level || "info"` short-circuit needs `??` for
-          # type-safe fallback. to_string + ?? handles
-          # null/missing without panicking.
-          raw, _err = to_string(.["talos-level"] || .level || "info")
-          .severity = downcase(raw)
+          # VRL: hyphenated keys are accessed via `."talos-level"`
+          # (dot-quote, NOT `.[]` — `[]` is array-index only and
+          # rejects string literals). string!() requires the
+          # value to be a string at runtime; talos always emits
+          # talos-level as a string, fall back to "info" via ??.
+          .severity = downcase(string!(."talos-level" || .level || "info"))
           .is_signal =
             .severity == "warn" || .severity == "warning" ||
             .severity == "error" || .severity == "err" ||
