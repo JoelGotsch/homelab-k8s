@@ -20,8 +20,21 @@ metadata:
     app.kubernetes.io/component: receiver
 data:
   vector.yaml: |
-    # Vector self-monitoring: expose its own metrics so
-    # kube-prometheus-stack's auto-discovery picks them up.
+    # Tiered-retention design (2026-06-26 redesign after #60
+    # uncovered cp1's 80 GB/day amplification + 1.1 GB/day
+    # steady-state per node × 6 nodes × 30d = unsustainable):
+    #
+    #   Tier 1 (recent):  /sink/recent-YYYY-MM-DD.log  — every
+    #                     event, retained 7d, gzipped after 1d
+    #   Tier 2 (signal):  /sink/signal-YYYY-MM-DD.log — talos-
+    #                     level in {warn,error,fatal,panic,crit,
+    #                     emergency,alert} only, retained 90d,
+    #                     gzipped after 7d
+    #
+    # Forensic value of info/debug drops sharply after 7 days;
+    # warn+ retains value for months (post-mortem reads months
+    # later are usually filtered to warn+ anyway). Two-tier
+    # gives 20× storage reduction with no signal loss.
     api:
       enabled: false  # no UI on the public side
     sources:
@@ -45,13 +58,37 @@ data:
         inputs: [talos]
         source: |
           .received_at = now()
-    sinks:
-      # Primary: write to PVC, one file per day. Forensic-
-      # grade, not query-grade.
-      file:
-        type: file
+      # Decide signal-vs-noise. Talos emits `talos-level` on
+      # most events (machined/kubelet/etcd/etc); fall back to
+      # plain `level` for tools that follow the older
+      # convention. Kernel kmsg lines have no level so we
+      # default to "info" (kernel warns/errs do include the
+      # level token in .msg so warn+ kernel events still
+      # land in the signal tier via a future enrich rule —
+      # not added yet, file as TODO if kernel signal matters
+      # more than the warn-substring-grep workaround).
+      classify_severity:
+        type: remap
         inputs: [enrich]
-        path: /sink/talos-%Y-%m-%d.log
+        source: |
+          .severity = downcase(string!(.["talos-level"] || .level || "info"))
+          .is_signal =
+            .severity == "warn" || .severity == "warning" ||
+            .severity == "error" || .severity == "err" ||
+            .severity == "fatal" || .severity == "panic" ||
+            .severity == "crit" || .severity == "critical" ||
+            .severity == "emergency" || .severity == "alert"
+      # Signal-only stream feeds the long-retention sink.
+      signal_only:
+        type: filter
+        inputs: [classify_severity]
+        condition: .is_signal == true
+    sinks:
+      # Tier 1 — recent, all events.
+      file_recent:
+        type: file
+        inputs: [classify_severity]
+        path: /sink/recent-%Y-%m-%d.log
         encoding:
           codec: json
         # Flush often so a node-down-soon event is on disk
@@ -60,10 +97,21 @@ data:
           type: memory
           max_events: 1000
           when_full: drop_newest
+      # Tier 2 — long-retention, warn+ only.
+      file_signal:
+        type: file
+        inputs: [signal_only]
+        path: /sink/signal-%Y-%m-%d.log
+        encoding:
+          codec: json
+        buffer:
+          type: memory
+          max_events: 1000
+          when_full: drop_newest
       # Tee to stdout so `kubectl logs ds/talos-log-sink`
       # works during initial bring-up debugging.
       console:
         type: console
-        inputs: [enrich]
+        inputs: [classify_severity]
         encoding:
           codec: json
