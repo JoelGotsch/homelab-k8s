@@ -104,21 +104,29 @@ spec:
         - port: 9101
           protocol: TCP
 ---
-# CiliumNetworkPolicy sibling — Prometheus → kube-apiserver. Without
-# this, Prometheus's `dial tcp 10.96.0.1:443: i/o timeout` errors mean
-# 0 active scrape targets (kube-state-metrics + every other
-# auto-discovered target depends on listing pods/svcs via the
-# apiserver). Standard NetworkPolicy can't match a non-pod target
-# like the cluster apiserver; Cilium's reserved entity is the right
-# primitive — same pattern as the openbao-seal-watchdog egress fix
-# (commit 8494b91, 2026-06-23).
+# CiliumNetworkPolicy — Prometheus egress to kube-apiserver +
+# every node's host-network endpoints (node-exporter, kubelet
+# cAdvisor, anything bound to the node IP).
 #
-# Discovered 2026-06-25 by the #58 PrometheusRule subagent: the new
-# rule sat at health=unknown because Prometheus had 0 active targets.
-# Trace: kubectl -n monitoring exec prometheus-... -- wget --spider
-# https://10.96.0.1:443 returns 'Connecting...' then hangs to
-# command timeout. After applying this CNP, scrape targets recover
-# and every metrics-based rule starts evaluating.
+# Originally added 2026-06-25 to fix the `dial tcp 10.96.0.1:443:
+# i/o timeout` (#71) — Prometheus couldn't list pods/svcs and had
+# 0 active scrape targets.
+#
+# Extended 2026-06-26 (#35 baseline-snapshot discovery) to add
+# `host` + `remote-node` entities. The original kube-apiserver-
+# only egress made Prometheus default-deny for everything else
+# — control-plane node-exporter scrapes worked accidentally
+# because the CP node IPs ARE the apiserver IPs, but worker
+# node-exporter (10.10.30.21-23:9100) and kubelet cAdvisor
+# (:10250) scrapes all timed out. Result: ~half the cluster's
+# memory + container metrics invisible, including the
+# longhorn-manager OOMKill loop that drove the worker-cascade
+# RCAs.
+#
+# `host` covers the LOCAL node (Prometheus's own worker);
+# `remote-node` covers PEER node IPs. Together they unblock all
+# node-exporter/kubelet scrapes. Same pattern as the openbao-
+# seal-watchdog egress fix (commit 8494b91).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -133,6 +141,8 @@ spec:
   egress:
     - toEntities:
         - kube-apiserver
+        - host
+        - remote-node
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
