@@ -258,6 +258,31 @@ nodeExporter:
 kubeStateMetrics:
   enabled: true
 
+# Subchart pass-through: kube-state-metrics chart's own values.
+# Without `metricLabelsAllowlist`, KSM emits `kube_pod_labels`
+# series with ONLY metadata labels (name, namespace, uid) — none
+# of the user-defined Kubernetes pod labels (`openbao-active`,
+# `app.kubernetes.io/name`, etc.) make it into Prometheus.
+#
+# Discovered 2026-06-26 (#58 follow-up): the
+# OpenBaoNoActiveLeader rule's PromQL fell through to the
+# `absent(kube_pod_labels{...})` branch and fired a false
+# positive critical alert. Same blast radius affects the new
+# talos-log-sink receiver-down rule (`label_app_kubernetes_io_
+# name="talos-log-sink"` selector — without the allowlist it
+# returns 0 series → absent() → alert fires).
+#
+# `pods=[*]` exposes ALL pod labels — high cardinality (~50
+# labels × 200 pods) but acceptable for a 6-node lab. The
+# correct-by-default choice is to surface labels rather than
+# silently drop them; we can scope down later if cardinality
+# becomes a Prometheus pressure point. For nodes too since the
+# worker-cascade-rules group references node labels.
+kube-state-metrics:
+  metricLabelsAllowlist:
+    - pods=[*]
+    - nodes=[*]
+
 # ---------- prometheus-operator ----------
 prometheusOperator:
   resources:
