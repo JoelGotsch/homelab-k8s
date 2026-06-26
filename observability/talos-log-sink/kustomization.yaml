@@ -12,3 +12,4 @@ resources:
   - daemonset.yaml
   - service.yaml
   - networkpolicy.yaml
+  - prometheusrule.yaml

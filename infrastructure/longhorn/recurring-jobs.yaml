@@ -36,16 +36,20 @@ spec:
   cron: "35 * * * *"
   task: snapshot
   groups: [default]
-  # Longhorn 1.7 admission validator caps retain at 100 per
-  # RecurringJob (rejects 168 with "retain value should be less than
-  # or equal to 100"). Original 168 = 7 days at hourly cadence was
-  # admitted under earlier chart versions; the 2026-06-09 Argo
-  # force-sync (per worker-OOM RCA staggering) revealed the new
-  # validator rule. Reduced to 100 hourly snapshots ≈ 4d 4h. Down-
-  # stream impact: longest scheduled-snapshot rollback window
-  # shortens from 7d to ~4d; tier-2/tier-3 restic backups still
-  # cover the 30-day-and-beyond restore.
-  retain: 100
+  # Reduced 2026-06-26 from 100 → 20 after #73/#74 CNPG-bloat
+  # incident: at retain=100, hourly snapshots accumulate ~4d of
+  # delta files which on busy DBs (authentik, paperless, langfuse,
+  # crowdsec) outgrew the declared PVC size. The 100-snapshot
+  # warning condition (TooManySnapshots) also correlated with the
+  # csi-resizer getting stuck during online-expand on those
+  # volumes — see #73/#74 + journal 2026-06-25/06-26.
+  #
+  # 20 hourly snapshots = ~20h rollback window. Tier-2 restic
+  # backups (90 retained, see backup-daily below) + tier-3
+  # Hetzner StorageBox snapshots cover the 24h–90d window.
+  # If a 4-day operational rollback is needed, recover from the
+  # restic tier-2 (RPO 24h, fine for that horizon).
+  retain: 20
   concurrency: 4
   labels:
     homelab-class: catch-all
@@ -71,10 +75,10 @@ spec:
   cron: "25 * * * *"
   task: snapshot
   groups: [secret-personal]
-  # Same Longhorn-1.7 retain<=100 validator constraint as
-  # snapshot-default above. Reduced from 168 to 100 (≈ 4d 4h hourly
-  # rollback window). Tier-2/tier-3 restic backups cover longer.
-  retain: 100
+  # Mirrors snapshot-default's 2026-06-26 reduction (100 → 20)
+  # so the secret-personal-class volumes follow the same retention
+  # policy. See snapshot-default above for the full rationale.
+  retain: 20
   concurrency: 4
   labels:
     homelab-class: secret-personal

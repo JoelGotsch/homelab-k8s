@@ -1,0 +1,114 @@
+# PrometheusRule for talos-log-sink receiver-down (task #62).
+#
+# The DaemonSet runs one pod per node — if even one is down,
+# that node's machine logs are silently dropped (Talos has
+# no buffering for its `logging.destinations` output; lines
+# arrive in real-time over TCP or not at all). The receiver-
+# being-up is the entire reliability story for the cross-
+# reboot log-preservation property we built this for.
+#
+# Detection: kube_pod_info filtered to the talos-log-sink
+# DS labels, grouped by node, alert when any node is below
+# 1 ready pod. We don't need vector-internal metrics — the
+# K8s view of pod-readiness is the right signal (DS pod
+# missing OR CrashLoop both mean lines are being dropped).
+#
+# Why kube_pod_info and not kube_pod_status_ready: the
+# kube-state-metrics rebuild path for label-selector
+# matching is more reliable on kube_pod_info (which always
+# emits one series per pod). kube_pod_status_ready{condition=
+# "true"} only emits when the condition is set. Both work in
+# steady-state; kube_pod_info doesn't silently drop a pod
+# that's stuck Pending.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: talos-log-sink
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: talos-log-sink
+    app.kubernetes.io/component: observability
+    # Kube-Prometheus-Stack discovers PrometheusRules with
+    # this label by default. Matches the chart's
+    # `prometheus.prometheusSpec.ruleSelector` configuration.
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: talos-log-sink
+      interval: 1m
+      rules:
+        # Page on any node missing its receiver pod for ≥10
+        # minutes. 10m absorbs DaemonSet update churn (rolling
+        # restart for image bumps, retention sidecar OOM-and-
+        # recovery) without paging.
+        - alert: TalosLogSinkReceiverDown
+          expr: |
+            (
+              count(kube_node_info) by ()
+              -
+              count(
+                kube_pod_status_ready{namespace="monitoring", condition="true"}
+                * on (namespace, pod) group_left()
+                kube_pod_labels{namespace="monitoring", label_app_kubernetes_io_name="talos-log-sink"}
+              ) by ()
+            ) > 0
+          for: 10m
+          labels:
+            severity: warning
+            component: talos-log-sink
+          annotations:
+            summary: "Talos log-sink receiver missing on at least one node"
+            description: |
+              At least one cluster node has no ready talos-log-sink
+              receiver pod. That node's Talos machine logs are being
+              dropped on the floor — `logging.destinations` writes are
+              fire-and-forget over TCP, no buffering.
+
+              Check: `kubectl -n monitoring get pods -l app.kubernetes.io/name=talos-log-sink -o wide`
+              for the node missing its pod, then `kubectl describe pod`
+              or `kubectl logs --previous` to diagnose.
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/talos/log-sink-bring-up.md"
+
+        # CrashLoop signal — pods present but restarting.
+        # 3 restarts in 15m is a real crash loop (transient
+        # network blips don't accumulate that fast).
+        - alert: TalosLogSinkReceiverCrashLooping
+          expr: |
+            increase(
+              kube_pod_container_status_restarts_total{
+                namespace="monitoring",
+                container="vector",
+                pod=~"talos-log-sink-.*"
+              }[15m]
+            ) >= 3
+          for: 5m
+          labels:
+            severity: warning
+            component: talos-log-sink
+          annotations:
+            summary: "Talos log-sink receiver crash-looping on {{ $labels.pod }}"
+            description: |
+              `{{ $labels.pod }}` has restarted ≥3 times in the last
+              15 minutes. Investigate via `kubectl -n monitoring logs
+              {{ $labels.pod }} -c vector --previous`.
+
+        # Catch the case where the entire DaemonSet is missing
+        # (e.g., chart removal, namespace deletion, accidental
+        # `kubectl delete ds`). Distinguishes "receiver gone
+        # cluster-wide" from "one node missing" above.
+        - alert: TalosLogSinkAbsent
+          expr: |
+            absent(kube_pod_info{namespace="monitoring", pod=~"talos-log-sink-.*"})
+          for: 10m
+          labels:
+            severity: critical
+            component: talos-log-sink
+          annotations:
+            summary: "Talos log-sink DaemonSet is gone cluster-wide"
+            description: |
+              No `talos-log-sink-*` pods are running anywhere in the
+              monitoring namespace. ALL nodes' Talos machine logs
+              are being dropped. Verify the DaemonSet exists
+              (`kubectl -n monitoring get ds talos-log-sink`) and
+              that the Argo `obs-talos-log-sink` Application is
+              Synced.

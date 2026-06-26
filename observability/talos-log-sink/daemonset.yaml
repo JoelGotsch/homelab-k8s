@@ -42,6 +42,51 @@ spec:
       # No host networking — hostPort is enough and keeps the
       # blast radius bounded.
       containers:
+        # Retention sidecar — prunes /var/log/talos-log-sink files
+        # older than 30 days, once per day. Lives in the same pod
+        # so it gets DaemonSet scheduling (one per node, prunes
+        # the node-local hostPath that node's Vector writes to).
+        # Tier-2 restic backups pick up these files nightly, so
+        # 30d local overlaps generously with off-site retention.
+        # Why 30 days: node forensics are usually consulted within
+        # a week of an incident; 30d gives buffer without filling
+        # /var/log (~100 MB/day steady state → ~3 GB / 30d).
+        - name: retention
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              sleep 60
+              while :; do
+                BEFORE=$(find /sink -maxdepth 1 -name 'talos-*.log' -type f 2>/dev/null | wc -l)
+                find /sink -maxdepth 1 -name 'talos-*.log' -type f -mtime +30 -delete 2>/dev/null || true
+                AFTER=$(find /sink -maxdepth 1 -name 'talos-*.log' -type f 2>/dev/null | wc -l)
+                echo "$(date -Iseconds) talos-log-sink retention: $BEFORE -> $AFTER files (deleted $((BEFORE - AFTER)))"
+                sleep 86400
+              done
+          volumeMounts:
+            - name: sink
+              mountPath: /sink
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            # find -delete needs write to /sink (hostPath); Talos
+            # creates /var/log/* as root-owned. Same root-with-no-
+            # privileges shape as the vector container below.
+            runAsNonRoot: false
+            runAsUser: 0
         - name: vector
           image: timberio/vector:0.51.0-distroless-libc
           args: ["--config-dir", "/etc/vector"]
