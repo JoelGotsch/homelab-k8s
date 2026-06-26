@@ -1,0 +1,83 @@
+# Kyverno ClusterPolicy — ENFORCE digest pinning for an
+# operator-managed allowlist of namespaces.
+#
+# Why a separate policy rather than mutating the existing
+# `audit-third-party-image-digest`:
+#
+#   The audit policy generates PolicyReport entries cluster-wide
+#   for visibility. Flipping the same policy to Enforce would
+#   blast-radius every namespace at once. The ratchet pattern is:
+#
+#     1. Choose a namespace where you've verified all images are
+#        digest-pinned (manually inspected manifests + confirmed
+#        Renovate is configured to keep digests fresh).
+#     2. Add it to `match.any.resources.namespaces` below.
+#     3. Argo syncs → Kyverno admits/rejects on next deploy.
+#     4. Watch for false positives for ~24h before moving the
+#        next namespace.
+#
+# Adding namespace convention: see
+# `homelab-docs/04-guides/digest-pin-enforce-allowlist.md`.
+#
+# This policy's match scope is ADDITIVE to the cluster-wide audit
+# policy — pods in the allowlist namespaces are validated by BOTH
+# (audit reports + enforce admission). The enforce match is the
+# binding one; audit just creates breadcrumbs.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: enforce-digest-pinning-allowlist
+  annotations:
+    policies.kyverno.io/title: "Enforce digest pinning (allowlist)"
+    policies.kyverno.io/category: Supply Chain
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: |
+      Block Pod admission in allowlisted namespaces unless ALL
+      containers (regular + init + ephemeral) reference images
+      by `@sha256:...` digest. Per ADR 0019 D3 — ratchet from
+      audit-only to namespace-scoped enforce as confidence
+      grows.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-digest-on-containers
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              # Operator allowlist. Add a namespace ONLY after
+              # all its consumer manifests use `image:tag@sha256:
+              # ...` form AND Renovate is configured to keep the
+              # digest in sync with the tag (`pinDigests: true`).
+              # See homelab-docs/04-guides/digest-pin-enforce-
+              # allowlist.md for the addition procedure.
+              namespaces:
+                - minio-on-nas
+                - backup-cronjobs
+      # Kyverno's `foreach` validates against every container in
+      # the spec (regular + init + ephemeral). Single negative
+      # rules each in their own block so the message tells you
+      # which container type failed.
+      validate:
+        message: |
+          Pods in {{ request.object.metadata.namespace }} must
+          reference images by digest (image:tag@sha256:...).
+          Container `{{ element.name }}` uses `{{ element.image }}`
+          which is not digest-pinned.
+
+          To fix, append `@sha256:...` to the image. Generate
+          the digest via:
+              crane digest <image>:<tag>
+          Renovate (with pinDigests: true) keeps this synced
+          automatically going forward.
+        foreach:
+          - list: "request.object.spec.containers || `[]`"
+            pattern:
+              image: "*@sha256:*"
+          - list: "request.object.spec.initContainers || `[]`"
+            pattern:
+              image: "*@sha256:*"
+          - list: "request.object.spec.ephemeralContainers || `[]`"
+            pattern:
+              image: "*@sha256:*"

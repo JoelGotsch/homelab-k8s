@@ -37,7 +37,15 @@ mode: standalone
 #                       namespace's `default` ServiceAccount.
 image:
   repository: registry.homelab.internal/ci-packages/minio
-  tag: RELEASE.2024-12-18T13-15-44Z  # OPERATOR PINS via Renovate
+  # Tag preserved for Renovate tracking; @sha256 digest appended
+  # so kubelet validates the pulled bytes against the recorded
+  # hash. Namespace is on the digest-pin enforce allowlist
+  # (infrastructure/kyverno/policies/enforce-digest-pinning-
+  # allowlist.yaml) — admission rejects pods without @sha256:...
+  # per 04-guides/digest-pin-enforce-allowlist.md.
+  # When Renovate bumps the tag, it MUST also update the digest
+  # (Renovate config: `pinDigests: true` for ci-packages/*).
+  tag: RELEASE.2024-12-18T13-15-44Z@sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3
 
 # The MinIO chart creates its own ServiceAccount (`minio-sa`)
 # rather than using the namespace's `default`, so attaching the

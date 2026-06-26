@@ -27,3 +27,8 @@ resources:
   # inheritedMetadata-doesn't-reach-Volume gap that caused the
   # 2026-06-25 PG/ClickHouse snapshot-delta PVC-bloat (#73).
   - policies/longhorn-volume-label-propagation.yaml
+  # Enforce: digest-pinning REQUIRED for an operator-managed
+  # allowlist of namespaces. Ratchet from audit (cluster-wide,
+  # visibility) to enforce (allowlist, blocking). Add new
+  # namespaces per 04-guides/digest-pin-enforce-allowlist.md.
+  - policies/enforce-digest-pinning-allowlist.yaml
