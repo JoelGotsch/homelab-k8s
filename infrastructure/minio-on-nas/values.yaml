@@ -45,7 +45,17 @@ image:
   # per 04-guides/digest-pin-enforce-allowlist.md.
   # When Renovate bumps the tag, it MUST also update the digest
   # (Renovate config: `pinDigests: true` for ci-packages/*).
-  tag: RELEASE.2024-12-18T13-15-44Z@sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3
+  # IMPORTANT: the digest is the FORGEJO-served digest, not the
+  # upstream (quay/dockerhub) one. Forgejo Packages re-wraps the
+  # manifest on push so the same image gets a different digest
+  # in our mirror than at upstream. Fetch via:
+  #   curl -sk -H "Authorization: Basic $(kubectl -n minio-on-nas \
+  #     get secret registry-homelab-internal-pull -o \
+  #     jsonpath='{.data.\.dockerconfigjson}' | base64 -d | \
+  #     jq -r '.auths."registry.homelab.internal".auth')" \
+  #     -I https://registry.homelab.internal/v2/ci-packages/minio/manifests/<tag> \
+  #     | grep -i docker-content-digest
+  tag: RELEASE.2024-12-18T13-15-44Z@sha256:34c8e2f52a5984492555427fee07254c80036bdb7079bb91679232abd7a4fa20
 
 # The MinIO chart creates its own ServiceAccount (`minio-sa`)
 # rather than using the namespace's `default`, so attaching the
