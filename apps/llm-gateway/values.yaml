@@ -23,7 +23,11 @@ image:
   # D3 + Kyverno require-first-party-image-digest enforce mode on
   # the next CI push.
   repository: registry.homelab.internal/forgejo-admin/llm-gateway
-  tag: "v0.0.1"  # OPERATOR PINS via Renovate
+  # Bumped 2026-06-27 to v0.0.2 — v0.0.1 blobs were lost during
+  # the #43 registry-blobs crypt rotation (encrypted under old
+  # password, unreadable post-swap). v0.0.2 is the first
+  # rebuilt-and-pushed image (commit 2a1957a + mypy 1.11 fix).
+  tag: "v0.0.2"  # OPERATOR PINS via Renovate
   pullPolicy: IfNotPresent
 
 # The chart consumes a Secret with key `masterkey`. We point it
