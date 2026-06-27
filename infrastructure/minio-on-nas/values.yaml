@@ -171,3 +171,34 @@ containerSecurityContext:
   # chart renders containerSecurityContext verbatim (toYaml).
   seccompProfile:
     type: RuntimeDefault
+
+# Soft anti-affinity against worker1. Discovered 2026-06-27 during
+# the #43 registry-blobs crypt rotation: kubelet pulls of
+# `registry.homelab.internal/ci-packages/*` images intermittently
+# fail with `could not fetch content descriptor sha256:… not found`
+# WHEN the pulling pod is on the same node as the Forgejo pod
+# (currently worker1). Different layer's reported missing on each
+# retry — the registry side serves 200 OK consistently in stress
+# tests from outside, so the failure is at the worker1 csi-rclone
+# vfs / page cache layer. Hypothesis: rclone-crypt vfs gets a
+# stale-listing race when Forgejo writes new blobs concurrent with
+# the local kubelet reading them through the same mount.
+#
+# Soft preference (NotIn worker1) — scheduler picks any non-worker1
+# node when room, falls back to worker1 if forced. Not a hard
+# rejection so MinIO can still run during cluster-wide drains.
+#
+# When this workaround can be removed:
+#   - Forgejo migrated off worker1 (and the registry-blob mount
+#     no longer co-resides with kubelet image pulls), OR
+#   - csi-rclone vfs caching investigated + fixed for the
+#     concurrent-writer-and-reader case.
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: NotIn
+              values: [worker1]
