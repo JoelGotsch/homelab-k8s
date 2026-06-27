@@ -55,7 +55,14 @@ image:
   #     jq -r '.auths."registry.homelab.internal".auth')" \
   #     -I https://registry.homelab.internal/v2/ci-packages/minio/manifests/<tag> \
   #     | grep -i docker-content-digest
-  tag: RELEASE.2024-12-18T13-15-44Z@sha256:34c8e2f52a5984492555427fee07254c80036bdb7079bb91679232abd7a4fa20
+  # Digest UPDATED 2026-06-27 after #43 registry-blobs rotation:
+  # the re-mirror used `crane copy` (which preserves the upstream
+  # manifest as-is), so the Forgejo-side digest now MATCHES the
+  # upstream quay.io digest. Previous wrapping behaviour (the
+  # `34c8e2f5…` digest the pin used to hold) came from an earlier
+  # `mc mirror`-based push. Going forward, mirrors should use
+  # crane to keep digests stable across upstream + first-party.
+  tag: RELEASE.2024-12-18T13-15-44Z@sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3
 
 # The MinIO chart creates its own ServiceAccount (`minio-sa`)
 # rather than using the namespace's `default`, so attaching the

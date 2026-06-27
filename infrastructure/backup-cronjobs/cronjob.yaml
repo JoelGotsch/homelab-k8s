@@ -77,7 +77,10 @@ spec:
               # Packages re-wraps manifests on push; the served
               # digest differs from quay/dockerhub. See
               # minio-on-nas/values.yaml for the curl recipe.
-              image: registry.homelab.internal/ci-packages/mc:RELEASE.2025-04-08T15-39-49Z@sha256:9ba8cb7340dd57ee994f6e2a8e45bc0dde9d5369615b03c6021105e5b9ce4449
+              # Digest UPDATED 2026-06-27 — fresh `crane copy` mirror
+              # preserves upstream digest (was previously re-wrapped by
+              # `mc mirror`). See minio-on-nas/values.yaml comment.
+              image: registry.homelab.internal/ci-packages/mc:RELEASE.2025-04-08T15-39-49Z@sha256:7e3efb09c22c0882fbf341b9d99f61f94ae6c4c20a06f2f1a2b20ea8993d8952
               imagePullPolicy: IfNotPresent
               command:
                 - /bin/sh
