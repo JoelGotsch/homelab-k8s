@@ -49,7 +49,12 @@ image:
   # the #43 registry-blobs crypt rotation (encrypted under old
   # password, unreadable post-swap). v0.0.2 is the first
   # rebuilt-and-pushed image (commit 2a1957a + mypy 1.11 fix).
-  tag: "v0.0.2"  # OPERATOR PINS via Renovate
+  # Digest pinned per Kyverno policy require-first-party-image-
+  # digest — fetch via:
+  #   curl -sk -H "Authorization: Basic <auth>" \
+  #     -I https://registry.homelab.internal/v2/forgejo-admin/llm-gateway/manifests/<tag> \
+  #     | grep -i docker-content-digest
+  tag: "v0.0.2@sha256:bbf5e82787128dfd3d5bec6f467d41e8873ec1ee5e8320cda5ffe6eb84770487"  # OPERATOR PINS via Renovate
   pullPolicy: IfNotPresent
 
 # The chart consumes a Secret with key `masterkey`. We point it
