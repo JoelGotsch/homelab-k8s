@@ -9,6 +9,28 @@
 
 replicaCount: 2
 
+# Soft anti-affinity against worker1. Same workaround as
+# infrastructure/minio-on-nas/values.yaml — kubelet pulls of
+# registry.homelab.internal/* images intermittently fail with
+# "could not fetch content descriptor … not found" when the
+# pulling pod is co-located with Forgejo (which writes to the
+# same csi-rclone-crypt mount the kubelet reads from). The
+# litellm-helm chart's affinity is shared by the main
+# Deployment AND the migrationJob — both pull from
+# registry.homelab.internal, both benefit.
+#
+# Remove when Forgejo migrates off worker1 OR csi-rclone vfs
+# concurrent-IO is fixed.
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: NotIn
+              values: [worker1]
+
 image:
   # Forgejo Packages OCI registry namespaces images by owner. The bot
   # `ci-packages` is in the `forgejo-admin` user namespace, so its
