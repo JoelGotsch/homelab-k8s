@@ -79,6 +79,21 @@ db:
   useExisting: true
   endpoint: "postgresql://llm-gateway-rw.llm-gateway.svc:5432/litellm"
   database: litellm
+  # Wire chart's migrationJob (which reads DATABASE_{USERNAME,
+  # PASSWORD,HOST} via secretKeyRef) at CNPG's auto-generated
+  # `llm-gateway-app` Secret. CNPG names the keys `user` +
+  # `password` + `host` (NOT the chart's `username`+`password`
+  # defaults). Without this override the Job's pod fails
+  # CreateContainerConfigError on "secret 'postgres' not found".
+  # Added 2026-06-27 during #43 close-out — the migration Job
+  # has been broken since the chart was wired to CNPG but the
+  # break was masked by the v0.0.1 ImagePullBackOff (also from
+  # #43).
+  secret:
+    name: llm-gateway-app
+    usernameKey: user
+    passwordKey: password
+    endpointKey: host
 
 # Inline LiteLLM proxy config. Mirrors
 # llm-gateway/policies/proxy_config.example.yaml — operator
