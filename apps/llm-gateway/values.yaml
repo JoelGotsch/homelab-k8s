@@ -265,11 +265,11 @@ volumeMounts:
 # are PRESIDIO_ANALYZER_API_BASE + PRESIDIO_ANONYMIZER_API_BASE.
 # Both Services are in the same namespace as LiteLLM (per
 # presidio-deployment.yaml).
-env:
-  - name: PRESIDIO_ANALYZER_API_BASE
-    value: http://presidio-analyzer.llm-gateway.svc.cluster.local:3000
-  - name: PRESIDIO_ANONYMIZER_API_BASE
-    value: http://presidio-anonymizer.llm-gateway.svc.cluster.local:3000
+# Chart's key is `envVars` (map), not `env`. Discovered 2026-06-28
+# during #75 close-out — using `env:` silently drops the values.
+envVars:
+  PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer.llm-gateway.svc.cluster.local:3000
+  PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer.llm-gateway.svc.cluster.local:3000
 
 # Mount the rendered allowlist ConfigMap at /etc/litellm/policies.
 volumes:
