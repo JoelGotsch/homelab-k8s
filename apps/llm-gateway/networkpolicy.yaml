@@ -97,16 +97,20 @@ spec:
         - ports:
             - port: "3000"
               protocol: TCP
-    # Mac Studio inference VLAN — operator inserts the actual
-    # /32 once known. Keep as a placeholder ipBlock.
-    - toCIDR:
-        - <MAC_STUDIO_INFERENCE_IP>/32
-      toPorts:
-        - ports:
-            - port: "8080"
-              protocol: TCP
-            - port: "11434"
-              protocol: TCP
+    # Mac Studio inference VLAN — Cilium's CIDR validator rejects
+    # the `<MAC_STUDIO_INFERENCE_IP>/32` placeholder string, which
+    # blocks Argo's sync of the entire app. Commented out until the
+    # operator lands the real Mac Studio IP (#75 close-out
+    # 2026-06-28). Uncomment + substitute when the inference VLAN
+    # is wired up.
+    # - toCIDR:
+    #     - <MAC_STUDIO_INFERENCE_IP>/32
+    #   toPorts:
+    #     - ports:
+    #         - port: "8080"
+    #           protocol: TCP
+    #         - port: "11434"
+    #           protocol: TCP
     # WAN egress for upstream LLM providers (Anthropic, OpenAI).
     # Cluster-egress goes through the WAN gateway; this rule is
     # the "everything else" allow. If tighter needed later,
