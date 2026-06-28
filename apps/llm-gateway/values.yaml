@@ -235,6 +235,22 @@ environmentSecrets:
   - llm-gateway-secrets
   - llm-gateway-app
 
+# Mount the policy ConfigMap into /etc/litellm/policies/ so the
+# llm_gateway.hooks.pre_call.TagEnforcer + load_provider_policy /
+# load_mcp_policy can read provider-allowlist.yaml + mcp-allowlist
+# .yaml at the paths they default to. Without this the hook's
+# constructor raises at module import time and LiteLLM reports
+# "Could not import handler from llm_gateway.hooks.pre_call".
+# Added 2026-06-28 during #75 close-out.
+volumes:
+  - name: policies
+    configMap:
+      name: llm-gateway-policies
+volumeMounts:
+  - name: policies
+    mountPath: /etc/litellm/policies
+    readOnly: true
+
 # Presidio service URLs — LiteLLM reads these to know where
 # the analyzer + anonymizer live. Per
 # litellm-docs/proxy/guardrails/pii_masking_v2: env names
