@@ -100,6 +100,27 @@ db:
     passwordKey: password
     endpointKey: host
 
+# migrationJob hook ordering (#75 fix). Chart default makes the
+# Job an Argo PreSync hook, which runs BEFORE the CNPG cluster
+# is applied → chicken-and-egg ("secret 'llm-gateway-app' not
+# found"). Disabling the argocd hook annotation makes the Job a
+# regular resource Argo applies in the normal wave, after the
+# CNPG cluster is up. The Job's own retry+backoff handles any
+# transient CNPG-not-ready-yet on the first sync.
+#
+# backoffLimit + ttl bumped so we can inspect a failed pod's
+# logs without job-controller's BackoffLimitExceeded sweep
+# deleting it immediately. Once #75 is closed, can drop ttl
+# back to chart default (120s).
+migrationJob:
+  hooks:
+    argocd:
+      enabled: false   # no PreSync hook
+    helm:
+      enabled: false   # no Helm hook either
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 3600
+
 # Inline LiteLLM proxy config. Mirrors
 # llm-gateway/policies/proxy_config.example.yaml — operator
 # keeps this in sync (Renovate cannot — semantic drift).
