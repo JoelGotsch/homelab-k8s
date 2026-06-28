@@ -33,16 +33,23 @@ resources:
 # tolerate the worst-case reconcile spike actually observed on the
 # higher-replica nodes.
 #
-# Bumping to 2Gi based on:
-#   - Worker2 + worker3 hit the 1Gi ceiling and OOM-loop;
-#     2Gi gives 2x headroom which should cover the spike.
-#   - Each worker has ~31 GB total + ~8 GB free even at current
-#     load, so 2Gi cap is comfortable from the node-perspective.
-#   - Talos OOMController kicks in at ~85% node-mem util;
-#     longhorn-manager at 2Gi is 6.3% of a 31 GB worker, well
-#     below any node-OOM threshold. The #34 cascade-prevention
-#     intent is preserved.
-# Request unchanged at 256 MiB.
+# 2026-06-26 #35 baseline showed dfb4q (worker2, 89 replicas) at
+# 1916 MB out of the 2 GiB cap — within 6% of the ceiling at
+# steady state. By 2026-06-28 the OOM-loop got worse: worker2's
+# longhorn-manager at 545 restarts in 3d, worker3's at 537.
+# Side-effect: volumes stuck in mid-attach state, blocking
+# Woodpecker step PVCs and breaking CI rolls.
+#
+# Bumping to 4Gi based on:
+#   - Worker2's working-set was 1916 MB steady state + spikes;
+#     4 GiB doubles the headroom and rides through the spike
+#     plus snapshot-purge bursts.
+#   - 4 GiB is 12.7% of a 31 GB worker — well under any node-
+#     OOM threshold. Talos OOMController triggers at ~85%
+#     node-mem; longhorn-manager would have to misbehave a
+#     LOT to threaten that.
+#   - Request unchanged at 256 MiB — base load is small; the
+#     larger limit only matters during reconcile spikes.
 patches:
 - target:
     kind: DaemonSet
@@ -62,7 +69,7 @@ patches:
                   memory: 256Mi
                   cpu: 100m
                 limits:
-                  memory: 2Gi
+                  memory: 4Gi
 # NOTE on fresh-install bootstrap:
 # Earlier this dir carried `bootstrap-sa.yaml` to pre-create
 # `longhorn-service-account` (+ ClusterRole/Binding) so the
