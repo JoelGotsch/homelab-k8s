@@ -45,16 +45,24 @@ image:
   # D3 + Kyverno require-first-party-image-digest enforce mode on
   # the next CI push.
   repository: registry.homelab.internal/forgejo-admin/llm-gateway
-  # Bumped 2026-06-27 to v0.0.2 — v0.0.1 blobs were lost during
-  # the #43 registry-blobs crypt rotation (encrypted under old
-  # password, unreadable post-swap). v0.0.2 is the first
-  # rebuilt-and-pushed image (commit 2a1957a + mypy 1.11 fix).
+  # Bumped 2026-06-28 to v0.0.4 — the v0.0.2 image worked for
+  # the Deployment but litellm's get_instance_fn() couldn't find
+  # the hook callback module (FILE-PATH lookup at
+  # /etc/litellm/llm_gateway/...). v0.0.4 Dockerfile adds a
+  # second symlink (/etc/litellm/llm_gateway → site-packages/
+  # llm_gateway) on top of v0.0.3's /app/litellm symlink so both
+  # LiteLLM's PreSync migrations command AND the proxy's callback
+  # resolver find what they expect. Per task #75.
+  #
+  # History: v0.0.1 was lost during #43 (registry-blobs crypt
+  # rotation). v0.0.2 first rebuild + mypy 1.11 floor.
+  # v0.0.3 added /app/litellm symlink. v0.0.4 adds the second
+  # symlink for the proxy callback resolver.
+  #
   # Digest pinned per Kyverno policy require-first-party-image-
-  # digest — fetch via:
-  #   curl -sk -H "Authorization: Basic <auth>" \
-  #     -I https://registry.homelab.internal/v2/forgejo-admin/llm-gateway/manifests/<tag> \
-  #     | grep -i docker-content-digest
-  tag: "v0.0.2@sha256:bbf5e82787128dfd3d5bec6f467d41e8873ec1ee5e8320cda5ffe6eb84770487"  # OPERATOR PINS via Renovate
+  # digest; fetch via the curl-against-/v2/.../manifests/<tag>
+  # recipe in the digest-pin-enforce-allowlist guide.
+  tag: "v0.0.4@sha256:6a5ab05dec3a66f4448af11e610c1479c71b340cf1a785ef1762ea653bf3cff8"  # OPERATOR PINS via Renovate
   pullPolicy: IfNotPresent
 
 # The chart consumes a Secret with key `masterkey`. We point it
