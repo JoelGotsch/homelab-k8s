@@ -128,22 +128,28 @@ migrationJob:
 # inference-VLAN address.
 proxy_config:
   model_list:
+    # 2026-06-28: routed through OpenRouter (single upstream
+    # account) rather than direct Anthropic + OpenAI APIs.
+    # LiteLLM provider slug `openrouter/<provider>/<model>`
+    # tells the proxy to dial https://openrouter.ai/api/v1 with
+    # OPENROUTER_API_KEY. Per-model spend tracking still works
+    # — LiteLLM logs the resolved model.
     - model_name: claude-sonnet
       litellm_params:
-        model: claude-3-5-sonnet-20241022
-        api_key: os.environ/ANTHROPIC_API_KEY
+        model: openrouter/anthropic/claude-3.5-sonnet
+        api_key: os.environ/OPENROUTER_API_KEY
     - model_name: claude-opus
       litellm_params:
-        model: claude-3-opus-20240229
-        api_key: os.environ/ANTHROPIC_API_KEY
+        model: openrouter/anthropic/claude-3-opus
+        api_key: os.environ/OPENROUTER_API_KEY
     - model_name: gpt-4o
       litellm_params:
-        model: gpt-4o
-        api_key: os.environ/OPENAI_API_KEY
+        model: openrouter/openai/gpt-4o
+        api_key: os.environ/OPENROUTER_API_KEY
     - model_name: gpt-4o-mini
       litellm_params:
-        model: gpt-4o-mini
-        api_key: os.environ/OPENAI_API_KEY
+        model: openrouter/openai/gpt-4o-mini
+        api_key: os.environ/OPENROUTER_API_KEY
     - model_name: mac-qwen-14b
       litellm_params:
         model: openai/Qwen2.5-14B-Instruct-4bit
