@@ -62,7 +62,7 @@ image:
   # Digest pinned per Kyverno policy require-first-party-image-
   # digest; fetch via the curl-against-/v2/.../manifests/<tag>
   # recipe in the digest-pin-enforce-allowlist guide.
-  tag: "v0.0.4@sha256:6a5ab05dec3a66f4448af11e610c1479c71b340cf1a785ef1762ea653bf3cff8"  # OPERATOR PINS via Renovate
+  tag: "v0.0.7@sha256:5d0f2f29ed5577806ef7ab6172f56c023ba868c65c986aee178bddc0209cec48"  # OPERATOR PINS via Renovate
   pullPolicy: IfNotPresent
 
 # The chart consumes a Secret with key `masterkey`. We point it
