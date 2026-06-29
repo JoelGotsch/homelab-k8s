@@ -70,10 +70,18 @@ spec:
         - ports:
             - port: "8200"
               protocol: TCP
-    # CloudNativePG cluster (budget/spend tracking).
+    # CloudNativePG cluster (budget/spend tracking). The CNPG
+    # cluster pods live in the SAME namespace as litellm (the
+    # `Cluster` CRD is in apps/llm-gateway/cnpg-cluster.yaml,
+    # not the shared `cnpg` namespace). The original `cnpg`
+    # namespace match was a copy-paste error from before the
+    # multi-tenant CNPG layout was standardized; it silently
+    # broke prisma connectivity once Cilium's default-deny took
+    # effect. Fixed 2026-06-29.
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: cnpg
+            k8s:io.kubernetes.pod.namespace: llm-gateway
+            cnpg.io/cluster: llm-gateway
       toPorts:
         - ports:
             - port: "5432"
