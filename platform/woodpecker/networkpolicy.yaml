@@ -208,6 +208,12 @@ spec:
         - matchName: "pypi.org"
         - matchName: "files.pythonhosted.org"
         - matchName: "registry.npmjs.org"
+        # Prisma engine binaries CDN — `prisma generate` downloads
+        # platform-specific schema-engine + query-engine from here
+        # at build time. Added 2026-06-29 for llm-gateway v0.0.11
+        # (Cloudflare-fronted, separate from production.cloudflare
+        # which covers Docker Hub).
+        - matchName: "binaries.prisma.sh"
         # GitHub (release archives, source for github-tags
         # / github-releases datasources, git+https deps)
         - matchName: "api.github.com"
