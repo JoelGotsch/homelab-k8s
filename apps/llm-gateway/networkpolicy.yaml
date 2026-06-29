@@ -232,3 +232,14 @@ spec:
         - ports:
             - port: "9187"
               protocol: TCP
+    # litellm proxy connects to postgres for budget/spend tracking.
+    # Without this, default-deny blocks the SYN-ACK back to litellm
+    # even though egress is allowed — connection times out silently.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: llm-gateway
+            app.kubernetes.io/name: litellm
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
