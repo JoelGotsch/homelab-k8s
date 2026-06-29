@@ -187,3 +187,40 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
+---
+# CNPG instance pods need INGRESS from the operator (cnpg-system) on the
+# instance-manager status port (8000) and from Prometheus (monitoring) on
+# the metrics port (9187). The namespace's default-deny NetworkPolicy
+# flips every llm-gateway pod — including the CNPG instances — to ingress
+# default-deny, so the operator's probe to :8000 timed out
+# ("Get https://<pod-ip>:8000/pg/status: i/o timeout") → after the primary
+# died with worker1's spontaneous reboot 2026-06-29, the operator couldn't
+# confirm llm-gateway-2 was healthy and never promoted it. Cluster stuck in
+# "Cluster Is Not Ready" + `llm-gateway-rw` Service had no endpoints.
+# Same pattern as paperless-pg-operator-ingress. Added 2026-06-29.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: llm-gateway-pg-operator-ingress
+  namespace: llm-gateway
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: llm-gateway
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+            - port: "9187"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "9187"
+              protocol: TCP
