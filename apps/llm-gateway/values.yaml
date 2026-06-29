@@ -293,10 +293,14 @@ ingress:
 resources:
   requests:
     cpu: 200m
-    memory: 512Mi
+    memory: 768Mi
   limits:
     cpu: "1"
-    memory: 1Gi
+    # Bumped 2026-06-29 from 1Gi — v0.0.11 image has the prisma
+    # engine binaries + bundled node (419MB image). Boot-time
+    # memory peaks crossed the 1Gi ceiling, OOMKilled the pod
+    # before startup probe could pass.
+    memory: 2Gi
 
 serviceMonitor:
   enabled: true
