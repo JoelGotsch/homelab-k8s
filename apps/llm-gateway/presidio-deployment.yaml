@@ -96,8 +96,18 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            # Poetry (the base image's dep manager) creates virtualenvs
+            # at /.cache/pypoetry/virtualenvs on container start;
+            # readOnlyRootFilesystem otherwise blocks it and the
+            # container exits with "destination . is not write-able
+            # at /". Discovered 2026-07-01 after 21h of CrashLoopBackOff.
+            - name: dot-cache
+              mountPath: /.cache
       volumes:
         - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: dot-cache
           emptyDir:
             sizeLimit: 256Mi
 ---
@@ -189,10 +199,20 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            # Poetry (the base image's dep manager) creates virtualenvs
+            # at /.cache/pypoetry/virtualenvs on container start;
+            # readOnlyRootFilesystem otherwise blocks it and the
+            # container exits with "destination . is not write-able
+            # at /". Discovered 2026-07-01 after 21h of CrashLoopBackOff.
+            - name: dot-cache
+              mountPath: /.cache
       volumes:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
+        - name: dot-cache
+          emptyDir:
+            sizeLimit: 128Mi
 ---
 apiVersion: v1
 kind: Service
