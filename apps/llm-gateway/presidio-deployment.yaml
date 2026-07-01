@@ -68,6 +68,12 @@ spec:
               value: "3000"
             # Default: NLP engine = spacy with en_core_web_lg
             # model (~750MB; included in image).
+            # Skip poetry venv creation — the image ships gunicorn +
+            # deps as system-installed Python packages. With a fresh
+            # emptyDir /.cache, poetry would create an empty venv and
+            # then `poetry run gunicorn` can't find gunicorn.
+            - name: POETRY_VIRTUALENVS_CREATE
+              value: "false"
           livenessProbe:
             httpGet:
               path: /health
@@ -173,6 +179,8 @@ spec:
           env:
             - name: PORT
               value: "3000"
+            - name: POETRY_VIRTUALENVS_CREATE
+              value: "false"
           livenessProbe:
             httpGet:
               path: /health
