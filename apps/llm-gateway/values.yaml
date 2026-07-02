@@ -142,22 +142,35 @@ proxy_config:
     # tells the proxy to dial https://openrouter.ai/api/v1 with
     # OPENROUTER_API_KEY. Per-model spend tracking still works
     # — LiteLLM logs the resolved model.
+    # Presidio guardrail is opt-in per-model (see the
+    # `guardrails:` block below with `default_on: false`).
+    # Only external-egress models (OpenRouter → openrouter.ai)
+    # get scanned; Mac Studio calls stay entirely in-homelab so
+    # PII redaction adds no defense there — just cost. Per
+    # 99-journal/2026-07-02-presidio-per-model-guardrail.md.
     - model_name: claude-sonnet
       litellm_params:
         model: openrouter/anthropic/claude-3.5-sonnet
         api_key: os.environ/OPENROUTER_API_KEY
+        guardrails: [presidio-pii-mask]
     - model_name: claude-opus
       litellm_params:
         model: openrouter/anthropic/claude-3-opus
         api_key: os.environ/OPENROUTER_API_KEY
+        guardrails: [presidio-pii-mask]
     - model_name: gpt-4o
       litellm_params:
         model: openrouter/openai/gpt-4o
         api_key: os.environ/OPENROUTER_API_KEY
+        guardrails: [presidio-pii-mask]
     - model_name: gpt-4o-mini
       litellm_params:
         model: openrouter/openai/gpt-4o-mini
         api_key: os.environ/OPENROUTER_API_KEY
+        guardrails: [presidio-pii-mask]
+    # Mac Studio models — no guardrails key = presidio skipped.
+    # Data never leaves the homelab so PII redaction is dead
+    # weight (and adds ~30ms + 2 sidecar hops per request).
     - model_name: mac-qwen-14b
       litellm_params:
         model: openai/Qwen2.5-14B-Instruct-4bit
@@ -191,6 +204,12 @@ proxy_config:
   # slip past tagging — e.g., a public-tagged prompt that
   # nevertheless contains a credit-card number or API key.
   # Per 99-journal/2026-05-02-presidio-litellm-integration.md.
+  #
+  # `default_on: false` — the guardrail is defined here but only
+  # runs for models that opt in via `litellm_params.guardrails:
+  # [presidio-pii-mask]`. Mac Studio models deliberately don't
+  # opt in (data never leaves homelab, PII scan is pure cost).
+  # Per 99-journal/2026-07-02-presidio-per-model-guardrail.md.
   guardrails:
     - guardrail_name: presidio-pii-mask
       litellm_params:
@@ -199,6 +218,7 @@ proxy_config:
         # model. `presidio_filter_scope: both` also scans
         # model output (catches LLM-hallucinated PII).
         mode: pre_call
+        default_on: false
         presidio_filter_scope: both
         # Per-entity confidence thresholds. Higher = stricter
         # detection. 0.7 is upstream's "balanced" default;
