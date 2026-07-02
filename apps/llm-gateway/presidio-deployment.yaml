@@ -57,7 +57,7 @@ spec:
       containers:
         - name: analyzer
           # OPERATOR PINS via Renovate.
-          image: mcr.microsoft.com/presidio-analyzer:2.2.358
+          image: mcr.microsoft.com/presidio-analyzer:2.2.362@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -68,12 +68,6 @@ spec:
               value: "3000"
             # Default: NLP engine = spacy with en_core_web_lg
             # model (~750MB; included in image).
-            # Skip poetry venv creation — the image ships gunicorn +
-            # deps as system-installed Python packages. With a fresh
-            # emptyDir /.cache, poetry would create an empty venv and
-            # then `poetry run gunicorn` can't find gunicorn.
-            - name: POETRY_VIRTUALENVS_CREATE
-              value: "false"
           livenessProbe:
             httpGet:
               path: /health
@@ -102,18 +96,8 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            # Poetry (the base image's dep manager) creates virtualenvs
-            # at /.cache/pypoetry/virtualenvs on container start;
-            # readOnlyRootFilesystem otherwise blocks it and the
-            # container exits with "destination . is not write-able
-            # at /". Discovered 2026-07-01 after 21h of CrashLoopBackOff.
-            - name: dot-cache
-              mountPath: /.cache
       volumes:
         - name: tmp
-          emptyDir:
-            sizeLimit: 256Mi
-        - name: dot-cache
           emptyDir:
             sizeLimit: 256Mi
 ---
@@ -170,7 +154,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: anonymizer
-          image: mcr.microsoft.com/presidio-anonymizer:2.2.358
+          image: mcr.microsoft.com/presidio-anonymizer:2.2.362@sha256:a10a12a2a613d13cf29d3ad3641e3258444dd8c90403dd644a0a114c472c2483
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -179,8 +163,6 @@ spec:
           env:
             - name: PORT
               value: "3000"
-            - name: POETRY_VIRTUALENVS_CREATE
-              value: "false"
           livenessProbe:
             httpGet:
               path: /health
@@ -207,20 +189,10 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            # Poetry (the base image's dep manager) creates virtualenvs
-            # at /.cache/pypoetry/virtualenvs on container start;
-            # readOnlyRootFilesystem otherwise blocks it and the
-            # container exits with "destination . is not write-able
-            # at /". Discovered 2026-07-01 after 21h of CrashLoopBackOff.
-            - name: dot-cache
-              mountPath: /.cache
       volumes:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
-        - name: dot-cache
-          emptyDir:
-            sizeLimit: 128Mi
 ---
 apiVersion: v1
 kind: Service
