@@ -75,3 +75,39 @@ repos:
         # of the 2026-06-03 PII audit (authentik.yml.example +
         # scripts/README.md were leaking the literal). Allowlist
         # lives at the top of the script.
+
+      - id: check-openbao-paths-coverage
+        name: every ExternalSecret kv path is declared in homelab-infra inventory
+        entry: >-
+          bash -c '[ -d ../homelab-infra ]
+          || { echo "skip: homelab-infra not checked out"; exit 0; };
+          ../homelab-infra/scripts/check-openbao-paths-coverage.sh'
+        language: system
+        pass_filenames: false
+        files: 'externalsecret.*\.ya?ml$'
+        # Mirror of the homelab-infra coverage hook (plan B5 step 2):
+        # ES-path drift ORIGINATES in this repo, so the guard must
+        # block here too. The script is cross-repo aware ($HK8S) and
+        # relies on the side-by-side clone convention (CLAUDE.md
+        # workspace map); it skips cleanly when homelab-infra isn't
+        # checked out (e.g. single-repo CI). Local script, no
+        # third-party hook repo — per the header policy above.
+
+      - id: check-synced-scripts
+        name: tri-repo synced scripts are byte-identical
+        entry: >-
+          bash -c 'for f in check-broken-links.sh check-no-mac-addresses.sh
+          check-no-operator-email.sh; do
+          for r in ../homelab-docs ../homelab-infra ../homelab-k8s; do
+          [ -f "$r/scripts/$f" ] && [ -f "scripts/$f" ]
+          && ! cmp -s "scripts/$f" "$r/scripts/$f"
+          && { echo "DRIFT: $f vs $r"; exit 1; };
+          done; done; exit 0'
+        language: system
+        pass_filenames: false
+        # Plan B5 step 3. The canonical copies live in homelab-docs/
+        # scripts/ (per each script's own header); editing one copy
+        # without re-syncing the siblings silently forks the guard
+        # logic across repos. Always-on (cheap byte compares); repos
+        # not checked out side-by-side are skipped. Local inline
+        # logic, no third-party hook repo — per the header policy.
