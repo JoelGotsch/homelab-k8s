@@ -101,6 +101,12 @@ spec:
               skipped a step.
             runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
 
+        # NOTE (2026-07-07 verification): kube_job_status_completion_time
+        # has NO series in this namespace when no completed Job exists in
+        # the retained history (all-failed runs, or history aged out) —
+        # this expression is then an empty vector and CANNOT fire. The
+        # ResticSnapshotStale alert below covers that quiet path via
+        # CronJob-level metrics + absent().
         - alert: BackupCronJobMissing24h
           # If no successful Job has finished within the last
           # 24h (cronjob runs daily), something's wrong even
@@ -127,4 +133,56 @@ spec:
               Inspect:
                 kubectl -n backup-cronjobs get cronjobs
                 kubectl -n backup-cronjobs get jobs --sort-by=.status.startTime
+            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+
+    - name: backup-cronjobs.staleness
+      interval: 1m
+      rules:
+        # A5a (review 2026-07): the quiet-failure path. A suspended or
+        # DELETED CronJob — or one that has never succeeded — produces
+        # no failure event and no kube_job_* series, so neither alert
+        # above can fire. Three clauses:
+        #   1. last success older than 2 days (suspended / silently
+        #      failing while lastSuccessfulTime ages);
+        #   2. CronJob object older than 2 days but NO
+        #      lastSuccessfulTime series at all (never succeeded —
+        #      kube-state-metrics only exports the metric once
+        #      .status.lastSuccessfulTime is set; verified live
+        #      2026-07-07: restic-minio-to-hetzner is in exactly this
+        #      state);
+        #   3. absent() — the CronJob object was deleted outright.
+        # CronJob-name regex matches the real object verified via
+        # `kubectl get cronjob -A` 2026-07-07: restic-minio-to-hetzner
+        # in namespace backup-cronjobs.
+        #
+        # PENDING (workspace rule 35 — operator step): failure-inject
+        # this alert before trusting it. `kubectl -n backup-cronjobs
+        # patch cronjob restic-minio-to-hetzner -p
+        # '{"spec":{"suspend":true}}'`, wait for the page to reach the
+        # phone, ack, unsuspend. Until then this is a paper guarantee.
+        - alert: ResticSnapshotStale
+          expr: |
+            (
+              time() - kube_cronjob_status_last_successful_time{namespace="backup-cronjobs",cronjob=~"restic-.*"}
+              > 86400 * 2
+            )
+            or
+            (
+              (time() - kube_cronjob_created{namespace="backup-cronjobs",cronjob=~"restic-.*"} > 86400 * 2)
+              unless kube_cronjob_status_last_successful_time{namespace="backup-cronjobs",cronjob=~"restic-.*"}
+            )
+            or
+            absent(kube_cronjob_created{namespace="backup-cronjobs",cronjob=~"restic-.*"})
+          for: 1h
+          labels:
+            severity: critical
+            component: backup-cronjobs
+          annotations:
+            summary: "Backup CronJob {{ $labels.cronjob }} has not succeeded in 2 days"
+            description: >-
+              No successful restic backup run for 2+ days (or the
+              CronJob was deleted / has never succeeded). Covers the
+              quiet-failure path: a suspended/deleted CronJob or a
+              credentials failure produces NO failure event. Review
+              finding docs-improvements.md L4/H1.
             runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
