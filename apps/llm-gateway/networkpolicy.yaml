@@ -47,6 +47,23 @@ spec:
       app.kubernetes.io/name: litellm
   ingress:
     # Cilium Gateway envoy — reserved `ingress` identity.
+    #
+    # Admin-UI / MCP exposure decision (2026-07, plan A3 hardening;
+    # LiteLLM's 2026 record: CVE-2026-42208 SQLi exploited in the
+    # wild, CVE-2026-42271 MCP command injection on CISA KEV):
+    # LiteLLM serves the proxy API, the admin UI (/ui) and MCP
+    # endpoints on the SAME port 4000, so this CNP cannot separate
+    # them — any consumer that may call /v1/* can also reach /ui and
+    # /mcp paths at the network layer. Enforcement is therefore:
+    #   * admin UI: disabled in-process via DISABLE_ADMIN_UI="True"
+    #     (values.yaml envVars; https://docs.litellm.ai/docs/proxy/ui).
+    #   * MCP: no MCP servers are configured in proxy_config (the
+    #     mcp-allowlist policy file is the gate); MCP endpoints
+    #     without configured servers expose no execution path, and
+    #     all callers still need a master-key-derived API key.
+    #   * reachability: only the Cilium Gateway (Tailscale-only
+    #     HTTPRoute) and monitoring may reach 4000 at all — the
+    #     gateway is never internet-exposed (ADR 0026).
     - fromEntities:
         - ingress
       toPorts:

@@ -290,6 +290,18 @@ volumeMounts:
 envVars:
   PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer.llm-gateway.svc.cluster.local:3000
   PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer.llm-gateway.svc.cluster.local:3000
+  # Disable the LiteLLM admin UI entirely (2026 hardening, plan A3 /
+  # docs-improvements M2). The proxy port stays open to consumers;
+  # /ui lives on the same port, so this env flag — not the CNP — is
+  # the enforcement. Env name + value verified against
+  # https://docs.litellm.ai/docs/proxy/ui ("Set DISABLE_ADMIN_UI=
+  # \"True\" in your environment to disable the Admin UI"); the
+  # enforcement fix is BerriAI/litellm PR #18397 (merged 2025-12-23,
+  # so present in any 2026 litellm build incl. this image). All
+  # admin/config changes go through this values file (GitOps), so
+  # the UI carries no operational value here — only attack surface
+  # (2026 SQLi CVE-2026-42208 was reachable via UI/API key paths).
+  DISABLE_ADMIN_UI: "True"
 
 service:
   type: ClusterIP
