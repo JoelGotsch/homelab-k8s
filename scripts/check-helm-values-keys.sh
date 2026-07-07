@@ -233,8 +233,31 @@ for c in charts:
         problems += 1
         continue
 
+    vtext = vfp.read_text()
+
+    # NOTE(journal 2026-06-09-cluster-state-survey): guard against
+    # duplicate top-level keys. Commit 8cbc291 introduced a second
+    # top-level `tempo:` block; YAML last-key-wins silently overrode the
+    # original block (resources/securityContext lost) and yaml.safe_load
+    # below would hide it too. Detect on the raw text before parsing.
+    seen_top = {}
+    for lineno, line in enumerate(vtext.splitlines(), 1):
+        if line.strip() == "---":
+            seen_top = {}
+            continue
+        m = re.match(r"^([A-Za-z0-9_.-]+):", line)
+        if m:
+            k = m.group(1)
+            if k in seen_top:
+                print(f"  ✗ {vfp}: duplicate top-level key '{k}:' "
+                      f"(lines {seen_top[k]} and {lineno}) — YAML last-key-wins "
+                      f"silently drops the earlier block")
+                problems += 1
+            else:
+                seen_top[k] = lineno
+
     try:
-        ours = yaml.safe_load(vfp.read_text()) or {}
+        ours = yaml.safe_load(vtext) or {}
     except yaml.YAMLError as e:
         print(f"  {vfp}: not valid YAML — {e}", file=sys.stderr)
         problems += 1
