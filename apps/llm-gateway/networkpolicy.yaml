@@ -243,6 +243,21 @@ spec:
         - ports:
             - port: "5432"
               protocol: TCP
+    # Streaming replication: the replica instance connects to the primary
+    # on 5432. Under the namespace default-deny (no same-ns allow here,
+    # unlike immich/paperless which open all same-ns pod-to-pod), the DB
+    # pods must explicitly permit each other on 5432 — otherwise the
+    # cluster clears the apiserver wait but never reaches 2/2. Paired with
+    # the matching egress rule below. (Netpol audit 2026-07-09, checklist
+    # item 21.)
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: llm-gateway
+            cnpg.io/cluster: llm-gateway
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
   # EGRESS for the CNPG instance pods. The namespace default-deny covers
   # Egress too, and this policy was the ONLY one selecting the DB pods —
   # but it shipped ingress-only (added 2026-06-29 for the operator probe).
@@ -289,4 +304,16 @@ spec:
       toPorts:
         - ports:
             - port: "9000"
+              protocol: TCP
+    # Streaming replication egress: replica → primary on 5432 (peer DB pod).
+    # Mirror of the replication ingress rule above; without it the replica
+    # can reach the apiserver but cannot connect to the primary, so the
+    # cluster stays 1/2. (Netpol audit 2026-07-09, checklist item 21.)
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: llm-gateway
+            cnpg.io/cluster: llm-gateway
+      toPorts:
+        - ports:
+            - port: "5432"
               protocol: TCP
