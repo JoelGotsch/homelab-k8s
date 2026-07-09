@@ -243,3 +243,50 @@ spec:
         - ports:
             - port: "5432"
               protocol: TCP
+  # EGRESS for the CNPG instance pods. The namespace default-deny covers
+  # Egress too, and this policy was the ONLY one selecting the DB pods —
+  # but it shipped ingress-only (added 2026-06-29 for the operator probe).
+  # Result: the instance-manager could not reach the kube-apiserver to read
+  # its Cluster CR ("dial tcp 10.96.0.1:443: i/o timeout" in wait-for-get-
+  # cluster) — llm-gateway-1 CrashLoopBackOff after worker1's reboot
+  # restarted it, and any restart of the surviving primary would have taken
+  # the whole DB down. llm-gateway-2 only survived because it predated the
+  # 2026-06-29 default-deny and kept an established connection. This mirrors
+  # the egress the paperless/immich CNPG clusters already carry (the missing
+  # half of CLAUDE.md rule 14). Added 2026-07-09.
+  egress:
+    # kube-dns — resolve the MinIO service + S3 endpoint for barman WAL.
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # CNPG instance manager → kube-apiserver. 10.96.0.1:443 is the reserved
+    # `kube-apiserver` Cilium entity, NOT a regular pod/CIDR. BOTH 443 and
+    # 6443: socket-LB translates the ClusterIP to the Talos backend (:6443)
+    # BEFORE egress policy is evaluated (CLAUDE.md rule 12).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # MinIO (cluster-internal — CNPG WAL/base-backup archiving). Lives in
+    # minio-on-nas, not `minio`.
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": minio-on-nas
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
