@@ -40,13 +40,25 @@ resources:
   - policies/homelab-require-namespace-resourcequota.yaml
   - policies/homelab-require-namespace-default-deny-netpol.yaml
   - policies/homelab-disallow-open-egress-cnp.yaml
-  - policies/homelab-disallow-unlimited-containers.yaml
-  - policies/homelab-warn-unlimited-cpu.yaml
+  # DEFERRED — Kyverno admission rejects these. Files kept in tree
+  # for reference; author fixes tracked in
+  # 05-projects/adr-0036-kyverno-policy-fixups.md:
+  #   - homelab-disallow-unlimited-containers: uses `element.name`
+  #     outside a foreach block (Kyverno v3 forbids this).
+  #   - homelab-warn-unlimited-cpu: same `element.name` issue.
+  #   - homelab-disallow-inline-secrets: LabelSelector values with
+  #     `/` (e.g. `kubernetes.io/service-account-token`) fail label
+  #     regex validation — needs CEL or a different match strategy.
+  # - policies/homelab-disallow-unlimited-containers.yaml
+  # - policies/homelab-warn-unlimited-cpu.yaml
   - policies/homelab-disallow-retain-reclaim-without-annotation.yaml
-  - policies/homelab-disallow-inline-secrets.yaml
+  # - policies/homelab-disallow-inline-secrets.yaml
   # Generators (paired with the require-* validators above):
   - policies/homelab-generate-default-limitrange.yaml
   - policies/homelab-generate-default-resourcequota.yaml
   - policies/homelab-generate-default-deny-netpol.yaml
   # Mutation policies (idempotent; enforce-ready):
-  - policies/homelab-mutate-openbao-pvc-retention.yaml
+  # DEFERRED — background-controller needs additional RBAC
+  # (update on v1/PersistentVolumeClaim in `{{ns}}`). Grant via
+  # Helm values or a separate ClusterRoleBinding, then re-enable.
+  # - policies/homelab-mutate-openbao-pvc-retention.yaml
