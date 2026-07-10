@@ -63,6 +63,40 @@ spec:
           - key: "{{ request.object.metadata.annotations.\"bypass.homelab.internal/homelab-generate-default-deny-netpol\" || '' }}"
             operator: Equals
             value: ""
+          # Skip infrastructure-tier namespaces — they don't have the
+          # Cilium CNPs that would re-open the required egress paths
+          # (Kyverno-in-kyverno needs apiserver egress; longhorn needs
+          # inter-worker etcd + iSCSI). Generating default-deny into
+          # these breaks the cluster (verified 2026-07-10 — Kyverno's
+          # own admission-controller couldn't reach the apiserver,
+          # cascading admission failures to every ns). Infra tier gets
+          # labels for classification but not the default-deny gate.
+          # App-tier apps have their own Cilium CNP shipped alongside
+          # each app manifest; those are the safe ns for this policy.
+          - key: "{{ request.object.metadata.name }}"
+            operator: AnyNotIn
+            value:
+              - kyverno
+              - longhorn-system
+              - longhorn-va-janitor
+              - cnpg-system
+              - cert-manager
+              - external-secrets
+              - trust-manager
+              - trivy-system
+              - clickhouse-operator
+              - cloudflare-tunnel
+              - csi-rclone-system
+              - minio-on-nas
+              - nfs-csi
+              - spegel
+              - backup-cronjobs
+              - monitoring
+              - observability-crowdsec
+              - observability-benchmarks
+              - observability-tempo
+              - kube-system
+              - argocd
       generate:
         apiVersion: networking.k8s.io/v1
         kind: NetworkPolicy
