@@ -62,7 +62,7 @@ image:
 persistence:
   config:
     enabled: true
-    storageClassName: longhorn-replica2-retain
+    storageClassName: longhorn-replica2
     size: 20Gi
     accessModes:
       - ReadWriteOnce

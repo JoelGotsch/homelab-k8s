@@ -93,7 +93,7 @@ storage:
     # 2026-07-09 ADR 0036: migrate to -retain family. /data holds
     # the RSA keypair (JWT signing), icon cache, sends + attachments.
     # A stray PVC delete would invalidate every issued JWT.
-    class: "longhorn-replica3-retain"
+    class: "longhorn-replica3"
     path: "/data"
     accessMode: "ReadWriteOnce"
 

@@ -36,7 +36,7 @@ metadata:
 spec:
   accessModes: [ReadWriteOnce]
   # 2026-07-09 ADR 0036: migrate to -retain family.
-  storageClassName: longhorn-replica2-retain
+  storageClassName: longhorn-replica2
   resources:
     requests:
       # Sized for: SQLite WAL leftovers (none — we use CNPG),

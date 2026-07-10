@@ -42,7 +42,7 @@ spec:
   accessModes: [ReadWriteMany]
   # 2026-07-09 ADR 0036: migrate to -retain family. Default
   # longhorn-replica2 is now reclaim=Delete (ephemeral).
-  storageClassName: longhorn-replica2-retain
+  storageClassName: longhorn-replica2
   resources:
     requests:
       # Right-sized 2026-07-09 per ADR 0036 audit — actual usage

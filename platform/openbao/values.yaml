@@ -53,12 +53,12 @@ server:
     accessMode: ReadWriteOnce
     enabled: true
     size: 5Gi
-    storageClass: longhorn-replica2-retain
+    storageClass: longhorn-replica2
   dataStorage:
     accessMode: ReadWriteOnce
     enabled: true
     size: 10Gi
-    storageClass: longhorn-replica2-retain
+    storageClass: longhorn-replica2
   extraEnvironmentVars:
     OPENBAO_CLUSTER_NAME: homelab
     # In-pod bao client talks to its own listener over HTTPS;
