@@ -42,22 +42,36 @@ spec:
     # above every current app's footprint but well below the
     # 96-PV Woodpecker orphan count that triggered ADR 0036.
     count/persistentvolumeclaims: "20"
-    # Aggregate PVC storage per namespace. Longhorn's
-    # storage-over-provisioning-percentage is set to 200 (ADR
-    # 0036 D7), so this ceiling can be generous — the tripwire
-    # is the schedulable-headroom alert, not this quota.
-    requests.storage: "500Gi"
+    # Per-StorageClass storage cap, scoped to Longhorn only.
+    # NAS-crypt PVCs (immich media, nextcloud family files,
+    # jellyfin library) are on a separate substrate and can
+    # legitimately be multi-TB — they don't count against
+    # Longhorn's schedulable capacity, so counting them here
+    # would trip apps that have zero Longhorn footprint on
+    # storage-scale that's irrelevant to the ADR 0036 concern.
+    # 1 TiB per Longhorn SC per namespace is generous vs
+    # current steady state (biggest single Longhorn PVC is
+    # ~100 GiB, largest per-ns sum is under 200 GiB).
+    longhorn-replica2.storageclass.storage.k8s.io/requests.storage: "1Ti"
+    longhorn-replica3.storageclass.storage.k8s.io/requests.storage: "1Ti"
+    longhorn-replica2-retain.storageclass.storage.k8s.io/requests.storage: "1Ti"
+    longhorn-replica3-retain.storageclass.storage.k8s.io/requests.storage: "1Ti"
 
     # ---- Service exposure ----
-    # No LoadBalancer or NodePort Services in first-party
-    # namespaces. All external ingress flows through the
-    # Cilium Gateway per ADR 0024. This closes the
-    # accidentally-public-Service exposure gap that Kyverno's
-    # `homelab-no-loadbalancer-or-nodeport` policy also covers
-    # at admission time; the ResourceQuota is the belt to
-    # Kyverno's suspenders.
-    count/services.loadbalancers: "0"
+    # NodePort Services forbidden — the port-range collision
+    # risk + inconsistent-IP-source pattern have no legitimate
+    # use in the cluster. Every external path goes through the
+    # Cilium Gateway per ADR 0024.
     count/services.nodeports: "0"
+    # LoadBalancer count capped at 2 — Forgejo needs one for
+    # SSH (git+ssh://) and future apps may need one for
+    # non-HTTP protocols the Gateway doesn't handle. Kyverno's
+    # `homelab-disallow-open-egress-cnp` sibling could be
+    # extended to audit LB Services if the ceiling here needs
+    # tightening; keeping it at 2 avoids the 2026-07-10-
+    # discovered false-positive on forgejo where a `0` cap
+    # would have broken existing steady state.
+    count/services.loadbalancers: "2"
 
     # ---- Object counts ----
     # Pod-count cap: 40 is well above steady-state (~5-15 for
