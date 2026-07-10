@@ -35,7 +35,6 @@ resources:
 # + ResourceQuota + default-deny scaffold into the already-
 # existing ns.
 components:
-  - ../../components/first-party-namespace
 
 # Patch the chart-rendered StatefulSet: switch
 # podManagementPolicy from the chart's hardcoded OrderedReady

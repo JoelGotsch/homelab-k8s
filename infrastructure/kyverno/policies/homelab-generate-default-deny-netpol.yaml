@@ -76,6 +76,8 @@ spec:
           - key: "{{ request.object.metadata.name }}"
             operator: AnyNotIn
             value:
+              # Infrastructure tier — kernel/CSI/network dependencies,
+              # no Cilium CNP layer to re-permit their egress.
               - kyverno
               - longhorn-system
               - longhorn-va-janitor
@@ -97,6 +99,15 @@ spec:
               - observability-tempo
               - kube-system
               - argocd
+              # App-tier but no complete Cilium CNP allowlist yet —
+              # adding default-deny cuts off DNS + peer traffic and
+              # cascades. Verified 2026-07-10 when openbao-1/2 raft
+              # members couldn't reach kube-DNS after the merge, quorum
+              # broke, ESO stalled, cascade continued. Opt back in
+              # once these namespaces ship a full CNP allowlist per
+              # ADR 0036 D2 §Egress scaffold.
+              - openbao
+              - approval-channel
       generate:
         apiVersion: networking.k8s.io/v1
         kind: NetworkPolicy
