@@ -101,13 +101,35 @@ spec:
               - argocd
               # App-tier but no complete Cilium CNP allowlist yet —
               # adding default-deny cuts off DNS + peer traffic and
-              # cascades. Verified 2026-07-10 when openbao-1/2 raft
-              # members couldn't reach kube-DNS after the merge, quorum
-              # broke, ESO stalled, cascade continued. Opt back in
-              # once these namespaces ship a full CNP allowlist per
-              # ADR 0036 D2 §Egress scaffold.
+              # cascades. Verified 2026-07-10:
+              # - openbao-1/2 couldn't reach kube-DNS post-merge,
+              #   quorum broke, ESO stalled.
+              # - forgejo-pg entered "Failing over" and stuck as a
+              #   split-brain (both pods self-promoted, no
+              #   replication, ~2MB LSN divergence) — cnpg-system
+              #   couldn't reach the instance status-probe port.
+              # - nextcloud-pg + vaultwarden-pg reported
+              #   "Instance Status Extraction Error" for the same
+              #   cnpg-system-to-instance HTTP path.
+              # CLAUDE.md rule 14: a namespace-wide podSelector:{}
+              # policy conscripts operator pods (cnpg-system status
+              # probes need :8000 ingress).
+              # Opt these back in once each namespace ships a full
+              # Cilium CNP allowlist that permits cnpg-system :8000
+              # ingress + apiserver egress (443+6443) + kube-DNS.
               - openbao
               - approval-channel
+              # CNPG-hosting namespaces (until per-ns CNPs cover the
+              # cnpg-system operator paths):
+              - authentik
+              - forgejo
+              - immich
+              - langfuse
+              - llm-gateway
+              - nextcloud
+              - observability-crowdsec
+              - paperless
+              - vaultwarden
       generate:
         apiVersion: networking.k8s.io/v1
         kind: NetworkPolicy
