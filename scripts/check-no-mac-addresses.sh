@@ -25,6 +25,12 @@ set -eu
 
 EXEMPT=(
   "scripts/check-no-mac-addresses.sh"  # this script's regex literal
+  # Trust-manager root-CA bundle carries a SHA-1 fingerprint of the
+  # homelab-internal-issuer root cert (20 hex bytes prefixed `SHA1:`
+  # per RFC 5280). The 6-byte-pair regex matches substrings of that
+  # 20-byte fingerprint. Not a MAC — same style is used across every
+  # PKI toolchain that prints certificate digests. See ADR 0034 D2.
+  "infrastructure/trust-manager/bundles.yaml"
 )
 
 PATTERN='([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}'
