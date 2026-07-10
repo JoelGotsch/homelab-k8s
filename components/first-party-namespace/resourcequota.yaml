@@ -1,0 +1,71 @@
+# Per-namespace resource + object-count quota for every
+# first-party namespace (ADR 0036 D2).
+#
+# The quota is deliberately modest — it stops runaway workloads
+# (a CI job that forks 10 000 pods; a bad Helm value that
+# multiplies replicas; the Longhorn-orphan-PV pattern that
+# triggered ADR 0036) but does not constrain a normal app.
+#
+# Apps that legitimately exceed a value MUST:
+#   (a) override the quota in the app's kustomize overlay via
+#       a strategic-merge patch, and
+#   (b) reference the reason in the app's README, and
+#   (c) add the `bypass.homelab.internal/homelab-namespace-quota:
+#       <reason>` annotation on the ResourceQuota if the
+#       override is a temporary waiver rather than a durable
+#       shape.
+#
+# The `count/*` fields are the real teeth here — they cap the
+# blast radius of the specific failure modes we have seen this
+# quarter (Longhorn PV orphans, LoadBalancer sprawl, NodePort
+# exposure).
+
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: homelab-namespace-quota
+spec:
+  hard:
+    # ---- Compute ----
+    # Modest per-namespace CPU/memory ceilings. Sum across all
+    # first-party namespaces intentionally exceeds cluster
+    # capacity: the quota is the per-app runaway guard, not the
+    # cluster-wide admission gate.
+    requests.cpu: "8"
+    requests.memory: "16Gi"
+    limits.cpu: "16"
+    limits.memory: "32Gi"
+
+    # ---- Storage ----
+    # PVC-count cap is the direct mitigation for the 2026-07-09
+    # Longhorn-orphans incident: 20 PVCs per namespace is well
+    # above every current app's footprint but well below the
+    # 96-PV Woodpecker orphan count that triggered ADR 0036.
+    count/persistentvolumeclaims: "20"
+    # Aggregate PVC storage per namespace. Longhorn's
+    # storage-over-provisioning-percentage is set to 200 (ADR
+    # 0036 D7), so this ceiling can be generous — the tripwire
+    # is the schedulable-headroom alert, not this quota.
+    requests.storage: "500Gi"
+
+    # ---- Service exposure ----
+    # No LoadBalancer or NodePort Services in first-party
+    # namespaces. All external ingress flows through the
+    # Cilium Gateway per ADR 0024. This closes the
+    # accidentally-public-Service exposure gap that Kyverno's
+    # `homelab-no-loadbalancer-or-nodeport` policy also covers
+    # at admission time; the ResourceQuota is the belt to
+    # Kyverno's suspenders.
+    count/services.loadbalancers: "0"
+    count/services.nodeports: "0"
+
+    # ---- Object counts ----
+    # Pod-count cap: 40 is well above steady-state (~5-15 for
+    # every current app) but bounds a runaway ReplicaSet or
+    # CronJob-history explosion.
+    count/pods: "40"
+    # Secret-count cap: unusual growth here is a sign of ESO
+    # misconfig or a controller writing per-request Secrets.
+    count/secrets: "50"
+    # ConfigMap-count cap: same rationale as secrets.
+    count/configmaps: "50"

@@ -1,0 +1,97 @@
+# Kyverno ClusterPolicy — every container must declare memory requests+limits
+#
+# Purpose:   Every container in a workload (Pod/Deployment/StatefulSet/
+#            DaemonSet/Job/CronFob) must declare both
+#            `resources.requests.memory` and `resources.limits.memory`.
+# ADR:       0036 D5
+# Rollout:   Audit -> Enforce after 2 weeks of clean PolicyReports
+#
+# Rationale: The 2026-07-08 Longhorn incident + the 2026-06-26 memory
+#            baseline sweep found ~40% of first-party containers ship
+#            without any memory limit. A single Java/Node process without
+#            a limit can consume the node's remaining allocatable and
+#            OOM-kill neighbouring pods (including longhorn-manager,
+#            which then triggers cascading volume unhealthy state). Memory
+#            has no throttling — once you cross the limit you're killed;
+#            once you don't have a limit you eat everything.
+#
+#            CPU is a SEPARATE policy (`homelab-warn-unlimited-cpu`) because
+#            CPU limits have subtle throttling downsides (CFS quota
+#            starvation on multi-core workloads) — audit-only, no
+#            enforcement plan.
+#
+# Bypass:    Annotate the workload with
+#              bypass.homelab.internal/homelab-disallow-unlimited-containers: "<reason>"
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: homelab-disallow-unlimited-containers
+  annotations:
+    policies.kyverno.io/title: "Containers: memory request+limit required"
+    policies.kyverno.io/category: "Resource Governance"
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Every container (regular + init + ephemeral) must set
+      `resources.requests.memory` AND `resources.limits.memory`. Bypass
+      with the annotation
+      `bypass.homelab.internal/homelab-disallow-unlimited-containers`.
+spec:
+  validationFailureAction: Audit
+  background: true
+  emitWarning: true
+  rules:
+    - name: containers-must-declare-memory
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          # System namespaces manage their own resources.* via upstream
+          # manifests we do not own; audit noise > signal.
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+      preconditions:
+        all:
+          - key: "{{ request.object.metadata.annotations.\"bypass.homelab.internal/homelab-disallow-unlimited-containers\" || '' }}"
+            operator: Equals
+            value: ""
+      validate:
+        allowExistingViolations: true
+        message: |
+          Container `{{ element.name }}` in
+          `{{ request.object.metadata.namespace }}/{{ request.object.metadata.name }}`
+          is missing memory requests or limits. Set both under
+          `resources.{requests,limits}.memory` (see the per-ns default
+          LimitRange for reasonable starting values) or annotate the
+          workload with
+            bypass.homelab.internal/homelab-disallow-unlimited-containers: "<reason>"
+          to waive.
+        foreach:
+          - list: "request.object.spec.containers || `[]`"
+            pattern:
+              resources:
+                requests:
+                  memory: "?*"
+                limits:
+                  memory: "?*"
+          - list: "request.object.spec.initContainers || `[]`"
+            pattern:
+              resources:
+                requests:
+                  memory: "?*"
+                limits:
+                  memory: "?*"
+          - list: "request.object.spec.ephemeralContainers || `[]`"
+            pattern:
+              resources:
+                requests:
+                  memory: "?*"
+                limits:
+                  memory: "?*"

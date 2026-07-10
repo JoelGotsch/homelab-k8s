@@ -1,0 +1,93 @@
+# Kyverno ClusterPolicy — Retain-reclaim StorageClass PVCs must carry a
+# retention reason annotation
+#
+# Purpose:   PVCs bound to the new `longhorn-replica{2,3}-retain`
+#            StorageClasses must declare *why* they need Retain-reclaim
+#            via the annotation `retention.homelab.internal/reason: <text>`.
+# ADR:       0036 D6
+# Rollout:   Audit -> Enforce after 2 weeks of clean PolicyReports
+#
+# Rationale: The 2026-07-08 Longhorn cleanup identified a class of orphaned
+#            PVs that outlived their PVCs because the StorageClass used
+#            reclaimPolicy: Retain — deletion of the PVC did nothing;
+#            volumes accumulated on the Longhorn backend for months. The
+#            new StorageClass split (`longhorn-replica{2,3}` default with
+#            Delete; `longhorn-replica{2,3}-retain` opt-in with Retain)
+#            makes the choice explicit at the StorageClass level. This
+#            policy binds the CHOICE to an audit trail: if you're
+#            opting into Retain, you must say why in-manifest so future
+#            operators (or your future self) know whether the PV can be
+#            reaped when the PVC is deleted.
+#
+# Bypass:    Uniform annotation pattern:
+#              bypass.homelab.internal/homelab-disallow-retain-reclaim-without-annotation: "<reason>"
+#            (rare — the `retention.homelab.internal/reason` annotation is
+#            the intended path; bypass is for time-boxed migrations only).
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: homelab-disallow-retain-reclaim-without-annotation
+  annotations:
+    policies.kyverno.io/title: "PVC on Retain SC: retention reason required"
+    policies.kyverno.io/category: "Storage / Longhorn"
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: PersistentVolumeClaim
+    policies.kyverno.io/description: |
+      PVCs using a StorageClass matching `longhorn-replica*-retain` MUST
+      carry the annotation `retention.homelab.internal/reason` with a
+      non-empty value. Bypass with
+      `bypass.homelab.internal/homelab-disallow-retain-reclaim-without-annotation`.
+spec:
+  validationFailureAction: Audit
+  background: true
+  emitWarning: true
+  rules:
+    - name: retain-sc-pvc-must-declare-retention-reason
+      match:
+        any:
+          - resources:
+              kinds: [PersistentVolumeClaim]
+      preconditions:
+        all:
+          # Waiver via bypass annotation.
+          - key: "{{ request.object.metadata.annotations.\"bypass.homelab.internal/homelab-disallow-retain-reclaim-without-annotation\" || '' }}"
+            operator: Equals
+            value: ""
+          # Only PVCs on a *-retain SC are subject to this policy.
+          # `AnyIn` with explicit values — Kyverno's `Equals` does NOT
+          # support wildcards on the `value:` side (verified 2026-07-10
+          # against Kyverno v1.13; would silently never match otherwise).
+          - key: "{{ request.object.spec.storageClassName || '' }}"
+            operator: AnyIn
+            value:
+              - longhorn-replica2-retain
+              - longhorn-replica3-retain
+          # No CNPG-owned-PVC skip: as of ADR 0036 the retention
+          # reason lives in the Cluster CR's
+          # `spec.inheritedMetadata.annotations["retention.homelab.internal/reason"]`
+          # and CNPG copies it to child PVCs at reconcile. Skipping
+          # CNPG-owned PVCs would defeat the audit — if CNPG's
+          # propagation silently fails, we want to see the violation
+          # in a PolicyReport, not sweep it under a skip. The
+          # `allowExistingViolations: true` + `background: true`
+          # combo handles the brief first-admission race window
+          # before CNPG's reconcile stamps the annotation.
+      validate:
+        allowExistingViolations: true
+        message: |
+          PVC `{{ request.object.metadata.namespace }}/{{ request.object.metadata.name }}`
+          uses StorageClass `{{ request.object.spec.storageClassName }}`
+          (Retain reclaim policy) but lacks the annotation
+          `retention.homelab.internal/reason`. Declare the reason for
+          opting out of Delete-on-PVC-deletion (e.g. "personal data,
+          restore-from-Longhorn-only") or annotate with
+            bypass.homelab.internal/homelab-disallow-retain-reclaim-without-annotation: "<reason>"
+          to waive. The default `longhorn-replica{2,3}` StorageClass
+          uses Delete reclaim policy and needs no such annotation.
+          CNPG-owned PVCs are skipped by preconditions — set the
+          reason on the parent Cluster CR spec.
+        pattern:
+          metadata:
+            annotations:
+              retention.homelab.internal/reason: "?*"

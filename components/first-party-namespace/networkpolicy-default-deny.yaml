@@ -1,0 +1,39 @@
+# Vanilla K8s NetworkPolicy — default-deny for the namespace.
+#
+# Defense-in-depth alongside Cilium CNPs (ADR 0036 D2). Cilium
+# is the primary network-policy engine (CNPs get the FQDN,
+# entity-selector, and L7 features K8s NetPols lack), but a
+# stock K8s NetworkPolicy is:
+#
+#   - independently understandable by any K8s operator, and
+#   - hard-fails safe: if Cilium's CNP layer is somehow bypassed
+#     (misconfigured CNI, admission webhook outage racing the
+#     CNP rollout, KPR disabled), the K8s NetPol is still there.
+#
+# The K8s NetPol enforces default-deny at both ingress and
+# egress. Per-workload allowances live in Cilium CNPs (which
+# override this deny within the pods they select — K8s NetPol
+# semantics are additive/OR: if *any* selecting policy allows
+# the flow, the flow is allowed).
+#
+# IMPORTANT: with `podSelector: {}` and empty
+# `policyTypes: [Ingress, Egress]`, EVERY pod in this
+# namespace loses all ingress AND all egress until a Cilium
+# CNP re-permits the flows the app needs. Apps that pull this
+# component MUST ship an accompanying CNP allowlist —
+# see ciliumnetworkpolicy-egress-scaffold.yaml.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: homelab-default-deny
+spec:
+  # Match every pod in the namespace.
+  podSelector: {}
+  # Deny both directions. Absent `ingress:` / `egress:` blocks
+  # under these policyTypes means "no traffic of this type is
+  # allowed by this policy" — combined with the empty pod
+  # selector, this is the standard K8s default-deny recipe.
+  policyTypes:
+    - Ingress
+    - Egress

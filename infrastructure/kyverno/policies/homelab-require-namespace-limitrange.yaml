@@ -1,0 +1,76 @@
+# Kyverno ClusterPolicy — require a LimitRange in every first-party namespace
+#
+# Purpose:   Every first-party namespace must have at least one LimitRange, so
+#            containers that ship without explicit resources.* still land at a
+#            sane default and cannot silently starve the node.
+# ADR:       0036 D1
+# Rollout:   Audit -> Enforce after 2 weeks of clean PolicyReports
+#
+# Rationale: The 2026-07-08 Longhorn incident showed that resource-governance
+#            was applied only to ci-woodpecker (per ADR 0023 D5). Across the
+#            other 20+ first-party namespaces there is no admission-time
+#            guarantee that a LimitRange exists at all. When a chart ships a
+#            Deployment without resources.*, the pod is admitted with
+#            unlimited CPU/mem and can knock out node-critical daemons
+#            (kubelet, longhorn-manager, cilium-agent). A per-namespace
+#            LimitRange is the last-mile default; this policy makes its
+#            absence visible cluster-wide and (eventually) blocks namespaces
+#            that omit one.
+#
+# Bypass:    Annotate the Namespace with
+#              bypass.homelab.internal/homelab-require-namespace-limitrange: "<reason>"
+#            (non-empty value). Kyverno emits a Loki-visible audit event on
+#            skip via the emitWarning path.
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: homelab-require-namespace-limitrange
+  annotations:
+    policies.kyverno.io/title: "Namespace: LimitRange required"
+    policies.kyverno.io/category: "Resource Governance"
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Namespace
+    policies.kyverno.io/description: |
+      Every Namespace labelled `homelab.internal/first-party: "true"` must
+      have at least one LimitRange defined within it. Bypass with the
+      annotation `bypass.homelab.internal/homelab-require-namespace-limitrange`.
+spec:
+  validationFailureAction: Audit
+  background: true
+  emitWarning: true
+  rules:
+    - name: namespace-must-have-limitrange
+      match:
+        any:
+          - resources:
+              kinds: [Namespace]
+              selector:
+                matchLabels:
+                  homelab.internal/first-party: "true"
+      preconditions:
+        all:
+          # Uniform bypass: annotation presence + non-empty value = skip.
+          - key: "{{ request.object.metadata.annotations.\"bypass.homelab.internal/homelab-require-namespace-limitrange\" || '' }}"
+            operator: Equals
+            value: ""
+      context:
+        - name: limitrangeCount
+          apiCall:
+            urlPath: "/api/v1/namespaces/{{ request.object.metadata.name }}/limitranges"
+            jmesPath: "length(items || `[]`)"
+      validate:
+        allowExistingViolations: true
+        message: |
+          Namespace `{{ request.object.metadata.name }}` is labelled
+          `homelab.internal/first-party: "true"` but has no LimitRange.
+          Add one (see platform/kyverno/policies/README.md for the default
+          shape) or annotate the Namespace with
+            bypass.homelab.internal/homelab-require-namespace-limitrange: "<reason>"
+          to waive.
+        deny:
+          conditions:
+            all:
+              - key: "{{ limitrangeCount }}"
+                operator: LessThan
+                value: 1

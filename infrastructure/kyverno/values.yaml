@@ -30,8 +30,15 @@ policyReportsCleanup:
 admissionController:
   replicas: 2
   resources:
-    requests: {cpu: 50m, memory: 128Mi}
-    limits: {memory: 512Mi}
+    # ADR 0036 rollout raises admission-controller headroom.
+    # Kyverno's admission path was previously 512Mi limit; with
+    # the ten `homelab-*` ClusterPolicies at Audit + the two
+    # ADR 0019 image-signature rules, sustained webhook load
+    # can hit that ceiling under Argo sync bursts. 1Gi limit
+    # + 100m/256Mi requests aligns with the ADR 0036 subagent
+    # brief's "Kyverno admission-controller can hot under load".
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
   topologySpreadConstraints:
     - maxSkew: 1
       topologyKey: kubernetes.io/hostname

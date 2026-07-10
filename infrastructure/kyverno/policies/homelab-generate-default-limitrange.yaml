@@ -1,0 +1,91 @@
+# Kyverno ClusterPolicy — auto-generate a default LimitRange into every
+# first-party namespace
+#
+# Purpose:   When a Namespace with `homelab.internal/first-party: "true"`
+#            is created (or reconciled), generate a namespace-scoped
+#            LimitRange named `default-limits` if it does not yet exist.
+# ADR:       0036 D8
+# Rollout:   Audit -> Enforce after 2 weeks of clean PolicyReports
+#            (Note: generate rules have no admission-block semantics; the
+#            Audit/Enforce distinction here is about PolicyReport
+#            surfacing on generate-failed events, per Kyverno v1.10+.)
+#
+# Rationale: Paired with `homelab-require-namespace-limitrange` (the
+#            validator). The validator says "this ns is missing a
+#            LimitRange"; this generator makes the missing-baseline case
+#            self-heal. `synchronize: true` means an accidental delete of
+#            the generated LimitRange is undone on the next reconcile
+#            (matches CLAUDE.md rule 8: controllers writing runtime state
+#            need explicit `data: {}` declarations — same idea here, the
+#            operator-managed shape gets restored).
+#
+#            Defaults come from ADR 0036:
+#              default:        cpu 500m, memory 512Mi
+#              defaultRequest: cpu 50m,  memory 128Mi
+#            Namespaces that need different defaults should ship their
+#            own LimitRange named anything OTHER than `default-limits`;
+#            this generator only manages the one it created.
+#
+# Bypass:    Annotate the Namespace with
+#              bypass.homelab.internal/homelab-generate-default-limitrange: "<reason>"
+#            to prevent generation (e.g. a namespace that intentionally
+#            wants a stricter LimitRange with the same shape name).
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: homelab-generate-default-limitrange
+  annotations:
+    policies.kyverno.io/title: "Namespace: auto-generate default LimitRange"
+    policies.kyverno.io/category: "Resource Governance"
+    policies.kyverno.io/severity: low
+    policies.kyverno.io/subject: LimitRange
+    policies.kyverno.io/description: |
+      When a Namespace with `homelab.internal/first-party: "true"` is
+      created/updated, generate a default LimitRange named
+      `default-limits`. `synchronize: true`. Bypass with
+      `bypass.homelab.internal/homelab-generate-default-limitrange`.
+spec:
+  # Generate rules use validationFailureAction for report surfacing only.
+  validationFailureAction: Audit
+  background: true
+  emitWarning: true
+  # generateExisting scans and generates against namespaces that
+  # already exist (not only new ones).
+  generateExisting: true
+  rules:
+    - name: generate-default-limitrange
+      match:
+        any:
+          - resources:
+              kinds: [Namespace]
+              selector:
+                matchLabels:
+                  homelab.internal/first-party: "true"
+      preconditions:
+        all:
+          - key: "{{ request.object.metadata.annotations.\"bypass.homelab.internal/homelab-generate-default-limitrange\" || '' }}"
+            operator: Equals
+            value: ""
+      generate:
+        apiVersion: v1
+        kind: LimitRange
+        name: default-limits
+        namespace: "{{ request.object.metadata.name }}"
+        synchronize: true
+        data:
+          metadata:
+            labels:
+              homelab.internal/generated-by: kyverno
+              homelab.internal/component: default-limits
+            annotations:
+              policies.kyverno.io/managed-by: homelab-generate-default-limitrange
+          spec:
+            limits:
+              - type: Container
+                default:
+                  cpu: 500m
+                  memory: 512Mi
+                defaultRequest:
+                  cpu: 50m
+                  memory: 128Mi

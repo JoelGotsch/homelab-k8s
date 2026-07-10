@@ -1,0 +1,72 @@
+# Kyverno ClusterPolicy — require a ResourceQuota in every first-party namespace
+#
+# Purpose:   Every first-party namespace must have at least one ResourceQuota,
+#            so a runaway workload cannot exhaust the cluster's total
+#            allocatable via unbounded pod creation.
+# ADR:       0036 D2
+# Rollout:   Audit -> Enforce after 2 weeks of clean PolicyReports
+#
+# Rationale: LimitRange caps a single container; ResourceQuota caps a whole
+#            namespace's aggregate consumption. Without one, a compromised
+#            or looping controller (Argo stuck retrying a bad template, a
+#            CronJob that spawns without cleanup) can create pods until
+#            node allocatable is exhausted. The 2026-06-27 blob-rotation
+#            near-miss and the earlier CNPG initdb sweeps both would have
+#            been contained by a namespace-level quota. This policy makes
+#            quotas mandatory on first-party namespaces; the specific
+#            budget lives in each namespace's own manifest (per-app
+#            expected load), not in this policy.
+#
+# Bypass:    Annotate the Namespace with
+#              bypass.homelab.internal/homelab-require-namespace-resourcequota: "<reason>"
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: homelab-require-namespace-resourcequota
+  annotations:
+    policies.kyverno.io/title: "Namespace: ResourceQuota required"
+    policies.kyverno.io/category: "Resource Governance"
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Namespace
+    policies.kyverno.io/description: |
+      Every Namespace labelled `homelab.internal/first-party: "true"` must
+      have at least one ResourceQuota defined. Bypass with the annotation
+      `bypass.homelab.internal/homelab-require-namespace-resourcequota`.
+spec:
+  validationFailureAction: Audit
+  background: true
+  emitWarning: true
+  rules:
+    - name: namespace-must-have-resourcequota
+      match:
+        any:
+          - resources:
+              kinds: [Namespace]
+              selector:
+                matchLabels:
+                  homelab.internal/first-party: "true"
+      preconditions:
+        all:
+          - key: "{{ request.object.metadata.annotations.\"bypass.homelab.internal/homelab-require-namespace-resourcequota\" || '' }}"
+            operator: Equals
+            value: ""
+      context:
+        - name: quotaCount
+          apiCall:
+            urlPath: "/api/v1/namespaces/{{ request.object.metadata.name }}/resourcequotas"
+            jmesPath: "length(items || `[]`)"
+      validate:
+        allowExistingViolations: true
+        message: |
+          Namespace `{{ request.object.metadata.name }}` is labelled
+          `homelab.internal/first-party: "true"` but has no ResourceQuota.
+          Add one sized for the workload, or annotate the Namespace with
+            bypass.homelab.internal/homelab-require-namespace-resourcequota: "<reason>"
+          to waive.
+        deny:
+          conditions:
+            all:
+              - key: "{{ quotaCount }}"
+                operator: LessThan
+                value: 1

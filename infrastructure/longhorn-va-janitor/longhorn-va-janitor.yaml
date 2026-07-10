@@ -84,6 +84,10 @@ metadata:
     # read-only root). `restricted` is the right baseline.
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest
+    # ADR 0036 D4 — infrastructure-tier janitor CronJob;
+    # classified as `internal`.
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal
 ---
 apiVersion: v1
 kind: ServiceAccount

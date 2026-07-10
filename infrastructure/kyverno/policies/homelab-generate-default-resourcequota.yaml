@@ -1,0 +1,86 @@
+# Kyverno ClusterPolicy — auto-generate a default ResourceQuota into every
+# first-party namespace
+#
+# Purpose:   When a Namespace with `homelab.internal/first-party: "true"`
+#            is created/reconciled, generate a namespace-scoped
+#            ResourceQuota named `default-quota` if it does not exist.
+# ADR:       0036 D9
+# Rollout:   Audit -> Enforce after 2 weeks of clean PolicyReports
+#
+# Rationale: Paired with `homelab-require-namespace-resourcequota`
+#            (the validator). The default is deliberately generous — it
+#            exists to catch *runaway* consumption (a controller stuck
+#            spawning), not to right-size each app. Right-sizing per-app
+#            comes via an explicit ResourceQuota in the namespace's own
+#            manifest, which this policy leaves alone (only manages
+#            `default-quota`).
+#
+#            Default budget:
+#              requests.cpu:     4       (≈ half of a smaller Talos node)
+#              requests.memory:  8Gi
+#              limits.cpu:       8
+#              limits.memory:    16Gi
+#              count/pods:       50
+#            These numbers are large enough that any existing app fits and
+#            small enough that a runaway CronJob spawning 10k pods gets
+#            blocked. Namespaces with heavier expected footprints should
+#            ship their own ResourceQuota (any name other than
+#            `default-quota`) — quotas are additive: the strictest one
+#            wins.
+#
+# Bypass:    Annotate the Namespace with
+#              bypass.homelab.internal/homelab-generate-default-resourcequota: "<reason>"
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: homelab-generate-default-resourcequota
+  annotations:
+    policies.kyverno.io/title: "Namespace: auto-generate default ResourceQuota"
+    policies.kyverno.io/category: "Resource Governance"
+    policies.kyverno.io/severity: low
+    policies.kyverno.io/subject: ResourceQuota
+    policies.kyverno.io/description: |
+      When a Namespace with `homelab.internal/first-party: "true"` is
+      created/updated, generate a default ResourceQuota named
+      `default-quota`. `synchronize: true`. Bypass with
+      `bypass.homelab.internal/homelab-generate-default-resourcequota`.
+spec:
+  validationFailureAction: Audit
+  background: true
+  emitWarning: true
+  generateExisting: true
+  rules:
+    - name: generate-default-resourcequota
+      match:
+        any:
+          - resources:
+              kinds: [Namespace]
+              selector:
+                matchLabels:
+                  homelab.internal/first-party: "true"
+      preconditions:
+        all:
+          - key: "{{ request.object.metadata.annotations.\"bypass.homelab.internal/homelab-generate-default-resourcequota\" || '' }}"
+            operator: Equals
+            value: ""
+      generate:
+        apiVersion: v1
+        kind: ResourceQuota
+        name: default-quota
+        namespace: "{{ request.object.metadata.name }}"
+        synchronize: true
+        data:
+          metadata:
+            labels:
+              homelab.internal/generated-by: kyverno
+              homelab.internal/component: default-quota
+            annotations:
+              policies.kyverno.io/managed-by: homelab-generate-default-resourcequota
+          spec:
+            hard:
+              requests.cpu: "4"
+              requests.memory: 8Gi
+              limits.cpu: "8"
+              limits.memory: 16Gi
+              count/pods: "50"

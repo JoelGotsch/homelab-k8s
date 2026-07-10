@@ -36,20 +36,18 @@ spec:
   cron: "35 * * * *"
   task: snapshot
   groups: [default]
-  # Reduced 2026-06-26 from 100 → 20 after #73/#74 CNPG-bloat
-  # incident: at retain=100, hourly snapshots accumulate ~4d of
-  # delta files which on busy DBs (authentik, paperless, langfuse,
-  # crowdsec) outgrew the declared PVC size. The 100-snapshot
-  # warning condition (TooManySnapshots) also correlated with the
-  # csi-resizer getting stuck during online-expand on those
-  # volumes — see #73/#74 + journal 2026-06-25/06-26.
+  # ADR 0036 D6 — tighten default group to retain: 6 (6h rolling
+  # window) from the previous 20. The `default` group is the
+  # catch-all for un-labelled PVCs (mostly transient / rebuild-
+  # able state); the 90-day daily backup below is the fallback
+  # floor. Labelled workloads that need more history opt into an
+  # explicit named group (`secret-personal` at 20, `internal` at
+  # 42, `internal-media` at 7).
   #
-  # 20 hourly snapshots = ~20h rollback window. Tier-2 restic
-  # backups (90 retained, see backup-daily below) + tier-3
-  # Hetzner StorageBox snapshots cover the 24h–90d window.
-  # If a 4-day operational rollback is needed, recover from the
-  # restic tier-2 (RPO 24h, fine for that horizon).
-  retain: 20
+  # Historical: reduced 2026-06-26 from 100 → 20 after #73/#74
+  # CNPG-bloat incident. ADR 0036 tightens further — see the
+  # ADR's D6 rationale.
+  retain: 6
   concurrency: 4
   labels:
     homelab-class: catch-all
