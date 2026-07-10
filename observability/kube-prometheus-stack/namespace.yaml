@@ -16,3 +16,8 @@ metadata:
   labels:
     pod-security.kubernetes.io/enforce: privileged
     pod-security.kubernetes.io/audit: privileged
+    # ADR 0036 D4 — observability-tier; classified as `internal`.
+    # Namespace declared here AND in falco-stack/namespace.yaml —
+    # labels must match to avoid last-applied churn.
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal

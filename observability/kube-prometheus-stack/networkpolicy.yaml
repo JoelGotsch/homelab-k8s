@@ -178,12 +178,33 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # ntfy-e2ee-relay — webhook receiver per
-    # alertmanager-config.yaml.
+    # ntfy-e2ee-relay — Tier 1 fan-out A per
+    # alertmanager-config.yaml (E2EE stream).
     - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: ntfy-e2ee-relay
+      ports:
+        - port: 8000
+          protocol: TCP
+    # ntfy server (direct publish) — Tier 2 sink for warning-
+    # severity alerts per alertmanager-config.yaml + the
+    # 03-runbooks/observability/alert-routing.md three-tier
+    # design (2026-07-10). Non-E2EE — payload is a summary
+    # string not secret material.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ntfy
+      ports:
+        - port: 80
+          protocol: TCP
+    # approval-channel — Tier 1 fan-out B (Signal via
+    # signal-bridge) per alertmanager-config.yaml.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: approval-channel
       ports:
         - port: 8000
           protocol: TCP
