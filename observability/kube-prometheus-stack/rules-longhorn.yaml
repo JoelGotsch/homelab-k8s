@@ -1,0 +1,362 @@
+# PrometheusRules for Longhorn capacity + control-plane health.
+#
+# Closes the observability gap surfaced by the 2026-07-09
+# near-outage: Longhorn hit 99.6% of schedulable capacity because
+# of a `reclaimPolicy: Retain` leak (96 orphaned Released PVs);
+# longhorn-manager crash-looped >1000 times per pod; the operator
+# got zero warning because no Longhorn-scoped rules existed and
+# no Longhorn ServiceMonitor was configured (verified 2026-07-09:
+# `kubectl -n longhorn-system get servicemonitor` → none).
+#
+# Two metric surfaces feed these rules:
+#
+#   1. Longhorn-native metrics (`longhorn_node_storage_*`,
+#      `longhorn_volume_state`, `longhorn_snapshot_*`) — served
+#      by the Longhorn manager at :9500/metrics.
+#      **REQUIRES** a ServiceMonitor scraping longhorn-backend
+#      on port 9500. This file assumes such a ServiceMonitor
+#      lands in `infrastructure/longhorn/servicemonitor.yaml`
+#      as a follow-up to the ADR 0036 pass; until it does,
+#      the four rules below marked `# METRIC SOURCE: longhorn`
+#      will not fire (silent absence, not a crash — Prometheus
+#      just returns empty vector).
+#      TRACKING: task #4 follow-up to add the ServiceMonitor
+#      alongside these rules.
+#
+#   2. Fallback metrics available today (`kube_persistentvolume_*`,
+#      `kube_pod_container_status_restarts_total`,
+#      `node_filesystem_*`) — served by kube-state-metrics and
+#      node-exporter, both already scraped by kube-prometheus-
+#      stack chart-default. The Released-PV pileup and the
+#      manager crash-loop rules use these — they work TODAY,
+#      no ServiceMonitor prerequisite.
+#
+# Routing (per kube-prometheus-stack alertmanager-config.yaml):
+#   severity: warning  → ntfy tier (per alert-routing.md
+#                        tier design; today: ntfy-via-relay)
+#   severity: critical → ntfy + Signal (approval-channel fan-out)
+#
+# `component: longhorn` is an operator-side filter only; not
+# matched by AM routes today.
+#
+# Related:
+#   - ADR 0036 D1 — StorageClass reclaimPolicy split
+#   - ADR 0036 D7 — schedulable-capacity headroom target
+#   - 99-journal/2026-07-09-longhorn-capacity-near-outage.md
+#   - homelab-infra/scripts/longhorn-cleanup-released-pvs.sh
+#   - 03-runbooks/observability/alert-routing.md
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: longhorn-capacity
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: longhorn-capacity
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: longhorn-capacity
+      interval: 1m
+      rules:
+        # ===== LonghornNodeSchedulableCapacityLow (warning) =====
+        # METRIC SOURCE: longhorn (requires ServiceMonitor — see
+        # file header).
+        #
+        # Per ADR 0036 D7: keep schedulable capacity ≤ 80% under
+        # steady state so a workload-growth spike or a rebalance
+        # doesn't tip a node into "no room to reschedule any
+        # replica" (the 2026-07-09 mode). `for: 15m` filters
+        # transient replica-migration spikes.
+        #
+        # `longhorn_node_storage_scheduled_bytes` is the sum of
+        # storage *committed* to replicas that have been
+        # scheduled onto this node.
+        # `longhorn_node_storage_reserved_bytes` is the operator-
+        # configured reservation for the node OS (defaults to
+        # 30G in Longhorn — visible in `Setting/storage-reserved-
+        # percentage-for-default-disk`).
+        # `longhorn_node_storage_maximum_bytes` is the raw disk
+        # capacity Longhorn sees. Their ratio is the effective
+        # "how full is this node from Longhorn's perspective"
+        # signal.
+        - alert: LonghornNodeSchedulableCapacityLow
+          expr: |
+            (
+              longhorn_node_storage_scheduled_bytes
+              + longhorn_node_storage_reserved_bytes
+            )
+            / longhorn_node_storage_maximum_bytes > 0.80
+          for: 15m
+          labels:
+            severity: warning
+            component: longhorn
+          annotations:
+            summary: "Longhorn node {{ $labels.node }} schedulable capacity > 80% ({{ $value | humanizePercentage }})"
+            description: |
+              Longhorn reports node `{{ $labels.node }}` at
+              {{ $value | humanizePercentage }} of its schedulable
+              capacity. Per ADR 0036 D7 the steady-state target is
+              ≤ 80%; sustained excursions above this leave no room
+              for replica rebalancing on a workload spike or a
+              node loss.
+
+              Most common cause on this cluster: `reclaimPolicy:
+              Retain` orphans on PVs whose PVCs were deleted.
+              Enumerate with:
+
+                kubectl get pv --field-selector status.phase=Released \
+                  | awk '/longhorn/'
+
+              If Released PVs are present, run the cleanup:
+
+                homelab-infra/scripts/longhorn-cleanup-released-pvs.sh
+
+              (dry-run by default; --apply after review).
+
+              Other causes:
+                - Snapshot accumulation (see LonghornSnapshot-
+                  Accumulation) — snapshots share block storage
+                  with volumes and count against schedulable.
+                - Replica count bump on high-churn StorageClass
+                  (rare; requires ADR 0016 revision).
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/observability/alert-routing.md"
+
+        # ===== LonghornNodeSchedulableCapacityCritical =====
+        # METRIC SOURCE: longhorn.
+        #
+        # Same expression, `> 0.90`, `for: 5m`. The 2026-07-09
+        # incident tripped at ~99.6% — 90% is the last warning
+        # threshold before there is no room for a single
+        # additional replica.
+        - alert: LonghornNodeSchedulableCapacityCritical
+          expr: |
+            (
+              longhorn_node_storage_scheduled_bytes
+              + longhorn_node_storage_reserved_bytes
+            )
+            / longhorn_node_storage_maximum_bytes > 0.90
+          for: 5m
+          labels:
+            severity: critical
+            component: longhorn
+          annotations:
+            summary: "Longhorn node {{ $labels.node }} schedulable capacity > 90% ({{ $value | humanizePercentage }})"
+            description: |
+              Longhorn node `{{ $labels.node }}` is at
+              {{ $value | humanizePercentage }} of its schedulable
+              capacity — at or above the 2026-07-09 near-outage
+              threshold. New replicas cannot schedule; longhorn-
+              manager is about to start crash-looping trying to
+              rebalance.
+
+              Act NOW:
+
+                # 1. See what's Released and orphaned:
+                homelab-infra/scripts/longhorn-cleanup-released-pvs.sh
+
+                # 2. If that doesn't recover ≥10 GiB, delete
+                #    unused snapshots via Longhorn UI OR
+                #    reduce recurring-jobs backup retention in
+                #    infrastructure/longhorn/recurring-jobs.yaml.
+
+                # 3. If still critical, scale the workload with
+                #    the largest ReplicaCount≥2 PVCs down to 1
+                #    replica temporarily (RollingUpdate → Recreate).
+
+              ADR 0036 D7 pins the operational headroom target;
+              99-journal/2026-07-09 captures the incident chain.
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/observability/alert-routing.md"
+
+        # ===== LonghornNodeDiskUsageFallback (warning) =====
+        # METRIC SOURCE: node-exporter (fallback; works TODAY).
+        #
+        # On Talos, `/var/lib/longhorn` is a subdirectory of the
+        # `/var` mount (Talos uses `/var` as the mutable data
+        # partition). node-exporter reports on `/var` — this is
+        # NOT the Longhorn-scoped view, but it catches the
+        # underlying-disk-is-full case even without a Longhorn
+        # ServiceMonitor.
+        #
+        # Threshold intentionally different from the Longhorn
+        # one above: `/var` also holds container images, logs,
+        # kubelet state — Longhorn shouldn't own the full
+        # partition. 85% on /var means "there's not much space
+        # left for anyone".
+        - alert: LonghornNodeDiskUsageFallback
+          expr: |
+            (
+              1 - (
+                node_filesystem_avail_bytes{mountpoint="/var",fstype!~"tmpfs|overlay"}
+                / node_filesystem_size_bytes{mountpoint="/var",fstype!~"tmpfs|overlay"}
+              )
+            ) > 0.85
+          for: 15m
+          labels:
+            severity: warning
+            component: longhorn
+          annotations:
+            summary: "Node {{ $labels.instance }} /var >85% full ({{ $value | humanizePercentage }})"
+            description: |
+              Node `{{ $labels.instance }}` /var partition (which
+              contains /var/lib/longhorn) is
+              {{ $value | humanizePercentage }} full.
+
+              This is the node-exporter fallback for the Longhorn
+              schedulable-capacity alerts — it fires when the
+              underlying disk is full regardless of whether
+              Longhorn's own metrics endpoint is scraped.
+
+              Triage:
+                talosctl --nodes {{ $labels.instance }} df -h /var
+                kubectl -n longhorn-system get nodes.longhorn.io -o wide
+
+              Then: run
+              `homelab-infra/scripts/longhorn-cleanup-released-pvs.sh`
+              to identify orphaned Longhorn PVs.
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/observability/alert-routing.md"
+
+        # ===== LonghornVolumeReleasedPileup (warning) =====
+        # METRIC SOURCE: kube-state-metrics (works TODAY — this
+        # was the leak-detector that would have fired days before
+        # the 2026-07-09 incident).
+        #
+        # `kube_persistentvolume_status_phase{phase="Released"}`
+        # emits 1 per Released PV. Count > 20 means a leak is
+        # accumulating. Steady-state healthy count is 0–5
+        # (transient PVC delete → PV cleanup window).
+        #
+        # We can't filter to Longhorn-only in the metric — PVs
+        # don't carry a StorageClass label in kube-state-metrics.
+        # The count therefore includes NFS-CSI + rclone PVs;
+        # threshold of 20 accounts for that background.
+        - alert: LonghornVolumeReleasedPileup
+          expr: |
+            count(kube_persistentvolume_status_phase{phase="Released"} == 1) > 20
+          for: 30m
+          labels:
+            severity: warning
+            component: longhorn
+          annotations:
+            summary: "{{ $value }} PVs stuck in Released phase (leak-detector)"
+            description: |
+              {{ $value }} PersistentVolumes are in phase
+              `Released` for ≥ 30 minutes. This is the leak
+              signature ADR 0036 D1 was written to prevent:
+              `reclaimPolicy: Retain` PVs stay allocated after
+              their PVC is deleted, silently consuming disk on
+              the Longhorn nodes.
+
+              Enumerate + plan cleanup (dry-run):
+                homelab-infra/scripts/longhorn-cleanup-released-pvs.sh
+
+              After review, delete safely with:
+                homelab-infra/scripts/longhorn-cleanup-released-pvs.sh --apply
+
+              If the count is dominated by non-Longhorn classes
+              (NFS-CSI / rclone), those need their own cleanup —
+              this script refuses to touch them.
+
+              This alert would have fired ~4 days before the
+              2026-07-09 near-outage if it had existed.
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/observability/alert-routing.md"
+
+        # ===== LonghornManagerCrashLoop (critical) =====
+        # METRIC SOURCE: kube-state-metrics (works TODAY — this
+        # rule would have paged during the 2026-07-09 incident,
+        # when observed restarts on one longhorn-manager pod
+        # exceeded 1135).
+        #
+        # `> 0.1` per second over 15m = >90 restarts in 15m =
+        # unambiguous crash loop. Steady state is 0. Even a
+        # normal chart upgrade rollout gives 1–2 restarts across
+        # the entire rollout window, well under this threshold.
+        - alert: LonghornManagerCrashLoop
+          expr: |
+            rate(
+              kube_pod_container_status_restarts_total{
+                namespace="longhorn-system",
+                container="longhorn-manager",
+                pod=~"longhorn-manager-.*"
+              }[15m]
+            ) > 0.1
+          for: 10m
+          labels:
+            severity: critical
+            component: longhorn
+          annotations:
+            summary: "longhorn-manager {{ $labels.pod }} in crash loop ({{ $value | humanize }}/s)"
+            description: |
+              `{{ $labels.pod }}` is restarting at
+              {{ $value | humanize }}/s sustained over 15 minutes
+              (>90 restarts / 15m). Every longhorn-manager
+              restart tears down the Longhorn scheduling loop on
+              that node; sustained loops here == cluster-wide
+              storage stall.
+
+              Companion signal: worker-cascade-signals'
+              `LonghornManagerRestarting` fires earlier (at
+              >1/hour, warning). This critical rule is the
+              "operator eyes NOW" trigger.
+
+              Common cause on this cluster: disk-full →
+              longhorn-manager exit → kubelet restart → still-
+              full disk → exit → loop. Check:
+
+                kubectl -n longhorn-system get pod {{ $labels.pod }} \
+                  -o jsonpath='{.status.containerStatuses[0].lastState.terminated}'
+                kubectl -n longhorn-system logs {{ $labels.pod }} --previous --tail=80
+
+              If exit-137 + disk-full: run the cleanup script
+              immediately (see LonghornVolumeReleasedPileup),
+              then check LonghornNodeSchedulableCapacityCritical
+              triage steps.
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/observability/alert-routing.md"
+
+        # ===== LonghornSnapshotAccumulation (warning) =====
+        # METRIC SOURCE: longhorn (requires ServiceMonitor).
+        #
+        # Snapshots share block storage with volumes; a runaway
+        # recurring-jobs snapshot policy can silently eat
+        # schedulable capacity. On 2026-07-09 the operator
+        # observed 1246 snapshots cluster-wide — well above the
+        # expected ~200 (10 volumes × ~20 daily snapshots at
+        # 3-week retention).
+        #
+        # `longhorn_snapshot_actual_size_bytes` emits one series
+        # per snapshot; `count()` gives the fleet total.
+        # Threshold `> 500` sits at ~2.5× steady state, `for:
+        # 1h` filters legitimate recurring-jobs bursts.
+        - alert: LonghornSnapshotAccumulation
+          expr: |
+            count(longhorn_snapshot_actual_size_bytes) > 500
+          for: 1h
+          labels:
+            severity: warning
+            component: longhorn
+          annotations:
+            summary: "Longhorn holds {{ $value }} snapshots cluster-wide (>500)"
+            description: |
+              The Longhorn cluster is holding {{ $value }}
+              snapshots. Steady-state target is ~200 (per the
+              recurring-jobs retention in
+              `infrastructure/longhorn/recurring-jobs.yaml`).
+
+              Common causes:
+                - Recurring-jobs `retain:` value bumped without
+                  a compensating cleanup pass.
+                - A recurring job that used to prune is failing
+                  silently — check the RecurringJob CRD status.
+                - An operator-created ad-hoc snapshot was never
+                  deleted.
+
+              Review + prune via Longhorn UI (Volume → Snapshots)
+              or via CLI:
+
+                kubectl -n longhorn-system get snapshots.longhorn.io \
+                  --sort-by=.metadata.creationTimestamp | head -50
+
+              If growth is unbounded, revisit
+              `infrastructure/longhorn/recurring-jobs.yaml` and
+              lower `retain:` — the trade-off is RPO vs disk.
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/observability/alert-routing.md"

@@ -29,3 +29,7 @@ resources:
   # pages the operator via signal-bridge directly, bypassing
   # Alertmanager.
   - openbao-seal-watchdog-cronjob.yaml
+
+# ADR 0036: cluster-wide resource-governance baseline.
+components:
+  - ../../components/first-party-namespace

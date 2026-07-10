@@ -19,16 +19,26 @@ spec:
   # Propagate labels to CNPG-managed children (Pods, PVCs,
   # Services). Picked up by infrastructure/longhorn/recurring-jobs.yaml's
   # `internal` group: 4-hourly snapshots × 7d retain.
-  inheritedMetadata:
-    labels:
-      recurring-job-group.longhorn.io/internal: "enabled"
-
+  #
   # CNPG primaries opt into replica3 per ADR 0016 — instances: 2
   # is DB-level redundancy, replica3 is disk-level redundancy
   # for the authoritative copy. Both layers earned.
+  # 2026-07-09 ADR 0036: CNPG Postgres data volume moves to
+  # the -retain family. Default longhorn-replica3 is now
+  # reclaim=Delete; the LiteLLM spend/budget DB is the source
+  # of truth for cost accounting — PVC delete must not evict.
+  # CNPG propagates inheritedMetadata.annotations to child PVCs at
+  # reconcile time (per CNPG docs), satisfying the Kyverno
+  # homelab-disallow-retain-reclaim-without-annotation policy.
+  inheritedMetadata:
+    labels:
+      recurring-job-group.longhorn.io/internal: "enabled"
+    annotations:
+      retention.homelab.internal/reason: "LiteLLM budget/spend DB — cost accounting source of truth."
+
   storage:
     size: 5Gi
-    storageClass: longhorn-replica3
+    storageClass: longhorn-replica3-retain
 
   monitoring:
     enablePodMonitor: true

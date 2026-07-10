@@ -30,9 +30,13 @@ metadata:
   labels:
     app.kubernetes.io/name: paperless-ngx
     app.kubernetes.io/component: hot-storage
+  annotations:
+    # ADR 0036: -retain SCs require a rationale.
+    retention.homelab.internal/reason: "Paperless data dir — config, migrations, ML/OCR model caches; rebuild is downloadable but non-trivial."
 spec:
   accessModes: [ReadWriteOnce]
-  storageClassName: longhorn-replica2
+  # 2026-07-09 ADR 0036: migrate to -retain family.
+  storageClassName: longhorn-replica2-retain
   resources:
     requests:
       # Sized for: SQLite WAL leftovers (none — we use CNPG),
@@ -83,6 +87,9 @@ spec:
       storage: 10Gi
 ---
 # Hot bucket — export (operator-triggered bulk exports).
+# Stays on the default (reclaim=Delete) SC — exports are one-off,
+# operator-triggered artefacts; on PVC delete losing an incomplete
+# export is acceptable.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -96,7 +103,8 @@ spec:
   storageClassName: longhorn-replica2
   resources:
     requests:
-      # Sized for one full library export (matches media/
-      # roughly). 100Gi headroom; resize if operator's
-      # archive grows.
-      storage: 100Gi
+      # Right-sized 100Gi → 20Gi 2026-07-09 per ADR 0036 audit
+      # (previous audit report noted actual usage <10 GiB).
+      # Bulk export is re-run on demand; capacity is easy to
+      # resize if a larger archive lands.
+      storage: 20Gi

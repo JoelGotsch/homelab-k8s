@@ -4,7 +4,12 @@ defaultSettings:
   defaultDataPath: /var/lib/longhorn
   defaultReplicaCount: 2  # ADR 0016 default
   storageMinimalAvailablePercentage: 10
-  storageOverProvisioningPercentage: 100
+  # ADR 0036 D7 — loosen from upstream default of 100 to 200.
+  # Tripwire is the Prometheus 80%-of-ceiling alert (160% ratio),
+  # not the ceiling itself. Prevents the accounting-axis stop-
+  # bind failure mode that triggered the 2026-07-09 incident
+  # (99.6% of schedulable capacity → SecretSyncedError cascade).
+  storageOverProvisioningPercentage: 200
   # Backup target: MinIO-on-NAS `longhorn-backups` bucket per
   # ADR 0016 D4 + ADR 0006 (warm tier). Restic CronJob at
   # `infrastructure/backup-cronjobs/` mirrors this bucket
@@ -22,7 +27,19 @@ persistence:
   defaultClass: false  # we install non-default classes per ADR 0016
   defaultClassReplicaCount: 2
 
-# Resource limits — Longhorn is per-node DaemonSet
+# ADR 0036 D7 — enable Prometheus scrape of Longhorn metrics so
+# the schedulable-headroom alert (80% of storageOverProvisioning-
+# Percentage) has a metric to fire against.
+metrics:
+  serviceMonitor:
+    enabled: true
+
+# Resource limits — Longhorn is per-node DaemonSet.
+# CSI sidecars: chart 1.7.2 does NOT expose per-container
+# resource keys under `csi:` (only replica counts). CSI-plugin
+# sidecar resources are patched via `kustomization.yaml`
+# strategic-merge patches (see below) to satisfy ADR 0036 D3
+# `homelab-container-resources-required`.
 csi:
   attacherReplicaCount: 2
   provisionerReplicaCount: 2

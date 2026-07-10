@@ -18,9 +18,18 @@ spec:
   # infrastructure/longhorn/recurring-jobs.yaml's
   # `secret-personal` group: hourly snapshots × 7d retain.
   # Authentik is `secret`-class (operator-identity backend).
+  #
+  # 2026-07-09 ADR 0036: CNPG Postgres data volume moves to the
+  # -retain family. Authentik DB carries user identities, OAuth
+  # clients, policies + flows — loss = full IdP re-enrolment cascade.
+  # CNPG propagates inheritedMetadata.annotations to child PVCs at
+  # reconcile time (per CNPG docs), satisfying the Kyverno
+  # homelab-disallow-retain-reclaim-without-annotation policy.
   inheritedMetadata:
     labels:
       recurring-job-group.longhorn.io/secret-personal: "enabled"
+    annotations:
+      retention.homelab.internal/reason: "Authentik IdP DB — users, OIDC clients, flows, policies; loss = full re-enrolment cascade."
 
   # Bumped 10Gi → 35Gi 2026-06-25: actual usage on pg-1 was 22.79 GiB
   # (vs. ~128 MB real DB data) due to Longhorn snapshot delta
@@ -33,7 +42,7 @@ spec:
   # bump is the headroom needed while that lands. Re ADR 0016 / #73.
   storage:
     size: 35Gi
-    storageClass: longhorn-replica3
+    storageClass: longhorn-replica3-retain
 
   monitoring:
     enablePodMonitor: true

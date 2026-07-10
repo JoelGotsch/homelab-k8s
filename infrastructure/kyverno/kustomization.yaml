@@ -32,3 +32,21 @@ resources:
   # visibility) to enforce (allowlist, blocking). Add new
   # namespaces per 04-guides/digest-pin-enforce-allowlist.md.
   - policies/enforce-digest-pinning-allowlist.yaml
+  # ADR 0036 — cluster-wide admission governance. All start in
+  # Audit; see policies/ROLLOUT.md for the Enforce migration plan
+  # and policies/README.md for the bypass-annotation convention.
+  # Validators:
+  - policies/homelab-require-namespace-limitrange.yaml
+  - policies/homelab-require-namespace-resourcequota.yaml
+  - policies/homelab-require-namespace-default-deny-netpol.yaml
+  - policies/homelab-disallow-open-egress-cnp.yaml
+  - policies/homelab-disallow-unlimited-containers.yaml
+  - policies/homelab-warn-unlimited-cpu.yaml
+  - policies/homelab-disallow-retain-reclaim-without-annotation.yaml
+  - policies/homelab-disallow-inline-secrets.yaml
+  # Generators (paired with the require-* validators above):
+  - policies/homelab-generate-default-limitrange.yaml
+  - policies/homelab-generate-default-resourcequota.yaml
+  - policies/homelab-generate-default-deny-netpol.yaml
+  # Mutation policies (idempotent; enforce-ready):
+  - policies/homelab-mutate-openbao-pvc-retention.yaml

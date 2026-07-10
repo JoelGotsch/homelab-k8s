@@ -1,27 +1,35 @@
-# Alertmanager routing config. Per ADR 0021 D7:
-# "Alertmanager + Falcosidekick → ntfy + Signal."
+# Alertmanager routing config. Per ADR 0021 D7 and the
+# three-tier design in
+# 03-runbooks/observability/alert-routing.md (2026-07-10):
 #
-# Two parallel delivery paths, both active:
-# - All severities → webhook → ntfy-e2ee-relay → ntfy
-#   (cluster-hosted ntfy server; baseline notification stream).
-# - Critical severity + deception events → approval-channel
-#   → signal-bridge → operator's Signal account
-#   (per ADR 0009 + ADR 0021 D7+D10 + the signal-webhook
-#   runbook). Activated 2026-04-30 with the signal-bridge +
-#   approval-channel layers landing.
+#   Tier 1 (Signal — page): critical severity, operator eyes
+#     within minutes. Fans out to BOTH ntfy-via-relay (E2EE
+#     stream) AND approval-channel (Signal via signal-bridge).
+#   Tier 2 (ntfy — attention): warning severity, operator sees
+#     within hours. Direct ntfy publish to a dedicated
+#     `homelab-alerts-warning` topic — non-E2EE, but the payload
+#     is a summary string not secret material.
+#   Tier 3 (silent — logged): info severity + explicitly null-
+#     routed. Loki captures the notification-log record; the
+#     LLM triage agent surfaces in weekly digests.
 #
-# The two paths fan out via `continue: true` on the relevant
-# routes so a critical alert reaches BOTH ntfy and Signal.
-# Independence is deliberate: ntfy is the default low-friction
-# stream, Signal is the high-attention stream — operator reads
-# both, but Signal carries the decisions-required subset.
+# Historical note (pre-2026-07-10):
+#   All severities routed through `ntfy-via-relay` (E2EE), and
+#   critical additionally fanned to Signal. The 2026-07-09
+#   Longhorn near-outage was NOT a routing failure — every
+#   defined alert was reaching ntfy — it was a RULE-COVERAGE
+#   failure (no Longhorn-scoped warning existed, so no alert
+#   ever fired to notice a leak that had been accumulating for
+#   4 days). This config extension adds the Tier 2 direct-ntfy
+#   sink so the operator can distinguish "attention" from
+#   "page" without losing either signal.
 #
-# Inhibition rules:
+# Inhibition rules (unchanged):
 # - critical inhibits warning for the same alertname (avoid
 #   double-paging when both fire).
-# - "InstanceDown" inhibits anything else for that instance
-#   (the host being unreachable explains why every other
-#   alert is firing).
+# - "InstanceDown" / "NodeNotReady" inhibits anything else for
+#   that instance (the host being unreachable explains why
+#   every other alert is firing).
 
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig
@@ -32,15 +40,41 @@ metadata:
     release: kube-prometheus-stack
 spec:
   route:
-    receiver: ntfy-via-relay
+    # Default receiver = Tier 2 direct-ntfy. Any alert without
+    # a more specific match lands here — same failure mode as
+    # the pre-2026-07-10 config's ntfy-via-relay default, but
+    # cheaper (no E2EE for the high-volume tier).
+    receiver: ntfy-direct
     groupBy: [alertname, namespace, severity]
     groupWait: 30s
     groupInterval: 5m
     repeatInterval: 12h
     routes:
+      # ===== Tier 3 silent (severity: info) =====
+      # info-tier alerts go to null; still logged via AM's
+      # notification log which alloy ships to Loki.
+      # Weekly review path per the alert-routing runbook.
+      - matchers:
+          - name: severity
+            value: info
+        receiver: 'null'
+
+      # ===== Tier 3 silent — chart-provided Watchdog =====
+      # kube-prometheus-stack ships a Watchdog rule that fires
+      # perpetually as an alerting-pipeline liveness probe.
+      # It should NEVER page — but should still route somewhere
+      # measurable so operator can build an alert-on-Watchdog-
+      # gone (dead-man's) rule downstream.
+      - matchers:
+          - name: alertname
+            value: Watchdog
+        receiver: 'null'
+
       # ===== Deception fan-out (ADR 0021 D10) =====
-      # Honey-asset hits: zero-latency, dedicated route, BOTH
-      # ntfy and the approval-channel /v1/deception path.
+      # Honey-asset hits: zero-latency dedicated route to
+      # ntfy-via-relay (E2EE stream — the operator's phone
+      # shows the exact context) AND approval-channel /v1/
+      # deception path (Signal buzz).
       - matchers:
           - name: component
             value: deception
@@ -48,18 +82,20 @@ spec:
         groupWait: 0s
         groupInterval: 30s
         repeatInterval: 30m
-        continue: true     # also evaluate the deception → Signal route below
+        continue: true
       - matchers:
           - name: component
             value: deception
         receiver: approval-channel-deception
         groupWait: 0s
         groupInterval: 30s
-        repeatInterval: 15m  # tighter than ntfy: deception is the operator-paging case
+        repeatInterval: 15m
 
-      # ===== Critical-severity fan-out (ADR 0021 D7) =====
-      # Critical alerts go to BOTH ntfy and Signal via approval-
-      # channel. Two independent streams; operator reads both.
+      # ===== Tier 1 (severity: critical) =====
+      # Two-branch fan-out: E2EE ntfy (relay path — same phone
+      # topic operator uses for encrypted stream) AND Signal
+      # via approval-channel. Both fire; operator gets one push
+      # per medium.
       - matchers:
           - name: severity
             value: critical
@@ -67,7 +103,7 @@ spec:
         groupWait: 5s
         groupInterval: 1m
         repeatInterval: 1h
-        continue: true     # also evaluate the critical → Signal route below
+        continue: true
       - matchers:
           - name: severity
             value: critical
@@ -76,16 +112,69 @@ spec:
         groupInterval: 1m
         repeatInterval: 1h
 
+      # ===== Tier 2 escalate-after opt-in =====
+      # Per the alert-routing runbook "escalate-after"
+      # mechanism: alerts labeled `escalate_after: "1h"` at the
+      # PrometheusRule level get an additional Signal fan-out
+      # after 55 minutes of continuous firing. Opt-in per rule
+      # (see the runbook for the candidate list); default
+      # warnings stay Tier 2 only.
+      - matchers:
+          - name: severity
+            value: warning
+          - name: escalate_after
+            value: "1h"
+        receiver: approval-channel-alert
+        groupWait: 55m       # give the operator a chance to see + ack the ntfy first
+        groupInterval: 15m
+        repeatInterval: 4h
+        continue: true       # also fall through to ntfy-direct via default
+
+      # (no explicit Tier 2 route needed — anything not matched
+      # above falls through to the default receiver = ntfy-direct.)
+
   receivers:
+    # ===== Tier 3 sink =====
+    - name: 'null'
+
+    # ===== Tier 2 sink — direct ntfy (non-E2EE) =====
+    # POSTs Alertmanager's webhook JSON to the cluster ntfy
+    # server's topic URL. ntfy accepts arbitrary JSON as the
+    # message body when Content-Type: application/json is set
+    # (per docs.ntfy.sh/publish); we let the summary string
+    # surface via the ntfy `X-Title` / `X-Priority` header
+    # mechanism if a future value bump wires that in. For now
+    # the raw AM JSON is what lands — parseable in the F-Droid
+    # app's message view.
+    #
+    # Auth: bearer token seeded by the operator per the
+    # alert-routing runbook §"Ntfy topic setup". Not the same
+    # token as ntfy-e2ee-relay's inbound-auth (which the
+    # relay uses to talk to *this* AM's webhook path).
+    #
+    # If the operator has NOT yet seeded kv/ntfy/am-direct-token,
+    # ExternalSecret in inbound-tokens-externalsecret.yaml
+    # renders `ntfy-am-direct` empty and AM's webhook 401s
+    # into a retry loop. Not damaging (retries are cheap;
+    # critical alerts still deliver via ntfy-via-relay +
+    # approval-channel), but the AM logs will complain.
+    # TODO(operator): seed kv/ntfy/am-direct-token per the
+    # alert-routing runbook before merging this file.
+    - name: ntfy-direct
+      webhookConfigs:
+        - url: http://ntfy.ntfy.svc.cluster.local/homelab-alerts-warning
+          sendResolved: true
+          httpConfig:
+            authorization:
+              type: Bearer
+              credentials:
+                name: am-inbound-tokens
+                key: ntfy-am-direct
+
+    # ===== Tier 1 sink A — E2EE ntfy via relay (unchanged) =====
     - name: ntfy-via-relay
       webhookConfigs:
         - url: http://ntfy-e2ee-relay.ntfy-e2ee-relay.svc.cluster.local:8000/webhook
-          # Alertmanager webhook output sends a JSON body with
-          # `alerts[]` containing summary + description.
-          # The relay's _extract_message in
-          # ntfy-e2ee-relay/ntfy_relay/server.py prefers this
-          # shape — Alertmanager v4 alerts[].annotations.summary
-          # is the second branch after Falcosidekick's `output`.
           sendResolved: true
           # Bearer-token defense-in-depth alongside NetPol
           # gating. Per the 2026-05-02 audit follow-up #4:
@@ -100,13 +189,7 @@ spec:
                 name: am-inbound-tokens
                 key: ntfy-e2ee-relay
 
-    # approval-channel receivers (per ADR 0009 + ADR 0021 D7+D10).
-    # approval-channel formats the AM v4 webhook batch as a
-    # terse Signal-readable message and forwards via signal-
-    # bridge. Two separate receivers — one for ordinary
-    # critical-severity alerts, one for deception events —
-    # so retry / repeat-interval / formatter framing stay
-    # independent.
+    # ===== Tier 1 sink B — Signal via approval-channel =====
     - name: approval-channel-alert
       webhookConfigs:
         - url: http://approval-channel.approval-channel.svc.cluster.local:8000/v1/alert
@@ -114,7 +197,6 @@ spec:
           # Alertmanager retries on 5xx; approval-channel
           # returns 502 if signal-bridge is unreachable.
           # That gives the durability layer.
-          # Bearer-token defense-in-depth (audit follow-up #4).
           httpConfig:
             authorization:
               type: Bearer
@@ -122,16 +204,11 @@ spec:
                 name: am-inbound-tokens
                 key: approval-channel
 
+    # ===== Deception sink — Signal (dedicated) =====
     - name: approval-channel-deception
       webhookConfigs:
         - url: http://approval-channel.approval-channel.svc.cluster.local:8000/v1/deception
           sendResolved: true
-          # `sendResolved` for deception is debatable — a
-          # deception hit doesn't really "resolve" — but
-          # leaving it on means the operator sees the
-          # entire interaction window. Tighten if signal
-          # noise materialises.
-          # Bearer-token defense-in-depth (audit follow-up #4).
           httpConfig:
             authorization:
               type: Bearer

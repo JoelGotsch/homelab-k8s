@@ -39,9 +39,16 @@ metadata:
   labels:
     app.kubernetes.io/name: nextcloud
     app.kubernetes.io/component: hot-storage
+  annotations:
+    # ADR 0036: -retain SCs require a rationale. The hot bucket
+    # holds Nextcloud config, custom_apps (installed integrations),
+    # themes + preview cache. Rebuild-from-scratch is possible but
+    # multi-hour (re-download apps, regenerate previews).
+    retention.homelab.internal/reason: "Nextcloud config + installed apps + preview cache; regenerating costs hours of re-download + preview generation."
 spec:
   accessModes: [ReadWriteMany]
-  storageClassName: longhorn-replica2
+  # 2026-07-09 ADR 0036: migrate to -retain family.
+  storageClassName: longhorn-replica2-retain
   resources:
     requests:
       # Sized for: config (~MB), custom_apps (~500MB across

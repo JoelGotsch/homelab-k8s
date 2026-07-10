@@ -43,3 +43,11 @@ resources:
   - httproute.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml
+
+# ADR 0036: cluster-wide resource-governance baseline.
+# NOTE: mirror this addition in the sibling .j2 template so
+# the next ansible re-render doesn't strip it (rendered file
+# header disclaims edits; the block is pinned so operators
+# see the drift on the next re-render pass).
+components:
+  - ../../components/first-party-namespace

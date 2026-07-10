@@ -1,0 +1,85 @@
+# Per-namespace resource + object-count quota for every
+# first-party namespace (ADR 0036 D2).
+#
+# The quota is deliberately modest — it stops runaway workloads
+# (a CI job that forks 10 000 pods; a bad Helm value that
+# multiplies replicas; the Longhorn-orphan-PV pattern that
+# triggered ADR 0036) but does not constrain a normal app.
+#
+# Apps that legitimately exceed a value MUST:
+#   (a) override the quota in the app's kustomize overlay via
+#       a strategic-merge patch, and
+#   (b) reference the reason in the app's README, and
+#   (c) add the `bypass.homelab.internal/homelab-namespace-quota:
+#       <reason>` annotation on the ResourceQuota if the
+#       override is a temporary waiver rather than a durable
+#       shape.
+#
+# The `count/*` fields are the real teeth here — they cap the
+# blast radius of the specific failure modes we have seen this
+# quarter (Longhorn PV orphans, LoadBalancer sprawl, NodePort
+# exposure).
+
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: homelab-namespace-quota
+spec:
+  hard:
+    # ---- Compute ----
+    # Modest per-namespace CPU/memory ceilings. Sum across all
+    # first-party namespaces intentionally exceeds cluster
+    # capacity: the quota is the per-app runaway guard, not the
+    # cluster-wide admission gate.
+    requests.cpu: "8"
+    requests.memory: "16Gi"
+    limits.cpu: "16"
+    limits.memory: "32Gi"
+
+    # ---- Storage ----
+    # PVC-count cap is the direct mitigation for the 2026-07-09
+    # Longhorn-orphans incident: 20 PVCs per namespace is well
+    # above every current app's footprint but well below the
+    # 96-PV Woodpecker orphan count that triggered ADR 0036.
+    count/persistentvolumeclaims: "20"
+    # Per-StorageClass storage cap, scoped to Longhorn only.
+    # NAS-crypt PVCs (immich media, nextcloud family files,
+    # jellyfin library) are on a separate substrate and can
+    # legitimately be multi-TB — they don't count against
+    # Longhorn's schedulable capacity, so counting them here
+    # would trip apps that have zero Longhorn footprint on
+    # storage-scale that's irrelevant to the ADR 0036 concern.
+    # 1 TiB per Longhorn SC per namespace is generous vs
+    # current steady state (biggest single Longhorn PVC is
+    # ~100 GiB, largest per-ns sum is under 200 GiB).
+    longhorn-replica2.storageclass.storage.k8s.io/requests.storage: "1Ti"
+    longhorn-replica3.storageclass.storage.k8s.io/requests.storage: "1Ti"
+    longhorn-replica2-retain.storageclass.storage.k8s.io/requests.storage: "1Ti"
+    longhorn-replica3-retain.storageclass.storage.k8s.io/requests.storage: "1Ti"
+
+    # ---- Service exposure ----
+    # NodePort Services forbidden — the port-range collision
+    # risk + inconsistent-IP-source pattern have no legitimate
+    # use in the cluster. Every external path goes through the
+    # Cilium Gateway per ADR 0024.
+    count/services.nodeports: "0"
+    # LoadBalancer count capped at 2 — Forgejo needs one for
+    # SSH (git+ssh://) and future apps may need one for
+    # non-HTTP protocols the Gateway doesn't handle. Kyverno's
+    # `homelab-disallow-open-egress-cnp` sibling could be
+    # extended to audit LB Services if the ceiling here needs
+    # tightening; keeping it at 2 avoids the 2026-07-10-
+    # discovered false-positive on forgejo where a `0` cap
+    # would have broken existing steady state.
+    count/services.loadbalancers: "2"
+
+    # ---- Object counts ----
+    # Pod-count cap: 40 is well above steady-state (~5-15 for
+    # every current app) but bounds a runaway ReplicaSet or
+    # CronJob-history explosion.
+    count/pods: "40"
+    # Secret-count cap: unusual growth here is a sign of ESO
+    # misconfig or a controller writing per-request Secrets.
+    count/secrets: "50"
+    # ConfigMap-count cap: same rationale as secrets.
+    count/configmaps: "50"

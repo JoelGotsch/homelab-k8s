@@ -1,0 +1,83 @@
+# Kyverno ClusterPolicy — auto-generate a default-deny NetworkPolicy into
+# every first-party namespace
+#
+# Purpose:   When a Namespace with `homelab.internal/first-party: "true"`
+#            is created/reconciled, generate a namespace-scoped
+#            NetworkPolicy named `default-deny` if it does not exist.
+# ADR:       0036 D10
+# Rollout:   Audit -> Enforce after 2 weeks of clean PolicyReports
+#
+# Rationale: Paired with `homelab-require-namespace-default-deny-netpol`.
+#            The K8s NetworkPolicy shape below denies ALL ingress and
+#            egress by default; namespaces overlay named CNPs (or K8s
+#            NetPols) on top to explicitly allow the traffic each pod
+#            needs. Because Cilium CNPs are additive/OR (CLAUDE.md rule
+#            15), the K8s deny below stays authoritative for "traffic
+#            not covered by any allow" — it's the safety net when a CNP
+#            is deleted or misapplied.
+#
+#            The `podSelector: {}` matches every pod in the namespace;
+#            `policyTypes: [Ingress, Egress]` with empty `ingress`/
+#            `egress` blocks means "deny both directions". This is the
+#            canonical shape called out in K8s NetworkPolicy docs.
+#
+#            Egress will normally be re-opened for kube-dns / apiserver /
+#            first-party dependencies via the namespace's shipped CNPs.
+#            First-boot of a new namespace may see brief DNS failures
+#            until the accompanying CNP arrives — this is intentional
+#            (fail-closed) and matches the homelab's default-deny posture.
+#
+# Bypass:    Annotate the Namespace with
+#              bypass.homelab.internal/homelab-generate-default-deny-netpol: "<reason>"
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: homelab-generate-default-deny-netpol
+  annotations:
+    policies.kyverno.io/title: "Namespace: auto-generate default-deny NetworkPolicy"
+    policies.kyverno.io/category: "Network Security"
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: NetworkPolicy
+    policies.kyverno.io/description: |
+      When a Namespace with `homelab.internal/first-party: "true"` is
+      created/updated, generate a default-deny NetworkPolicy named
+      `default-deny`. `synchronize: true`. Bypass with
+      `bypass.homelab.internal/homelab-generate-default-deny-netpol`.
+spec:
+  validationFailureAction: Audit
+  background: true
+  emitWarning: true
+  generateExisting: true
+  rules:
+    - name: generate-default-deny-netpol
+      match:
+        any:
+          - resources:
+              kinds: [Namespace]
+              selector:
+                matchLabels:
+                  homelab.internal/first-party: "true"
+      preconditions:
+        all:
+          - key: "{{ request.object.metadata.annotations.\"bypass.homelab.internal/homelab-generate-default-deny-netpol\" || '' }}"
+            operator: Equals
+            value: ""
+      generate:
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        name: default-deny
+        namespace: "{{ request.object.metadata.name }}"
+        synchronize: true
+        data:
+          metadata:
+            labels:
+              homelab.internal/generated-by: kyverno
+              homelab.internal/component: default-deny
+            annotations:
+              policies.kyverno.io/managed-by: homelab-generate-default-deny-netpol
+          spec:
+            podSelector: {}
+            policyTypes:
+              - Ingress
+              - Egress

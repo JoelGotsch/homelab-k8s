@@ -20,6 +20,7 @@ helmCharts:
     includeCRDs: false
 
 resources:
+  - namespace.yaml
   - externalsecret.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml

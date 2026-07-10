@@ -158,3 +158,14 @@ falcosidekick:
     prometheus.io/scrape: "true"
     prometheus.io/port: "2801"
     prometheus.io/path: "/metrics"
+
+  # ADR 0036 D3 — falcosidekick was missing a memory limit,
+  # flagged by the 2026-07-09 audit sweep. Falco (the DaemonSet)
+  # keeps chart-default resources because kernel-probe cost is
+  # workload-dependent and chart-default is upstream-tuned.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi

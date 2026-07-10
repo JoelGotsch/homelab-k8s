@@ -41,16 +41,24 @@ server:
     \    - labelSelector:\n        matchLabels:\n          app.kubernetes.io/name:\
     \ openbao\n          app.kubernetes.io/instance: openbao\n          component:\
     \ server\n      topologyKey: kubernetes.io/hostname\n"
+  # 2026-07-09 ADR 0036: OpenBao's Raft data + audit log volumes
+  # move to the -retain family. The Raft dir is the source of
+  # truth for every homelab secret; a stray PVC delete on a
+  # single replica means a re-join dance, on all replicas means
+  # restoring from an offline snapshot (multi-hour RTO). Default
+  # longhorn-replica2 is now reclaim=Delete; retain is mandatory.
+  # retention.homelab.internal/reason (data): "OpenBao Raft data — source of truth for every homelab secret."
+  # retention.homelab.internal/reason (audit): "OpenBao audit log — tamper-evidence trail for the secret store."
   auditStorage:
     accessMode: ReadWriteOnce
     enabled: true
     size: 5Gi
-    storageClass: longhorn-replica2
+    storageClass: longhorn-replica2-retain
   dataStorage:
     accessMode: ReadWriteOnce
     enabled: true
     size: 10Gi
-    storageClass: longhorn-replica2
+    storageClass: longhorn-replica2-retain
   extraEnvironmentVars:
     OPENBAO_CLUSTER_NAME: homelab
     # In-pod bao client talks to its own listener over HTTPS;

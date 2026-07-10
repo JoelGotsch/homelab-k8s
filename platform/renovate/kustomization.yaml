@@ -18,3 +18,7 @@ resources:
   - externalsecret.yaml
   - cronjob.yaml
   - networkpolicy.yaml
+
+# ADR 0036: cluster-wide resource-governance baseline.
+components:
+  - ../../components/first-party-namespace

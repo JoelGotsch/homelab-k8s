@@ -22,15 +22,24 @@ spec:
   # infrastructure/longhorn/recurring-jobs.yaml's
   # `secret-personal` group: hourly snapshots × 7d retain.
   # Vaultwarden is `secret`-class (password vault).
+  #
+  # 2026-07-09 ADR 0036: CNPG Postgres data volume moves to the
+  # -retain family. Vaultwarden DB carries the operator's + family
+  # members' daily-driver credential vaults.
+  # CNPG propagates inheritedMetadata.annotations to child PVCs at
+  # reconcile time (per CNPG docs), satisfying the Kyverno
+  # homelab-disallow-retain-reclaim-without-annotation policy.
   inheritedMetadata:
     labels:
       recurring-job-group.longhorn.io/secret-personal: "enabled"
+    annotations:
+      retention.homelab.internal/reason: "Vaultwarden Postgres — operator + family password vaults."
 
   storage:
     # Personal-vault scale: hundreds of items, dozens of
     # users. 5Gi is generous; resize if usage grows.
     size: 5Gi
-    storageClass: longhorn-replica3
+    storageClass: longhorn-replica3-retain
 
   monitoring:
     enablePodMonitor: true

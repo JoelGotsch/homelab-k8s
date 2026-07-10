@@ -1,0 +1,82 @@
+# Cilium CNP egress scaffold — COMMENTED OUT by default.
+#
+# This file is a template for the CNP every first-party app
+# must ship alongside the default-deny K8s NetworkPolicy
+# emitted by this component. Uncommenting it as-is will fail —
+# `<APP_LABEL>` and `<APP_FQDN_HERE>` are operator-fill
+# placeholders per the CLAUDE.md `<UPPER_SNAKE>` convention.
+#
+# Why it lives here (commented) rather than in the app:
+#   The scaffold documents the *shape* every first-party CNP
+#   must have — kube-DNS egress, kube-apiserver egress on
+#   BOTH 443 and 6443 (CLAUDE.md rule #12; socket-LB translates
+#   before policy eval), and an FQDN allowlist. Missing any of
+#   these has cost multi-hour outages in this workspace.
+#
+# The app MUST:
+#   1. Copy this file into the app's own directory
+#      (typically `apps/<name>/ciliumnetworkpolicy.yaml`).
+#   2. Uncomment and rename the CNP `metadata.name` to
+#      `<app>-egress`.
+#   3. Fill in `<APP_LABEL>` on the endpointSelector.
+#   4. Replace the FQDN placeholders with the app's real
+#      external egress targets — one entry per destination.
+#   5. Delete rules the app does not need (e.g. drop the
+#      apiserver rule if the app never calls the K8s API).
+#   6. Register the file in the app's kustomization.yaml
+#      `resources:` block (NOT in this component — the
+#      component ships the *scaffold*, not the enforced CNP,
+#      because the endpointSelector is app-specific).
+#
+# ---
+#
+# apiVersion: cilium.io/v2
+# kind: CiliumNetworkPolicy
+# metadata:
+#   name: <app>-egress
+# spec:
+#   endpointSelector:
+#     matchLabels:
+#       app.kubernetes.io/name: <APP_LABEL>
+#   egress:
+#     # ---- kube-DNS ----
+#     # Every CNP that uses `toFQDNs` MUST first allow DNS to
+#     # kube-dns, otherwise the FQDN lookup fails before
+#     # the toFQDNs rule can match (CLAUDE.md rule #15).
+#     - toEndpoints:
+#         - matchLabels:
+#             k8s-app: kube-dns
+#             io.kubernetes.pod.namespace: kube-system
+#       toPorts:
+#         - ports:
+#             - port: "53"
+#               protocol: UDP
+#             - port: "53"
+#               protocol: TCP
+#           rules:
+#             dns:
+#               - matchPattern: "*"
+#     # ---- kube-apiserver ----
+#     # Ports 443 AND 6443 — socket-LB DNATs the ClusterIP-443
+#     # to the node-6443 before policy eval, so both must be
+#     # allowed (CLAUDE.md rule #12; watchdog PATCH timeout
+#     # journal 2026-06-22).
+#     - toEntities:
+#         - kube-apiserver
+#       toPorts:
+#         - ports:
+#             - port: "443"
+#               protocol: TCP
+#             - port: "6443"
+#               protocol: TCP
+#     # ---- Per-app FQDN allowlist ----
+#     # One entry per external destination the app talks to.
+#     # Prefer exact matches over `matchPattern`; wildcards
+#     # widen the attack surface.
+#     - toFQDNs:
+#         - matchName: "<APP_FQDN_HERE>"
+#         # - matchPattern: "*.<APP_DOMAIN>"
+#       toPorts:
+#         - ports:
+#             - port: "443"
+#               protocol: TCP

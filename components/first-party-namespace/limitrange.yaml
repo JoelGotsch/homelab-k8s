@@ -1,0 +1,59 @@
+# Default per-container resource envelope + PVC size ceiling
+# for every first-party namespace (ADR 0036 D2).
+#
+# The container defaults are the LimitRange side of a two-tier
+# strategy:
+#
+#   - LimitRange fills in default requests/limits when a
+#     PodSpec omits them (soft floor — silent, no admission
+#     rejection).
+#   - The `homelab-container-resources-required` Kyverno
+#     ClusterPolicy in Audit-then-Enforce mode rejects
+#     PodSpecs missing explicit requests/limits (hard floor —
+#     forces app authors to state their numbers).
+#
+# The LimitRange keeps the workspace safe *today* (Audit mode
+# means Kyverno only warns); the Kyverno policy is the long-run
+# enforcement (ADR 0036 D5).
+#
+# PVC size ceiling: surfaces "someone typoed 100G instead of
+# 100M" before it silently over-allocates. Apps that legitimately
+# need >100 Gi (Jellyfin media caches, Immich hot tier,
+# Prometheus TSDB) MUST override this LimitRange in their
+# overlay OR use a NAS-backed storage class.
+
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: homelab-defaults
+spec:
+  limits:
+    - type: Container
+      default:
+        # Modest ceiling; workloads with real needs override
+        # explicitly in their PodSpec (Kyverno then verifies
+        # the override was intentional).
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        # Small request floor: apps still need to *declare* what
+        # they want; this only catches the "forgot to set it"
+        # path.
+        cpu: 50m
+        memory: 128Mi
+    - type: PersistentVolumeClaim
+      max:
+        # Hard ceiling for Longhorn-backed PVCs. Apps that need
+        # bulk capacity (media, backups, TSDB) either:
+        #   - override this LimitRange in the app's overlay
+        #     (kustomize patch), and cross-reference the
+        #     override in the app's README, or
+        #   - route the PVC to a NAS-backed storage class
+        #     (nas-crypt-*) which is not subject to Longhorn
+        #     capacity pressure.
+        storage: 100Gi
+      min:
+        # Trivially-small PVCs are almost always a bug (empty
+        # `resources.requests.storage` renders as 0/1Mi). Force
+        # a floor.
+        storage: 100Mi

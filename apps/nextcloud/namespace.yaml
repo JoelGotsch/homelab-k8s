@@ -3,6 +3,10 @@ kind: Namespace
 metadata:
   name: nextcloud
   labels:
+    # ADR 0036: first-party namespace enrolment.
+    homelab.internal/first-party: "true"
+    # `personal` — operator + family files, calendars, contacts.
+    homelab.internal/data-class: personal
     # `baseline` exception (2026-05-29 decision). The official nextcloud
     # apache image's entrypoint must start as root — writes PHP conf.d,
     # chowns data, binds :80 — then drops to www-data. restricted PSS

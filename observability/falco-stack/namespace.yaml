@@ -22,3 +22,7 @@ metadata:
     # securityContexts; the namespace-level setting is
     # the floor.
     pod-security.kubernetes.io/audit: privileged
+    # ADR 0036 D4 — observability-tier; classified as `internal`.
+    # Labels mirror kube-prometheus-stack/namespace.yaml (same ns).
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal

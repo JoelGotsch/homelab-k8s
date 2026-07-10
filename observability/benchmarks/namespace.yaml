@@ -6,3 +6,6 @@ metadata:
     pod-security.kubernetes.io/enforce: privileged
     pod-security.kubernetes.io/warn: privileged
     pod-security.kubernetes.io/audit: privileged
+    # ADR 0036 D4 — observability-tier; classified as `internal`.
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal

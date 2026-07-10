@@ -103,12 +103,28 @@ spec:
                       "src/$bucket" "/staging/$bucket"
                   done
                   echo "=== mirror complete: $(du -sh /staging | cut -f1) staged ==="
+              env:
+                # `mc` writes its config on first `alias set`. With
+                # readOnlyRootFilesystem it can't create the default
+                # $HOME/.mc (HOME unset → /.mc) and died every run with
+                # "mkdir /.mc: read-only file system" — so this init
+                # NEVER succeeded and tier-3 has never backed up in 45d
+                # (status.lastSuccessfulTime empty). Point mc at the
+                # writable in-memory `tmp` volume instead. (CLAUDE.md /
+                # misc.md: "mc in PSS-restricted pods needs a writable
+                # config dir".) Fixed 2026-07-09.
+                - name: MC_CONFIG_DIR
+                  value: /tmp/mc
               envFrom:
                 - secretRef:
                     name: minio-reader-creds
               volumeMounts:
                 - name: staging
                   mountPath: /staging
+                # Shared with the restic container; the only writable
+                # path under readOnlyRootFilesystem. Holds mc's config.
+                - name: tmp
+                  mountPath: /tmp
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities:

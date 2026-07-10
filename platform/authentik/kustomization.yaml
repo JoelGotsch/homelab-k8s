@@ -25,6 +25,10 @@ resources:
   - networkpolicy.yaml
   - servicemonitor.yaml
 
+# ADR 0036: cluster-wide resource-governance baseline.
+components:
+  - ../../components/first-party-namespace
+
 # Custom blueprints — one YAML per app, materialised as a
 # ConfigMap that the chart mounts at /blueprints/. Worker
 # auto-discovers `*.yaml` keys and applies them on reconcile.

@@ -1,0 +1,14 @@
+# Dedicated namespace for Tempo. Created here rather than
+# relying on Argo's CreateNamespace=true so the ADR 0036 D4
+# first-party labels apply at Sync-time.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability-tempo
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    # ADR 0036 D4 — observability-tier; classified as `internal`.
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal

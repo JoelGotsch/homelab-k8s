@@ -110,11 +110,14 @@ alertmanager:
               storage: 5Gi
 
     resources:
+      # ADR 0036 subagent brief default for Alertmanager.
+      # Raised limit 256Mi → 512Mi to give notification-fanout
+      # bursts headroom.
       requests:
         cpu: 50m
         memory: 128Mi
       limits:
-        memory: 256Mi
+        memory: 512Mi
 
   # Minimal base config the prometheus-operator merges with
   # routes from the AlertmanagerConfig CRD selected by
@@ -242,17 +245,33 @@ grafana:
           filterBySpanID: false
 
   resources:
+    # ADR 0036 subagent brief default for Grafana. Limit
+    # bumped 512Mi → 1Gi to accommodate dashboard sidecar
+    # imports plus Loki/Tempo datasource proxy load.
     requests:
       cpu: 100m
       memory: 256Mi
     limits:
-      memory: 512Mi
+      memory: 1Gi
 
 # ---------- node-exporter (DaemonSet) ----------
 nodeExporter:
   enabled: true
   # Talos: hostNetwork + hostPID required for /proc /sys access.
   # Chart defaults handle this.
+
+# prometheus-node-exporter subchart resources — ADR 0036 D3.
+# The `nodeExporter.enabled` toggle above just gates the subchart;
+# actual container resources live under the subchart's own values
+# key. Without this, the DaemonSet ran with `resources: {}` (audit
+# 2026-07-09).
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
 
 # ---------- kube-state-metrics ----------
 kubeStateMetrics:
@@ -282,6 +301,14 @@ kube-state-metrics:
   metricLabelsAllowlist:
     - pods=[*]
     - nodes=[*]
+  # ADR 0036 D3 — chart-default resources: {} audit-flagged
+  # 2026-07-09.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
 
 # ---------- prometheus-operator ----------
 prometheusOperator:

@@ -3,5 +3,10 @@ kind: Namespace
 metadata:
   name: forgejo
   labels:
+    # ADR 0036: first-party namespace enrolment.
+    homelab.internal/first-party: "true"
+    # `internal` — source of truth per ADR 0023 (git metadata,
+    # issues, PRs, hooks; source content is internal-class).
+    homelab.internal/data-class: internal
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted

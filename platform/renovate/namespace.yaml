@@ -3,5 +3,10 @@ kind: Namespace
 metadata:
   name: renovate
   labels:
+    # ADR 0036: first-party namespace enrolment.
+    homelab.internal/first-party: "true"
+    # `internal` — Forgejo PAT + git clones (source content is
+    # internal-class per ADR 0003).
+    homelab.internal/data-class: internal
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted

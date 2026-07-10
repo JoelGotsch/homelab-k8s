@@ -15,9 +15,19 @@ spec:
   # `secret-personal` group: hourly snapshots × 7d retain.
   # Paperless documents are `personal`-class (financial /
   # ID / medical paperwork).
+  #
+  # 2026-07-09 ADR 0036: CNPG Postgres data volume moves to the
+  # -retain family. Paperless DB carries document metadata,
+  # tags, correspondents, OCR text index — must not release on
+  # a stray PVC delete.
+  # CNPG propagates inheritedMetadata.annotations to child PVCs at
+  # reconcile time (per CNPG docs), satisfying the Kyverno
+  # homelab-disallow-retain-reclaim-without-annotation policy.
   inheritedMetadata:
     labels:
       recurring-job-group.longhorn.io/secret-personal: "enabled"
+    annotations:
+      retention.homelab.internal/reason: "Paperless DB — document metadata + tags + OCR text index."
 
   # Bumped 10Gi → 20Gi 2026-06-25: actual usage was 12.85 GiB on pg-2
   # (vs. ~13 MB real DB data) due to Longhorn snapshot delta
@@ -30,7 +40,7 @@ spec:
   # bump is the headroom needed while that lands. Re ADR 0016 / #73.
   storage:
     size: 20Gi
-    storageClass: longhorn-replica3
+    storageClass: longhorn-replica3-retain
 
   monitoring:
     enablePodMonitor: true

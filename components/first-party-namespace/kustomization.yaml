@@ -1,0 +1,39 @@
+# First-party-namespace baseline component.
+#
+# Seeds every namespace labelled `homelab.internal/first-party: "true"`
+# with the resource-governance floor mandated by ADR 0036 D2:
+#
+#   - LimitRange           — per-container defaults + a PVC size ceiling
+#   - ResourceQuota        — per-namespace resource + object-count cap
+#   - default-deny NetPol  — vanilla K8s NetworkPolicy defence-in-depth
+#                             layer alongside Cilium CNPs
+#   - CNP egress scaffold  — commented-out template; apps MUST edit
+#                             before deploy (kube-DNS, kube-apiserver,
+#                             plus per-app FQDN allowlist)
+#
+# Usage from an app's kustomization.yaml:
+#
+#   apiVersion: kustomize.config.k8s.io/v1beta1
+#   kind: Kustomization
+#   namespace: my-app
+#   resources:
+#     - namespace.yaml
+#     - ...
+#   components:
+#     - ../../components/first-party-namespace
+#
+# The component is intentionally namespace-agnostic; the calling
+# Kustomization's `namespace:` field (or the app's namespace.yaml)
+# stays authoritative for the target namespace.
+#
+# See ../README.md for override fields, waiver annotations, and
+# expected app-side edits.
+
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - limitrange.yaml
+  - resourcequota.yaml
+  - networkpolicy-default-deny.yaml
+  - ciliumnetworkpolicy-egress-scaffold.yaml

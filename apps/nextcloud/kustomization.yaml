@@ -29,3 +29,8 @@ resources:
   - httproute.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml
+
+# ADR 0036: cluster-wide resource-governance baseline
+# (LimitRange + ResourceQuota + default-deny NetPol scaffold).
+components:
+  - ../../components/first-party-namespace

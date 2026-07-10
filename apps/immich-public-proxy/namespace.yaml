@@ -3,5 +3,10 @@ kind: Namespace
 metadata:
   name: immich-public-proxy
   labels:
+    # ADR 0036: first-party namespace enrolment.
+    homelab.internal/first-party: "true"
+    # `public` — stateless read-only share proxy behind CF Tunnel;
+    # holds no user data itself (proxies to Immich).
+    homelab.internal/data-class: public
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted

@@ -32,3 +32,4 @@ resources:
   - httproute.yaml
   - worker-cascade-rules.yaml
   - openbao-seal-rules.yaml
+  - rules-longhorn.yaml

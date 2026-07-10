@@ -26,6 +26,11 @@ resources:
   - networkpolicy.yaml
   - servicemonitor.yaml
 
+# ADR 0036: cluster-wide resource-governance baseline
+# (LimitRange + ResourceQuota + default-deny NetPol scaffold).
+components:
+  - ../../components/first-party-namespace
+
 # The Helm chart creates the config PVC on Longhorn (Jellyfin's
 # config + cache + library DB). Patch in the recurring-job-group
 # label so it joins infrastructure/longhorn/recurring-jobs.yaml's

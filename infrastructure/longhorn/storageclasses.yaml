@@ -1,8 +1,33 @@
-# Longhorn storage classes per ADR 0016.
-# - longhorn-replica2: default for most workloads
-# - longhorn-replica3: critical workloads (CNPG primaries,
-#   OpenBao Raft, etc.)
-# - longhorn-replica1: regenerable data (caches, scratch)
+# Longhorn storage classes per ADR 0016 (replica shape) and
+# ADR 0036 (reclaim-policy split).
+#
+# Reclaim-policy split (ADR 0036 D1):
+#   `longhorn-replica{2,3}` default to `reclaimPolicy: Delete`
+#   so PVCs are garbage-collected with their parent workload.
+#   The 2026-07-09 Longhorn 99.6%-full incident was driven by
+#   96 orphaned Retain-policy PVs left behind by 11 days of
+#   Woodpecker CI — Delete-by-default is the fix.
+#
+#   Workloads whose data must outlive the PVC (CNPG primaries,
+#   OpenBao Raft, Vaultwarden, Forgejo git) opt into the
+#   `-retain` variants below. See ADR 0036 D1 + the migration
+#   matrix in the ADR's "Consequences → Migration" table.
+#
+# Classes:
+# - longhorn-replica2         : default; Delete on PVC removal
+# - longhorn-replica3         : critical workloads; Delete on PVC removal
+# - longhorn-replica2-retain  : opt-in Retain for replica=2
+# - longhorn-replica3-retain  : opt-in Retain for replica=3
+# - longhorn-replica1         : regenerable / scratch data
+#
+# NOTE (operator, 2026-07-10): a `longhorn-static` class is
+# referenced by the Longhorn Helm chart's `defaultLonghornStaticStorageClass`
+# setting but is not defined explicitly here (it is auto-created
+# by Longhorn's manager for statically-provisioned PVs). Its
+# reclaimPolicy is Delete by default and stays Delete per
+# ADR 0036 D1. TODO: confirm no manifests reference `longhorn-static`
+# as a `storageClassName` for dynamic provisioning before the
+# Enforce cut-over.
 
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -10,6 +35,47 @@ metadata:
   name: longhorn-replica2
   annotations:
     storageclass.kubernetes.io/is-default-class: "true"
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+# ADR 0036 D1: Delete-by-default. Retain-worthy workloads opt
+# into longhorn-replica2-retain below.
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "2"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+  fsType: "ext4"
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-replica3
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+# ADR 0036 D1: Delete-by-default. Critical stateful workloads
+# (CNPG primaries, OpenBao Raft) opt into longhorn-replica3-retain.
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "3"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+  fsType: "ext4"
+---
+# ADR 0036 D1: opt-in Retain variant for stateful workloads
+# whose data must outlive the PVC — CNPG Postgres data
+# directories, Vaultwarden data (see ADR 0028 / vaultwarden
+# README), and any workload where an accidental
+# `kubectl delete pvc` must not tombstone the underlying
+# volume. PVCs using this class MUST also carry the
+# `retention.homelab.internal/reason: <text>` annotation
+# per ADR 0036 D2, enforced by the `homelab-retain-requires-reason`
+# Kyverno policy.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-replica2-retain
 provisioner: driver.longhorn.io
 allowVolumeExpansion: true
 reclaimPolicy: Retain
@@ -23,7 +89,7 @@ parameters:
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: longhorn-replica3
+  name: longhorn-replica3-retain
 provisioner: driver.longhorn.io
 allowVolumeExpansion: true
 reclaimPolicy: Retain
