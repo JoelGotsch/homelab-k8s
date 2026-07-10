@@ -107,4 +107,4 @@ spec:
       # (previous audit report noted actual usage <10 GiB).
       # Bulk export is re-run on demand; capacity is easy to
       # resize if a larger archive lands.
-      storage: 20Gi
+      storage: 100Gi

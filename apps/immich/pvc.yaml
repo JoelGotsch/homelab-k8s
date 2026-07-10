@@ -50,7 +50,7 @@ spec:
       # count + DB backups). Original 100 GiB was speculative
       # headroom for a hypothetical 100k-photo library. Resize
       # (capacity-only edit) when actual utilisation approaches.
-      storage: 20Gi
+      storage: 100Gi
 ---
 # Cold bucket — originals on the encrypted NAS share via
 # csi-rclone. The crypt-over-NFS chained remote is configured
