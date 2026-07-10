@@ -13,13 +13,23 @@ spec:
   # infrastructure/longhorn/recurring-jobs.yaml's
   # `secret-personal` group: hourly snapshots × 7d retain.
   # Nextcloud is `personal`-class (user files + calendar).
+  #
+  # 2026-07-09 ADR 0036: CNPG Postgres data volume moves to the
+  # -retain family. Default longhorn-replica3 is now reclaim=Delete;
+  # Nextcloud DB carries user accounts, file metadata, calendar,
+  # contacts — must not be released on a stray PVC delete.
+  # CNPG propagates inheritedMetadata.annotations to child PVCs at
+  # reconcile time (per CNPG docs), satisfying the Kyverno
+  # homelab-disallow-retain-reclaim-without-annotation policy.
   inheritedMetadata:
     labels:
       recurring-job-group.longhorn.io/secret-personal: "enabled"
+    annotations:
+      retention.homelab.internal/reason: "Nextcloud DB — user accounts, file metadata, calendar, contacts."
 
   storage:
     size: 10Gi
-    storageClass: longhorn-replica3
+    storageClass: longhorn-replica3-retain
 
   monitoring:
     enablePodMonitor: true

@@ -3,5 +3,9 @@ kind: Namespace
 metadata:
   name: immich
   labels:
+    # ADR 0036: first-party namespace enrolment.
+    homelab.internal/first-party: "true"
+    # `personal` — photos + face/embedding metadata (ADR 0003).
+    homelab.internal/data-class: personal
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted

@@ -5,3 +5,9 @@ metadata:
   labels:
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
+    # ADR 0036 D4 — first-party classification labels.
+    # `cnpg-system` is infra-tier (the operator itself);
+    # per-app CNPG Cluster CRs land in the consuming app's own
+    # first-party namespace which does pull the shared component.
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal

@@ -54,11 +54,16 @@ image:
 
 # Config + cache + DB on Longhorn-replica2 (single-replica
 # Jellyfin; resilience via snapshot, not multi-replica).
+# 2026-07-09 ADR 0036: migrate to -retain family. The config
+# PVC carries library metadata + watch state + user accounts;
+# losing it forces a full NAS-tree rescan (hours) and drops
+# every user's playback progress. Right-sized 50Gi → 20Gi —
+# actual usage stays under 10 GiB even after full media scan.
 persistence:
   config:
     enabled: true
-    storageClassName: longhorn-replica2
-    size: 50Gi
+    storageClassName: longhorn-replica2-retain
+    size: 20Gi
     accessModes:
       - ReadWriteOnce
   # Media library mount — references the NFS PVC declared

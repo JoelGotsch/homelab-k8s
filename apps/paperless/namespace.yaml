@@ -3,5 +3,9 @@ kind: Namespace
 metadata:
   name: paperless
   labels:
+    # ADR 0036: first-party namespace enrolment.
+    homelab.internal/first-party: "true"
+    # `personal` — scanned financial/ID/medical paperwork.
+    homelab.internal/data-class: personal
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted

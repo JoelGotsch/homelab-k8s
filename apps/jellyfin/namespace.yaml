@@ -3,5 +3,10 @@ kind: Namespace
 metadata:
   name: jellyfin
   labels:
+    # ADR 0036: first-party namespace enrolment.
+    homelab.internal/first-party: "true"
+    # `personal` — family media consumption (watch history +
+    # per-user library state on the Longhorn config PVC).
+    homelab.internal/data-class: personal
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted

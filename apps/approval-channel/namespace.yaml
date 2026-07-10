@@ -12,6 +12,11 @@ kind: Namespace
 metadata:
   name: approval-channel
   labels:
+    # ADR 0036: first-party namespace enrolment.
+    homelab.internal/first-party: "true"
+    # `internal` — alert-metadata routing, not user data
+    # (per ADR 0003 classification).
+    homelab.internal/data-class: internal
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted

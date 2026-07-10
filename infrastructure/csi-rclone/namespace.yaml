@@ -16,3 +16,8 @@ metadata:
   labels:
     pod-security.kubernetes.io/enforce: privileged
     pod-security.kubernetes.io/audit: privileged
+    # ADR 0036 D4 — infrastructure-tier CSI driver namespace.
+    # Data-class `internal` (metadata only — the encrypted
+    # backing store's data-class is a per-consumer property).
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal

@@ -24,9 +24,17 @@ metadata:
   labels:
     app.kubernetes.io/name: signal-bridge
     app.kubernetes.io/component: data
+  annotations:
+    # ADR 0036: -retain SCs require a rationale.
+    # signal-cli registration data + private device identity keys —
+    # a stray PVC delete forces re-registration (SMS to the operator's
+    # phone). The openbao-seal-watchdog escape hatch depends on this
+    # bridge staying registered, so retention is load-bearing.
+    retention.homelab.internal/reason: "signal-cli registration + private device identity keys; loss forces re-registration (SMS) and breaks the alerting escape hatch."
 spec:
   accessModes: [ReadWriteOnce]
-  storageClassName: longhorn-replica2
+  # 2026-07-09 ADR 0036: migrate to -retain family.
+  storageClassName: longhorn-replica2-retain
   resources:
     requests:
       storage: 2Gi

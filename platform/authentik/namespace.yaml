@@ -3,5 +3,10 @@ kind: Namespace
 metadata:
   name: authentik
   labels:
+    # ADR 0036: first-party namespace enrolment.
+    homelab.internal/first-party: "true"
+    # `secret` — operator-identity backend; a compromise cascades
+    # to every OIDC-consuming service.
+    homelab.internal/data-class: secret
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/audit: baseline

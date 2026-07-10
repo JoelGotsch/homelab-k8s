@@ -44,12 +44,21 @@ deployment:
 # Longhorn — same shape as the rest of the cluster's stateful
 # workloads. Git data is cluster-replicated; NAS is for the
 # WORM-shape LFS + Packages content.
+#
+# 2026-07-09 ADR 0036: migrate to -retain family. Git repos +
+# config are source-of-truth for the forge; PVC delete must
+# not release the underlying volume. Right-sized 100Gi → 20Gi
+# per audit — real usage stays under 10 GiB (LFS + Packages
+# are already offloaded to NAS via forgejo-lfs + forgejo-packages
+# PVCs in pvc.yaml).
 persistence:
   enabled: true
-  storageClass: longhorn-replica3
-  size: 100Gi
+  storageClass: longhorn-replica3-retain
+  size: 20Gi
   accessModes:
     - ReadWriteOnce
+  annotations:
+    retention.homelab.internal/reason: "Forgejo app data — git repos + config + runtime state; source-of-truth for the forge."
 
 # Use the externally-managed CNPG cluster instead of the
 # bundled Postgres dependency. CNPG service exposed at

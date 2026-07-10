@@ -31,16 +31,26 @@ metadata:
   labels:
     app.kubernetes.io/name: immich
     app.kubernetes.io/component: hot-storage
+  annotations:
+    # ADR 0036: -retain SCs require a rationale. Immich's hot
+    # bucket holds thumbnails, previews, encoded video, profile
+    # + CNPG backups. Regenerating from the cold-tier originals
+    # costs hours of ML re-inference (CLIP + face embeddings) —
+    # deletion should NOT release the underlying volume.
+    retention.homelab.internal/reason: "Regenerating thumbs/previews/encoded video from originals costs hours of ML re-inference (CLIP + face embeddings); PVC delete must not evict data."
 spec:
   accessModes: [ReadWriteMany]
-  storageClassName: longhorn-replica2
+  # 2026-07-09 ADR 0036: migrate to -retain family. Default
+  # longhorn-replica2 is now reclaim=Delete (ephemeral).
+  storageClassName: longhorn-replica2-retain
   resources:
     requests:
-      # Sized for ~100k photos: ~30 GiB thumbs + previews,
-      # ~50 GiB encoded video buffer (operator can disable
-      # transcoding to keep this low), ~10 GiB
-      # backups/profile/upload-staging, ~10 GiB headroom.
-      storage: 100Gi
+      # Right-sized 2026-07-09 per ADR 0036 audit — actual usage
+      # sat well under 10 GiB (thumbs+previews at current photo
+      # count + DB backups). Original 100 GiB was speculative
+      # headroom for a hypothetical 100k-photo library. Resize
+      # (capacity-only edit) when actual utilisation approaches.
+      storage: 20Gi
 ---
 # Cold bucket — originals on the encrypted NAS share via
 # csi-rclone. The crypt-over-NFS chained remote is configured

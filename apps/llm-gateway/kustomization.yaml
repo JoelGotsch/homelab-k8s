@@ -43,6 +43,11 @@ resources:
   - registry-pull-secret.yaml
   - sa-default.yaml
 
+# ADR 0036: cluster-wide resource-governance baseline
+# (LimitRange + ResourceQuota + default-deny NetPol scaffold).
+components:
+  - ../../components/first-party-namespace
+
 # Two patches on the chart-rendered migrations Job:
 #   (1) Strategic-merge — add the PSA-restricted-compliant
 #       pod-level securityContext fields (see patch file).

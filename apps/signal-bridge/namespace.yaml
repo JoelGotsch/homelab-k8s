@@ -12,6 +12,11 @@ kind: Namespace
 metadata:
   name: signal-bridge
   labels:
+    # ADR 0036: first-party namespace enrolment.
+    homelab.internal/first-party: "true"
+    # `secret` — Signal-cli registration data + private device
+    # identity keys on the PVC. Loss forces re-registration.
+    homelab.internal/data-class: secret
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted

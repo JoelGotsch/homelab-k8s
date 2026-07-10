@@ -3,5 +3,10 @@ kind: Namespace
 metadata:
   name: ntfy
   labels:
+    # ADR 0036: first-party namespace enrolment.
+    homelab.internal/first-party: "true"
+    # `internal` — alert broker; ntfy-e2ee-relay re-encrypts
+    # before publish, so the server sees only ciphertext.
+    homelab.internal/data-class: internal
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted

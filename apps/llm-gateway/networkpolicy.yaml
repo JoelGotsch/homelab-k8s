@@ -28,6 +28,19 @@ kind: CiliumNetworkPolicy
 metadata:
   name: llm-gateway-allow
   namespace: llm-gateway
+  annotations:
+    # ADR 0036 D5: wildcard-CIDR egress in this policy is
+    # documented. LiteLLM proxies homelab traffic to external
+    # LLM providers (OpenRouter today, direct Anthropic/OpenAI
+    # historically); the destination set is announced by CDNs +
+    # can rotate weekly, so a hostname-narrowed toFQDNs rule
+    # would require constant curation. Presidio guardrails
+    # (see values.yaml `guardrails:`) plus the classification
+    # gate in llm_gateway.hooks.pre_call are the primary defense;
+    # this wildcard is defence-in-depth-only. Kyverno's
+    # no-cidr-world-egress ClusterPolicy waives this CNP via
+    # this annotation.
+    bypass.homelab.internal/no-cidr-world-egress: "external-LLM-provider-egress; Presidio + classification gate are the primary controls"
 spec:
   endpointSelector:
     matchLabels:

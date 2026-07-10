@@ -15,3 +15,8 @@ resources:
   # platform/forgejo/README.md §"First-party image pulls".
   - registry-pull-secret.yaml
   - sa-default.yaml
+
+# ADR 0036: cluster-wide resource-governance baseline
+# (LimitRange + ResourceQuota + default-deny NetPol scaffold).
+components:
+  - ../../components/first-party-namespace

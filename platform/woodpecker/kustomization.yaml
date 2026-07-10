@@ -27,3 +27,17 @@ resources:
   - httproute.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml
+
+# ADR 0036 deferred here: the shared first-party-namespace
+# component assumes a single target namespace, but this
+# kustomization spans TWO namespaces (`woodpecker` control
+# plane + `ci-woodpecker` step-Pod runner) and does not set a
+# top-level `namespace:`. Wiring the component in would render
+# LimitRange/ResourceQuota with an unspecified namespace,
+# colliding with the ci-woodpecker `quota.yaml` reference
+# implementation (ADR 0023 D5 authoritative for step Pods).
+#
+# Follow-up: split into a small overlay that scopes the shared
+# component to `woodpecker` (control plane) only. Punch-list
+# item — kept out of scope for the initial ADR 0036 sweep to
+# avoid unintended cross-ns admission surface.

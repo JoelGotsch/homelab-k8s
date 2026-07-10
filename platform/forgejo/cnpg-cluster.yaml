@@ -26,9 +26,18 @@ spec:
   # Propagate labels to CNPG-managed children. Picked up by
   # infrastructure/longhorn/recurring-jobs.yaml's `internal`
   # group: 4-hourly snapshots × 7d retain.
+  #
+  # 2026-07-09 ADR 0036: CNPG Postgres data volume moves to the
+  # -retain family. Forgejo DB is source-of-truth relational
+  # metadata (issues, PRs, hooks, users).
+  # CNPG propagates inheritedMetadata.annotations to child PVCs at
+  # reconcile time (per CNPG docs), satisfying the Kyverno
+  # homelab-disallow-retain-reclaim-without-annotation policy.
   inheritedMetadata:
     labels:
       recurring-job-group.longhorn.io/internal: "enabled"
+    annotations:
+      retention.homelab.internal/reason: "Forgejo DB — issues, PRs, hooks, users; source-of-truth for the forge."
 
   storage:
     # Forgejo's data churn is bounded — git data lives on
@@ -36,7 +45,7 @@ spec:
     # metadata (users, issues, PRs, hooks) goes through Postgres.
     # 10Gi is generous at homelab scale; expand later if needed.
     size: 10Gi
-    storageClass: longhorn-replica3
+    storageClass: longhorn-replica3-retain
 
   monitoring:
     enablePodMonitor: true

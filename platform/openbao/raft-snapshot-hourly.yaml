@@ -27,9 +27,13 @@ metadata:
     # both at file-level (this CronJob) and at block-level
     # (Longhorn).
     recurring-job-group.longhorn.io/secret-personal: "enabled"
+  annotations:
+    # ADR 0036: -retain SCs require a rationale.
+    retention.homelab.internal/reason: "Hourly Raft snapshots — the local tier-1 of the OpenBao backup chain (per ADR 0018 D5)."
 spec:
   accessModes: [ReadWriteOnce]
-  storageClassName: longhorn-replica2
+  # 2026-07-09 ADR 0036: migrate to -retain family.
+  storageClassName: longhorn-replica2-retain
   resources:
     requests:
       storage: 10Gi

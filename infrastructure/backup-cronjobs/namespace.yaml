@@ -5,3 +5,10 @@ metadata:
   labels:
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
+    # ADR 0036 D4 — infrastructure-tier; classified as `internal`.
+    # Does NOT pull the first-party-namespace component: restic
+    # CronJobs write large PVCs (cache) and would trip the
+    # LimitRange PVC max=100Gi; NetPol shape lives in
+    # networkpolicy.yaml already tuned for restic egress.
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal

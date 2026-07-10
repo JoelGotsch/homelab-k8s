@@ -3,5 +3,10 @@ kind: Namespace
 metadata:
   name: pr-agent
   labels:
+    # ADR 0036: first-party namespace enrolment.
+    homelab.internal/first-party: "true"
+    # `internal` — receives Forgejo webhook payloads (PR diffs +
+    # metadata); calls into llm-gateway; no user data at rest.
+    homelab.internal/data-class: internal
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted

@@ -202,6 +202,20 @@ server:
 # transcode, smart-search indexing, face detection).
 microservices:
   enabled: true
+  # ADR 0036: explicit resources on every container. Microservices
+  # transcodes video + generates thumbnails; heavier than the API
+  # but still bounded — 2 Gi limit covers concurrent ingest of
+  # a burst upload without OOMKilling under LimitRange defaults.
+  controllers:
+    main:
+      containers:
+        main:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 2Gi
 
 # Valkey — bundled cache (Redis-compatible). Chart default is enabled:false,
 # so we have to opt in. Service lands at `immich-valkey` and the chart
@@ -231,6 +245,15 @@ valkey:
             readOnlyRootFilesystem: false   # valkey writes its dump/aof
             capabilities:
               drop: [ALL]
+          # ADR 0036: explicit resources on every container.
+          # Valkey is Immich's ephemeral job queue — 256Mi limit
+          # covers queue depth at homelab photo scale.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
 
 # Machine-learning (CLIP smart search + ArcFace facial
 # recognition). Workers do this entirely on-cluster — per

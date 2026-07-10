@@ -34,6 +34,10 @@ resources:
   - networkpolicy.yaml
   - servicemonitor.yaml
 
+# ADR 0036: cluster-wide resource-governance baseline.
+components:
+  - ../../components/first-party-namespace
+
 # The Helm chart creates the main app PVC (Forgejo's data dir
 # on Longhorn — git repos + config + runtime state). Patch in
 # the recurring-job-group label so it joins

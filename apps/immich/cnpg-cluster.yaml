@@ -28,9 +28,20 @@ spec:
   # infrastructure/longhorn/recurring-jobs.yaml's
   # `secret-personal` group: hourly snapshots × 7d retain.
   # Immich is `personal`-class (photos + face/embedding metadata).
+  #
+  # 2026-07-09 ADR 0036: CNPG Postgres data volume moves to the
+  # -retain family. Default longhorn-replica3 is now reclaim=Delete;
+  # a stray Cluster CR delete must NOT release the source-of-truth
+  # relational state (users, albums, face embeddings, smart-search
+  # vectors).
+  # CNPG propagates inheritedMetadata.annotations to child PVCs at
+  # reconcile time (per CNPG docs), satisfying the Kyverno
+  # homelab-disallow-retain-reclaim-without-annotation policy.
   inheritedMetadata:
     labels:
       recurring-job-group.longhorn.io/secret-personal: "enabled"
+    annotations:
+      retention.homelab.internal/reason: "Immich Postgres = source of truth for users/albums/embeddings/smart-search; PVC delete must not evict data."
 
   # OPERATOR PINS via Renovate. The image must include
   # vectorchord (loaded via shared_preload_libraries below).
@@ -38,7 +49,7 @@ spec:
 
   storage:
     size: 20Gi
-    storageClass: longhorn-replica3
+    storageClass: longhorn-replica3-retain
 
   monitoring:
     enablePodMonitor: true

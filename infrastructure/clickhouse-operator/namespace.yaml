@@ -11,3 +11,8 @@ metadata:
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
+    # ADR 0036 D4 — infrastructure-tier operator; classified as
+    # `internal`. Per-app ClickHouseInstallation CRs land in the
+    # consuming app's own namespace.
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal

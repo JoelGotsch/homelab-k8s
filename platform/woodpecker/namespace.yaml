@@ -11,6 +11,10 @@ kind: Namespace
 metadata:
   name: woodpecker
   labels:
+    # ADR 0036: first-party namespace enrolment (control plane).
+    homelab.internal/first-party: "true"
+    # `internal` — CI orchestrator + webhook receiver.
+    homelab.internal/data-class: internal
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
 ---
@@ -19,6 +23,14 @@ kind: Namespace
 metadata:
   name: ci-woodpecker
   labels:
+    # ADR 0036: first-party namespace enrolment (step-Pod runner).
+    # quota.yaml is the reference implementation of the shared
+    # component (ADR 0023 D5 predates ADR 0036); the values
+    # there stay authoritative for ci-woodpecker — the shared
+    # component in components/first-party-namespace/ is NOT
+    # attached here to avoid ObjectQuota / LimitRange conflicts.
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal
     # PSS = privileged on this ns. Woodpecker's k8s backend auto-
     # generates step Pod specs without the explicit securityContext
     # fields restricted demands (allowPrivilegeEscalation:false,
