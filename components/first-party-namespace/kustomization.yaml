@@ -35,5 +35,14 @@ kind: Component
 resources:
   - limitrange.yaml
   - resourcequota.yaml
-  - networkpolicy-default-deny.yaml
+  # DEFERRED — this NetPol conscripts operator-spawned pods
+  # (cnpg-system status probes, ESO renders) in every consuming
+  # namespace. Verified 2026-07-10: rolling it out under Kyverno
+  # regen triggered the forgejo-pg split-brain and blocked
+  # cnpg-system → nextcloud-pg / vaultwarden-pg status probes.
+  # See CLAUDE.md rule 14 and ADR 0036 D2.
+  # Re-add per-namespace once each app's Cilium CNP explicitly
+  # covers: cnpg-system → instance:8000 ingress, apiserver
+  # egress (443 + 6443), and kube-DNS egress.
+  # - networkpolicy-default-deny.yaml
   - ciliumnetworkpolicy-egress-scaffold.yaml
