@@ -64,15 +64,19 @@ spec:
             value: ""
       validate:
         allowExistingViolations: true
+        # Foreach can't hold a `message:` (Kyverno v3 rejects the
+        # field at that path) but the outer message can't
+        # reference `element.*` either. Compromise: the outer
+        # message names the workload; the operator has to open the
+        # workload to find which specific container is missing the
+        # request/limit. Trade-off documented in ADR 0036 D5.
         message: |
-          Container `{{ element.name }}` in
-          `{{ request.object.metadata.namespace }}/{{ request.object.metadata.name }}`
-          is missing memory requests or limits. Set both under
-          `resources.{requests,limits}.memory` (see the per-ns default
-          LimitRange for reasonable starting values) or annotate the
-          workload with
+          Workload `{{ request.object.metadata.namespace }}/{{ request.object.metadata.name }}`
+          has a container without memory requests+limits. Every
+          container (regular, init, ephemeral) must set both under
+          `resources.{requests,limits}.memory` — see the per-ns
+          default LimitRange for starting values. Waive with
             bypass.homelab.internal/homelab-disallow-unlimited-containers: "<reason>"
-          to waive.
         foreach:
           - list: "request.object.spec.containers || `[]`"
             pattern:

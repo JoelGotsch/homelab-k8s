@@ -62,15 +62,16 @@ spec:
             value: ""
       validate:
         allowExistingViolations: true
+        # Outer message cannot reference `element.*` (only bound
+        # inside foreach); foreach cannot hold a `message:` field.
+        # Same trade-off as [[homelab-disallow-unlimited-containers]].
         message: |
-          Container `{{ element.name }}` in
-          `{{ request.object.metadata.namespace }}/{{ request.object.metadata.name }}`
-          has no `resources.limits.cpu`. This is audit-only (CFS-quota
-          throttling makes cluster-wide CPU limits risky); consider a
-          limit for this specific workload if it has bursty CPU behaviour.
-          Annotate the workload with
+          Workload `{{ request.object.metadata.namespace }}/{{ request.object.metadata.name }}`
+          has a container without `resources.limits.cpu`. Audit-only
+          (CFS-quota throttling makes cluster-wide CPU limits risky);
+          consider a limit for this specific workload if it's bursty.
+          Waive the audit noise with
             bypass.homelab.internal/homelab-warn-unlimited-cpu: "<reason>"
-          to silence this report.
         foreach:
           - list: "request.object.spec.containers || `[]`"
             pattern:

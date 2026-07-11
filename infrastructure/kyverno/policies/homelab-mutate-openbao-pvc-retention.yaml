@@ -49,12 +49,9 @@ metadata:
       Matches PVCs in the `openbao` namespace with the
       `app.kubernetes.io/name: openbao` label. Idempotent.
 spec:
-  # Mutations don't validate — they patch. `background: true` also
-  # mutates existing objects on policy update (mutate-existing),
-  # which is what closes the loop for already-created OpenBao PVCs
-  # on first policy apply.
+  # Mutations don't validate — they patch. Admission-time only
+  # (see the `mutate:` block for why background/targets is off).
   background: true
-  mutateExistingOnPolicyUpdate: true
   rules:
     - name: stamp-openbao-pvc-retention-annotation
       match:
@@ -83,18 +80,30 @@ spec:
             operator: Equals
             value: ""
       mutate:
-        # `targets` is only needed for mutating OBJECTS OTHER THAN the
-        # admission request. Here we want to patch the request PVC
-        # itself, so the shorter patchStrategicMerge form suffices.
-        # For mutate-existing on already-created PVCs, Kyverno's
-        # `mutateExistingOnPolicyUpdate: true` + `background: true`
-        # handles it — the same rule applies both at admission and
-        # in background scans.
-        targets:
-          - apiVersion: v1
-            kind: PersistentVolumeClaim
-            name: "{{ request.object.metadata.name }}"
-            namespace: "{{ request.object.metadata.namespace }}"
+        # Admission-time mutation only: no `targets:` block.
+        #
+        # A `targets:` block asks Kyverno's background controller
+        # to update objects OTHER THAN the admission request,
+        # which needs `update` permission on v1/PersistentVolumeClaim
+        # in `{{ns}}` that the chart's default RBAC does NOT grant.
+        # Kyverno's admission webhook rejects the policy if the
+        # background SA lacks the permission it advertises.
+        #
+        # Skipping `targets:` means:
+        #  - New OpenBao PVCs get the retention annotation stamped
+        #    at admission (the common case: chart bump, disaster
+        #    recovery, node rebuild).
+        #  - Already-created PVCs (30d+ old at time of first apply)
+        #    are NOT mutated. Manually annotate them once:
+        #      kubectl -n openbao annotate pvc data-openbao-0 \
+        #        retention.homelab.internal/reason='<reason>'
+        #    See runbook `openbao/routine-unseal.md` §"PVC
+        #    annotation baseline".
+        #
+        # If we ever grant the background-controller PVC/update RBAC
+        # (via a ClusterRoleBinding shipped from this repo), we can
+        # re-add the `targets:` block and get the mutate-existing
+        # semantics back.
         patchStrategicMerge:
           metadata:
             annotations:
