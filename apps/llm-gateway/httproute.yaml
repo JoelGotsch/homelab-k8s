@@ -27,5 +27,5 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: llm-gateway
+        - name: llm-gateway-litellm
           port: 4000

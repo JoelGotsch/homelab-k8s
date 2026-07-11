@@ -22,5 +22,12 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: llm-gateway
+        # The chart's Service is `llm-gateway-litellm`, not
+        # `llm-gateway`. Wrong-name here => Cilium Gateway
+        # ResolvedRefs=False, BackendNotFound, 500/503 at the
+        # gateway even though pods are Ready (CLAUDE.md rule 20).
+        # Silent since first bring-up 2026-06-something; surfaced
+        # 2026-07-11 while chasing the Argo app-llm-gateway
+        # Degraded rollup.
+        - name: llm-gateway-litellm
           port: 4000
