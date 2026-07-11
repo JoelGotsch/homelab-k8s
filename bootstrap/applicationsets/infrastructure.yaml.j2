@@ -58,6 +58,12 @@ spec:
           - CreateNamespace=true
           - ServerSideApply=true
           - ApplyOutOfSyncOnly=true
+          # Without this, ignoreDifferences suppresses only the
+          # patch-during-sync, not the Sync=OutOfSync status —
+          # the app keeps showing OutOfSync even though Argo
+          # will never try to reconcile the diff (rule 7 noise
+          # multiplier).
+          - RespectIgnoreDifferences=true
       # Suppress fields the target admission webhook writes back
       # into every object — they'd otherwise keep every infra-*
       # app permanently OutOfSync and hide real drift (rule 7).

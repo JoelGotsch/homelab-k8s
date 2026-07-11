@@ -43,6 +43,7 @@ spec:
           - CreateNamespace=true
           - ServerSideApply=true
           - ApplyOutOfSyncOnly=true
+          - RespectIgnoreDifferences=true
       # Suppress drifts on fields kube-apiserver / operators
       # write back or that are immutable-by-design after
       # create — kept obs-* apps permanently OutOfSync (rule 7).
