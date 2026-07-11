@@ -40,14 +40,15 @@ spec:
       # merge inherits sibling list items so it can't reliably
       # zero `volumes`/`volumeMounts`.
       containers:
-        # Prisma migrations pulls its schema client on start;
-        # the LimitRange default of 512Mi is not enough to
-        # boot the Node runtime + prisma binary. Observed
-        # OOMKilled x4 in 3m on 2026-07-10 with the default.
+        # LiteLLM's `prisma_migration.py` shells out to the
+        # prisma CLI which spawns node + downloads the schema
+        # client on start. 1Gi wasn't enough — pod OOMKilled
+        # in 16s under 1Gi. Bumped to 2Gi. Migration only
+        # runs on chart upgrade, so the ceiling is short-lived.
         - name: prisma-migrations
           resources:
             requests:
               cpu: 100m
-              memory: 512Mi
-            limits:
               memory: 1Gi
+            limits:
+              memory: 2Gi
