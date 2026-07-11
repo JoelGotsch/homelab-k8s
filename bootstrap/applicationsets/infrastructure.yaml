@@ -58,3 +58,18 @@ spec:
           - CreateNamespace=true
           - ServerSideApply=true
           - ApplyOutOfSyncOnly=true
+      # Suppress fields the target admission webhook writes back
+      # into every object — they'd otherwise keep every infra-*
+      # app permanently OutOfSync and hide real drift (rule 7).
+      ignoreDifferences:
+        # Kyverno's ClusterPolicy webhook defaults
+        # `spec.admission: true` and per-rule
+        # `skipBackgroundRequests` on any rule that uses
+        # context.apiCall / generate / verifyImages. Verified
+        # 2026-07-11 on 6 ClusterPolicies.
+        - group: kyverno.io
+          kind: ClusterPolicy
+          jsonPointers:
+            - /spec/admission
+          jqPathExpressions:
+            - '.spec.rules[].skipBackgroundRequests'

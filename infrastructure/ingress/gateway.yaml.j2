@@ -22,7 +22,12 @@ spec:
       tls:
         mode: Terminate
         certificateRefs:
-          - kind: Secret
+          # `group: ""` is the Gateway API CRD default; the
+          # apiserver stamps it on write, so leaving it out
+          # here produces persistent Argo OutOfSync. Writing
+          # it explicitly matches persisted state.
+          - group: ""
+            kind: Secret
             name: homelab-wildcard-tls
             namespace: ingress
       allowedRoutes:
@@ -62,7 +67,8 @@ spec:
       tls:
         mode: Terminate
         certificateRefs:
-          - kind: Secret
+          - group: ""
+            kind: Secret
             name: registry-homelab-internal-tls
             namespace: ingress
       allowedRoutes:

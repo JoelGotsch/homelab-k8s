@@ -43,3 +43,21 @@ spec:
           - CreateNamespace=true
           - ServerSideApply=true
           - ApplyOutOfSyncOnly=true
+      # Suppress drifts on fields kube-apiserver / operators
+      # write back or that are immutable-by-design after
+      # create — kept obs-* apps permanently OutOfSync (rule 7).
+      ignoreDifferences:
+        # obs-tempo: `persistence.storageClassName` was corrected
+        # 2026-06-09 (was `persistence.storageClass`, silently
+        # dropped per rule 5) but StatefulSet VCTs are immutable
+        # after create. Live PVC binds `longhorn-replica2` via
+        # cluster default SC, so this drift is cosmetic. Fixing
+        # for real would require an orphan-delete of the STS;
+        # tempo blocks live in MinIO so it's data-safe, but not
+        # worth the churn.
+        - group: apps
+          kind: StatefulSet
+          name: tempo
+          namespace: observability-tempo
+          jsonPointers:
+            - /spec/volumeClaimTemplates
