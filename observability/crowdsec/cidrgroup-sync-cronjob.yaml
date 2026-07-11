@@ -57,8 +57,18 @@ data:
 
     # Extract IP / CIDR values; sort + dedupe; emit each as
     # a YAML list element nested under externalCIDRs.
+    #
+    # Cilium's CiliumCIDRGroup CRD validation requires CIDR
+    # notation on every entry — bare IPs like "98.159.37.75"
+    # fail with `must be of type cidr`. LAPI's `Ip`-scoped
+    # decisions return bare IPs (a `Range`-scoped decision
+    # already carries the /NN suffix), so append `/32` for v4
+    # and `/128` for v6 when the value lacks a `/`.
     cidr_lines=$(printf '%s' "$decisions_json" \
-      | jq -r '.[] | select(.scope == "Ip" or .scope == "Range") | .value' \
+      | jq -r '.[]
+                | select(.scope == "Ip" or .scope == "Range")
+                | .value
+                | if test("/") then . elif test(":") then . + "/128" else . + "/32" end' \
       | sort -u \
       | sed 's/^/    - /')
 
