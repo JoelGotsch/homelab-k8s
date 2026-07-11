@@ -67,6 +67,46 @@ spec:
           - key: "{{ request.object.metadata.annotations.\"bypass.homelab.internal/homelab-generate-default-limitrange\" || '' }}"
             operator: Equals
             value: ""
+          # Same exclusion set as the ResourceQuota generator (and
+          # default-deny). Infra-tier + heavy-app namespaces already
+          # ship explicit LimitRanges via their kustomization; the
+          # generated default would either duplicate (harmless) or
+          # conflict on chart-rendered pods that already inherited
+          # a different default and now break under stricter caps.
+          - key: "{{ request.object.metadata.name }}"
+            operator: AnyNotIn
+            value:
+              - kyverno
+              - longhorn-system
+              - longhorn-va-janitor
+              - cnpg-system
+              - cert-manager
+              - external-secrets
+              - trust-manager
+              - trivy-system
+              - clickhouse-operator
+              - cloudflare-tunnel
+              - csi-rclone-system
+              - minio-on-nas
+              - nfs-csi
+              - spegel
+              - backup-cronjobs
+              - monitoring
+              - observability-crowdsec
+              - observability-benchmarks
+              - observability-tempo
+              - kube-system
+              - argocd
+              - openbao
+              - approval-channel
+              - authentik
+              - forgejo
+              - immich
+              - langfuse
+              - llm-gateway
+              - nextcloud
+              - paperless
+              - vaultwarden
       generate:
         apiVersion: v1
         kind: LimitRange
