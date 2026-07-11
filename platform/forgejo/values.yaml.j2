@@ -35,6 +35,18 @@ deployment:
           name: forgejo-admin
           key: email
 
+# ndots:1 — external lookups (github.com push-mirror sync) must
+# not walk the search list: the node-inherited tail<net>.ts.net
+# search domain SERVFAILs (not NXDOMAIN), which hard-stops musl's
+# getaddrinfo before the bare name is ever tried ("could not
+# resolve host: github.com" while nslookup works). Same trap as
+# feedback_immich_public_proxy_dns_search-list-trap; cluster-local
+# names in app.ini are already FQDNs so nothing regresses.
+dnsConfig:
+  options:
+    - name: ndots
+      value: "1"
+
 # Forgejo's app data (config, repos, runtime state) on
 # Longhorn — same shape as the rest of the cluster's stateful
 # workloads. Git data is cluster-replicated; NAS is for the
