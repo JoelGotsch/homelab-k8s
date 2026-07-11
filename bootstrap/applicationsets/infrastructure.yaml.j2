@@ -73,3 +73,25 @@ spec:
             - /spec/admission
           jqPathExpressions:
             - '.spec.rules[].skipBackgroundRequests'
+        # Altinity ClickHouse operator patches its own
+        # Deployment labels at runtime (`clickhouse.altinity.com/*`).
+        # Field manager `clickhouse-operator` (op=Update) owns
+        # these keys — verified 2026-07-11 via
+        # `--show-managed-fields`.
+        - group: apps
+          kind: Deployment
+          name: clickhouse-operator-altinity-clickhouse-operator
+          namespace: clickhouse-operator
+          jsonPointers:
+            - /metadata/labels/clickhouse.altinity.com~1app
+            - /metadata/labels/clickhouse.altinity.com~1chop
+            - /metadata/labels/clickhouse.altinity.com~1chop-commit
+            - /metadata/labels/clickhouse.altinity.com~1chop-date
+        # Longhorn-manager patches
+        # `.spec.conversion.webhook.clientConfig.caBundle` on every
+        # Longhorn CRD at runtime; the chart ships `""`. Classic
+        # operator-writeback (rule 8 corollary).
+        - group: apiextensions.k8s.io
+          kind: CustomResourceDefinition
+          jsonPointers:
+            - /spec/conversion/webhook/clientConfig/caBundle
