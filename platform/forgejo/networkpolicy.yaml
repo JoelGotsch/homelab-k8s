@@ -13,7 +13,9 @@
 #   server + agent for OAuth + git-fetch, Renovate for API).
 # - Forgejo egress: kube-DNS + CNPG Postgres (same ns) +
 #   OpenBao (for ESO-managed secrets) + NFS server (NAS) +
-#   Authentik (OIDC discovery + token validation).
+#   Authentik (OIDC discovery + token validation) +
+#   github.com:443 (push-mirror sync — Forgejo is source of
+#   truth, GitHub read-only mirror per ADR 0023 D1).
 
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -88,7 +90,9 @@ spec:
             - port: "2222"
               protocol: TCP
   egress:
-    # kube-DNS.
+    # kube-DNS — with DNS-proxy visibility (`rules.dns`) so
+    # Cilium populates its FQDN→IP cache for the toFQDNs
+    # rule below (same shape as renovate-runner-egress-fqdn).
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: kube-system
@@ -98,6 +102,18 @@ spec:
             - port: "53"
               protocol: UDP
             - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # GitHub push-mirror sync (ADR 0023 D1: GitHub is the
+    # read-only downstream mirror; Forgejo pushes over HTTPS).
+    # Without this, every push_mirrors sync fails on egress.
+    - toFQDNs:
+        - matchName: "github.com"
+      toPorts:
+        - ports:
+            - port: "443"
               protocol: TCP
     # CNPG Postgres (same ns).
     - toEndpoints:
