@@ -97,8 +97,35 @@ extends to cover argocd as a follow-up.
    ownership between Ansible's bootstrap apply and Argo's
    reconciliation.
 
+## OpenBao paths to seed
+
+| Path | Keys | Consumer |
+|---|---|---|
+| `kv/argocd/admin-password` | `password` | `externalsecret.yaml` (admin login until OIDC) |
+| `kv/argocd/oidc` | `client_id`, `client_secret` | `externalsecret.yaml` → `oidc.authentik` Secret |
+| `kv/argocd/forgejo-repo-cred` | `username`, `token` | `externalsecret-repo-forgejo.yaml` → Argo repo credential for in-cluster Forgejo (ADR 0037) |
+
+Seed snippet for the repo credential (generates the `svc-argocd`
+PAT inside the forgejo pod and pipes it into OpenBao without it
+ever landing on a terminal; `bao login` first):
+
+```sh
+kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
+    forgejo admin user generate-access-token -u svc-argocd \
+    -t argocd-repo-read --scopes read:repository --raw | tail -1 | \
+  kubectl exec -i -n openbao openbao-0 -- \
+    sh -c 'read T; bao kv put kv/argocd/forgejo-repo-cred username=svc-argocd token="$T"'
+```
+
+The `svc-argocd` bot must exist and be a read-only collaborator on
+`forgejo-admin/homelab-k8s` (created 2026-07-11; recreate at cold
+start via `forgejo admin user create` + the collaborators API).
+
 ## Related
 
+- [ADR 0037](../../../homelab-docs/02-decisions/0037-argocd-pulls-from-forgejo.md)
+  — Argo pulls from in-cluster Forgejo; GitHub mirror is the
+  cold-start + break-glass source.
 - [ADR 0027](../../../homelab-docs/02-decisions/0027-argocd-self-managing.md)
   — the self-managing pattern + supersedence of ADR 0004 D4.
 - [ADR 0004](../../../homelab-docs/02-decisions/0004-argocd-for-gitops.md)

@@ -53,10 +53,13 @@ cd "$REPO_ROOT"
 
 # Find every markdown file. Excludes: .git/, the scripts/
 # directory itself (this script + its siblings shouldn't be
-# treated as docs).
+# treated as docs), and vendored upstream Helm charts (third-party
+# READMEs ship broken relative links/anchors we don't maintain —
+# e.g. the forgejo chart's bundled redis/postgresql-ha docs).
 md_files=$(find . -type f -name '*.md' \
     -not -path './.git/*' \
-    -not -path './scripts/*')
+    -not -path './scripts/*' \
+    -not -path '*/charts/*')
 
 # Slug cache: avoid re-extracting headings from the same target
 # file when many links point to it. Implemented as a Bash 4

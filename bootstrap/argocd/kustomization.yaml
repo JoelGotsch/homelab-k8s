@@ -41,6 +41,12 @@ resources:
   # in patches/oidc-config.yaml. See externalsecret.yaml.
   - externalsecret.yaml
 
+  # ESO-projected Forgejo repo credential (svc-argocd read-only
+  # PAT) so Argo pulls homelab-k8s from in-cluster Forgejo per
+  # ADR 0037. Idle until OpenBao is seeded + repoURLs point at
+  # Forgejo; harmless (SecretSyncedError) before that.
+  - externalsecret-repo-forgejo.yaml
+
 patches:
   - path: patches/argocd-cmd-params.yaml
     target:
