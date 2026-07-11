@@ -47,6 +47,13 @@ spec:
         metadata:
           labels:
             app.kubernetes.io/name: restic-tier-3
+            # backup-cronjobs-allow NetPol matches pods by
+            # `app.kubernetes.io/component: backup-pipeline`.
+            # Without this label the restic pod falls through to
+            # the namespace-wide default-deny — verified 2026-07-11:
+            # mc init container timed out on
+            # `dial tcp: lookup minio.minio-on-nas...: i/o timeout`.
+            app.kubernetes.io/component: backup-pipeline
         spec:
           restartPolicy: Never
           securityContext:
