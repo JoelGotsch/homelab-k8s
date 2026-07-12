@@ -63,17 +63,64 @@ homelab-infra/scripts/provision-ntfy-relay-token.sh \
     --also-publish-auth-path kv/ntfy/publish-auth \
     --token-label e2ee-relay
 
-# 3. Operator-mobile user + read-only ACL + token (scripted).
+# 3. Operator-mobile user + read-only ACL on BOTH topics + token
+#    + password (scripted). Password is required because the
+#    F-Droid ntfy app v1.24 only supports Basic auth and ntfy
+#    does NOT accept access tokens as Basic-auth passwords
+#    (verified 2026-07-12; see
+#    99-journal/2026-07-12-alert-pipeline-bringup-audit.md).
 homelab-infra/scripts/provision-ntfy-relay-token.sh \
     --user operator-mobile \
     --topic homelab-alerts \
     --acl-perm ro \
     --kv-path kv/ntfy/operator-mobile-token \
+    --also-store-password-path kv/ntfy/operator-mobile-password \
     --token-label operator-fdroid
-# Operator pulls the printed token into the F-Droid app's
-# "Default access token" field along with the topic key from
-# kv/ntfy/topic-key.
+
+# 3b. Grant the same operator-mobile user read-only on the
+#     Tier-2 direct topic (homelab-alerts-warning). Tier 2
+#     publishes here via `ntfy-direct` receiver — a separate
+#     stream from the E2EE relay topic above. Without this ACL
+#     the phone only sees Tier-1 criticals, not the 100+ Tier-2
+#     warnings. The provision script targets a single topic; the
+#     second ACL is a one-liner via kubectl exec.
+kubectl -n ntfy exec deploy/ntfy -- \
+    ntfy access operator-mobile homelab-alerts-warning read-only
 ```
+
+### Phone setup (F-Droid ntfy app)
+
+Fetch the credentials into the mac clipboard, one at a time
+(no printed values):
+
+```sh
+# Username field: the string 'operator-mobile' (no fetch needed).
+# Password field:
+bao kv get -field=value kv/ntfy/operator-mobile-password | pbcopy
+# E2EE decryption key (for the homelab-alerts topic only —
+# homelab-alerts-warning is plain-text and needs no key):
+bao kv get -field=value kv/ntfy/topic-key | pbcopy
+```
+
+In the F-Droid app, do NOT use the global Users list — its
+"Add user" screen calls `PUT /v1/users`, which requires the
+admin role. `operator-mobile` is a regular user and will
+401 there. Instead, add credentials per subscription:
+
+1. Home → **+** → topic name (start with
+   `homelab-alerts-warning` to verify the auth path with
+   the plain topic before the E2EE one).
+2. **Use another server** → `https://ntfy.lab.<domain>`
+   (the HTTPRoute host — see
+   `apps/ntfy/httproute.yaml.j2`).
+3. Advanced / padlock → **Username** `operator-mobile`,
+   **Password** paste.
+4. Subscribe.
+5. Repeat for `homelab-alerts`; in the subscribe dialog,
+   set the E2EE key (paste `kv/ntfy/topic-key`).
+
+Verify: `kubectl -n ntfy exec deploy/ntfy -- wget -qO-
+http://localhost/v1/stats` — `subscribers` should be ≥1.
 
 The admin-password step still uses kubectl-exec because the
 admin role grants ntfy CLI access on the pod (effectively
