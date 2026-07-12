@@ -98,6 +98,23 @@ alertmanager:
         release: kube-prometheus-stack
     alertmanagerConfigNamespaceSelector: {}
 
+    # Without this, the Operator wraps every route in the
+    # AlertmanagerConfig CRD with a `namespace=<crd-ns>`
+    # matcher — meaning only alerts labeled
+    # `namespace="monitoring"` can enter the tree. Every other
+    # alert (kube-system, argocd, longhorn-system, app
+    # namespaces, ...) falls through to the top-level null
+    # receiver and is silently dropped.
+    # Verified 2026-07-12: 143 of 168 firing alerts were
+    # being null-routed for this reason — the three-tier
+    # design in 03-runbooks/observability/alert-routing.md was
+    # paper only. `type: None` disables the auto-injected
+    # matcher; the CRD's own `severity=critical` /
+    # `component=deception` / etc. matchers do the routing as
+    # intended.
+    alertmanagerConfigMatcherStrategy:
+      type: None
+
     # Storage — Alertmanager state (silences, notification
     # log) needs to survive restarts.
     storage:
