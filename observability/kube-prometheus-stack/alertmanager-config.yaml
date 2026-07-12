@@ -3,15 +3,32 @@
 # 03-runbooks/observability/alert-routing.md (2026-07-10):
 #
 #   Tier 1 (Signal — page): critical severity, operator eyes
-#     within minutes. Fans out to BOTH ntfy-via-relay (E2EE
-#     stream) AND approval-channel (Signal via signal-bridge).
+#     within minutes. Fans out to BOTH direct ntfy (topic
+#     `homelab-alerts`) AND approval-channel (Signal via
+#     signal-bridge). Neither leg is E2EE — the ntfy server
+#     is Tailscale-only, so its plaintext view is inside the
+#     trust boundary; approval-channel talks to signal-bridge
+#     inside the cluster.
 #   Tier 2 (ntfy — attention): warning severity, operator sees
 #     within hours. Direct ntfy publish to a dedicated
-#     `homelab-alerts-warning` topic — non-E2EE, but the payload
-#     is a summary string not secret material.
+#     `homelab-alerts-warning` topic. Same shape as Tier 1's
+#     ntfy leg, different topic + slower cadence.
 #   Tier 3 (silent — logged): info severity + explicitly null-
 #     routed. Loki captures the notification-log record; the
 #     LLM triage agent surfaces in weekly digests.
+#
+# Historical note — E2EE removal (2026-07-12):
+#   Tier 1 used to route through `ntfy-via-relay` →
+#   `ntfy-e2ee-relay` which AES-256-GCM-encrypted the payload
+#   client-side per ADR 0024 D1 phase-2 (gating condition for
+#   moving ntfy off Tailscale-only onto Cloudflare Tunnel, so
+#   CF's TLS terminator wouldn't see alert content). Phase 2
+#   never happened; ntfy stayed Tailscale-only. The relay's
+#   custom wire format also isn't F-Droid-decryptable, so the
+#   phone showed ciphertext. Reverted to direct publish; the
+#   relay stays deployed as a safety net for potential
+#   phase-2 re-commit. See 99-journal/2026-07-12-alert-
+#   pipeline-bringup-audit.md §E2EE removal.
 #
 # Historical note (pre-2026-07-10):
 #   All severities routed through `ntfy-via-relay` (E2EE), and
@@ -71,14 +88,13 @@ spec:
         receiver: 'null'
 
       # ===== Deception fan-out (ADR 0021 D10) =====
-      # Honey-asset hits: zero-latency dedicated route to
-      # ntfy-via-relay (E2EE stream — the operator's phone
-      # shows the exact context) AND approval-channel /v1/
+      # Honey-asset hits: zero-latency dedicated route to the
+      # direct-ntfy Tier-1 topic AND approval-channel /v1/
       # deception path (Signal buzz).
       - matchers:
           - name: component
             value: deception
-        receiver: ntfy-via-relay
+        receiver: ntfy-critical
         groupWait: 0s
         groupInterval: 30s
         repeatInterval: 30m
@@ -92,14 +108,27 @@ spec:
         repeatInterval: 15m
 
       # ===== Tier 1 (severity: critical) =====
-      # Two-branch fan-out: E2EE ntfy (relay path — same phone
-      # topic operator uses for encrypted stream) AND Signal
-      # via approval-channel. Both fire; operator gets one push
-      # per medium.
+      # Two-branch fan-out: direct ntfy (topic `homelab-alerts`,
+      # non-E2EE) AND Signal via approval-channel. Both fire;
+      # operator gets one push per medium.
+      #
+      # Historical note: this used to go through
+      # `ntfy-e2ee-relay` with AES-256-GCM client-side
+      # encryption per ADR 0024 D1 phase-2 (Cloudflare-Tunnel
+      # migration to keep the ntfy server + CF blind to alert
+      # content). Phase 2 never happened; ntfy stayed
+      # Tailscale-only. The relay's custom wire format is also
+      # not F-Droid-native (the operator couldn't decrypt
+      # server-side ciphertext on the phone). Reverted to
+      # direct publish 2026-07-12 — see
+      # 99-journal/2026-07-12-alert-pipeline-bringup-audit.md
+      # §E2EE removal. Relay stays deployed as a
+      # reversible-decision safety net until phase 2 is
+      # committed / abandoned.
       - matchers:
           - name: severity
             value: critical
-        receiver: ntfy-via-relay
+        receiver: ntfy-critical
         groupWait: 5s
         groupInterval: 1m
         repeatInterval: 1h
@@ -171,23 +200,29 @@ spec:
                 name: am-inbound-tokens
                 key: ntfy-am-direct
 
-    # ===== Tier 1 sink A — E2EE ntfy via relay (unchanged) =====
-    - name: ntfy-via-relay
+    # ===== Tier 1 sink A — direct ntfy (topic homelab-alerts) =====
+    # Was: `ntfy-via-relay` routed through ntfy-e2ee-relay
+    # for AES-256-GCM encryption. Removed 2026-07-12 because
+    # (a) Phase-2 CF-Tunnel-fronted ntfy — the E2EE gating
+    # condition — never happened; (b) the relay's custom wire
+    # format isn't F-Droid-decryptable, so the phone showed
+    # ciphertext. Reverted to direct publish; same shape as
+    # the Tier-2 `ntfy-direct` receiver, different topic.
+    #
+    # Auth: reuses the `am-direct` ntfy user (same as Tier 2)
+    # via the `ntfy-am-direct` key of `am-inbound-tokens`.
+    # `am-direct` was granted write-only on both topics
+    # 2026-07-12; one user covers both tiers.
+    - name: ntfy-critical
       webhookConfigs:
-        - url: http://ntfy-e2ee-relay.ntfy-e2ee-relay.svc.cluster.local:8000/webhook
+        - url: http://ntfy.ntfy.svc.cluster.local/homelab-alerts
           sendResolved: true
-          # Bearer-token defense-in-depth alongside NetPol
-          # gating. Per the 2026-05-02 audit follow-up #4:
-          # the relay's `_verify_inbound_token` rejects
-          # missing / wrong-token requests with 401. Mirror
-          # Secret `am-inbound-tokens` lives in monitoring ns
-          # via `inbound-tokens-externalsecret.yaml`.
           httpConfig:
             authorization:
               type: Bearer
               credentials:
                 name: am-inbound-tokens
-                key: ntfy-e2ee-relay
+                key: ntfy-am-direct
 
     # ===== Tier 1 sink B — Signal via approval-channel =====
     - name: approval-channel-alert
