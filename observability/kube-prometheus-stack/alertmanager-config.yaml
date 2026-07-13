@@ -87,6 +87,44 @@ spec:
             value: Watchdog
         receiver: 'null'
 
+      # ===== Trivy CVE alerts — daily digest (alert fatigue) =====
+      # Per subagent audit 2026-07-12: 114 Trivy* alerts fire
+      # concurrently (one per image scanned). Grouped alone by
+      # alertname+severity, the operator gets 2 notifications
+      # (one CRITICAL summary, one HIGH summary) instead of 114.
+      # `continue: false` — Trivy criticals do NOT fan out to
+      # Signal because CVEs have day/week fix horizons (rule 40
+      # trained-to-ignore risk). The runbook has Trivy off the
+      # escalate-after opt-in list as well.
+      - matchers:
+          - name: component
+            value: trivy
+        receiver: ntfy-direct
+        groupBy: [alertname, severity]
+        groupWait: 5m
+        groupInterval: 1h
+        repeatInterval: 7d
+        continue: false
+
+      # ===== TargetDown rollup — one notification per outage =====
+      # 14 firing right now. Most are ServiceMonitor mis-config
+      # (approval-channel ImagePullBackOff by design; signal-bridge
+      # /metrics returns 404 because bbernhard image doesn't
+      # publish Prometheus metrics; cloudflared / vaultwarden /
+      # paperless / loki-headless / jellyfin / forgejo-http /
+      # coredns — all real bugs but not per-target actionable).
+      # Group by alertname alone so a single monitoring outage
+      # rolls up to one notification with N targets in the payload.
+      - matchers:
+          - name: alertname
+            value: TargetDown
+        receiver: ntfy-direct
+        groupBy: [alertname]
+        groupWait: 1m
+        groupInterval: 15m
+        repeatInterval: 12h
+        continue: false
+
       # ===== Deception fan-out (ADR 0021 D10) =====
       # Honey-asset hits: zero-latency dedicated route to the
       # direct-ntfy Tier-1 topic AND approval-channel /v1/

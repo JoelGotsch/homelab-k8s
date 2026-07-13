@@ -261,3 +261,48 @@ prometheusOperator:
       memory: 128Mi
     limits:
       memory: 256Mi
+
+# ---------- alert-fatigue tuning (2026-07-13) ----------
+# Disable chart-shipped alerts that fire on non-existent
+# targets in this cluster. Each verified as not-actionable —
+# component isn't running, was replaced, or is single-
+# replica-by-design so the cluster-alert semantics don't
+# apply.
+
+# Cilium runs in kube-proxy-replacement mode (ADR 0016).
+# No kube-proxy DaemonSet exists; the rule fires forever on
+# an `absent()` scrape target. Firing since 2026-06-05.
+kubeProxy:
+  enabled: false
+
+# Talos binds kube-controller-manager to 127.0.0.1:10257 —
+# external scrape at 10.10.30.11:10257 is refused. Firing
+# since 2026-06-05. Follow-up: Talos-side ServiceMonitor via
+# a --secure-port bindaddr machine-config patch.
+kubeControllerManager:
+  enabled: false
+
+# Same as kubeControllerManager — Talos binds kube-scheduler
+# to loopback; external scrape refused. Firing since
+# 2026-06-05.
+kubeScheduler:
+  enabled: false
+
+# Fine-grained rule toggles for the alert families disabled
+# above + the AlertmanagerCluster* rules that misfire on our
+# single-replica-by-design Alertmanager (RWO Longhorn PVC).
+# Every AM restart trips the >50%-replicas-down threshold
+# because 100% > 50%. See 99-journal/2026-07-13-
+# alert-fatigue-tuning.md for detail.
+defaultRules:
+  rules:
+    kubeProxy: false
+    kubeControllerManager: false
+    kubeSchedulerAlerting: false
+    # `alertmanager: false` disables the whole
+    # alertmanager.rules.yaml file — including
+    # AlertmanagerFailedReload / AlertmanagerConfigInconsistent
+    # which we WANT for a single-replica AM. Follow-up
+    # (separate commit): first-party PrometheusRule that
+    # ships the single-instance-safe variants back.
+    alertmanager: false
