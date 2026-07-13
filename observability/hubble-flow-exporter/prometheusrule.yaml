@@ -149,6 +149,10 @@ spec:
           labels:
             severity: warning
             component: hubble-flow-exporter
+            # Escalate to Signal after 55m (alert-routing.md
+            # opt-in). A sustained per-node capture stall is a
+            # network-flow exfiltration blind-spot — page.
+            escalate_after: "1h"
           annotations:
             summary: "Hubble exporter source stalled on {{ $labels.node }} (flows produced, none ingested)"
             description: |
@@ -161,3 +165,34 @@ spec:
               buffer is NOT full: Vector itself is stuck; check
               sidecar logs and consider a daemonset rollout-
               restart.
+
+        # Monitoring-gap fix (2026-07-13): hubble-relay was down
+        # 51 days (Cilium CA verification failure) and NOTHING
+        # alerted — the flow-exporter is a Vector sidecar inside
+        # the cilium-agent DaemonSet tailing a LOCAL file, so it
+        # kept working (and its rules kept passing) while the
+        # cluster-wide relay aggregator was dead. This rule
+        # watches relay's own readiness so a relay outage can't
+        # hide again. Rule 35/40 (paper guarantee).
+        - alert: HubbleRelayDown
+          expr: |
+            kube_pod_container_status_ready{namespace="kube-system", pod=~"hubble-relay-.*"} == 0
+          for: 15m
+          labels:
+            severity: warning
+            component: hubble-flow-exporter
+          annotations:
+            summary: "hubble-relay not ready ({{ $labels.pod }}) — cluster-wide Hubble aggregation down"
+            description: |
+              hubble-relay pod {{ $labels.pod }} has been
+              not-Ready for ≥ 15m. The Hubble UI and cluster-wide
+              `hubble observe` are unavailable while it's down.
+              Per-node flow capture (the exfiltration-detection
+              signal shipped to Loki by the Vector sidecar) is
+              UNAFFECTED — it tails a local file, not the relay —
+              so this is an observability-plane outage, not a
+              security-signal gap. Common cause: Cilium CA
+              rotation drift after a Cilium re-render (helm-method
+              certs regenerate the CA); fix by rolling
+              `ds/cilium` then `deploy/hubble-relay`. See
+              99-journal/2026-07-13.

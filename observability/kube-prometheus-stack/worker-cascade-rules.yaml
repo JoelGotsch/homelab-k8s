@@ -56,6 +56,11 @@ spec:
           labels:
             severity: warning
             component: talos
+            # Escalate to Signal after 55m (alert-routing.md
+            # opt-in). Recurring node OOM-kills are the
+            # 2026-06-09 cascade blind-spot; sustained firing
+            # warrants a page.
+            escalate_after: "1h"
           annotations:
             summary: "OOM kill on node {{ $labels.instance }}"
             description: |
@@ -148,6 +153,11 @@ spec:
           labels:
             severity: warning
             component: longhorn
+            # Escalate to Signal after 55m (alert-routing.md
+            # opt-in). Repeated manager restarts are the #1
+            # cascade precursor (2026-06-09 RCA) — page if it
+            # keeps firing.
+            escalate_after: "1h"
           annotations:
             summary: "longhorn-manager {{ $labels.namespace }}/{{ $labels.pod }} restarting (>1 in 1h)"
             description: |

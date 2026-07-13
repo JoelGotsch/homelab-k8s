@@ -74,6 +74,10 @@ spec:
           labels:
             severity: warning
             component: cnpg
+            # Escalate to Signal after 55m (alert-routing.md
+            # opt-in). Stalled WAL archiving → PV fills → Postgres
+            # refuses to start; page before it becomes an outage.
+            escalate_after: "1h"
           annotations:
             summary: "CNPG WAL archive failing for cluster {{ $labels.namespace }}/{{ $labels.cluster }}"
             description: |

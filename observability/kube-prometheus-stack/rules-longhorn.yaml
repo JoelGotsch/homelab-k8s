@@ -91,6 +91,11 @@ spec:
           labels:
             severity: warning
             component: longhorn
+            # Escalate to Signal after 55m continuous firing
+            # (alert-routing.md escalate-after opt-in). Capacity
+            # creeping toward the 90% critical is worth a page
+            # if the operator hasn't seen the ntfy warning.
+            escalate_after: "1h"
           annotations:
             summary: "Longhorn node {{ $labels.node }} schedulable capacity > 80% ({{ $value | humanizePercentage }})"
             description: |
@@ -237,6 +242,11 @@ spec:
           labels:
             severity: warning
             component: longhorn
+            # Escalate to Signal after 55m (alert-routing.md
+            # opt-in). This is the leak-detector that would have
+            # caught the 2026-07-09 96-orphan-PV incident early;
+            # if the leak outpaces daily review, page.
+            escalate_after: "1h"
           annotations:
             summary: "{{ $value }} PVs stuck in Released phase (leak-detector)"
             description: |
