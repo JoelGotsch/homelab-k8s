@@ -1,0 +1,43 @@
+# Cilium egress for alloy's kube-apiserver access.
+#
+# alloy's loki.source.kubernetes streams pod logs *through the
+# kube-apiserver* (not by reading files). Cilium's socket-LB DNATs
+# the apiserver ClusterIP (10.96.0.1:443) to the control-plane host
+# endpoint (:6443) BEFORE policy eval, so a vanilla NetworkPolicy
+# `podSelector: {component: kube-apiserver}` egress rule never
+# matches the post-DNAT destination and the traffic is dropped
+# (CLAUDE.md rule 12; known-caveats "Cilium socket-LB DNATs
+# kube-apiserver"). This was the final blocker keeping alloy at
+# `loki_write_sent_bytes_total = 0` after the observability-alloy
+# move activated its (previously orphaned) egress policy.
+#
+# The reserved `kube-apiserver` entity resolves to the real API
+# server endpoints regardless of labeling — works for Talos's
+# static-pod control plane. Ports 443 AND 6443 because socket-LB
+# translates 443→6443 before policy eval.
+#
+# dns + loki egress stay in the vanilla networkpolicy.yaml; Cilium
+# composes K8s NetworkPolicy and CiliumNetworkPolicy additively
+# (allow = union), so alloy's effective egress = dns ∪ loki ∪
+# apiserver.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: alloy-apiserver-egress
+  namespace: observability-alloy
+  labels:
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/component: egress-policy
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: alloy
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP

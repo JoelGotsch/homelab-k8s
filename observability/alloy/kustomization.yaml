@@ -19,4 +19,5 @@ helmCharts:
 resources:
   - namespace.yaml
   - networkpolicy.yaml
+  - ciliumnetworkpolicy-egress.yaml
   - servicemonitor.yaml

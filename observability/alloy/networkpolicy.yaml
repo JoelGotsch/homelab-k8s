@@ -41,18 +41,12 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # kube-API for pod discovery (discovery.kubernetes
-    # component).
-    - to:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              component: kube-apiserver
-      ports:
-        - port: 6443
-          protocol: TCP
-        - port: 443
-          protocol: TCP
+    # kube-API egress is NOT here — a vanilla podSelector can't
+    # match the socket-LB-DNAT'd apiserver (rule 12). It lives in
+    # ciliumnetworkpolicy-egress.yaml as `toEntities:
+    # [kube-apiserver]`. loki.source.kubernetes streams pod logs
+    # through the apiserver, so without that CNP alloy ships zero
+    # logs even though its pods are healthy.
     # Loki push — cross-ns (Loki in monitoring).
     - to:
         - namespaceSelector:
