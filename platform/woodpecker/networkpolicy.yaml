@@ -32,7 +32,7 @@ spec:
     # Forgejo (webhooks).
     - fromEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: forgejo
+            io.kubernetes.pod.namespace: forgejo
       toPorts:
         - ports:
             - port: "8000"
@@ -52,7 +52,7 @@ spec:
     # kube-DNS.
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: kube-system
+            io.kubernetes.pod.namespace: kube-system
             k8s-app: kube-dns
       toPorts:
         - ports:
@@ -63,7 +63,7 @@ spec:
     # Forgejo for OAuth + git metadata.
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: forgejo
+            io.kubernetes.pod.namespace: forgejo
       toPorts:
         - ports:
             - port: "3000"
@@ -86,7 +86,7 @@ spec:
     # kube-DNS.
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: kube-system
+            io.kubernetes.pod.namespace: kube-system
             k8s-app: kube-dns
       toPorts:
         - ports:
@@ -131,7 +131,7 @@ spec:
     # kube-DNS.
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: kube-system
+            io.kubernetes.pod.namespace: kube-system
             k8s-app: kube-dns
       toPorts:
         - ports:
@@ -142,7 +142,7 @@ spec:
     # Forgejo for git-clone (HTTPS) + Forgejo Packages push.
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: forgejo
+            io.kubernetes.pod.namespace: forgejo
       toPorts:
         - ports:
             - port: "3000"
@@ -164,8 +164,8 @@ spec:
     # populate its FQDN→IP cache for the toFQDNs rules below.
     - toEndpoints:
         - matchLabels:
-            "k8s:io.kubernetes.pod.namespace": kube-system
-            "k8s:k8s-app": kube-dns
+            "io.kubernetes.pod.namespace": kube-system
+            "k8s-app": kube-dns
       toPorts:
         - ports:
             - port: "53"

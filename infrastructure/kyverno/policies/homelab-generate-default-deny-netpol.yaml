@@ -130,6 +130,21 @@ spec:
               - observability-crowdsec
               - paperless
               - vaultwarden
+              # Woodpecker: has its own CNP allowlist but suffers
+              # from the k8s: prefix rule-15 bug (2026-06-06) —
+              # the DNS + kube-apiserver rules match zero
+              # endpoints so DNS is silently blocked; verified
+              # 2026-07-13 while diagnosing 13-day agent
+              # crashloop. CNP is being fixed in the same
+              # commit; excluding here until the fix has
+              # soaked (avoid double-jeopardy).
+              - woodpecker
+              # ci-woodpecker: transient CI pods spawned by the
+              # Woodpecker agent. They inherit whatever egress
+              # the agent has (no per-pod CNP), so a
+              # namespace-wide default-deny would kill every CI
+              # step. Never should carry it.
+              - ci-woodpecker
       generate:
         apiVersion: networking.k8s.io/v1
         kind: NetworkPolicy
