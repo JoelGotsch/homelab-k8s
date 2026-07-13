@@ -42,7 +42,15 @@ spec:
           type: RuntimeDefault
       containers:
         - name: app
-          image: "registry.homelab.internal/approval-channel:0.1.0"  # OPERATOR PINS via Renovate
+          # Namespace `ci-packages/` (not bare `approval-channel`)
+          # because Forgejo Packages OCI URLs = <owner>/<package>
+          # and the ci-packages bot can only push to its own
+          # owner namespace. See apps/ntfy-e2ee-relay/deployment.yaml
+          # for the same rationale. `approval-channel` bare-name
+          # was the pre-CI scaffold pin from 2026-04-30 — corrected
+          # 2026-07-13 to match what the Woodpecker pipeline
+          # actually pushes.
+          image: "registry.homelab.internal/ci-packages/approval-channel:0.1.0"  # OPERATOR PINS via Renovate
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
