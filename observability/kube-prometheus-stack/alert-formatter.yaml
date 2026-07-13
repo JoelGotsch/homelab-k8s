@@ -30,49 +30,6 @@
 # instead — see 99-journal/2026-07-13 for the E2EE-removal
 # rationale.
 
-# Image-pull credentials for registry.homelab.internal (Forgejo
-# Packages). The formatter is the first workload in the
-# monitoring ns to pull a first-party ci-packages image (every
-# other monitoring image is upstream), so the pull secret has
-# to be projected here. Per platform/forgejo/README.md
-# §"First-party image pulls".
-apiVersion: external-secrets.io/v1beta1
-kind: ExternalSecret
-metadata:
-  name: registry-homelab-internal-pull
-  namespace: monitoring
-spec:
-  refreshInterval: 1h
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: openbao
-  target:
-    name: registry-homelab-internal-pull
-    creationPolicy: Owner
-    template:
-      engineVersion: v2
-      type: kubernetes.io/dockerconfigjson
-      data:
-        .dockerconfigjson: |
-          {
-            "auths": {
-              "registry.homelab.internal": {
-                "username": "{{ .username }}",
-                "password": "{{ .password }}",
-                "auth": "{{ printf "%s:%s" .username .password | b64enc }}"
-              }
-            }
-          }
-  data:
-    - secretKey: username
-      remoteRef:
-        key: shared/forgejo-packages/ci
-        property: username
-    - secretKey: password
-      remoteRef:
-        key: shared/forgejo-packages/ci
-        property: token
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -225,18 +182,23 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
-      imagePullSecrets:
-        - name: registry-homelab-internal-pull
       containers:
         - name: formatter
-          # Digest-pinned: the cluster's Spegel-mirrored registry
-          # path resolves first-party refs by digest (a bare tag
-          # returns "not found" at containerd), and Kyverno's
-          # require-first-party-image-digest (ADR 0019 D3)
-          # mandates it. Tag kept for human readability. Bump the
-          # digest via Renovate when the ci-packages/python
-          # mirror is refreshed.
-          image: registry.homelab.internal/ci-packages/python:3.12-slim@sha256:6c4dd321d176d61ea848dc8c73a4f7dbae8f70e0ee48bb411ea2f045b599fa8e
+          # Upstream Docker Hub image, NOT the ci-packages
+          # mirror. The mirror serves the manifest fine over
+          # HTTP, but containerd/Spegel can't resolve a
+          # registry.homelab.internal ref that no node has ever
+          # pulled (ci-packages/python is only used as a
+          # build-FROM inside Woodpecker, which pulls from the
+          # Forgejo host directly — a different hostname — so
+          # it never lands in any node's containerd cache, and
+          # Spegel has no peer to serve it). For a stdlib-only
+          # runner the mirror buys nothing; upstream is simpler
+          # and pulls anonymously like every other kps image
+          # (grafana, kube-state-metrics, etc.). Digest-pinned
+          # for reproducibility + the audit-digest-pinning
+          # policy; bump via Renovate.
+          image: docker.io/library/python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf
           imagePullPolicy: IfNotPresent
           command: ["python", "/app/formatter.py"]
           ports:
