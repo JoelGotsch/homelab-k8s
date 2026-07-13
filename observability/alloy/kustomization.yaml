@@ -17,5 +17,6 @@ helmCharts:
     includeCRDs: false
 
 resources:
+  - namespace.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml

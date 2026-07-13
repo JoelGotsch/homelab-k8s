@@ -1,0 +1,23 @@
+# Alloy runs a node-level DaemonSet that mounts hostPath volumes
+# (/var/log/pods, /var/log/journal) and runs as root to read
+# journald — so the namespace floor must be privileged PSA.
+# baseline (the cluster default) forbids hostPath volumes and
+# would reject every alloy pod.
+#
+# This namespace was previously created bare (no labels) because
+# the alloy layer shipped no namespace.yaml — alloy's helm release
+# rendered into `monitoring` instead. After the ADR 0036 move to a
+# dedicated `observability-alloy` namespace, the pods hit
+# `violates PodSecurity "baseline:latest": hostPath volumes` until
+# this floor was set. Mirrors the privileged tier of
+# falco-stack/namespace.yaml.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability-alloy
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    # ADR 0036 D4 — observability-tier; classified as `internal`.
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal
