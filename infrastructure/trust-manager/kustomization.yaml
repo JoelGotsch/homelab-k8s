@@ -8,7 +8,7 @@ kind: Kustomization
 helmCharts:
   - name: trust-manager
     repo: https://charts.jetstack.io
-    version: "0.13.0"  # OPERATOR PINS via Renovate
+    version: "v0.24.0"  # OPERATOR PINS via Renovate
     releaseName: trust-manager
     namespace: trust-manager
     valuesFile: values.yaml
