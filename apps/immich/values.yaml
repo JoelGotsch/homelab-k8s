@@ -5,12 +5,13 @@
 # ADR 0030 (csi-rclone + hot/cold storage split) +
 # identity.md (Authentik OIDC).
 #
-# Storage layout per ADR 0030 §D2:
-#   /usr/src/app/upload         ← Longhorn (immich-hot PVC)
+# Storage layout per ADR 0030 §D2 (immich v3 paths — the upload
+# root moved from /usr/src/app/upload to /data in v3.0.0):
+#   /data                       ← Longhorn (immich-hot PVC)
 #                                 thumbs, previews, encoded
 #                                 video, profile, DB backups,
 #                                 upload-staging
-#   /usr/src/app/upload/library ← csi-rclone (immich-originals
+#   /data/library               ← csi-rclone (immich-originals
 #                                 PVC, StorageClass
 #                                 nas-crypt-personal-photos)
 #                                 storage-template-organised
@@ -32,12 +33,14 @@
 # Migration from NAS-Docker PhotoPrism per
 # 03-runbooks/immich/migrate-from-photoprism.md.
 
-image:
-  repository: ghcr.io/immich-app/immich-server
-  # OPERATOR PINS via Renovate. Pin server + ml + microservices
-  # to the same Immich version — they share the DB schema.
-  tag: "v1.135.0"
-  pullPolicy: IfNotPresent
+# NOTE: image version is pinned by the chart appVersion (bumped via
+# the kustomization.yaml chart `version:`). A top-level `image:` block
+# is NOT a key this bjw-s-based chart reads — the real key is
+# controllers.main.containers.main.image. The stale top-level block
+# (immich-server:v1.135.0) that used to sit here was a dead no-op AND
+# a latent downgrade trap if a future chart ever started reading it,
+# so it was removed. Per-component image overrides, if ever needed,
+# go under <component>.controllers.main.containers.main.image.
 
 # Bundled Postgres subchart was removed in immich-charts 0.10.0
 # (chart enforces this via a checks.yaml template — setting
@@ -53,24 +56,34 @@ image:
 # block that all components mount.
 immich:
   persistence:
-    # Hot bucket on Longhorn — outer mount.
+    # Hot bucket on Longhorn — the chart's shared `library` mount,
+    # auto-mounted at /data (immich v3's upload root) across all
+    # components. Chart 0.13.1 (bjw-s common 4.x) only accepts
+    # `existingClaim` here — enabled/mountPath/accessMode were
+    # removed from the schema (the mount path is chart-fixed).
     library:
-      enabled: true
       existingClaim: immich-hot
-      mountPath: /usr/src/app/upload
-      accessMode: ReadWriteOnce
-    # Cold bucket on csi-rclone — inner mount stacked on top
-    # of the hot bucket at the `library/` subdir. Immich's
-    # storage-template moves originals here on first index.
-    originals:
-      enabled: true
-      existingClaim: immich-originals
-      mountPath: /usr/src/app/upload/library
-      accessMode: ReadWriteOnce
+    # NOTE: the cold-bucket `originals` mount is no longer a valid
+    # `immich.persistence` entry in 0.13.1 (only `library` is
+    # allowed here). It moved to `server.persistence.originals`
+    # below — the server is the component that does originals file
+    # I/O (ML reaches images over HTTP, not the filesystem).
 
 # Server (HTTP API + web frontend).
 server:
   enabled: true
+  # Cold bucket on csi-rclone (immich-originals, nas-crypt-personal-
+  # photos) stacked at the library/ subdir of the shared upload mount
+  # (ADR 0030 hot/cold split). On the server only — it does the
+  # originals file I/O; ML reaches images over HTTP. bjw-s common
+  # persistence schema (existingClaim + globalMounts.path).
+  persistence:
+    originals:
+      existingClaim: immich-originals
+      globalMounts:
+        # immich v3 moved the upload root from /usr/src/app/upload
+        # to /data; storage-template originals live under /data/library.
+        - path: /data/library
   # Mounts the immich-hot RWO PVC; replicaCount 1. Force Recreate so
   # a chart bump doesn't deadlock (new pod can't attach the RWO volume
   # while the old holds it). immich-charts uses the bjw-s controllers
@@ -182,19 +195,16 @@ server:
                 secretKeyRef:
                   name: immich-oidc
                   key: issuer
-                  optional: true
             OAUTH_CLIENT_ID:
               valueFrom:
                 secretKeyRef:
                   name: immich-oidc
                   key: client_id
-                  optional: true
             OAUTH_CLIENT_SECRET:
               valueFrom:
                 secretKeyRef:
                   name: immich-oidc
                   key: client_secret
-                  optional: true
             OAUTH_AUTO_REGISTER: "true"
             OAUTH_BUTTON_TEXT: "Login with Authentik"
 
@@ -278,9 +288,8 @@ machine-learning:
             readOnlyRootFilesystem: false
             capabilities:
               drop: [ALL]
-  image:
-    repository: ghcr.io/immich-app/immich-machine-learning
-    tag: "v1.135.0"
+  # (dead top-level `image:` block removed — see the note at the
+  # server/top of file; bjw-s reads controllers.main.containers.main.image.)
   persistence:
     cache:
       enabled: true

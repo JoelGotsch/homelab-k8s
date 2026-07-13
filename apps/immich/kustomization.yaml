@@ -24,7 +24,7 @@ namespace: immich
 helmCharts:
   - name: immich
     repo: oci://ghcr.io/immich-app/immich-charts
-    version: "0.11.1"  # OPERATOR PINS via Renovate
+    version: "0.13.1"  # OPERATOR PINS via Renovate
     releaseName: immich
     namespace: immich
     valuesFile: values.yaml
