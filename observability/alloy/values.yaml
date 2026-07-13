@@ -88,31 +88,21 @@ alloy:
         }
       }
 
-      // ---------- Journald source (system + Talos audit) ----------
-
-      loki.source.journal "system" {
-        path        = "/var/log/journal"
-        max_age     = "24h"
-        forward_to  = [loki.write.default.receiver]
-        relabel_rules = loki.relabel.journal.rules
-
-        labels = {
-          job  = "journald",
-          host = sys.env("HOSTNAME"),
-        }
-      }
-
-      loki.relabel "journal" {
-        forward_to = []
-        rule {
-          source_labels = ["__journal__systemd_unit"]
-          target_label  = "unit"
-        }
-        rule {
-          source_labels = ["__journal__hostname"]
-          target_label  = "host"
-        }
-      }
+      // ---------- Node/system logs ----------
+      // NOTE: no `loki.source.journal` here. Talos does not run
+      // systemd-journald and has no /var/log/journal — the block
+      // that used to live here hard-crashed alloy on startup
+      // ("failed to open journal in directory /var/log/journal:
+      // no such file or directory"), which is why alloy never ran
+      // after the ADR-0036 move to observability-alloy. Talos
+      // node/machine logs are captured node-locally by the
+      // talos-log-sink Vector DaemonSet (machine.logging.
+      // destinations → hostPath /var/log/talos-log-sink/), a
+      // reboot-resilient store independent of Loki/Longhorn.
+      // FOLLOW-UP (needs operator decision): if node logs should
+      // also land in Loki, add a `local.file_match` +
+      // `loki.source.file` over /var/log/talos-log-sink/*.log
+      // instead of resurrecting journald.
 
       // ---------- Loki client ----------
 
