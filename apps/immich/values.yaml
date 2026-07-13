@@ -293,6 +293,11 @@ machine-learning:
   persistence:
     cache:
       enabled: true
+      # bjw-s common 4.x requires an explicit `type` before
+      # size/storageClass/accessMode are accepted (chart-default is
+      # emptyDir, which forbids them). PVC keeps the ML model cache
+      # across restarts so models aren't re-downloaded every boot.
+      type: persistentVolumeClaim
       size: 10Gi
       storageClass: longhorn-replica2
       accessMode: ReadWriteOnce
