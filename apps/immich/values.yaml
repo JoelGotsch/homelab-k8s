@@ -167,6 +167,19 @@ server:
             # ships it. Tells Immich's startup probe which vector
             # extension to load.
             DB_VECTOR_EXTENSION: "vectorchord"
+            # immich v3 system-integrity folder check: the server
+            # verifies a `.immich` marker file in every media folder
+            # (thumbs/upload/library/…) to catch a wrong/unmounted
+            # backing volume. /data/library is our fresh csi-rclone
+            # originals mount with no marker yet, so the check crashes
+            # the server on first v3 boot. This flag lets immich start
+            # and CREATE the markers itself. FOLLOW-UP: once the marker
+            # exists in /data/library, remove this to re-enable the
+            # safety (it's a real guard for our stale-prone csi-rclone
+            # mounts — a wedged NAS mount would otherwise let immich
+            # write originals to the wrong place). See immich docs
+            # administration/system-integrity#folder-checks.
+            IMMICH_IGNORE_MOUNT_CHECK_ERRORS: "true"
             # Valkey (Redis-compatible) bundled by the chart — service name
             # is `<release>-valkey` per bjw-s naming convention, not
             # `<release>-redis-master` (which is the Bitnami-Redis convention
