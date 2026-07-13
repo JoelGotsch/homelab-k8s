@@ -29,6 +29,22 @@ gatewayAPI:
   enabled: true
 hubble:
   enabled: true
+  # Hubble TLS cert management. `method: cronJob` (not the chart
+  # default `helm`) is deliberate: the helm method re-mints a
+  # fresh self-signed CA on EVERY chart re-render, so any Argo
+  # hard-refresh / redeploy silently rotated the CA and left
+  # whichever workload didn't restart (agent vs relay) on the
+  # old CA — hubble-relay was dead 51 days this way
+  # (x509: signed by unknown authority "Cilium CA"), see
+  # 99-journal/2026-07-13. The cronJob method persists the CA
+  # in hubble-ca-secret and rotates only leaf certs on a
+  # schedule, so re-renders no longer touch the CA.
+  tls:
+    auto:
+      enabled: true
+      method: cronJob
+      certValidityDuration: 1095
+      schedule: "0 0 1 */3 *"   # rotate leaves quarterly; CA persists
   metrics:
     enabled:
     - dns:query;ignoreAAAA
