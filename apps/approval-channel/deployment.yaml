@@ -50,7 +50,13 @@ spec:
           # was the pre-CI scaffold pin from 2026-04-30 — corrected
           # 2026-07-13 to match what the Woodpecker pipeline
           # actually pushes.
-          image: "registry.homelab.internal/ci-packages/approval-channel:0.1.0"  # OPERATOR PINS via Renovate
+          # Tag is `v0.1.0` (the git tag Woodpecker pushes via
+          # ${CI_COMMIT_TAG}), NOT `0.1.0` — the bare-number tag
+          # 404s. Digest-pinned: Spegel/containerd resolves
+          # first-party refs by digest, and Kyverno's
+          # require-first-party-image-digest (ADR 0019 D3)
+          # mandates it. Bump both via Renovate on new tags.
+          image: "registry.homelab.internal/ci-packages/approval-channel:v0.1.0@sha256:d26983948754fa2d595ce632647da20b0e1cbff1bd4eed587f3269a017afc33e"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
