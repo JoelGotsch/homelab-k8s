@@ -33,7 +33,7 @@ resources:
   # in homelab-infra group_vars/all/main.yml, commit + push.
   # Source URL pattern:
   #   https://raw.githubusercontent.com/argoproj/argo-cd/<vX.Y.Z>/manifests/install.yaml
-  # Current pin: v3.4.2 (matches homelab-infra argocd_version).
+  # Current pin: v3.4.5 (matches homelab-infra argocd_version).
   - argocd-install.yaml
 
   # ESO-projected Authentik OIDC client creds. Targets the
