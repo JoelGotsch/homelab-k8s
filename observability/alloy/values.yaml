@@ -15,6 +15,15 @@ controller:
       operator: Exists
     - effect: NoExecute
       operator: Exists
+  # readOnlyRootFilesystem: true (securityContext below) makes the
+  # image root FS read-only, but alloy writes its remotecfg cache +
+  # storagePath (/tmp/alloy) under /tmp. Back /tmp with a writable
+  # emptyDir so `mkdir /tmp/alloy` succeeds without loosening the
+  # hardened root FS.
+  volumes:
+    extra:
+      - name: tmp
+        emptyDir: {}
 
 alloy:
   # Alloy config — flow-language (River syntax). Inline here
@@ -119,6 +128,9 @@ alloy:
   mounts:
     varlog: true       # /var/log
     dockercontainers: false
+    extra:
+      - name: tmp
+        mountPath: /tmp
 
   # Self-metrics — scraped by the chart-default-selector
   # ServiceMonitor (separate manifest).
