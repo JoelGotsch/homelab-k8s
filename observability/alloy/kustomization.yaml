@@ -12,7 +12,7 @@ helmCharts:
     repo: https://grafana.github.io/helm-charts
     version: "0.10.0"  # OPERATOR PINS via Renovate
     releaseName: alloy
-    namespace: monitoring
+    namespace: observability-alloy
     valuesFile: values.yaml
     includeCRDs: false
 

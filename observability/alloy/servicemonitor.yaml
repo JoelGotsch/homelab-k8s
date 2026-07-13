@@ -2,7 +2,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: alloy
-  namespace: monitoring
+  namespace: observability-alloy
   labels:
     release: kube-prometheus-stack
 spec:
@@ -11,7 +11,7 @@ spec:
       app.kubernetes.io/name: alloy
   namespaceSelector:
     matchNames:
-      - monitoring
+      - observability-alloy
   endpoints:
     - port: http-metrics
       path: /metrics

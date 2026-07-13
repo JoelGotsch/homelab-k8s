@@ -18,9 +18,13 @@ spec:
       app.kubernetes.io/name: loki
   policyTypes: [Ingress, Egress]
   ingress:
-    # Alloy DaemonSet (same ns, log push).
+    # Alloy DaemonSet (cross-ns log push — alloy lives in
+    # observability-alloy per ADR 0036, not monitoring).
     - from:
-        - podSelector:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability-alloy
+          podSelector:
             matchLabels:
               app.kubernetes.io/name: alloy
       ports:
