@@ -167,19 +167,21 @@ server:
             # ships it. Tells Immich's startup probe which vector
             # extension to load.
             DB_VECTOR_EXTENSION: "vectorchord"
-            # immich v3 system-integrity folder check: the server
-            # verifies a `.immich` marker file in every media folder
-            # (thumbs/upload/library/…) to catch a wrong/unmounted
-            # backing volume. /data/library is our fresh csi-rclone
-            # originals mount with no marker yet, so the check crashes
-            # the server on first v3 boot. This flag lets immich start
-            # and CREATE the markers itself. FOLLOW-UP: once the marker
-            # exists in /data/library, remove this to re-enable the
-            # safety (it's a real guard for our stale-prone csi-rclone
-            # mounts — a wedged NAS mount would otherwise let immich
-            # write originals to the wrong place). See immich docs
-            # administration/system-integrity#folder-checks.
-            IMMICH_IGNORE_MOUNT_CHECK_ERRORS: "true"
+            # immich v3 system-integrity folder check verifies a
+            # `.immich` marker in every media folder to catch a
+            # wrong/unmounted backing volume. immich auto-creates the
+            # markers for the /data (hot) subfolders but NOT for the
+            # externally-mounted /data/library (csi-rclone originals),
+            # so first v3 boot crashed the check. Bootstrap sequence
+            # (2026-07-13): set IMMICH_IGNORE_MOUNT_CHECK_ERRORS=true
+            # once → immich started → manually created
+            # /data/library/.immich (13-byte ms-epoch marker, matching
+            # immich's format) → removed the flag (here) to re-enable
+            # the check. The safety is a real guard for our stale-prone
+            # csi-rclone mounts (a wedged NAS mount would otherwise let
+            # immich write originals to the wrong place). If the
+            # immich-originals PVC is ever recreated, repeat the
+            # bootstrap. Docs: administration/system-integrity#folder-checks.
             # Valkey (Redis-compatible) bundled by the chart — service name
             # is `<release>-valkey` per bjw-s naming convention, not
             # `<release>-redis-master` (which is the Bitnami-Redis convention
