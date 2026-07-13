@@ -54,6 +54,19 @@ spec:
   monitoring:
     enablePodMonitor: true
 
+  # Explicit resources (was inheriting the 512Mi namespace LimitRange
+  # default). immich v3's one-time reverse-geocoding init bulk-loads
+  # ~55k rows AND builds vectorchord indexes; at 512Mi with
+  # shared_buffers=256MB postgres was OOMKilled (exit 137) mid-load,
+  # triggering a crash→failover→repeat loop that kept immich-server
+  # in ECONNRESET/EHOSTUNREACH. 2Gi gives the load + index build room.
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+
   postgresql:
     parameters:
       max_connections: "200"
