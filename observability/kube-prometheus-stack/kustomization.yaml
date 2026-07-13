@@ -28,6 +28,7 @@ resources:
   - externalsecret.yaml
   - inbound-tokens-externalsecret.yaml
   - alertmanager-config.yaml
+  - alert-formatter.yaml
   - networkpolicy.yaml
   - httproute.yaml
   - worker-cascade-rules.yaml

@@ -204,39 +204,27 @@ spec:
     # ===== Tier 3 sink =====
     - name: 'null'
 
-    # ===== Tier 2 sink — direct ntfy (non-E2EE) =====
-    # POSTs Alertmanager's webhook JSON to the cluster ntfy
-    # server's topic URL. ntfy accepts arbitrary JSON as the
-    # message body when Content-Type: application/json is set
-    # (per docs.ntfy.sh/publish); we let the summary string
-    # surface via the ntfy `X-Title` / `X-Priority` header
-    # mechanism if a future value bump wires that in. For now
-    # the raw AM JSON is what lands — parseable in the F-Droid
-    # app's message view.
+    # ===== Tier 2 sink — direct ntfy via alert-formatter =====
+    # Posts the AM webhook JSON to the alert-formatter service
+    # (alert-formatter.yaml), which extracts a readable summary
+    # (title = alertname, body = per-alert `severity · namespace:
+    # summary` lines, ntfy Priority + emoji Tags by severity) and
+    # re-publishes to the ntfy topic. Before 2026-07-13 AM posted
+    # the raw JSON straight to the topic URL and the F-Droid app
+    # showed unreadable nested JSON.
     #
-    # Auth: bearer token seeded by the operator per the
-    # alert-routing runbook §"Ntfy topic setup". Not the same
-    # token as ntfy-e2ee-relay's inbound-auth (which the
-    # relay uses to talk to *this* AM's webhook path).
+    # No auth header here: the formatter holds the ntfy publish
+    # token (am-inbound-tokens / ntfy-am-direct) and adds the
+    # Bearer on the formatter→ntfy leg. AM→formatter is
+    # NetPol-gated (alert-formatter-allow ingress from
+    # alertmanager pods only).
     #
-    # If the operator has NOT yet seeded kv/ntfy/am-direct-token,
-    # ExternalSecret in inbound-tokens-externalsecret.yaml
-    # renders `ntfy-am-direct` empty and AM's webhook 401s
-    # into a retry loop. Not damaging (retries are cheap;
-    # critical alerts still deliver via ntfy-via-relay +
-    # approval-channel), but the AM logs will complain.
-    # TODO(operator): seed kv/ntfy/am-direct-token per the
-    # alert-routing runbook before merging this file.
+    # `topic` query param selects the destination topic — one
+    # formatter serves both tiers.
     - name: ntfy-direct
       webhookConfigs:
-        - url: http://ntfy.ntfy.svc.cluster.local/homelab-alerts-warning
+        - url: http://alert-formatter.monitoring.svc.cluster.local:8080/publish?topic=homelab-alerts-warning
           sendResolved: true
-          httpConfig:
-            authorization:
-              type: Bearer
-              credentials:
-                name: am-inbound-tokens
-                key: ntfy-am-direct
 
     # ===== Tier 1 sink A — direct ntfy (topic homelab-alerts) =====
     # Was: `ntfy-via-relay` routed through ntfy-e2ee-relay
@@ -244,23 +232,17 @@ spec:
     # (a) Phase-2 CF-Tunnel-fronted ntfy — the E2EE gating
     # condition — never happened; (b) the relay's custom wire
     # format isn't F-Droid-decryptable, so the phone showed
-    # ciphertext. Reverted to direct publish; same shape as
-    # the Tier-2 `ntfy-direct` receiver, different topic.
+    # ciphertext. Reverted to direct publish; now via the
+    # alert-formatter (same as Tier 2), different topic.
     #
-    # Auth: reuses the `am-direct` ntfy user (same as Tier 2)
-    # via the `ntfy-am-direct` key of `am-inbound-tokens`.
-    # `am-direct` was granted write-only on both topics
-    # 2026-07-12; one user covers both tiers.
+    # No auth header — the formatter holds the ntfy token
+    # (am-inbound-tokens / ntfy-am-direct) and adds the Bearer
+    # on its ntfy leg. `am-direct` has write-only on both
+    # topics (granted 2026-07-12); one user covers both tiers.
     - name: ntfy-critical
       webhookConfigs:
-        - url: http://ntfy.ntfy.svc.cluster.local/homelab-alerts
+        - url: http://alert-formatter.monitoring.svc.cluster.local:8080/publish?topic=homelab-alerts
           sendResolved: true
-          httpConfig:
-            authorization:
-              type: Bearer
-              credentials:
-                name: am-inbound-tokens
-                key: ntfy-am-direct
 
     # ===== Tier 1 sink B — Signal via approval-channel =====
     - name: approval-channel-alert

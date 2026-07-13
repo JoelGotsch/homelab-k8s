@@ -187,11 +187,23 @@ spec:
       ports:
         - port: 8000
           protocol: TCP
-    # ntfy server (direct publish) — Tier 2 sink for warning-
-    # severity alerts per alertmanager-config.yaml + the
-    # 03-runbooks/observability/alert-routing.md three-tier
-    # design (2026-07-10). Non-E2EE — payload is a summary
-    # string not secret material.
+    # alert-formatter (same namespace) — both ntfy tiers now
+    # route through the formatter, which extracts a readable
+    # summary and re-publishes to ntfy. Per alertmanager-
+    # config.yaml receivers ntfy-direct + ntfy-critical
+    # (2026-07-13). The formatter's own egress to ntfy is in
+    # alert-formatter.yaml.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alert-formatter
+      ports:
+        - port: 8080
+          protocol: TCP
+    # ntfy server (direct publish) — kept for the
+    # openbao-seal-watchdog CronJob's direct publish path and
+    # as a fallback; AM's own alert publishes now go via the
+    # formatter above. Non-E2EE, Tailscale-only server.
     - to:
         - namespaceSelector:
             matchLabels:

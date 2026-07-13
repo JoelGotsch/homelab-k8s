@@ -1,0 +1,288 @@
+# alert-formatter — tiny AM-webhook → ntfy adapter
+#
+# Problem it solves: Alertmanager's webhook receiver posts its
+# own JSON schema as the request body. When AM posts that
+# directly to an ntfy topic URL, ntfy stores the raw JSON as
+# the message — unreadable on the F-Droid app (nested JSON,
+# the actual alert text buried in `alerts[].annotations`).
+#
+# This service receives the AM webhook, extracts a readable
+# summary, and re-publishes to ntfy with a proper Title /
+# Priority / Tags. Both alert tiers point at it (topic passed
+# as a query param), so one service formats both the Tier-1
+# `homelab-alerts` and Tier-2 `homelab-alerts-warning` streams.
+#
+# Design choices:
+# - stdlib-only Python (http.server + urllib) so it runs on the
+#   already-present `ci-packages/python:3.12-slim` image with
+#   no build step — same "no new image" pattern as
+#   observability/crowdsec/cidrgroup-sync-cronjob.yaml.
+# - Holds the ntfy publish token (from am-inbound-tokens, key
+#   ntfy-am-direct — the `am-direct` ntfy user, write-only on
+#   both topics). AM → formatter is NetPol-gated only (no
+#   inter-service auth); the real secret (ntfy token) lives
+#   only here. The formatter → ntfy leg carries the Bearer.
+# - readOnlyRootFilesystem-safe: http.server writes nothing to
+#   disk.
+#
+# Reversal note: if a future need for E2EE returns (ADR 0024
+# D1 phase-2), route Tier 1 back through ntfy-e2ee-relay
+# instead — see 99-journal/2026-07-13 for the E2EE-removal
+# rationale.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alert-formatter-script
+  namespace: monitoring
+data:
+  formatter.py: |
+    """AM-webhook -> ntfy adapter. stdlib only. Per
+    03-runbooks/observability/alert-routing.md."""
+    import json
+    import os
+    import sys
+    import urllib.error
+    import urllib.request
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import parse_qs, urlparse
+
+    NTFY_BASE_URL = os.environ["NTFY_BASE_URL"].rstrip("/")
+    NTFY_TOKEN = os.environ["NTFY_TOKEN"]
+
+    # ntfy priority: 5=max(buzz through DND), 3=default, 2=low.
+    PRIORITY = {"critical": "5", "warning": "3", "info": "2"}
+    # ntfy tag = emoji shown next to the title.
+    def _tag(status, severity):
+        if status == "resolved":
+            return "white_check_mark"
+        return {
+            "critical": "rotating_light",
+            "warning": "warning",
+            "info": "information_source",
+        }.get(severity, "bell")
+
+    def _format(payload):
+        status = payload.get("status", "firing")
+        alerts = payload.get("alerts") or []
+        group = payload.get("groupLabels") or {}
+        common = payload.get("commonLabels") or {}
+        alertname = group.get("alertname") or common.get("alertname") or "alert"
+        severity = (
+            common.get("severity")
+            or group.get("severity")
+            or (alerts[0].get("labels", {}).get("severity") if alerts else None)
+        )
+        n = len(alerts)
+        prefix = "RESOLVED" if status == "resolved" else "FIRING"
+        title = f"[{prefix}] {alertname}"
+        if n > 1:
+            title = f"[{prefix}] {alertname} ({n} alerts)"
+        lines = []
+        for a in alerts[:20]:
+            labels = a.get("labels") or {}
+            ann = a.get("annotations") or {}
+            sev = labels.get("severity", "?")
+            loc = labels.get("namespace") or labels.get("pod") or ""
+            text = (
+                ann.get("summary")
+                or ann.get("description")
+                or labels.get("alertname", "")
+            )
+            lines.append(f"{sev}" + (f" · {loc}" if loc else "") + f": {text}")
+        if n > 20:
+            lines.append(f"... +{n - 20} more")
+        body = "\n".join(lines) if lines else alertname
+        priority = PRIORITY.get(severity or "", "3")
+        return title, body, priority, _tag(status, severity)
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, code, msg=b""):
+            self.send_response(code)
+            self.send_header("Content-Length", str(len(msg)))
+            self.end_headers()
+            if msg:
+                self.wfile.write(msg)
+
+        def do_GET(self):
+            if urlparse(self.path).path == "/healthz":
+                self._send(200, b"ok")
+            else:
+                self._send(404)
+
+        def do_POST(self):
+            parsed = urlparse(self.path)
+            if parsed.path != "/publish":
+                self._send(404)
+                return
+            topic = (parse_qs(parsed.query).get("topic") or [""])[0]
+            if not topic:
+                self._send(400, b"missing topic query param")
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                self._send(400, b"bad json")
+                return
+            title, body, priority, tag = _format(payload)
+            req = urllib.request.Request(
+                f"{NTFY_BASE_URL}/{topic}",
+                data=body.encode("utf-8"),
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {NTFY_TOKEN}",
+                    # ntfy header values must be single-line;
+                    # alertname + severity are always single-line.
+                    "Title": title,
+                    "Priority": priority,
+                    "Tags": tag,
+                    "Content-Type": "text/plain; charset=utf-8",
+                },
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    resp.read()
+                self._send(204)
+            except urllib.error.HTTPError as e:
+                sys.stderr.write(f"ntfy error {e.code}: {e.read()[:200]!r}\n")
+                self._send(502)
+            except Exception as e:  # noqa: BLE001
+                sys.stderr.write(f"ntfy publish failed: {e}\n")
+                self._send(502)
+
+        def log_message(self, *args):
+            return  # quiet — Alloy ships stderr, and we log only failures
+
+    if __name__ == "__main__":
+        ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-formatter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: alert-formatter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alert-formatter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: alert-formatter
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: formatter
+          image: registry.homelab.internal/ci-packages/python:3.12-slim
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/app/formatter.py"]
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: NTFY_BASE_URL
+              value: http://ntfy.ntfy.svc.cluster.local
+            - name: NTFY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: am-inbound-tokens
+                  key: ntfy-am-direct
+          volumeMounts:
+            - name: script
+              mountPath: /app
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: script
+          configMap:
+            name: alert-formatter-script
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-formatter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: alert-formatter
+spec:
+  selector:
+    app.kubernetes.io/name: alert-formatter
+  ports:
+    - port: 8080
+      targetPort: http
+      name: http
+---
+# NetworkPolicy — the formatter accepts webhook POSTs only from
+# Alertmanager, and egresses only to kube-DNS + the ntfy server.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: alert-formatter-allow
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: alert-formatter
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alertmanager
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # ntfy server — the publish target.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ntfy
+      ports:
+        - port: 80
+          protocol: TCP
