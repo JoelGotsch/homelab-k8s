@@ -15,6 +15,10 @@ metadata:
   namespace: llm-gateway
 spec:
   instances: 2
+  # CVE remediation 2026-07-13: pin patched postgres image
+  # (was inheriting operator default 17.2 / Debian-11 base).
+  # 17.6-bookworm = latest patched 17.x, Debian-12 base.
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.6-bookworm
 
   # Propagate labels to CNPG-managed children (Pods, PVCs,
   # Services). Picked up by infrastructure/longhorn/recurring-jobs.yaml's
