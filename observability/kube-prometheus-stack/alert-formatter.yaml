@@ -229,7 +229,14 @@ spec:
         - name: registry-homelab-internal-pull
       containers:
         - name: formatter
-          image: registry.homelab.internal/ci-packages/python:3.12-slim
+          # Digest-pinned: the cluster's Spegel-mirrored registry
+          # path resolves first-party refs by digest (a bare tag
+          # returns "not found" at containerd), and Kyverno's
+          # require-first-party-image-digest (ADR 0019 D3)
+          # mandates it. Tag kept for human readability. Bump the
+          # digest via Renovate when the ci-packages/python
+          # mirror is refreshed.
+          image: registry.homelab.internal/ci-packages/python:3.12-slim@sha256:6c4dd321d176d61ea848dc8c73a4f7dbae8f70e0ee48bb411ea2f045b599fa8e
           imagePullPolicy: IfNotPresent
           command: ["python", "/app/formatter.py"]
           ports:
