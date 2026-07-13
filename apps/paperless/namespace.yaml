@@ -7,5 +7,14 @@ metadata:
     homelab.internal/first-party: "true"
     # `personal` — scanned financial/ID/medical paperwork.
     homelab.internal/data-class: personal
-    pod-security.kubernetes.io/enforce: restricted
-    pod-security.kubernetes.io/audit: restricted
+    # PSS relaxed restricted→baseline 2026-07-13 (operator decision):
+    # paperless-ngx 2.16+ ships an s6-overlay that must start as root
+    # to chown /run at preinit, then drops the app to uid 1000 via
+    # USERMAP_UID/GID. restricted PSS (runAsNonRoot) makes 2.16+
+    # unbootable; there is no non-root-preserving path (emptyDir is
+    # always root-owned). baseline still blocks host namespaces,
+    # hostPath, privileged, and most caps — the container drops to
+    # [CHOWN,DAC_OVERRIDE,FOWNER,SETUID,SETGID,KILL] (s6 essentials)
+    # and the app itself runs as 1000. See known-caveats "paperless".
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: baseline

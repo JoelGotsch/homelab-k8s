@@ -21,7 +21,7 @@
 image:
   repository: ghcr.io/paperless-ngx/paperless-ngx
   # OPERATOR PINS via Renovate.
-  tag: "2.14.7"
+  tag: "2.20.15"
   pullPolicy: IfNotPresent
 
 # Disable bundled Postgres + MariaDB; use external CNPG.
@@ -116,6 +116,13 @@ ingress:
 # DB_* + REDIS_* + URL + OIDC vars projected from Secrets
 # created by cnpg-cluster.yaml + externalsecret.yaml.
 env:
+  # paperless-ngx image: run as root (podSecurityContext) but remap
+  # the internal paperless user to 1000 so the app process + all
+  # files it writes are uid/gid 1000, not root. s6-overlay starts
+  # root, chowns /run, then s6-setuidgid drops to this uid.
+  USERMAP_UID: "1000"
+  USERMAP_GID: "1000"
+
   # Timezone — operator's locale.
   PAPERLESS_TIME_ZONE: "Europe/Berlin"
 
@@ -211,22 +218,30 @@ env:
   # if Office-document conversion becomes a need.
   PAPERLESS_TIKA_ENABLED: "false"
 
-# Pod-level security: non-root, dropped caps.
+# Pod-level security: paperless-ngx 2.16+ s6-overlay must START as
+# root (chowns /run at preinit) then drops the app to uid 1000 via
+# USERMAP_UID/GID (env). Hence runAsNonRoot:false / runAsUser:0.
+# fsGroup 1000 keeps the mounted PVCs group-writable for the
+# dropped-to-1000 app. baseline PSS (namespace.yaml) permits this.
 podSecurityContext:
-  runAsNonRoot: true
-  runAsUser: 1000
-  runAsGroup: 1000
+  runAsNonRoot: false
+  runAsUser: 0
+  runAsGroup: 0
   fsGroup: 1000
   seccompProfile:
     type: RuntimeDefault
 
 securityContext:
-  allowPrivilegeEscalation: false
+  # s6 manages its own uid/gid transitions; keep escalation allowed.
+  allowPrivilegeEscalation: true
   # readOnlyRootFilesystem: false — Paperless writes to
   # /tmp at runtime (PDF processing, OCR scratch).
   readOnlyRootFilesystem: false
+  # Drop ALL, add back only what s6-overlay preinit needs to chown
+  # /run + drop privileges to 1000 (all baseline-permitted).
   capabilities:
     drop: [ALL]
+    add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID, KILL]
 
 resources:
   requests:
