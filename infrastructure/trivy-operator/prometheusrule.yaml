@@ -47,10 +47,25 @@ spec:
         # scan cycle. 30m is well under the operator's expected
         # response window + still flags real findings the same
         # workday.
+        #
+        # `max_over_time(...[2h])` is CRITICAL for anti-flap
+        # (2026-07-13 fix): trivy-operator periodically
+        # regenerates VulnerabilityReports, during which the
+        # `trivy_image_vulnerabilities` series briefly VANISHES.
+        # A bare `> 0` expr resolves the instant the series is
+        # absent (for: only debounces firing, not resolution),
+        # then ALL alerts re-fire together 30m after the metric
+        # returns — producing an hourly flood of identical
+        # notifications (symptom: every firing alert shares one
+        # startsAt). Wrapping in max_over_time keeps the alert
+        # firing as long as the CVE was seen in the last 2h,
+        # bridging the report-regeneration gaps. Trade-off: a
+        # genuinely-fixed CVE stays alerting for up to 2h after
+        # the fix — acceptable for CVE horizons.
         - alert: TrivyCriticalCVEOnDeployedImage
           expr: |
             max by (namespace, name, image_repository, image_tag)
-              (trivy_image_vulnerabilities{severity="Critical"}) > 0
+              (max_over_time(trivy_image_vulnerabilities{severity="Critical"}[2h])) > 0
           for: 30m
           labels:
             severity: critical
@@ -85,7 +100,7 @@ spec:
         - alert: TrivyManyHighCVEOnDeployedImage
           expr: |
             max by (namespace, name, image_repository, image_tag)
-              (trivy_image_vulnerabilities{severity="High"}) > 5
+              (max_over_time(trivy_image_vulnerabilities{severity="High"}[2h])) > 5
           for: 2h
           labels:
             severity: warning

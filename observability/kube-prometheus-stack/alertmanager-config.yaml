@@ -102,7 +102,15 @@ spec:
         receiver: ntfy-direct
         groupBy: [alertname, severity]
         groupWait: 5m
-        groupInterval: 1h
+        # groupInterval governs re-notification when the group's
+        # CONTENTS change (new image with a CVE appears, e.g.
+        # during an upgrade sweep). Was 1h → produced hourly
+        # re-sends whenever a scan added/removed a member. 6h
+        # caps churn-driven digests to ~4/day even mid-upgrade;
+        # the anti-flap max_over_time in the trivy PrometheusRule
+        # is the primary fix, this is defense-in-depth.
+        # 2026-07-13.
+        groupInterval: 6h
         repeatInterval: 7d
         continue: false
 
