@@ -26,7 +26,7 @@
 image:
   repository: ghcr.io/paperless-ngx/paperless-ngx
   # OPERATOR PINS via Renovate.
-  tag: "2.14.7"
+  tag: "2.20.15"
   pullPolicy: IfNotPresent
 
 # Disable bundled Postgres + MariaDB; use external CNPG.
@@ -94,6 +94,23 @@ persistence:
     enabled: true
     type: pvc
     existingClaim: paperless-export
+  # paperless-ngx 2.16+ bumped s6-overlay, whose preinit needs to
+  # own/write /run and /tmp. Running as uid 1000 (non-root), the
+  # image's root-owned /run makes s6 fatal: "/run belongs to uid 0
+  # instead of 1000 … we're lacking the privileges to fix it"
+  # (exit 100 → CrashLoop). Back /run + /tmp with writable emptyDirs
+  # (fsGroup 1000 makes them group-writable) so s6 can populate them.
+  # Paired with S6_READ_ONLY_ROOT=1 in env below.
+  run:
+    enabled: true
+    type: emptyDir
+    globalMounts:
+      - path: /run
+  tmp:
+    enabled: true
+    type: emptyDir
+    globalMounts:
+      - path: /tmp
 
 # Don't expose Service externally — Cilium HTTPRoute owns
 # ingress.
@@ -121,6 +138,12 @@ ingress:
 # DB_* + REDIS_* + URL + OIDC vars projected from Secrets
 # created by cnpg-cluster.yaml + externalsecret.yaml.
 env:
+  # s6-overlay (paperless-ngx 2.16+): tell s6 the image root may be
+  # read-only-ish and to stage its writable state under the emptyDir
+  # /run + /tmp mounts (see persistence.run/tmp above) rather than
+  # trying to chown the root-owned image dirs as uid 1000.
+  S6_READ_ONLY_ROOT: "1"
+
   # Timezone — operator's locale.
   PAPERLESS_TIME_ZONE: "Europe/Berlin"
 
