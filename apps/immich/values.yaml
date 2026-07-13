@@ -167,21 +167,22 @@ server:
             # ships it. Tells Immich's startup probe which vector
             # extension to load.
             DB_VECTOR_EXTENSION: "vectorchord"
-            # immich v3 system-integrity folder check verifies a
-            # `.immich` marker in every media folder to catch a
-            # wrong/unmounted backing volume. immich auto-creates the
-            # markers for the /data (hot) subfolders but NOT for the
-            # externally-mounted /data/library (csi-rclone originals),
-            # so first v3 boot crashed the check. Bootstrap sequence
-            # (2026-07-13): set IMMICH_IGNORE_MOUNT_CHECK_ERRORS=true
-            # once → immich started → manually created
-            # /data/library/.immich (13-byte ms-epoch marker, matching
-            # immich's format) → removed the flag (here) to re-enable
-            # the check. The safety is a real guard for our stale-prone
-            # csi-rclone mounts (a wedged NAS mount would otherwise let
-            # immich write originals to the wrong place). If the
-            # immich-originals PVC is ever recreated, repeat the
-            # bootstrap. Docs: administration/system-integrity#folder-checks.
+            # MANDATORY for the ADR-0030 csi-rclone originals mount.
+            # immich v3's system-integrity folder check WRITES a
+            # `.immich` marker into every media folder on boot to prove
+            # write access + correct mount. /data/library is backed by
+            # csi-rclone over SMB (nas-crypt-personal-photos), and that
+            # marker write fails `EPERM: operation not permitted`
+            # (rclone-over-SMB doesn't support immich's in-place marker
+            # write — the same rclone/SMB op-limitation class that bit
+            # paperless's personal-documents remote). So the check is
+            # fundamentally incompatible with rclone-backed originals
+            # and MUST be disabled — this is NOT a temporary bootstrap.
+            # Trade-off: immich won't self-detect a wrong/unmounted
+            # /data/library; the csi-rclone StorageClass + the volume's
+            # own health are the guard instead. Docs:
+            # administration/system-integrity#folder-checks.
+            IMMICH_IGNORE_MOUNT_CHECK_ERRORS: "true"
             # Valkey (Redis-compatible) bundled by the chart — service name
             # is `<release>-valkey` per bjw-s naming convention, not
             # `<release>-redis-master` (which is the Bitnami-Redis convention
