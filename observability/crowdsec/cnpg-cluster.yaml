@@ -20,6 +20,14 @@ metadata:
 spec:
   instances: 2
 
+  # Pin the postgres image explicitly (was inheriting the CNPG
+  # operator default = postgresql:17.2, a Debian-11/bullseye
+  # base with ~21 CRITICAL CVEs flagged by Trivy 2026-07-13).
+  # 17.6-bookworm is the latest patched 17.x on a Debian-12
+  # base — same PG major (data-compatible rolling update), the
+  # newer base clears the deb11 package CVEs.
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.6-bookworm
+
   # Propagate labels to CNPG-managed children. Picked up by
   # infrastructure/longhorn/recurring-jobs.yaml's `internal`
   # group: 4-hourly snapshots × 7d retain.
