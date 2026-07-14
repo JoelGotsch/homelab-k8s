@@ -255,6 +255,18 @@ spec:
         - ports:
             - port: "3000"
               protocol: TCP
+    # Prometheus scrape — grafana serves /metrics on the same 3000
+    # port. This rule was MISSING, so grafana's ServiceMonitor target
+    # was policy-denied (Hubble: "Policy denied DROPPED") and grafana
+    # self-metrics were uncollected for 3+ days (rule 17: missing
+    # metrics fail silent). Added 2026-07-14.
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: prometheus
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
   egress:
     # kube-DNS.
     - toEndpoints:
