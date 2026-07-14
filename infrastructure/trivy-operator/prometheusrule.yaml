@@ -62,29 +62,16 @@ spec:
         # bridging the report-regeneration gaps. Trade-off: a
         # genuinely-fixed CVE stays alerting for up to 2h after
         # the fix — acceptable for CVE horizons.
-        # `image_repository!~"…"` suppresses the ACCEPTED,
-        # no-upstream-fix images so they don't re-page forever (ADR
-        # 0019 D2 option 4; documented in
-        # 04-guides/known-caveats.md §"Accepted Trivy CVEs", review-by
-        # 2026-10-13). These are all base-layer/bundle CVEs the
-        # maintainer's own latest release still ships:
-        #   cloudnative-pg/postgresql + tensorchord/…-vectorchord
-        #     → Debian-base CVEs, no patched build (deployed in ~9
-        #       CNPG namespaces = the bulk of the old alert flood)
-        #   argoproj/argocd, dexidp/dex, docker/library/redis
-        #     → argocd's latest (v3.4.5) still pins these exact tags
-        # Excluded by REPOSITORY (not repo:tag) on purpose: the base
-        # layer will always carry some criticals, so a tag bump alone
-        # isn't news. Renovate PRs + the review-by date are the
-        # re-review triggers. App images (authentik/immich/paperless/
-        # k8s-sidecar/…) are NOT excluded — a newer release may fix
-        # them, so they still alert (post-09:00 per the AM mute).
-        # 2026-07-14 (operator: repeated CVE pages for accepted images).
+        # NOTE: accepted/no-fix CVEs are suppressed at the SCAN level
+        # via `trivy.ignoreFile` (infrastructure/trivy-operator/
+        # values.yaml) — Trivy drops those CVE IDs so they never enter
+        # this metric. That's more precise than an image-level exclude
+        # here: a NEW, unaccepted critical on the same image still
+        # fires. See 04-guides/known-caveats.md §"Accepted Trivy CVEs".
         - alert: TrivyCriticalCVEOnDeployedImage
           expr: |
             max by (namespace, name, image_repository, image_tag)
-              (max_over_time(trivy_image_vulnerabilities{severity="Critical",
-                image_repository!~"cloudnative-pg/postgresql|tensorchord/cloudnative-vectorchord|argoproj/argocd|dexidp/dex|docker/library/redis"}[2h])) > 0
+              (max_over_time(trivy_image_vulnerabilities{severity="Critical"}[2h])) > 0
           for: 30m
           labels:
             severity: critical

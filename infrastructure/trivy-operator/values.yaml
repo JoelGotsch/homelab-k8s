@@ -128,6 +128,37 @@ trivy:
   # vendor pressure, image swap).
   ignoreUnfixed: false
 
+  # Accepted CVEs (ADR 0019 D2 option 4) — Trivy ignores these IDs
+  # globally so they drop out of the reports AND the
+  # `trivy_image_vulnerabilities` metric, which stops the
+  # TrivyCriticalCVEOnDeployedImage alert re-firing for them. This
+  # replaces the earlier image_repository!~ exclusion in
+  # prometheusrule.yaml (per-CVE is more precise: a NEW critical on
+  # the same image still alerts). Documented in
+  # 04-guides/known-caveats.md §"Accepted Trivy CVEs"; review-by
+  # 2026-10-13. When Renovate bumps an image, re-check whether its
+  # accepted IDs still apply and prune stale ones. 2026-07-14.
+  ignoreFile: |
+    # --- Go stdlib (argocd v3.4.5 + dex v2.45.0; no rebuild on the
+    #     pinned tag — maintainer's latest still ships them) ---
+    CVE-2023-24538
+    CVE-2023-24540
+    CVE-2024-24790
+    # --- argocd / dex bundle residuals ---
+    CVE-2025-68121
+    CVE-2026-31789
+    CVE-2026-33186
+    # --- Debian base layer: cloudnative-pg/postgresql:17.6-bookworm
+    #     + tensorchord/cloudnative-vectorchord:17-0.4.3 (no patched
+    #     CNPG image build) + docker/library/redis:8.2.3-alpine ---
+    CVE-2023-45853
+    CVE-2024-56171
+    CVE-2025-7458
+    CVE-2026-33845
+    CVE-2026-42010
+    CVE-2026-42496
+    CVE-2026-8376
+
   # Image-cache size; default 5Gi default is far more than we
   # need for the homelab image count, but the chart defaults to
   # PVC-backed in ClientServer mode only. In Standalone the
