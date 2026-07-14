@@ -113,6 +113,13 @@ spec:
         groupInterval: 6h
         repeatInterval: 7d
         continue: false
+        # Trivy CVEs are never time-urgent (day/week fix horizons),
+        # so suppress notifications overnight — a 06:00 ntfy buzz for
+        # accepted base-layer CVEs is pure noise. Muted 00:00–09:00
+        # Europe/Berlin; a batch that would fire in that window is
+        # held and delivered at 09:00. 2026-07-14 (operator ask).
+        muteTimeIntervals:
+          - overnight-quiet
 
       # ===== TargetDown rollup — one notification per outage =====
       # 14 firing right now. Most are ServiceMonitor mis-config
@@ -303,3 +310,16 @@ spec:
           value: NodeNotReady
       targetMatch: []
       equal: [node]
+
+  # Named time intervals referenced by routes' muteTimeIntervals.
+  # `overnight-quiet` silences low-urgency digests (Trivy CVEs)
+  # between midnight and 09:00 local — a held batch delivers at
+  # 09:00. Only Tier-1 pages (Signal, deception) bypass this by
+  # not referencing it. 2026-07-14.
+  muteTimeIntervals:
+    - name: overnight-quiet
+      timeIntervals:
+        - times:
+            - startTime: "00:00"
+              endTime: "09:00"
+          location: "Europe/Berlin"
