@@ -38,6 +38,18 @@ spec:
     # repointing server mgmt→storage VLAN, so the CSI node plugin
     # stages at a fresh path instead of colliding with the stuck
     # hard-mount left by the old (unreachable 10.10.10.10) handle.
+    #
+    # The old 10.10.10.10 hard-mount then lingered in worker2's
+    # kernel mount table for ~51 days (worker2 hadn't rebooted since
+    # before the repoint). When something probed it, the `hard` mount
+    # to the dead handle pinned processes in uninterruptible D-state
+    # → load1=598 + BOTH talosctl reboot modes hung on it → required a
+    # hardware power-cycle (2026-07-14 incident). Cleared on reboot;
+    # no node carries a 10.10.10.10 mount now. NOTE the `hard` +
+    # `nfsvers=4.1` options below still apply to 10.10.40.2 — if the
+    # storage VLAN / NAS ever goes unreachable, the same D-state wedge
+    # can happen to any node holding this mount (known-caveats
+    # "minio-on-nas hard NFS mount").
     volumeHandle: minio-on-nas-storagevlan
     volumeAttributes:
       server: 10.10.40.2
