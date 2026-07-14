@@ -318,8 +318,16 @@ spec:
   # not referencing it. 2026-07-14.
   muteTimeIntervals:
     - name: overnight-quiet
+      # NOTE: this AlertmanagerConfig CRD's TimeInterval has NO
+      # `location` field (operator v0.92.1 v1alpha1 schema), so times
+      # are UTC. To guarantee no delivery before 09:00 Europe/Berlin
+      # YEAR-ROUND (CET=UTC+1, CEST=UTC+2) the window ends at 08:00
+      # UTC (= 09:00 CET / 10:00 CEST) and starts at 21:00 UTC; the
+      # midnight wrap needs two ranges. A held digest delivers at the
+      # window's end. Revisit if the CRD gains `location`.
       timeIntervals:
         - times:
+            - startTime: "21:00"
+              endTime: "24:00"
             - startTime: "00:00"
-              endTime: "09:00"
-          location: "Europe/Berlin"
+              endTime: "08:00"
