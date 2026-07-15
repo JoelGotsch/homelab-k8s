@@ -52,20 +52,38 @@ spec:
           protocol: TCP
     # Scrape — any pod with a `prometheus.io/scrape: true`
     # annotation OR matching ServiceMonitor selector.
-    # Wide allow because the scrape targets are everywhere
-    # by design; auth-gating happens at the metrics-endpoint
-    # level (most metrics endpoints are unauthenticated within
-    # cluster — standard Prometheus pattern).
+    # namespaceSelector is wide, but this is a PORT ALLOWLIST:
+    # a new ServiceMonitor on a port NOT listed here is silently
+    # egress-denied (verdict:none SYN drop) and its target fails
+    # OPEN as "context deadline exceeded" — no alert (rule 17).
+    # ANY new scrape port MUST be added below. This recurred
+    # 2026-06-26 (node-exporter), 2026-07-14 (grafana:3000), and
+    # 2026-07-15 (loki/alloy/coredns/jellyfin/cloudflared/forgejo).
+    # auth-gating happens at the metrics-endpoint level (most
+    # metrics endpoints are unauthenticated within cluster —
+    # standard Prometheus pattern).
     - to:
         - namespaceSelector: {}
       ports:
+        - port: 2000   # cloudflared tunnel metrics
+          protocol: TCP
+        - port: 3000   # grafana + forgejo /metrics
+          protocol: TCP
+        - port: 3100   # loki
+          protocol: TCP
         - port: 8080
           protocol: TCP
         - port: 8081
           protocol: TCP
         - port: 8082
           protocol: TCP
+        - port: 8096   # jellyfin
+          protocol: TCP
         - port: 9090
+          protocol: TCP
+        - port: 9153   # coredns
+          protocol: TCP
+        - port: 12345  # alloy
           protocol: TCP
         - port: 9100
           protocol: TCP
@@ -165,6 +183,10 @@ spec:
       ports:
         - port: 9093
           protocol: TCP
+        - port: 8080   # prometheus-config-reloader sidecar /metrics
+          protocol: TCP   # (ServiceMonitor scrapes this separately
+                          # from the 9093 web port). Was missing →
+                          # the :8080 target failed OPEN (rule 17).
   egress:
     - to:
         - namespaceSelector:
