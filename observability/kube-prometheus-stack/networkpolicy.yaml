@@ -301,6 +301,21 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
+    # kube-apiserver — the grafana-sc-dashboard / -datasources
+    # sidecars (k8s-sidecar) watch ConfigMaps/Secrets via the
+    # kubernetes.default ClusterIP 10.96.0.1:443, which socket-LB
+    # DNATs to the real apiserver :6443 BEFORE policy eval, so
+    # BOTH ports are required (rule 12). Was missing → both
+    # sidecars crashlooped (ConnectTimeout to 10.96.0.1:443) and
+    # dashboards/datasources were not provisioned.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
     # Prometheus data source.
     - toEndpoints:
         - matchLabels:
