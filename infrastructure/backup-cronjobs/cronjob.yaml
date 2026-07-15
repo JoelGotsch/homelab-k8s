@@ -254,6 +254,16 @@ spec:
                   readOnly: true
                 - name: tmp
                   mountPath: /tmp
+                # Give ssh (restic's sftp backend) a passwd/group entry for
+                # uid 1000 — see restic-passwd-configmap.yaml.
+                - name: restic-passwd
+                  mountPath: /etc/passwd
+                  subPath: passwd
+                  readOnly: true
+                - name: restic-passwd
+                  mountPath: /etc/group
+                  subPath: group
+                  readOnly: true
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities:
@@ -277,3 +287,6 @@ spec:
               emptyDir:
                 medium: Memory
                 sizeLimit: 256Mi
+            - name: restic-passwd
+              configMap:
+                name: restic-passwd

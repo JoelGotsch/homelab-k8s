@@ -1,0 +1,23 @@
+# Minimal /etc/passwd + /etc/group for the restic container.
+#
+# restic's sftp backend shells out to `ssh`, which calls getpwuid(getuid())
+# early to resolve the local user. The pod runs as runAsUser: 1000, but the
+# restic/restic image has no passwd entry for uid 1000, so ssh aborts with
+# "No user exists for uid 1000" and the sftp session never starts (tier-3
+# repo init failed here, 2026-07-15). readOnlyRootFilesystem prevents
+# writing /etc/passwd at runtime, so we mount these entries as files
+# (subPath) instead. Fixed 2026-07-15.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: restic-passwd
+  namespace: backup-cronjobs
+data:
+  passwd: |
+    root:x:0:0:root:/root:/bin/sh
+    backup:x:1000:1000:backup:/tmp:/bin/sh
+    nobody:x:65534:65534:nobody:/nonexistent:/sbin/nologin
+  group: |
+    root:x:0:
+    backup:x:1000:
+    nobody:x:65534:
