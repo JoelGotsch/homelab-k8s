@@ -111,3 +111,15 @@ repos:
         # logic across repos. Always-on (cheap byte compares); repos
         # not checked out side-by-side are skipped. Local inline
         # logic, no third-party hook repo — per the header policy.
+
+      - id: check-cnpg-netpol
+        name: CNPG namespaces under egress default-deny carry the full DB egress rule set
+        entry: scripts/check-cnpg-netpol.sh
+        language: system
+        pass_filenames: false
+        files: '(networkpolicy|cnpg-cluster).*\.ya?ml$'
+        # Guards the llm-gateway/paperless CNPG-outage class (netpol-audit
+        # MEDIUM-3, checklist E): once a namespace running a CNPG cluster
+        # opts into an egress default-deny, its DB pods MUST get egress to
+        # kube-apiserver (443+6443), DNS, MinIO, and their replication
+        # peer — or the instance manager CrashLoopBackOffs. Local script.
