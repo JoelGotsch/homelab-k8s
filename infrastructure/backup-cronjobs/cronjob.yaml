@@ -7,9 +7,16 @@
 # stored in OpenBao at kv/prod/restic/cluster-tier-3/password
 # AND in the offline-recovery archive per ADR 0011).
 #
-# Sources mirrored: homelab-backups-cluster (CNPG WAL+base) +
-# longhorn-backups (Longhorn snapshots). NOT loki-chunks —
-# Loki retention is configured in its own values; loss of Loki
+# Sources mirrored: homelab-backups-cluster (CNPG WAL+base) ONLY (~120 MiB).
+# longhorn-backups (~7.8 TB of full volume backups) was REMOVED from the
+# offsite path on 2026-07-15: staging it into the restic-staging PVC is
+# impossible (you'd need an 8 TB+ staging volume — a full second copy of
+# all backups on the cluster's own storage). The critical, irreplaceable
+# state (databases) is already covered offsite here via CNPG's own WAL/base
+# backups; Longhorn's bulk (mostly media) stays tier-1/2 on the NAS.
+# Getting Longhorn offsite is a separate decision (rclone-stream or a
+# Longhorn-native second backup target — needs 8 TB+ Hetzner capacity).
+# NOT loki-chunks either — Loki retention is its own concern; loss of Loki
 # history is acceptable per [ADR 0021].
 #
 # Tier-2 (friend's NAS) is a sibling CronJob, not a step in
@@ -99,11 +106,27 @@ spec:
                     http://minio.minio-on-nas.svc.cluster.local:9000 \
                     "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
 
-                  # Mirror in incremental mode — `mc mirror`
-                  # compares object metadata and skips
-                  # unchanged. --remove syncs deletions so the
-                  # staging tree matches the bucket exactly.
-                  for bucket in homelab-backups-cluster longhorn-backups; do
+                  BUCKETS="homelab-backups-cluster"
+                  # Prune staging dirs for buckets no longer mirrored, so
+                  # restic never ships stale data and the PVC can't fill
+                  # with an orphaned tree. `mc mirror --remove` only syncs
+                  # deletions WITHIN each mirrored bucket, not across
+                  # removed buckets — so when longhorn-backups was dropped
+                  # (2026-07-15) its ~partial staging tree would otherwise
+                  # linger. Self-healing: rm any /staging/<dir> not in
+                  # $BUCKETS (frees space before the mirror runs).
+                  for d in /staging/*/; do
+                    [ -e "$d" ] || continue
+                    b=$(basename "$d")
+                    case " $BUCKETS " in
+                      *" $b "*) ;;
+                      *) echo "=== pruning orphaned staging dir: $b ==="; rm -rf "$d" ;;
+                    esac
+                  done
+                  # Mirror in incremental mode — `mc mirror` compares object
+                  # metadata and skips unchanged. --remove syncs deletions
+                  # so the staging tree matches the bucket exactly.
+                  for bucket in $BUCKETS; do
                     echo "=== mirror src/$bucket → /staging/$bucket ==="
                     mkdir -p "/staging/$bucket"
                     mc mirror --remove --overwrite \
