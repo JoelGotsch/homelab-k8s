@@ -31,16 +31,17 @@ metadata:
   labels:
     app.kubernetes.io/name: signal-bridge
 data:
-  # json-rpc mode: signal-cli runs as a persistent daemon (vs
-  # `native`, which spawns signal-cli per request). Required for
-  # the /v1/metrics endpoint — bbernhard only registers the
-  # Prometheus metrics handler in json-rpc mode; under `native`
-  # /v1/metrics 404s even with ENABLE_METRICS=1. Single-replica +
-  # Recreate strategy (below) keeps the one daemon holding the
-  # signal-cli SQLite account exclusively, so no lock overlap.
-  MODE: json-rpc
-  # bbernhard exposes self-metrics in Prometheus format on the
-  # same port as the API at /v1/metrics.
+  # Native build — selected by MODE; bundled in the standard image.
+  MODE: native
+  # NOTE: bbernhard/signal-cli-rest-api does NOT support Prometheus
+  # metrics — there is no ENABLE_METRICS var and no /v1/metrics
+  # endpoint in any mode (verified 2026-07-15 against the running
+  # 0.99 pod: /v1/metrics 404s under both native and json-rpc; the
+  # upstream README/DeepWiki confirm no metrics feature — only the
+  # unrelated h4x0r/signal-cli-api fork exposes Prometheus). The
+  # ENABLE_METRICS key + servicemonitor were based on a false
+  # premise; kept here only to document the dead end. To actually
+  # scrape signal metrics we'd have to swap images entirely.
   ENABLE_METRICS: "1"
 ---
 apiVersion: apps/v1
