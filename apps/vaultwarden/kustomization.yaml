@@ -25,7 +25,6 @@ resources:
   - externalsecret.yaml
   - httproute.yaml
   - networkpolicy.yaml
-  - servicemonitor.yaml
 
 # ADR 0036: cluster-wide resource-governance baseline.
 components:
