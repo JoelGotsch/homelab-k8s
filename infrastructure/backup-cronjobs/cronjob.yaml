@@ -199,24 +199,19 @@ spec:
                   echo "$SSH_KEY" > /tmp/.ssh/id_ed25519
                   chmod 600 /tmp/.ssh/id_ed25519
 
-                  # Host-key trust path:
-                  #
-                  # If SSH_KNOWN_HOST is set (operator captured
-                  # the fingerprint at first SSH + wrote it to
-                  # OpenBao at kv/prod/backup/hetzner-storage-box
-                  # ssh_known_host), pin it. This is the
-                  # preferred (post-TOFU) posture per
-                  # 99-journal/2026-04-29-restic-tier-3-cronjob.md
-                  # D5.
-                  #
-                  # If unset (first install / pre-pin), fall back
-                  # to ssh-keyscan. Brief TOFU window.
-                  if [ -n "${SSH_KNOWN_HOST:-}" ]; then
-                    echo "$SSH_KNOWN_HOST" > /tmp/.ssh/known_hosts
-                  else
-                    ssh-keyscan -p "${HSB_PORT:-23}" -H "$HSB_HOST" \
-                      > /tmp/.ssh/known_hosts 2>/dev/null
-                  fi
+                  # Host-key trust: pinned from the restic-known-hosts
+                  # ConfigMap — PUBLIC host keys verified by ssh-keyscan +
+                  # fingerprint on 2026-07-15. This SUPERSEDES the OpenBao
+                  # SSH_KNOWN_HOST env (still projected but unused): that
+                  # value was stale/incomplete and did not include the
+                  # ed25519 key the box presents, so ssh failed "Host key
+                  # verification failed" and tier-3 repo init never
+                  # completed. Public host keys belong in versioned config,
+                  # not the secret store. Copied to a writable path so ssh
+                  # (which may append on key rotation) doesn't hit the RO
+                  # mount. To rotate: re-keyscan the box, update the
+                  # ConfigMap.
+                  cp /etc/restic-ssh/known_hosts /tmp/.ssh/known_hosts
                   chmod 600 /tmp/.ssh/known_hosts
 
                   export RESTIC_REPOSITORY="sftp:${HSB_USER}@${HSB_HOST}:/cluster-backups-tier-3"
@@ -279,6 +274,10 @@ spec:
                   mountPath: /etc/group
                   subPath: group
                   readOnly: true
+                # Pinned Hetzner Storage Box host keys — restic-known-hosts-configmap.yaml
+                - name: restic-known-hosts
+                  mountPath: /etc/restic-ssh
+                  readOnly: true
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities:
@@ -305,3 +304,6 @@ spec:
             - name: restic-passwd
               configMap:
                 name: restic-passwd
+            - name: restic-known-hosts
+              configMap:
+                name: restic-known-hosts

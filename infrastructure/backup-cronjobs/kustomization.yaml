@@ -17,3 +17,4 @@ resources:
   - registry-pull-secret.yaml
   - sa-default.yaml
   - restic-passwd-configmap.yaml
+  - restic-known-hosts-configmap.yaml
