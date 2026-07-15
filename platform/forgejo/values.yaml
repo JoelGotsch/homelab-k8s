@@ -239,6 +239,14 @@ gitea:
     cron:
       ENABLED: "true"
 
+    # Prometheus metrics on the main HTTP port at /metrics
+    # (scraped by servicemonitor.yaml). No TOKEN → unauthenticated,
+    # which is fine in-cluster: networkpolicy.yaml restricts /metrics
+    # ingress to the prometheus pod only. Without this the endpoint
+    # served the web UI HTML and the scrape target failed (rule 17).
+    metrics:
+      ENABLED: "true"
+
   # Forgejo reads INI keys from env vars (FORGEJO__<section>__<KEY>)
   # via environment-to-ini. These MUST live under
   # gitea.additionalConfigFromEnvs — the chart (forgejo 10.0.0) has
