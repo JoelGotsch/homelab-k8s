@@ -220,15 +220,27 @@ spec:
                   # Restic invokes ssh internally; point it at our keypair.
                   export RESTIC_SFTP_COMMAND="ssh -i /tmp/.ssh/id_ed25519 -o UserKnownHostsFile=/tmp/.ssh/known_hosts -o BatchMode=yes -p ${HSB_PORT:-23} ${HSB_USER}@${HSB_HOST} -s sftp"
 
+                  # SINGLE SFTP connection. Hetzner Storage Boxes corrupt
+                  # data under concurrent SFTP (restic's default is 5
+                  # connections) — the symptom was intermittent
+                  # "config or key ... damaged: ciphertext verification
+                  # failed" on small files, with the failure point moving
+                  # between runs (a full 6.3 GiB backup succeeded once, then
+                  # the next run failed opening the repo). Serializing to
+                  # sftp.connections=1 is the documented fix; slower but the
+                  # nightly window tolerates it. Applied to EVERY restic
+                  # call. (2026-07-15)
+                  RESTIC_OPTS="-o sftp.connections=1"
+
                   # Initialize on first run; idempotent on
                   # existing repo (returns "already initialized").
-                  if ! restic snapshots --no-lock --quiet >/dev/null 2>&1; then
+                  if ! restic $RESTIC_OPTS snapshots --no-lock --quiet >/dev/null 2>&1; then
                     echo "=== initializing restic repo ==="
-                    restic init
+                    restic $RESTIC_OPTS init
                   fi
 
                   echo "=== restic backup /staging ==="
-                  restic backup /staging \
+                  restic $RESTIC_OPTS backup /staging \
                     --tag "tier-3" \
                     --tag "automated" \
                     --host "k8s-${HOSTNAME}"
@@ -239,7 +251,7 @@ spec:
                   # true "forever" knob; --keep-monthly 120 covers
                   # 10 years which is well past any retention
                   # commitment we'd realistically honor.
-                  restic forget \
+                  restic $RESTIC_OPTS forget \
                     --prune \
                     --keep-daily 30 \
                     --keep-weekly 12 \
@@ -248,7 +260,7 @@ spec:
                     --keep-tag preserve
 
                   echo "=== restic snapshots (last 5) ==="
-                  restic snapshots --compact | tail -10
+                  restic $RESTIC_OPTS snapshots --compact | tail -10
               env:
                 - name: HOME
                   value: /tmp  # restic uses ~/.cache; readOnlyRootFilesystem requires writable HOME
