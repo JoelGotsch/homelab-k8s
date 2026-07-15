@@ -63,6 +63,21 @@ spec:
             app.kubernetes.io/component: backup-pipeline
         spec:
           restartPolicy: Never
+          # ndots:1 for the musl resolver in the restic image. restic's sftp
+          # backend shells out to `ssh` (a C/musl binary, unlike the Go
+          # binaries mc/restic which have their own resolver). Under the
+          # default ndots:5, musl prepends the cluster search domains to the
+          # external storage-box FQDN and returns EAI_AGAIN
+          # ("Could not resolve hostname ...: Try again"), so repo init
+          # never reached Hetzner. ndots:1 makes the 2-dot FQDN resolve
+          # directly. CLAUDE.md rule 27 / known-caveat 2026-06-06. Fixed
+          # 2026-07-15. (mc still resolves the cluster FQDN fine — Go
+          # resolver, and the FQDN has >=1 dot so ndots:1 is a no-op for it.)
+          dnsConfig:
+            options:
+              - name: ndots
+                value: "1"
+              - name: single-request-reopen
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
