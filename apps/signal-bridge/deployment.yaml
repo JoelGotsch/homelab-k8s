@@ -31,8 +31,14 @@ metadata:
   labels:
     app.kubernetes.io/name: signal-bridge
 data:
-  # Native build — selected by MODE; bundled in the standard image.
-  MODE: native
+  # json-rpc mode: signal-cli runs as a persistent daemon (vs
+  # `native`, which spawns signal-cli per request). Required for
+  # the /v1/metrics endpoint — bbernhard only registers the
+  # Prometheus metrics handler in json-rpc mode; under `native`
+  # /v1/metrics 404s even with ENABLE_METRICS=1. Single-replica +
+  # Recreate strategy (below) keeps the one daemon holding the
+  # signal-cli SQLite account exclusively, so no lock overlap.
+  MODE: json-rpc
   # bbernhard exposes self-metrics in Prometheus format on the
   # same port as the API at /v1/metrics.
   ENABLE_METRICS: "1"
