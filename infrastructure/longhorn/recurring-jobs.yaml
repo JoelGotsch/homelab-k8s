@@ -130,17 +130,48 @@ spec:
   labels:
     homelab-class: internal-media
 ---
-# ─── volume-level backup to MinIO-on-NAS ───────────────────
+# ─── volume-level backup to MinIO-on-NAS — OPT-IN ──────────
 # Per ADR 0016 D4 + backup-and-dr.md §"Cluster Longhorn volumes":
-# daily volume backup to NAS-MinIO `longhorn-backups` bucket,
-# retained 90d locally; the Restic CronJob at
-# `infrastructure/backup-cronjobs/` mirrors the bucket nightly
-# to tier-2 (friend's NAS) + tier-3 (Hetzner Storage Box).
+# daily volume backup to NAS-MinIO `longhorn-backups` bucket; the
+# Restic CronJob at `infrastructure/backup-cronjobs/` mirrors the
+# backup-worthy prefixes to tier-3 (Hetzner Storage Box) offsite.
+#
+# ⚠ THIS JOB IS OPT-IN, NOT BLANKET (changed 2026-07-16). It targets
+# the dedicated `backup` group, NOT `default`. Reason: it previously
+# ran `groups: [default]` retain 90, which backed up ALL ~54 volumes
+# daily and kept 90 copies each. That over-retention (a) bloated the
+# NAS `longhorn-backups` bucket and (b) — when ephemeral volumes
+# (ci-woodpecker CI PVCs, etc.) were deleted mid-backup — left
+# thousands of orphaned `Pending` Backup CRs that OOM-crashlooped
+# longhorn-manager (2026-07-16 incident; see TODO "Longhorn control-
+# plane hygiene" + memory reference-longhorn-manager-oom-orphaned-
+# backups). Making backup opt-in means only unique-data volumes are
+# backed up, so deleting a regenerable/CI volume no longer orphans a
+# backup CR.
+#
+# Membership: a volume joins via the label
+# `recurring-job-group.longhorn.io/backup: enabled` (applied to the
+# Longhorn Volume CR by scripts/label-backup-volumes.sh — Volume CRs
+# are runtime objects, not GitOps). Snapshots are unaffected: every
+# volume stays in `default` for local CoW snapshots (the two groups
+# coexist on a volume — verified 2026-07-16).
+#
+# CURRENT backup set (see scripts/label-backup-volumes.sh for the
+# authoritative list + rationale):
+#   vaultwarden/vaultwarden-data       (secret: attachments + org keys)
+#   forgejo/gitea-shared-storage       (internal: git repos + LFS)
+#   signal-bridge/signal-bridge-data   (secret: Signal session/keys)
+#   paperless/paperless-data           (personal: insurance copy)
+#   ntfy/ntfy-data                     (internal: default-offsite)
+# Everything else = snapshot-only (CNPG DBs → barman; openbao → raft
+# snapshot; telemetry/caches → regenerable).
+#
+# retain 14: this is the tier-1 NAS-local depth for fast restore; the
+# deep GFS tail (weekly/monthly/yearly) lives on restic→Hetzner
+# (backup plan Workstream E), NOT on the NAS. Was 90 (over-retained).
 #
 # Backup target + credentials configured in values.yaml
 # (`defaultSettings.backupTarget` + `backupTargetCredentialSecret`).
-# Without those filled, `task: backup` fails per-volume — the
-# snapshot tasks above keep working regardless.
 apiVersion: longhorn.io/v1beta2
 kind: RecurringJob
 metadata:
@@ -156,8 +187,8 @@ spec:
   # 03:05 openbao daily snapshot). Frequency + destination unchanged.
   cron: "35 3 * * *"
   task: backup
-  groups: [default]
-  retain: 90                   # 90 daily backups
+  groups: [backup]             # OPT-IN group, not [default] — see header
+  retain: 14                   # NAS-local depth; GFS tail on restic→Hetzner
   concurrency: 2
   labels:
     homelab-purpose: tier1-to-nas-minio
