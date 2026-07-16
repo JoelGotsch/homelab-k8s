@@ -90,6 +90,7 @@ spec:
     - toFQDNs:
         # Container registries
         - matchName: "registry-1.docker.io"
+        - matchName: "index.docker.io"  # Docker Hub tag-list/metadata API — distinct host from the registry-1 pull path; ETIMEDOUT confirmed 2026-07-16 first live run
         - matchName: "auth.docker.io"
         - matchName: "production.cloudflare.docker.com"
         - matchName: "ghcr.io"

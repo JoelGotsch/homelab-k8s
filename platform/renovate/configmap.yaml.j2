@@ -40,8 +40,15 @@ data:
       requireConfig: 'optional',
       // Operational tunables — most behaviour comes from the
       // central preset that per-repo configs extend.
-      logLevel: 'info',
-      logFormat: 'json',  // for Loki ingestion per ADR 0021
+      //
+      // Log level/format are NOT valid config.js keys (Renovate's
+      // schema rejects them here — confirmed 2026-07-16, first
+      // live run: "WARN: Config validation errors found ...
+      // Invalid configuration option: logFormat/logLevel", non-
+      // fatal but noisy). They're host-level settings only, set
+      // via the CronJob's LOG_LEVEL / RENOVATE_LOG_FORMAT env
+      // vars (for Loki ingestion per ADR 0021) — see cronjob.yaml.
+      //
       // Bound the run; if a registry is slow, fail fast and
       // retry next schedule.
       prHourlyLimit: 4,
