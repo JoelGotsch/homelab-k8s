@@ -48,7 +48,13 @@ langfuse:
         cpu: 50m
         memory: 256Mi
       limits:
-        memory: 1Gi
+        # 1Gi -> 2Gi: chart 1.5.38 (app v3.174.1+) OOM'd at ~500MB heap
+        # under the 1Gi limit — new MCP-protocol features (prompts,
+        # observations, annotationQueues, evals, etc., absent from
+        # 1.5.31's startup log) raised baseline memory. Found + fixed
+        # 2026-07-16 during the patch-bump rollout; old pod (1.5.31)
+        # kept serving throughout via RollingUpdate, no outage.
+        memory: 2Gi
     # Custom env MUST go under `pod.additionalEnv` / `pod.additionalEnvFrom`
     # — the langfuse/langfuse chart's keys. The previous `extraEnv` /
     # `extraEnvFrom` at web-level were NOT chart keys → silently dropped at
