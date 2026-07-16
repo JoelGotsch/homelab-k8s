@@ -111,15 +111,10 @@ spec:
                   backup_share /nas/personal-documents  personal
                   backup_share /nas/internal-archive    internal
                   backup_share /nas/forgejo-lfs         internal
-                  # jellyfin-media DISABLED pending an operator capacity
-                  # decision: verification (2026-07-16) found the library is
-                  # 7.8 TB of real media, not near-empty like the crypt shares.
-                  # 7.8 TB over restic sftp.connections=1 is infeasible AND
-                  # likely exceeds the tier-3 Hetzner Storage Box capacity
-                  # (which also holds cluster + crypt-share backups). Re-enable
-                  # only once the target is decided (bigger box / separate media
-                  # target / accept-no-offsite). See TODO "jellyfin media 7.8TB".
-                  # backup_share /nas/jellyfin-media      internal-media
+                  # jellyfin-media (7.8 TB) is NOT backed up here — deferred to
+                  # the Sept review as a separate rclone→cold-storage lane
+                  # (verification 2026-07-16 found it's 7.8 TB, too big for the
+                  # tier-3 Hetzner repo). Its mount/PVC were removed. See TODO.
 
                   # Per-class GFS retention, scoped to THIS lane via the AND-tag
                   # `nas-personal,<class>` so it never prunes the cluster lane.
@@ -152,7 +147,6 @@ spec:
                 - { name: personal-documents,  mountPath: /nas/personal-documents, readOnly: true }
                 - { name: internal-archive,    mountPath: /nas/internal-archive,   readOnly: true }
                 - { name: forgejo-lfs,         mountPath: /nas/forgejo-lfs,        readOnly: true }
-                - { name: jellyfin-media,      mountPath: /nas/jellyfin-media,     readOnly: true }
                 - { name: restic-secrets, mountPath: /restic-secrets, readOnly: true }
                 - { name: tmp, mountPath: /tmp }
                 - { name: restic-passwd, mountPath: /etc/passwd, subPath: passwd, readOnly: true }
@@ -172,7 +166,6 @@ spec:
             - { name: personal-documents, persistentVolumeClaim: { claimName: backup-src-personal-documents } }
             - { name: internal-archive,   persistentVolumeClaim: { claimName: backup-src-internal-archive } }
             - { name: forgejo-lfs,        persistentVolumeClaim: { claimName: backup-src-forgejo-lfs } }
-            - { name: jellyfin-media,     persistentVolumeClaim: { claimName: backup-src-jellyfin-media } }
             - name: restic-secrets
               secret: { secretName: restic-tier-3-password, defaultMode: 0400 }
             # restic cache/tmp — disk-backed (NOT memory): the cache grows with

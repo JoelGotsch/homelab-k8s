@@ -88,44 +88,10 @@ spec:
   accessModes: [ReadWriteMany]
   storageClassName: nas-crypt-forgejo-lfs
   resources: { requests: { storage: 1Gi } }
----
-# Jellyfin media is a STATIC nfs-csi PV — NOT dynamic. The nfs-internal-media
-# StorageClass can't dynamically provision (its `mountOptions` is a bad
-# *parameter*, rejected by nfs-csi) AND it points at /volume1/internal-media,
-# which is the WRONG share (jellyfin's real media is at
-# /volume1/docker/media-center/media — verified 2026-07-16 against the live
-# jellyfin-media PV). So replicate jellyfin's own static PV: same server +
-# share, read-only, but a UNIQUE volumeHandle so it's a distinct PV. NFS
-# allows the concurrent read-only mount alongside jellyfin's.
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: backup-jellyfin-media
-  labels: { app.kubernetes.io/component: backup-pipeline }
-spec:
-  capacity: { storage: 4Ti }
-  accessModes: [ReadOnlyMany]
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: ""
-  claimRef:
-    namespace: backup-cronjobs
-    name: backup-src-jellyfin-media
-  csi:
-    driver: nfs.csi.k8s.io
-    volumeHandle: backup-jellyfin-media
-    volumeAttributes:
-      server: 10.10.40.2
-      share: /volume1/docker/media-center/media
-  mountOptions: [nfsvers=4.1, hard, nconnect=8, rsize=131072, wsize=131072, ro]
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: backup-src-jellyfin-media
-  namespace: backup-cronjobs
-  labels: { app.kubernetes.io/component: backup-pipeline, homelab.internal/data-class: internal-media }
-spec:
-  accessModes: [ReadOnlyMany]
-  storageClassName: ""
-  volumeName: backup-jellyfin-media
-  resources: { requests: { storage: 4Ti } }
+# NOTE: jellyfin media (internal-media) is NOT here. Verification (2026-07-16)
+# found the library is 7.8 TB — too big for the tier-3 Hetzner repo — so its
+# offsite backup is DEFERRED to the September review and will likely be a
+# separate rclone→cold-storage lane (restic is broken on Glacier tiers), not an
+# NFS PVC in this job. See TODO "jellyfin media (7.8 TB) offsite". Its static NFS
+# PV would live at /volume1/docker/media-center/media (server 10.10.40.2) if
+# ever revived here.
