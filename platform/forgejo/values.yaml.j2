@@ -19,7 +19,7 @@ strategy:
 
 image:
   # OPERATOR PINS via Renovate.
-  tag: "10.0.0"
+  tag: "15.0.5"
   rootless: true
   pullPolicy: IfNotPresent
 
@@ -67,21 +67,12 @@ persistence:
   annotations:
     retention.homelab.internal/reason: "Forgejo app data — git repos + config + runtime state; source-of-truth for the forge."
 
-# Use the externally-managed CNPG cluster instead of the
-# bundled Postgres dependency. CNPG service exposed at
-# forgejo-pg-rw.forgejo.svc:5432 per cnpg-cluster.yaml.
-postgresql:
-  enabled: false
-postgresql-ha:
-  enabled: false
-
-# Disable bundled Redis — Forgejo single-replica without HA
-# can run without Redis cache (uses in-process). Re-enable if
-# session count / queue depth surface as a bottleneck.
-redis:
-  enabled: false
-redis-cluster:
-  enabled: false
+# We use the externally-managed CNPG cluster instead of a
+# bundled Postgres, and no Redis cache (in-process is enough
+# at single-replica scale). Chart v17.x (app v15.0.5+) dropped
+# the postgresql/postgresql-ha/redis/redis-cluster subchart
+# dependencies entirely (Bitnami free-image discontinuation) —
+# there is nothing left to disable via values.
 
 # Service: HTTP is ClusterIP behind the Cilium Gateway
 # HTTPRoute; SSH is its own LoadBalancer Service on a
@@ -143,14 +134,11 @@ gitea:
     email: "${GITEA_ADMIN_EMAIL}"
     username: forgejo-admin
 
-  # External Postgres via CNPG — disable bundled chart deps.
-  # Chart removed `gitea.database.builtIn.*` switches; bundled
-  # database enablement now lives in the top-level chart-
-  # dependency blocks (`postgresql.enabled: false`,
-  # `postgresql-ha.enabled: false` — set earlier in this file).
-  # External connection details go in `gitea.config.database`
-  # below (DB_TYPE, HOST, NAME, USER + the security envFrom
-  # for DB_PASSWD).
+  # External Postgres via CNPG — no bundled chart deps to
+  # disable (chart v17.x dropped the postgresql/redis subcharts
+  # entirely; see the note above `service:`). Connection details
+  # go in `gitea.config.database` below (DB_TYPE, HOST, NAME,
+  # USER + the security envFrom for DB_PASSWD).
 
   config:
     APP_NAME: "Forgejo — homelab"
@@ -166,6 +154,16 @@ gitea:
       START_SSH_SERVER: "true"
       LFS_START_SERVER: "true"
       OFFLINE_MODE: "true"   # don't fetch external Gravatars
+      # PQ-first key exchange for the built-in SSH server. Forgejo's
+      # own shipped default (curve25519-sha256, ecdh-*, dh-group14-*)
+      # has no post-quantum option — golang.org/x/crypto/ssh only
+      # gained mlkem768x25519-sha256 support mid-2025, and Forgejo
+      # doesn't turn it on by default even on versions whose library
+      # supports it (verified 2026-07-16 against forgejo.org's config
+      # cheat sheet). Client OpenSSH triggers a "not using a
+      # post-quantum key exchange" warning without this. Classical
+      # algorithms kept as fallback for older SSH clients.
+      SSH_SERVER_KEY_EXCHANGES: "mlkem768x25519-sha256, curve25519-sha256, ecdh-sha2-nistp256, ecdh-sha2-nistp384, ecdh-sha2-nistp521, diffie-hellman-group14-sha256, diffie-hellman-group14-sha1"
 
     database:
       DB_TYPE: postgres
@@ -181,7 +179,14 @@ gitea:
       LEVEL: info
       ROUTER: console
       ENABLE_ACCESS_LOG: "true"
-      ACCESS_LOG_TEMPLATE: '{"time":"{{.Ctx.Request.Time}}","method":"{{.Ctx.Request.Method}}","url":"{{.Ctx.Request.URL.RequestURI}}","status":{{.ResponseWriter.Status}},"size":{{.ResponseWriter.Size}}}'
+      # Guarded below (raw block) against Forgejo's own Go-template
+      # syntax (dotted Ctx/ResponseWriter fields) being parsed as
+      # a Jinja expression — a bare leading dot is a Jinja2 syntax
+      # error. This line was previously only correct in the
+      # rendered values.yaml (hand-patched there directly, same
+      # class of drift as the extraVolumes fix above) — the .j2
+      # itself could never have produced it. Fixed 2026-07-16.
+      ACCESS_LOG_TEMPLATE: '{% raw %}{"time":"{{.Ctx.Request.Time}}","method":"{{.Ctx.Request.Method}}","url":"{{.Ctx.Request.URL.RequestURI}}","status":{{.ResponseWriter.Status}},"size":{{.ResponseWriter.Size}}}{% endraw %}'
 
     service:
       DISABLE_REGISTRATION: "true"
@@ -241,21 +246,6 @@ gitea:
     # served the web UI HTML and the scrape target failed (rule 17).
     metrics:
       ENABLED: "true"
-
-  # Mount the LFS + Packages NFS PVCs at the paths above.
-  additionalVolumes:
-    - name: lfs
-      persistentVolumeClaim:
-        claimName: forgejo-lfs
-    - name: packages
-      persistentVolumeClaim:
-        claimName: forgejo-packages
-
-  additionalVolumeMounts:
-    - name: lfs
-      mountPath: /data/lfs
-    - name: packages
-      mountPath: /data/packages
 
   # Forgejo reads INI keys from env vars (FORGEJO__<section>__<KEY>)
   # via environment-to-ini. These MUST live under
@@ -317,3 +307,32 @@ resources:
     memory: 512Mi
   limits:
     memory: 2Gi
+
+# Mount the LFS + Packages NFS PVCs at the paths declared in
+# gitea.config.lfs.PATH + gitea.config.packages.PATH above.
+#
+# Top-level, NOT nested under gitea: — the chart's deployment
+# template only ever reads .Values.extraVolumes /
+# .Values.extraContainerVolumeMounts (or the deprecated unified
+# .Values.extraVolumeMounts as a fallback). A prior gitea.additionalVolumes
+# / gitea.additionalVolumeMounts placement here was a silent no-op
+# (confirmed against the chart's Go templates — that key is never
+# read anywhere) that had drifted from the actually-deployed
+# values.yaml, which was hand-patched to the correct top-level form
+# without the fix being carried back to this .j2 source. Caught
+# 2026-07-16 re-rendering for the v15.0.5 upgrade — re-rendering
+# from the stale .j2 would have silently dropped the LFS/Packages
+# mounts on the next deploy.
+extraVolumes:
+  - name: lfs
+    persistentVolumeClaim:
+      claimName: forgejo-lfs
+  - name: packages
+    persistentVolumeClaim:
+      claimName: forgejo-packages
+
+extraContainerVolumeMounts:
+  - name: lfs
+    mountPath: /data/lfs
+  - name: packages
+    mountPath: /data/packages
