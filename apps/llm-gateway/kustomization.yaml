@@ -20,11 +20,17 @@ helmCharts:
   # artifact, no name segment), so we drop the `name` field
   # to `litellm-helm` and the repo to its parent.
   # Chart version mirrors the LiteLLM PyPI version (per
-  # BerriAI's release workflow): chart 1.85.1 = LiteLLM
-  # 1.85.1.
+  # BerriAI's release workflow) — but the appVersion is inert
+  # for THIS deployment: values.yaml digest-pins the homelab-
+  # built llm-gateway image, so chart bumps change templates/
+  # labels only, never running app code. The real LiteLLM
+  # version moves when that image is rebuilt (and THAT is the
+  # event that runs new Prisma migrations — base-backup the
+  # llm-gateway CNPG cluster first; first-ever base backup
+  # taken 2026-07-17, see journal).
   - name: litellm-helm
     repo: oci://ghcr.io/berriai
-    version: "1.85.1"  # OPERATOR PINS via Renovate
+    version: "1.92.0"  # OPERATOR PINS via Renovate
     releaseName: llm-gateway
     namespace: llm-gateway
     valuesFile: values.yaml
