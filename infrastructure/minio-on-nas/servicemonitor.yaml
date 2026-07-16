@@ -1,0 +1,38 @@
+# ServiceMonitor for MinIO-on-NAS — Workstream F (backup-storage footprint).
+#
+# The chart's built-in serviceMonitor is disabled ("operator owns the
+# ServiceMonitor" in values.yaml) but was never created, so MinIO wasn't
+# scraped and the NAS backup-bucket footprint was invisible. This closes that:
+# it exposes `minio_bucket_usage_total_bytes{bucket=...}` so the backup-footprint
+# alerts (backup-cronjobs/prometheusrule-footprint.yaml) can watch the
+# `longhorn-backups` + `homelab-backups-cluster` buckets for regrowth (the
+# blanket-backup / over-retention recurrence class).
+#
+# Auth: MINIO_PROMETHEUS_AUTH_TYPE=public (values.yaml) → no bearer token
+# needed. The minio-on-nas NetworkPolicy already allows monitoring→9000.
+# `release: kube-prometheus-stack` is REQUIRED — the cluster Prometheus's
+# serviceMonitorSelector matches only that label.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: minio-on-nas
+  namespace: minio-on-nas
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: minio
+      release: minio
+  endpoints:
+    # Cluster/node/resource metrics — cheap, scrape at the default cadence.
+    - port: http
+      scheme: http
+      path: /minio/v2/metrics/cluster
+      interval: 60s
+    # Per-bucket usage (minio_bucket_usage_total_bytes). Bucket metrics scan
+    # bucket state, so scrape less often to keep the cost low.
+    - port: http
+      scheme: http
+      path: /minio/v2/metrics/bucket
+      interval: 300s

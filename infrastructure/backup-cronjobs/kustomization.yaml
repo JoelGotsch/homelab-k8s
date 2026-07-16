@@ -15,6 +15,7 @@ resources:
   - nas-personal-cronjob.yaml
   - networkpolicy.yaml
   - prometheusrule.yaml
+  - prometheusrule-footprint.yaml   # Workstream F — backup-size/pileup alerts
   # ADR 0035 D2 — image-pull cred for the Forgejo Packages
   # mirror of the pinned `mc` image. See registry-pull-secret.yaml.
   - registry-pull-secret.yaml

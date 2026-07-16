@@ -33,6 +33,7 @@ resources:
   - pv.yaml
   - externalsecret.yaml
   - networkpolicy.yaml
+  - servicemonitor.yaml   # Workstream F — scrape bucket-usage for footprint alerts
   # ADR 0035 D2 — image-pull cred for the Forgejo Packages
   # mirror of the pinned MinIO image. See registry-pull-secret.yaml.
   - registry-pull-secret.yaml

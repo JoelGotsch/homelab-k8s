@@ -1,0 +1,95 @@
+# Backup-storage footprint alerts — Workstream F.
+#
+# Complements the CronJob failure/staleness alerts in prometheusrule.yaml with
+# "how big is the backup getting" — the pileup risks the operator flagged. Two
+# sources:
+#   - kubelet_volume_stats  (proven-available) → the langfuse ClickHouse trace
+#     store, whose churny growth is the specific pileup risk (backup-and-dr.md
+#     + the Sept re-evaluation). This is an EARLY warning, well before the
+#     generic KubePersistentVolumeFillingUp (which fires only near-full).
+#   - minio_bucket_usage_total_bytes  (needs the minio-on-nas ServiceMonitor)
+#     → the NAS backup buckets. `longhorn-backups` should stay small after the
+#     2026-07-16 opt-in regrouping + A5 prune; regrowth = the blanket-backup /
+#     over-retention recurrence class.
+#
+# NOTE (rule 35): the MinIO-bucket alerts are only as good as the scrape. The
+# NasBackupMetricsMissing rule guards the silent-failure path (rule 17: a
+# broken scrape makes the size alerts un-fireable). Failure-inject the bucket
+# alert once real data exists (write >threshold to a scratch bucket, confirm
+# the page) before trusting it.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: backup-footprint
+  namespace: backup-cronjobs
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: backup-footprint.langfuse
+      interval: 1m
+      rules:
+        - alert: LangfuseTraceStoreGrowing
+          # Langfuse ClickHouse trace volume is 90Gi. Warn at ~50% (45Gi) —
+          # early enough to switch to clickhouse-backup logical (the Sept
+          # decision) before it's urgent. Generic KubePersistentVolumeFillingUp
+          # covers the near-full case.
+          expr: |
+            kubelet_volume_stats_used_bytes{namespace="langfuse",persistentvolumeclaim="data-volume-chi-langfuse-langfuse-0-0-0"}
+            > 45 * 1024 * 1024 * 1024
+          for: 30m
+          labels:
+            severity: warning
+            component: backup-cronjobs
+          annotations:
+            summary: Langfuse ClickHouse trace store over 45 GiB
+            description: >-
+              The langfuse ClickHouse trace volume is
+              {{ $value | humanize1024 }}B used (of 90Gi). This is the churny
+              pileup risk flagged for the September backup review: raw-volume
+              backup of a large ClickHouse gets inefficient. Consider moving
+              the langfuse lane to `clickhouse-backup` (logical, FREEZE-
+              consistent) and check the tier-3 footprint.
+            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+
+    - name: backup-footprint.nas-buckets
+      interval: 5m
+      rules:
+        - alert: LonghornBackupsBucketRegrowing
+          # Post-2026-07-16 (opt-in `backup` group + A5 prune) this bucket holds
+          # only the ~8 small opt-in volumes. >100Gi means the blanket backup
+          # crept back or a volume ballooned. Tunable as real data lands.
+          expr: |
+            sum(minio_bucket_usage_total_bytes{bucket="longhorn-backups"}) > 100 * 1024 * 1024 * 1024
+          for: 1h
+          labels:
+            severity: warning
+            component: backup-cronjobs
+          annotations:
+            summary: NAS longhorn-backups bucket over 100 GiB
+            description: >-
+              `longhorn-backups` is {{ $value | humanize1024 }}B — it should be
+              small (only the opt-in `backup` recurring-job group). Regrowth
+              suggests the blanket [default] backup returned or a backed-up
+              volume grew. Check `scripts/label-backup-volumes.sh` membership +
+              backup-daily's `groups`.
+            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+
+        - alert: NasBackupMetricsMissing
+          # rule 17 — a broken MinIO scrape makes every size alert above
+          # un-fireable (silent). Fire if the bucket metric disappears while
+          # MinIO is expected up.
+          expr: |
+            absent(minio_bucket_usage_total_bytes{bucket="longhorn-backups"})
+          for: 30m
+          labels:
+            severity: warning
+            component: backup-cronjobs
+          annotations:
+            summary: MinIO backup-bucket metrics absent (footprint alerts blind)
+            description: >-
+              `minio_bucket_usage_total_bytes` for longhorn-backups is absent
+              for 30m — the minio-on-nas ServiceMonitor scrape is broken, so the
+              NAS backup-footprint alerts can't fire. Check the ServiceMonitor +
+              the minio-on-nas NetworkPolicy (monitoring→9000).
+            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md

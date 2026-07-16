@@ -259,17 +259,32 @@ spec:
                   # the NAS lane with this policy, fighting that job's per-class
                   # retention. `--prune` is still repo-global (safe: it only
                   # drops data unreferenced by ANY surviving snapshot).
-                  # Retention here is the cluster lane's (CNPG WAL/base +
-                  # selective Longhorn); per-class refinement of THIS lane is
-                  # tracked as remaining Workstream E (needs per-class tags on
-                  # the mixed /staging tree).
+                  # BOUNDED GFS for the whole cluster lane (Workstream E,
+                  # 2026-07-16). Was 30/12/120/10 — the keep-monthly 120 kept
+                  # 10 YEARS of monthly whole-/staging snapshots ("monthly
+                  # forever"). Replaced with the `secret`-class GFS (14/8/12/3)
+                  # applied to the ENTIRE lane.
+                  #
+                  # Why one policy, not true per-class: the /staging tree mixes
+                  # classes WITHIN each daily snapshot (cnpg/<app> spans
+                  # secret/personal/internal; longhorn-backups are hash-named
+                  # PVCs). Per-class would require splitting the backup into
+                  # per-app/per-volume calls with a class map maintained in this
+                  # shell — fragile, and duplicating the data-class labels +
+                  # label-backup-volumes.sh. The lane is tiny (~120 MiB + 8
+                  # small volumes) and dedup'd, so retention DEPTH has
+                  # negligible space cost; using the MOST-conservative class
+                  # (secret) means nothing here is under-retained. The
+                  # NAS-personal lane, whose shares ARE cleanly class-separated,
+                  # keeps true per-class GFS. Revisit at the Sept backup review
+                  # if the cluster-lane footprint ever justifies the split.
                   restic $RESTIC_OPTS forget \
                     --prune \
                     --tag tier-3 \
-                    --keep-daily 30 \
-                    --keep-weekly 12 \
-                    --keep-monthly 120 \
-                    --keep-yearly 10 \
+                    --keep-daily 14 \
+                    --keep-weekly 8 \
+                    --keep-monthly 12 \
+                    --keep-yearly 3 \
                     --keep-tag preserve
 
                   echo "=== restic snapshots (last 5) ==="
