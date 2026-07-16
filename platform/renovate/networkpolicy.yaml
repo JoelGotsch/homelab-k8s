@@ -106,7 +106,8 @@ spec:
         - matchName: "openbao.github.io"
         - matchName: "helm.cilium.io"
         - matchName: "argoproj.github.io"
-        - matchName: "external-secrets.io"
+        - matchName: "charts.external-secrets.io"  # actual chart repo host — external-secrets.io (apex) doesn't match, FQDN rules are exact-host; "Failed to look up helm package" confirmed 2026-07-16
+        - matchName: "charts.goauthentik.io"  # platform/authentik — same failure mode, was missing entirely
         - matchName: "charts.crowdsec.net"
         - matchName: "charts.jetstack.io"
         - matchName: "kubernetes.github.io"
