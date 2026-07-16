@@ -21,7 +21,6 @@ resources:
   - deployment.yaml
   - networkpolicy.yaml
   - ciliumnetworkpolicy-egress.yaml
-  - servicemonitor.yaml
   # OpenBao seal-status watchdog (2026-06-23 postmortem) — the
   # circular-dependency break for the case where OpenBao itself
   # is what's broken and ESO-backed AM/ntfy credentials are

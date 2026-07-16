@@ -33,16 +33,14 @@ metadata:
 data:
   # Native build — selected by MODE; bundled in the standard image.
   MODE: native
-  # NOTE: bbernhard/signal-cli-rest-api does NOT support Prometheus
-  # metrics — there is no ENABLE_METRICS var and no /v1/metrics
-  # endpoint in any mode (verified 2026-07-15 against the running
-  # 0.99 pod: /v1/metrics 404s under both native and json-rpc; the
-  # upstream README/DeepWiki confirm no metrics feature — only the
-  # unrelated h4x0r/signal-cli-api fork exposes Prometheus). The
-  # ENABLE_METRICS key + servicemonitor were based on a false
-  # premise; kept here only to document the dead end. To actually
-  # scrape signal metrics we'd have to swap images entirely.
-  ENABLE_METRICS: "1"
+  # NOTE: no prometheus metrics here. bbernhard/signal-cli-rest-api
+  # has no ENABLE_METRICS var and no /v1/metrics endpoint in any mode
+  # (verified 2026-07-15 against the running 0.99 pod: /v1/metrics
+  # 404s under both native and json-rpc; upstream docs confirm no
+  # metrics feature — only the unrelated h4x0r/signal-cli-api fork
+  # exposes Prometheus). The old ENABLE_METRICS key + ServiceMonitor
+  # were a false premise and were removed 2026-07-16. Pod liveness is
+  # covered by KubePodNotReady (kube-state-metrics), not app metrics.
 ---
 apiVersion: apps/v1
 kind: Deployment
