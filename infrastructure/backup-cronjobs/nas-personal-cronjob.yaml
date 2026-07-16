@@ -1,0 +1,178 @@
+# Restic CronJob: NAS personal+ shares → Hetzner Storage Box (tier-3, offsite).
+# Workstream C — closes the "bulk personal data has zero offsite copy" gap.
+#
+# WHAT: reads the NAS personal/internal/internal-media shares as PLAINTEXT via
+# read-only csi-rclone / nfs-csi mounts (csi-rclone decrypts on the node; the
+# crypt key never enters this pod) and restic-backs-them-up to the SAME Hetzner
+# repo the cluster tier-3 job uses (`/cluster-backups-tier-3`) — one repo,
+# class-tagged (operator decision 2026-07-16), so `restic snapshots` shows every
+# lane in one place. Snapshots are tagged `nas-personal` + the data-class, so
+# retention is applied per class without touching the cluster lane's snapshots.
+#
+# WHY plaintext (not ciphertext): this data already runs decrypted on-cluster
+# (immich/nextcloud/paperless), so the backup pod is no new plaintext trust
+# boundary; Hetzner only ever sees restic ciphertext; dedup is far better on
+# plaintext; and DR needs only the restic key (not restic + rclone-crypt).
+#
+# SCHEDULE 04:30 UTC — staggered off the cluster tier-3 job (02:15) and the
+# OpenBao raft snapshot (03:00) so the two restic jobs never contend on the
+# shared repo's prune lock (forget --prune takes an exclusive lock).
+#
+# Reuses the cluster job's proven pieces (2026-07-15 fixes): restic-passwd +
+# restic-known-hosts ConfigMaps, sftp.connections=1 (Hetzner corrupts under
+# concurrent SFTP), ndots:1 dnsConfig (musl resolver), and the same
+# ExternalSecrets (hetzner-sb-creds, restic-tier-3-password). NetworkPolicy:
+# the `app.kubernetes.io/component: backup-pipeline` label makes the existing
+# `backup-cronjobs-allow` egress (DNS + Hetzner SFTP 22/23) apply — no new NP.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: restic-nas-personal-to-hetzner
+  namespace: backup-cronjobs
+  labels:
+    app.kubernetes.io/name: restic-nas-personal
+    app.kubernetes.io/component: backup-pipeline
+spec:
+  schedule: "30 4 * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      # Fixed-share NAS mounts + a full-repo prune can take a while as data
+      # grows; allow up to 12h before the job is killed.
+      activeDeadlineSeconds: 43200
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: restic-nas-personal
+            app.kubernetes.io/component: backup-pipeline
+        spec:
+          restartPolicy: Never
+          # ndots:1 for the musl resolver in the restic image (see cronjob.yaml).
+          dnsConfig:
+            options:
+              - name: ndots
+                value: "1"
+              - name: single-request-reopen
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            # csi-rclone requires fsGroup for allow_other on the mounts.
+            fsGroup: 1000
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: restic
+              image: restic/restic:0.17.3@sha256:8f5a62b422a2cb1277ea0dd6e826fe1acf649e5b9f02d60e5268d5fd1976255a
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  # Stage SSH key + pinned known_hosts for the SFTP backend
+                  # (identical to the cluster tier-3 job).
+                  mkdir -p /tmp/.ssh
+                  echo "$SSH_KEY" > /tmp/.ssh/id_ed25519
+                  chmod 600 /tmp/.ssh/id_ed25519
+                  cp /etc/restic-ssh/known_hosts /tmp/.ssh/known_hosts
+                  chmod 600 /tmp/.ssh/known_hosts
+
+                  export RESTIC_REPOSITORY="sftp:${HSB_USER}@${HSB_HOST}:/cluster-backups-tier-3"
+                  export RESTIC_PASSWORD_FILE=/restic-secrets/password
+                  export RESTIC_PROGRESS_FPS=0
+                  export RESTIC_SFTP_COMMAND="ssh -i /tmp/.ssh/id_ed25519 -o UserKnownHostsFile=/tmp/.ssh/known_hosts -o BatchMode=yes -p ${HSB_PORT:-23} ${HSB_USER}@${HSB_HOST} -s sftp"
+                  # Hetzner corrupts data under concurrent SFTP — serialize.
+                  RESTIC_OPTS="-o sftp.connections=1"
+
+                  # Shared repo with the cluster tier-3 job; init only if the
+                  # repo doesn't exist yet (idempotent).
+                  if ! restic $RESTIC_OPTS snapshots --no-lock --quiet >/dev/null 2>&1; then
+                    echo "=== initializing restic repo ==="
+                    restic $RESTIC_OPTS init
+                  fi
+
+                  # Back up each share as its own snapshot (per-share restore
+                  # granularity), tagged nas-personal + its data-class. A share
+                  # whose PVC is empty/unmounted is skipped, not fatal.
+                  backup_share() {  # $1=path  $2=class
+                    if [ ! -d "$1" ]; then echo "SKIP $1 (not mounted)"; return 0; fi
+                    echo "=== restic backup $1  [class=$2] ==="
+                    restic $RESTIC_OPTS backup "$1" \
+                      --tag nas-personal --tag "$2" --tag automated \
+                      --host nas-personal
+                  }
+                  backup_share /nas/personal-photos     personal
+                  backup_share /nas/personal-files      personal
+                  backup_share /nas/family-shared       personal
+                  backup_share /nas/personal-documents  personal
+                  backup_share /nas/internal-archive    internal
+                  backup_share /nas/forgejo-lfs         internal
+                  backup_share /nas/jellyfin-media      internal-media
+
+                  # Per-class GFS retention, scoped to THIS lane via the AND-tag
+                  # `nas-personal,<class>` so it never prunes the cluster lane.
+                  # --group-by paths keeps each share's history independent.
+                  # forget (no --prune) marks; a single prune reclaims after.
+                  echo "=== restic forget (per class, nas-personal lane) ==="
+                  restic $RESTIC_OPTS forget --tag nas-personal,personal --group-by paths \
+                    --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --keep-yearly 1 --keep-tag preserve
+                  restic $RESTIC_OPTS forget --tag nas-personal,internal --group-by paths \
+                    --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --keep-tag preserve
+                  restic $RESTIC_OPTS forget --tag nas-personal,internal-media --group-by paths \
+                    --keep-daily 2 --keep-weekly 6 --keep-monthly 3 --keep-tag preserve
+
+                  echo "=== restic prune ==="
+                  restic $RESTIC_OPTS prune
+
+                  echo "=== restic snapshots (nas-personal lane) ==="
+                  restic $RESTIC_OPTS snapshots --tag nas-personal --compact | tail -20
+              env:
+                - name: HOME
+                  value: /tmp
+              envFrom:
+                - secretRef:
+                    name: hetzner-sb-creds
+              volumeMounts:
+                # NAS source shares — ALL read-only (backup must never write).
+                - { name: personal-photos,    mountPath: /nas/personal-photos,    readOnly: true }
+                - { name: personal-files,      mountPath: /nas/personal-files,     readOnly: true }
+                - { name: family-shared,       mountPath: /nas/family-shared,      readOnly: true }
+                - { name: personal-documents,  mountPath: /nas/personal-documents, readOnly: true }
+                - { name: internal-archive,    mountPath: /nas/internal-archive,   readOnly: true }
+                - { name: forgejo-lfs,         mountPath: /nas/forgejo-lfs,        readOnly: true }
+                - { name: jellyfin-media,      mountPath: /nas/jellyfin-media,     readOnly: true }
+                - { name: restic-secrets, mountPath: /restic-secrets, readOnly: true }
+                - { name: tmp, mountPath: /tmp }
+                - { name: restic-passwd, mountPath: /etc/passwd, subPath: passwd, readOnly: true }
+                - { name: restic-passwd, mountPath: /etc/group,  subPath: group,  readOnly: true }
+                - { name: restic-known-hosts, mountPath: /etc/restic-ssh, readOnly: true }
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: { drop: [ALL] }
+                readOnlyRootFilesystem: true
+              resources:
+                requests: { cpu: 250m, memory: 512Mi }
+                limits: { memory: 2Gi }
+          volumes:
+            - { name: personal-photos,    persistentVolumeClaim: { claimName: backup-src-personal-photos } }
+            - { name: personal-files,     persistentVolumeClaim: { claimName: backup-src-personal-files } }
+            - { name: family-shared,      persistentVolumeClaim: { claimName: backup-src-family-shared } }
+            - { name: personal-documents, persistentVolumeClaim: { claimName: backup-src-personal-documents } }
+            - { name: internal-archive,   persistentVolumeClaim: { claimName: backup-src-internal-archive } }
+            - { name: forgejo-lfs,        persistentVolumeClaim: { claimName: backup-src-forgejo-lfs } }
+            - { name: jellyfin-media,     persistentVolumeClaim: { claimName: backup-src-jellyfin-media } }
+            - name: restic-secrets
+              secret: { secretName: restic-tier-3-password, defaultMode: 0400 }
+            # restic cache/tmp — disk-backed (NOT memory): the cache grows with
+            # repo size as the personal data fills, and would blow the pod
+            # memory limit if RAM-backed.
+            - name: tmp
+              emptyDir: { sizeLimit: 20Gi }
+            - name: restic-passwd
+              configMap: { name: restic-passwd }
+            - name: restic-known-hosts
+              configMap: { name: restic-known-hosts }

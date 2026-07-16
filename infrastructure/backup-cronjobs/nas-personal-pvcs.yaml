@@ -1,0 +1,101 @@
+# Read-only source PVCs for the NAS personal+ offsite backup (Workstream C).
+#
+# Each PVC mounts the SAME fixed share its owning app uses: the csi-rclone
+# `nas-crypt-*` StorageClasses set remotePath="" and the nfs-csi
+# `nfs-internal-media` SC targets a fixed `share`, so EVERY PVC on the SC
+# mounts the share ROOT — verified 2026-07-16 via the immich PV volumeHandle
+# (`nas-crypt-personal-photos#pvc-…`, remotePath ""). So a second PVC here
+# sees exactly the data the app writes. csi-rclone decrypts on the node
+# (crypt key stays on the node, not in this pod); the backup pod reads
+# PLAINTEXT and restic re-encrypts to Hetzner (operator decision 2026-07-16).
+#
+# accessMode ReadWriteMany matches the proven SC behaviour (the apps bind RWX;
+# ROX provisioning on csi-rclone is unproven and would risk failing at Argo).
+# The CronJob mounts every one of these `readOnly: true`, so the backup can
+# never write to the NAS — RWX here is a provisioning detail, not write intent.
+#
+# reclaimPolicy Retain (inherited from the SCs) is harmless: these are mount
+# handles over a pre-existing share, so a deleted PVC leaves only a Released
+# PV with no underlying storage to leak. Nominal 1Gi request — fixed-share
+# CSI ignores size (the mount shows the whole share).
+#
+# NOT included: nas-crypt-registry-blobs (Forgejo container registry — the
+# blobs are regenerable/re-pushable images; snapshot-only). Add here if that
+# assumption changes.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-src-personal-photos
+  namespace: backup-cronjobs
+  labels: { app.kubernetes.io/component: backup-pipeline, homelab.internal/data-class: personal }
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nas-crypt-personal-photos
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-src-personal-files
+  namespace: backup-cronjobs
+  labels: { app.kubernetes.io/component: backup-pipeline, homelab.internal/data-class: personal }
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nas-crypt-personal-files
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-src-family-shared
+  namespace: backup-cronjobs
+  labels: { app.kubernetes.io/component: backup-pipeline, homelab.internal/data-class: personal }
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nas-crypt-family-shared
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-src-personal-documents
+  namespace: backup-cronjobs
+  labels: { app.kubernetes.io/component: backup-pipeline, homelab.internal/data-class: personal }
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nas-crypt-personal-documents
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-src-internal-archive
+  namespace: backup-cronjobs
+  labels: { app.kubernetes.io/component: backup-pipeline, homelab.internal/data-class: internal }
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nas-crypt-internal-archive
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-src-forgejo-lfs
+  namespace: backup-cronjobs
+  labels: { app.kubernetes.io/component: backup-pipeline, homelab.internal/data-class: internal }
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nas-crypt-forgejo-lfs
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-src-jellyfin-media
+  namespace: backup-cronjobs
+  labels: { app.kubernetes.io/component: backup-pipeline, homelab.internal/data-class: internal-media }
+spec:
+  accessModes: [ReadOnlyMany]     # nfs-csi supports ROX (jellyfin already binds it ROX)
+  storageClassName: nfs-internal-media
+  resources: { requests: { storage: 1Gi } }

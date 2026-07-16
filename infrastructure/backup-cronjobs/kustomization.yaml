@@ -10,6 +10,9 @@ resources:
   - pvc.yaml
   - externalsecret.yaml
   - cronjob.yaml
+  # Workstream C — NAS personal+ shares → Hetzner (offsite for bulk data).
+  - nas-personal-pvcs.yaml
+  - nas-personal-cronjob.yaml
   - networkpolicy.yaml
   - prometheusrule.yaml
   # ADR 0035 D2 — image-pull cred for the Forgejo Packages

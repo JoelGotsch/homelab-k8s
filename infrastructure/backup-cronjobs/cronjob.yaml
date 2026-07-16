@@ -250,14 +250,22 @@ spec:
                     --tag "automated" \
                     --host "k8s-${HOSTNAME}"
 
-                  echo "=== restic forget --prune ==="
-                  # Per backup-and-dr.md tier-3: 365d + monthly-
-                  # forever for personal+. Restic doesn't have a
-                  # true "forever" knob; --keep-monthly 120 covers
-                  # 10 years which is well past any retention
-                  # commitment we'd realistically honor.
+                  echo "=== restic forget --prune (cluster lane only) ==="
+                  # --tag tier-3 SCOPES this forget to the cluster lane. The
+                  # repo is now shared with the NAS-personal job (Workstream C,
+                  # one-repo class-tagged design), whose snapshots carry
+                  # `nas-personal` (not `tier-3`). Without this filter, forget
+                  # groups by host+paths across the WHOLE repo and would prune
+                  # the NAS lane with this policy, fighting that job's per-class
+                  # retention. `--prune` is still repo-global (safe: it only
+                  # drops data unreferenced by ANY surviving snapshot).
+                  # Retention here is the cluster lane's (CNPG WAL/base +
+                  # selective Longhorn); per-class refinement of THIS lane is
+                  # tracked as remaining Workstream E (needs per-class tags on
+                  # the mixed /staging tree).
                   restic $RESTIC_OPTS forget \
                     --prune \
+                    --tag tier-3 \
                     --keep-daily 30 \
                     --keep-weekly 12 \
                     --keep-monthly 120 \
