@@ -1,0 +1,102 @@
+# Default-deny + least-privilege allow-set for the external-secrets namespace
+# (netpol-audit.md MEDIUM-1). ESO reads OpenBao and writes every Kubernetes
+# Secret in the cluster, so with no policy it was Cilium default-allow — one
+# of the two highest-value lateral-movement targets, wide open at L3/L4.
+#
+# Flow set (verified against the live deployment 2026-07-15):
+#   Controller (app=external-secrets):
+#     egress -> openbao.openbao.svc:8200 (fetch secrets)
+#     egress -> kube-apiserver 443+6443   (watch ExternalSecret CRs, write Secrets)
+#     egress -> kube-dns:53
+#   Webhook (app=external-secrets-webhook):
+#     ingress <- kube-apiserver -> pod port 10250 (validating/conversion webhook;
+#                the apiserver, a reserved entity, calls it — a namespaceSelector
+#                can never match it, so this MUST be fromEntities)
+#   cert-controller: apiserver + DNS egress (manages the webhook's TLS cert)
+#   All pods: metrics :8080 scrapable from monitoring.
+#
+# SAFETY NOTE: apply this ATTENDED with Hubble in policy-audit mode first
+# (`cilium endpoint config <id> PolicyAuditMode=Enabled`), watch
+# `hubble observe --namespace external-secrets --verdict AUDIT` for a full
+# reconcile cycle, and only then enforce. A too-tight policy here makes
+# secret sync fail SILENTLY (existing Secrets persist; new/rotated ones stop).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: external-secrets-default-deny
+  namespace: external-secrets
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: external-secrets-allow
+  namespace: external-secrets
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Prometheus scrape of ESO metrics (:8080 on all components).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    # kube-dns
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # OpenBao API — the secret backend.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openbao
+      ports:
+        - port: 8200
+          protocol: TCP
+---
+# kube-apiserver ingress (to the webhook) + egress (controller) need the
+# reserved entity — native NetworkPolicy can't express it (rule 12).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: external-secrets-apiserver
+  namespace: external-secrets
+spec:
+  endpointSelector: {}
+  ingress:
+    # The API server calls the ESO validating/conversion webhook on the
+    # POD port 10250 (svc 443 -> containerPort 10250; socket-LB DNATs
+    # before policy eval, so match the pod port — rule 13).
+    - fromEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "10250"
+              protocol: TCP
+  egress:
+    # Controller + cert-controller reach the API server. BOTH 443 and 6443
+    # (socket-LB translates ClusterIP:443 -> backend:6443 before policy eval).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
