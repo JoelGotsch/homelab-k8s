@@ -123,3 +123,13 @@ repos:
         # opts into an egress default-deny, its DB pods MUST get egress to
         # kube-apiserver (443+6443), DNS, MinIO, and their replication
         # peer — or the instance manager CrashLoopBackOffs. Local script.
+      - id: check-data-class
+        name: Every first-party namespace declares a valid data-class (ADR 0003/0036 D3)
+        entry: scripts/check-data-class.sh
+        language: system
+        pass_filenames: false
+        files: 'namespace\.ya?ml$'
+        # Rule 31 — ship the lint with the convention. data-class drives PSS/
+        # netpol posture AND is the entry point for the backup decision; it
+        # is NOT enforced at admission by Kyverno, so this shift-left guard
+        # keeps a new namespace from shipping without a classification.
