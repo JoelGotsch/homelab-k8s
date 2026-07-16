@@ -156,7 +156,20 @@ agent:
     # Default storage class for any step volumes (clone, cache).
     WOODPECKER_BACKEND_K8S_STORAGE_CLASS: "longhorn-replica2"
     WOODPECKER_BACKEND_K8S_VOLUME_SIZE: "10G"
-    WOODPECKER_BACKEND_K8S_STORAGE_RWX: "false"
+    # RWX (chart default; was "false" here with no rationale
+    # comment — a real bug, not a deliberate choice). Each
+    # pipeline's steps run as separate pods sharing one workspace
+    # PVC; RWO means the volume can only be attached to one node
+    # at a time, so a later step scheduled on a different node
+    # than the previous one hits "Multi-Attach error... already
+    # exclusively attached to one node" and blocks until detach —
+    # exactly the queue/ack failures + stuck-pending pipelines
+    # found 2026-07-16 investigating flaky CI (Woodpecker's own
+    # docs + issue #3344 describe this exact failure mode for
+    # RWX=false on multi-node clusters). Longhorn's CSI driver
+    # transparently provisions RWX via its Share Manager when a
+    # PVC requests it — no storage-class change needed.
+    WOODPECKER_BACKEND_K8S_STORAGE_RWX: "true"
     # Step pod security defaults. SECCTX_NONROOT was true until
     # 2026-06-04 — kubelet rejected canonical CI step images
     # (woodpeckerci/plugin-git, docker-buildx, etc.) at start-time:
@@ -177,6 +190,19 @@ agent:
   # auto-created woodpecker-default-agent-secret (both server + agent
   # reference it). A custom `envFrom` here is ignored by the chart (wrong
   # key) and unnecessary. Removed 2026-05-29.
+  #
+  # 2026-06-09 addition: Woodpecker 3.x dropped auto-registration via
+  # the global secret — agents must exist in the server DB. The
+  # 2026-06-06 saga rebuilt the server DB; the chart-default secret
+  # alone now fails with "individual agent not found by token". The
+  # operator created `agent-0` via the UI and seeded the resulting
+  # per-agent token to kv/woodpecker/agent-token; the
+  # `woodpecker-agent-token` Secret (ExternalSecret-projected) carries
+  # it as WOODPECKER_AGENT_TOKEN. The chart's correct key for adding
+  # extra secret envFroms is `extraSecretNamesForEnvFrom` (verified
+  # against the server block's working use of the same key 2026-05-29).
+  extraSecretNamesForEnvFrom:
+    - woodpecker-agent-token
 
   resources:
     requests:

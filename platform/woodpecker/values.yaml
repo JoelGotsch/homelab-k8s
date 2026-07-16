@@ -42,11 +42,26 @@ server:
     WOODPECKER_LOG_LEVEL: "info"
     # JSON logs for Loki ingestion per ADR 0021.
     WOODPECKER_LOG_FORMAT: "json"
-    # Disable webhooks-to-public; Forgejo + Woodpecker are
-    # in-cluster.
+    # Webhook URL embedded in newly-registered Forgejo hooks. Cluster-
+    # internal Service URL with trailing-dot FQDN so Forgejo's pod can
+    # reach Woodpecker without (a) hairpinning through the public
+    # Cilium Gateway and (b) tripping the tailscale-search-list DNS
+    # trap that NXDOMAINs `woodpecker.<sub>.<domain>.tail<net>.ts.net.`
+    # before glibc tries the bare FQDN. See
+    # feedback_dns_search_list_trap_webhook_delivery for the rationale.
+    # Was https://woodpecker.<sub>.<domain> until 2026-06-04; the
+    # post-hoc PATCH in provision-woodpecker-repo.sh now becomes a
+    # no-op for new repos (it's still kept for already-activated repos
+    # whose webhook was installed before this change).
     WOODPECKER_WEBHOOK_HOST: "http://woodpecker-server.woodpecker.svc.cluster.local."
     # Privileged plugins — explicit allowlist required since
     # Woodpecker 3.x (formerly all plugins ran privileged by default).
+    # docker-buildx needs privileged to mount the host docker socket
+    # / run BuildKit-in-pod for multi-arch builds. Each entry is an
+    # image reference (registry/repo, no tag). Per ADR 0019 D3 the
+    # eventual cosign-signing plugin will land here too. Audit this
+    # list with the same scrutiny as a `trusted: true` repo (privileged
+    # plugins can read host files + escape the step pod sandbox).
     WOODPECKER_PLUGINS_PRIVILEGED: "woodpeckerci/plugin-docker-buildx"
     # Database: SQLite on Longhorn for the server's job state.
     # Forgejo's CNPG handles the source-of-truth metadata;
@@ -79,13 +94,14 @@ server:
   # StatefulSet (which is what the woodpecker-server chart
   # renders), use `OnDelete` — the kube-apiserver rejects
   # `Recreate` here because that strategy is Deployment-only
-  # ("StatefulSet ... spec.updateStrategy: Invalid value
-  #   {\"Type\":\"Recreate\",\"RollingUpdate\":null}: must be
-  #   RollingUpdate or OnDelete" — verified 2026-06-05).
-  # With OnDelete the operator runs `kubectl -n woodpecker
-  # delete pod woodpecker-server-0` post-upgrade; the pod
-  # terminates, releases the PVC, and the StatefulSet
-  # controller spins up the replacement which attaches cleanly.
+  # ("StatefulSet ... spec.updateStrategy: Invalid value ...
+  #   must be RollingUpdate or OnDelete" — verified 2026-06-05).
+  # The previous `strategy: Recreate` form here was a double
+  # bug: `strategy` is a Deployment-only chart-values key
+  # (silently dropped on StatefulSet workloads), and `Recreate`
+  # would also have been rejected if it had been mapped. Fixed
+  # the key (strategy → updateStrategy) and the value
+  # (Recreate → OnDelete) together.
   updateStrategy:
     type: OnDelete
 
@@ -145,14 +161,28 @@ agent:
     # Default storage class for any step volumes (clone, cache).
     WOODPECKER_BACKEND_K8S_STORAGE_CLASS: "longhorn-replica2"
     WOODPECKER_BACKEND_K8S_VOLUME_SIZE: "10G"
-    WOODPECKER_BACKEND_K8S_STORAGE_RWX: "false"
+    # RWX (chart default; was "false" here with no rationale
+    # comment — a real bug, not a deliberate choice). Each
+    # pipeline's steps run as separate pods sharing one workspace
+    # PVC; RWO means the volume can only be attached to one node
+    # at a time, so a later step scheduled on a different node
+    # than the previous one hits "Multi-Attach error... already
+    # exclusively attached to one node" and blocks until detach —
+    # exactly the queue/ack failures + stuck-pending pipelines
+    # found 2026-07-16 investigating flaky CI (Woodpecker's own
+    # docs + issue #3344 describe this exact failure mode for
+    # RWX=false on multi-node clusters). Longhorn's CSI driver
+    # transparently provisions RWX via its Share Manager when a
+    # PVC requests it — no storage-class change needed.
+    WOODPECKER_BACKEND_K8S_STORAGE_RWX: "true"
     # Step pod security defaults. SECCTX_NONROOT was true until
-    # 2026-06-04 — kubelet rejected woodpeckerci/plugin-git (and most
-    # canonical CI step images) at start-time with "container has
-    # runAsNonRoot and image will run as root." pinning to false lets
-    # the canonical images run; ci-woodpecker ns isolation
-    # (ResourceQuota + LimitRange + scoped SA + default-deny NetPol)
-    # is the layered defense per ADR 0023 D5.
+    # 2026-06-04 — kubelet rejected canonical CI step images
+    # (woodpeckerci/plugin-git, docker-buildx, etc.) at start-time:
+    # "container has runAsNonRoot and image will run as root."
+    # Pinning to false lets the canonical images run; ci-woodpecker
+    # ns isolation (ResourceQuota + LimitRange + scoped SA +
+    # default-deny NetPol + FQDN egress allowlist) is the layered
+    # defense per ADR 0023 D5.
     WOODPECKER_BACKEND_K8S_POD_NODE_SELECTOR: ""
     WOODPECKER_BACKEND_K8S_SECCTX_NONROOT: "false"
     # How many pipeline steps the agent runs in parallel.
