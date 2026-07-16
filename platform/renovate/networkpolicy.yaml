@@ -100,6 +100,7 @@ spec:
         - matchName: "cdn03.quay.io"
         - matchName: "gcr.io"
         # Helm chart repos referenced by homelab-k8s
+        - matchName: "code.forgejo.org"  # oci://code.forgejo.org/forgejo-helm (platform/forgejo) — ETIMEDOUT confirmed 2026-07-16 first live run
         - matchName: "charts.bitnami.com"
         - matchName: "grafana.github.io"
         - matchName: "openbao.github.io"
