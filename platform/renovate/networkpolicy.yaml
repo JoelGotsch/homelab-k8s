@@ -115,6 +115,25 @@ spec:
         - matchName: "renovatebot.github.io"
         - matchName: "operator.victoriametrics.com"
         - matchName: "longhorn.io"
+        # Full audit against every `repo:` in homelab-k8s
+        # kustomization.yaml files 2026-07-16 — the list above had
+        # accumulated ad hoc as failures surfaced one Renovate run at
+        # a time; cross-checked all actually-referenced hosts at once
+        # instead of waiting for each to fail individually.
+        - matchName: "charts.longhorn.io"  # distinct host from longhorn.io above
+        - matchName: "charts.min.io"
+        - matchName: "cloudnative-pg.github.io"
+        - matchName: "crowdsecurity.github.io"  # distinct host from charts.crowdsec.net above
+        - matchName: "docs.altinity.com"  # infrastructure/clickhouse-operator
+        - matchName: "guerzon.github.io"  # apps/vaultwarden
+        - matchName: "jellyfin.github.io"
+        - matchName: "langfuse.github.io"
+        - matchName: "nextcloud.github.io"
+        - matchName: "open-telemetry.github.io"
+        - matchName: "prometheus-community.github.io"
+        - matchName: "aquasecurity.github.io"  # infrastructure/trivy-operator
+        - matchName: "falcosecurity.github.io"  # observability/falco-stack
+        - matchName: "woodpecker-ci.org"
         # Language-package registries (first-party Python
         # apps' deps)
         - matchName: "pypi.org"
