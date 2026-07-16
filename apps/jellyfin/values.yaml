@@ -52,6 +52,39 @@ image:
   tag: "10.10.0"
   pullPolicy: IfNotPresent
 
+# Enable Jellyfin's BUILT-IN Prometheus /metrics endpoint (there is no
+# metrics plugin in the official repo — the earlier "jellyfin-plugin-metrics"
+# assumption was wrong). `EnableMetrics` lives in system.xml, which Jellyfin
+# manages at runtime and does NOT expose in the UI, so we flip it before
+# startup with an idempotent sed. Reuses the jellyfin image (already present +
+# digest-pin-allowlisted) only for `sed`. Keep the tag in sync with image.tag
+# (Renovate should bump both; a lag is harmless — sed is version-agnostic).
+# On a brand-new config PVC, system.xml doesn't exist yet, so /metrics comes
+# up on the first restart after initial provisioning. (2026-07-16)
+initContainers:
+  - name: enable-metrics
+    image: jellyfin/jellyfin:10.10.0
+    command:
+      - sh
+      - -c
+      - |
+        f=/config/config/system.xml
+        if [ -f "$f" ]; then
+          sed -i 's|<EnableMetrics>false</EnableMetrics>|<EnableMetrics>true</EnableMetrics>|' "$f"
+          echo "enable-metrics: EnableMetrics=true ensured"
+        else
+          echo "enable-metrics: system.xml absent (fresh install); metrics enable on next restart"
+        fi
+    volumeMounts:
+      - name: config
+        mountPath: /config
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+
 # Config + cache + DB on Longhorn-replica2 (single-replica
 # Jellyfin; resilience via snapshot, not multi-replica).
 # 2026-07-09 ADR 0036: migrate to -retain family. The config

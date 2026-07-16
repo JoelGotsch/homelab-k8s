@@ -1,7 +1,7 @@
-# Jellyfin doesn't ship native Prometheus metrics. Community
-# plugin "jellyfin-plugin-metrics" exposes them on the same
-# port. Operator installs post-bring-up; ServiceMonitor here
-# is ready to scrape once the plugin is active.
+# Jellyfin's BUILT-IN Prometheus metrics on /metrics (port 8096), gated by
+# <EnableMetrics> in system.xml. Enabled via the enable-metrics initContainer
+# (values.yaml) — there is NO metrics plugin in the official Jellyfin repo
+# (the old "jellyfin-plugin-metrics" note was wrong). Corrected 2026-07-16.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
