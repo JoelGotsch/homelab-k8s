@@ -13,7 +13,7 @@ spec:
   goTemplateOptions: ["missingkey=error"]
   generators:
     - git:
-        repoURL: https://github.com/JoelGotsch/homelab-k8s
+        repoURL: https://forgejo.lab.vyramo.com/forgejo-admin/homelab-k8s
         revision: main
         directories:
           - path: platform/*
@@ -28,7 +28,7 @@ spec:
     spec:
       project: default
       source:
-        repoURL: https://github.com/JoelGotsch/homelab-k8s
+        repoURL: https://forgejo.lab.vyramo.com/forgejo-admin/homelab-k8s
         targetRevision: main
         path: '{{.path.path}}'
       destination:
