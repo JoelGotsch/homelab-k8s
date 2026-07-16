@@ -1,0 +1,105 @@
+# Default-deny + least-privilege for the OpenBao SERVER pods (netpol-audit
+# MEDIUM-1). OpenBao is the cluster's secret store; with no policy it ran
+# Cilium default-allow, so any compromised pod cluster-wide could reach
+# openbao:8200. This locks the server's ingress/egress.
+#
+# SCOPE: this selects ONLY the 3 raft server pods
+# (app.kubernetes.io/name=openbao, component=server) — NOT the whole
+# namespace. The hourly/daily raft-snapshot CronJob pods are deliberately
+# left in default-allow: they are ephemeral, and conscripting them risks
+# breaking the offsite raft snapshot (which scp's to the Hetzner Storage
+# Box) for little gain. The security goal — restrict who can reach the vault
+# API — is met by locking the server's ingress.
+#
+# APPLY ATTENDED: this was rolled out with Cilium PolicyAuditMode enabled on
+# the openbao endpoints first, Hubble-observed for unexpected drops (incl.
+# raft peer + client flows), then enforced. A missed egress rule (raft peers,
+# apiserver) can wedge the raft cluster → vault outage (rule 28). Do NOT
+# hand-edit under enforcement without re-auditing.
+#
+# Flows (verified against the live deployment 2026-07-16):
+#   ingress :8200  <- external-secrets (ESO), cert-manager (Vault issuer,
+#                     homelab-internal-issuer), signal-bridge (seal-watchdog),
+#                     in-namespace (snapshot cronjobs)
+#   ingress 8201/8202 <- peer openbao server pods (raft cluster + rep)
+#   ingress        <- host / remote-node (kubelet health probes + operator
+#                     `kubectl port-forward`, which arrives as the node)
+#   egress kube-apiserver 443+6443 (Kubernetes auth token review)
+#   egress kube-dns 53
+#   egress 8201/8202 -> peer openbao server pods (raft)
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: openbao-server
+  namespace: openbao
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbao
+      component: server
+  ingress:
+    # Vault API (8200): ESO, cert-manager (Vault issuer), seal-watchdog,
+    # and in-namespace clients (the raft-snapshot CronJob pods).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: external-secrets
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cert-manager
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: signal-bridge
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: openbao
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    # Raft cluster (8201) + replication (8202) between the server pods.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: openbao
+            app.kubernetes.io/name: openbao
+      toPorts:
+        - ports:
+            - port: "8201"
+              protocol: TCP
+            - port: "8202"
+              protocol: TCP
+    # Kubelet liveness/readiness probes + operator `kubectl port-forward`
+    # both arrive as the node (host / remote-node entity), not a pod.
+    - fromEntities:
+        - host
+        - remote-node
+  egress:
+    # Kubernetes auth method reviews SA tokens against the API server.
+    # BOTH 443 and 6443 (socket-LB translates ClusterIP:443 -> backend:6443
+    # before policy eval, CLAUDE.md rule 12).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # kube-dns
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Raft peers (pod-to-pod, 8201 cluster + 8202 rep).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: openbao
+            app.kubernetes.io/name: openbao
+      toPorts:
+        - ports:
+            - port: "8201"
+              protocol: TCP
+            - port: "8202"
+              protocol: TCP

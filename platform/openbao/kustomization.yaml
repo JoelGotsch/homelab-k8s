@@ -7,7 +7,6 @@
 
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 # Re-apply the same Helm release with values matching the
 # bootstrap install. Bootstrap-time values live in
 # homelab-infra/ansible/files/openbao-{values,overrides}.yaml
@@ -15,17 +14,16 @@ kind: Kustomization
 helmCharts:
   - name: openbao
     repo: https://openbao.github.io/openbao-helm
-    version: "0.28.3"  # OPERATOR PINS via Renovate
+    version: "0.28.3" # OPERATOR PINS via Renovate
     releaseName: openbao
     namespace: openbao
     valuesFile: values.yaml
     includeCRDs: true
-
 resources:
   - raft-snapshot-cronjob.yaml
   - raft-snapshot-hourly.yaml
   - httproute.yaml
-
+  - networkpolicy.yaml
 # ADR 0036: cluster-wide resource-governance baseline.
 # NOTE: the openbao namespace itself is bootstrapped by
 # homelab-k8s/bootstrap/bootstrap-namespaces.yaml (ansible
@@ -35,7 +33,6 @@ resources:
 # + ResourceQuota + default-deny scaffold into the already-
 # existing ns.
 components:
-
 # Patch the chart-rendered StatefulSet: switch
 # podManagementPolicy from the chart's hardcoded OrderedReady
 # to Parallel. Per ADR 0018 D11 (amendment 2026-06-24): the
