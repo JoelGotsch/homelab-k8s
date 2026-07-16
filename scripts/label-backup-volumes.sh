@@ -36,6 +36,8 @@ BACKUP_PVCS=(
   "paperless/paperless-data|personal: insurance copy (docs are on NAS-crypt)"
   "ntfy/ntfy-data|internal: default-offsite (cached msgs/attachments)"
   "nextcloud/nextcloud-hot|personal: datadirectory (file versions/trashbin) + config.php instance secret/passwordsalt (bulk user files are on NAS-crypt via Workstream C)"
+  "langfuse/data-volume-chi-langfuse-langfuse-0-0-0|personal: ClickHouse trace store (private prompt/completion content). RAW-VOLUME backup = crash-consistent, not app-consistent; re-evaluate Sept 2026 vs clickhouse-backup logical + storage size"
+  "langfuse/langfuse-s3|personal: Langfuse blob store (large trace payloads)"
 )
 
 echo "Labelling Longhorn volumes into the 'backup' recurring-job group..."

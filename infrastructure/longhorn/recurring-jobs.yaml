@@ -165,7 +165,11 @@ spec:
 #   ntfy/ntfy-data                     (internal: default-offsite)
 #   nextcloud/nextcloud-hot            (personal: datadirectory versions/
 #                                       trashbin + config.php instance secret)
-# Everything else = snapshot-only (CNPG DBs → barman; openbao → raft
+#   langfuse/data-volume-chi-…-0-0-0   (personal: ClickHouse trace store —
+#                                       raw-volume, re-eval Sept vs logical)
+#   langfuse/langfuse-s3               (personal: Langfuse blob payloads)
+# Everything else = snapshot-only (CNPG DBs → barman incl. langfuse-pg;
+# openbao → raft
 # snapshot; telemetry/caches → regenerable). NB: nextcloud/paperless BULK
 # user data lives on NAS-crypt shares → offsite via Workstream C, not here.
 #
