@@ -1,0 +1,145 @@
+# Backup footprint dashboard — Workstream F (2026-07-16).
+#
+# Watches how big the backups are getting, across the layers the operator cares
+# about: the NAS MinIO backup buckets (tier-1/staging), the langfuse ClickHouse
+# trace store (the flagged pileup risk), and restic CronJob freshness. Pairs
+# with the backup-footprint PrometheusRule alerts.
+#
+# Metrics (all verified live 2026-07-16):
+#   minio_bucket_usage_total_bytes{bucket}      ← minio-on-nas ServiceMonitor
+#   kubelet_volume_stats_used_bytes{...}        ← kubelet
+#   kube_cronjob_status_last_successful_time    ← kube-state-metrics
+#   ALERTS{component="backup-cronjobs"}         ← the backup PrometheusRules
+#
+# Sidecar picks it up via grafana_dashboard=1; lands in the "Homelab" folder.
+# Deep link: https://grafana.lab.vyramo.com/d/homelab-backup-footprint
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-backup-footprint
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/name: grafana-dashboards
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: observability
+  annotations:
+    grafana_folder: "Homelab"
+data:
+  backup-footprint.json: |
+    {
+      "uid": "homelab-backup-footprint",
+      "title": "Homelab — Backup footprint",
+      "tags": ["homelab", "backup", "storage"],
+      "schemaVersion": 39,
+      "version": 1,
+      "editable": true,
+      "refresh": "1m",
+      "time": { "from": "now-24h", "to": "now" },
+      "templating": { "list": [] },
+      "annotations": { "list": [] },
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "longhorn-backups bucket",
+          "description": "Should stay small after the opt-in regrouping + A5 prune. Alert fires >100 GiB.",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "bytes", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 53687091200 }, { "color": "red", "value": 107374182400 } ] } }, "overrides": [] },
+          "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+            "expr": "sum(minio_bucket_usage_total_bytes{bucket=\"longhorn-backups\"})" } ]
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "homelab-backups-cluster bucket",
+          "description": "CNPG WAL + base backups (barman).",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+          "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+            "expr": "sum(minio_bucket_usage_total_bytes{bucket=\"homelab-backups-cluster\"})" } ]
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Langfuse ClickHouse trace store",
+          "description": "Pileup risk. Alert fires >45 GiB of 90 GiB — time to switch to clickhouse-backup logical.",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "bytes", "max": 96636764160, "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 48318382080 }, { "color": "red", "value": 77309411328 } ] } }, "overrides": [] },
+          "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+            "expr": "kubelet_volume_stats_used_bytes{namespace=\"langfuse\",persistentvolumeclaim=\"data-volume-chi-langfuse-langfuse-0-0-0\"}" } ]
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Restic tier-3 last success (age)",
+          "description": "Time since each restic CronJob last succeeded. Red if stale.",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null }, { "color": "yellow", "value": 90000 }, { "color": "red", "value": 172800 } ] } }, "overrides": [] },
+          "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "" }, "textMode": "value_and_name" },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+            "legendFormat": "{{cronjob}}",
+            "expr": "time() - kube_cronjob_status_last_successful_time{namespace=\"backup-cronjobs\",cronjob=~\"restic-.*\"}" } ]
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "NAS backup bucket sizes over time",
+          "description": "The A5 drain shows here as longhorn-backups falling.",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+          "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+            "legendFormat": "{{bucket}}",
+            "expr": "sum by (bucket) (minio_bucket_usage_total_bytes{bucket=~\"longhorn-backups|homelab-backups-cluster\"})" } ]
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Langfuse ClickHouse trace store over time",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+          "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10, "thresholdsStyle": { "mode": "line" } }, "thresholds": { "mode": "absolute", "steps": [
+            { "color": "transparent", "value": null }, { "color": "red", "value": 48318382080 } ] } }, "overrides": [] },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+            "legendFormat": "clickhouse trace store",
+            "expr": "kubelet_volume_stats_used_bytes{namespace=\"langfuse\",persistentvolumeclaim=\"data-volume-chi-langfuse-langfuse-0-0-0\"}" } ]
+        },
+        {
+          "id": 7,
+          "type": "table",
+          "title": "Backup CronJob freshness",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+          "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+          "options": { "showHeader": true },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+            "format": "table", "instant": true,
+            "expr": "time() - kube_cronjob_status_last_successful_time{namespace=\"backup-cronjobs\"}" } ]
+        },
+        {
+          "id": 8,
+          "type": "table",
+          "title": "Firing backup alerts",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+          "fieldConfig": { "defaults": {}, "overrides": [] },
+          "options": { "showHeader": true },
+          "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+            "format": "table", "instant": true,
+            "expr": "ALERTS{component=\"backup-cronjobs\",alertstate=\"firing\"}" } ]
+        }
+      ]
+    }

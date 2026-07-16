@@ -28,3 +28,4 @@ kind: Kustomization
 resources:
   - cluster-overview.yaml
   - llm-gateway.yaml
+  - backup-footprint.yaml   # Workstream F — backup size / pileup / restic freshness
