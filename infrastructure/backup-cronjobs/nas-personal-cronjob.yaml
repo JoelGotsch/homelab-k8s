@@ -111,7 +111,15 @@ spec:
                   backup_share /nas/personal-documents  personal
                   backup_share /nas/internal-archive    internal
                   backup_share /nas/forgejo-lfs         internal
-                  backup_share /nas/jellyfin-media      internal-media
+                  # jellyfin-media DISABLED pending an operator capacity
+                  # decision: verification (2026-07-16) found the library is
+                  # 7.8 TB of real media, not near-empty like the crypt shares.
+                  # 7.8 TB over restic sftp.connections=1 is infeasible AND
+                  # likely exceeds the tier-3 Hetzner Storage Box capacity
+                  # (which also holds cluster + crypt-share backups). Re-enable
+                  # only once the target is decided (bigger box / separate media
+                  # target / accept-no-offsite). See TODO "jellyfin media 7.8TB".
+                  # backup_share /nas/jellyfin-media      internal-media
 
                   # Per-class GFS retention, scoped to THIS lane via the AND-tag
                   # `nas-personal,<class>` so it never prunes the cluster lane.
