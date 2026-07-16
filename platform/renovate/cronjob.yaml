@@ -63,9 +63,18 @@ spec:
               # bot updates its own image pin in this repo).
               image: "renovate/renovate:38"
               imagePullPolicy: IfNotPresent
-              args:
-                - "--config-file=/config/config.js"
               env:
+                # Renovate's CLI has no --config-file flag (only
+                # ever accepted via env var or a default-named
+                # file in cwd) — confirmed against
+                # docs.renovatebot.com/self-hosted-configuration
+                # 2026-07-16 after the first live run crashed
+                # with "error: unknown option '--config-file=...'".
+                # Never caught earlier because the CronJob had
+                # never actually run before (shipped suspended
+                # since scaffolding).
+                - name: RENOVATE_CONFIG_FILE
+                  value: /config/config.js
                 - name: RENOVATE_TOKEN
                   valueFrom:
                     secretKeyRef:
