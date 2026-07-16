@@ -163,8 +163,11 @@ spec:
 #   signal-bridge/signal-bridge-data   (secret: Signal session/keys)
 #   paperless/paperless-data           (personal: insurance copy)
 #   ntfy/ntfy-data                     (internal: default-offsite)
+#   nextcloud/nextcloud-hot            (personal: datadirectory versions/
+#                                       trashbin + config.php instance secret)
 # Everything else = snapshot-only (CNPG DBs → barman; openbao → raft
-# snapshot; telemetry/caches → regenerable).
+# snapshot; telemetry/caches → regenerable). NB: nextcloud/paperless BULK
+# user data lives on NAS-crypt shares → offsite via Workstream C, not here.
 #
 # retain 14: this is the tier-1 NAS-local depth for fast restore; the
 # deep GFS tail (weekly/monthly/yearly) lives on restic→Hetzner

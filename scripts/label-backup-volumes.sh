@@ -35,6 +35,7 @@ BACKUP_PVCS=(
   "signal-bridge/signal-bridge-data|secret: Signal linked-device session/keys"
   "paperless/paperless-data|personal: insurance copy (docs are on NAS-crypt)"
   "ntfy/ntfy-data|internal: default-offsite (cached msgs/attachments)"
+  "nextcloud/nextcloud-hot|personal: datadirectory (file versions/trashbin) + config.php instance secret/passwordsalt (bulk user files are on NAS-crypt via Workstream C)"
 )
 
 echo "Labelling Longhorn volumes into the 'backup' recurring-job group..."
