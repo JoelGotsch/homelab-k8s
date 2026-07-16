@@ -3,12 +3,10 @@
 # update-policy.md (Renovate as the dependency-update bot
 # for first-party + homelab-k8s repos).
 #
-# Status: ships dormant. spec.suspend=true until operator
-# completes the post-Forgejo activation procedure (see
-# README §Post-Forgejo activation). Argo's Application
-# does NOT flip suspend back to true on operator change —
-# the suspend field is omitted from sync targets so Argo
-# leaves the field alone after first apply. Confirmed via
+# Status: activated 2026-07-16 (spec.suspend=false). Argo's
+# Application does NOT flip suspend back to true on operator
+# change — the suspend field is omitted from sync targets so
+# Argo leaves the field alone after first apply. Confirmed via
 # the syncOptions=RespectIgnoreDifferences pattern below.
 #
 # Schedule: weekly Saturday before 06:00 Europe/Berlin —
@@ -30,9 +28,7 @@ metadata:
     # set to false (operator-controlled). See README.
     argocd.argoproj.io/sync-options: "Validate=true"
 spec:
-  # OPERATOR FLIPS to false once Forgejo is up + bot is
-  # configured + OpenBao path is seeded. See README.
-  suspend: true
+  suspend: false
   schedule: "0 5 * * 6"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
