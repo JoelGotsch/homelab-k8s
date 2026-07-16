@@ -106,6 +106,12 @@ spec:
     # demand more.
     - toFQDNs:
         - matchName: "repo.jellyfin.org"
+        # repo.jellyfin.org 302-redirects the plugin manifest AND the
+        # plugin download zips to a geo-load-balanced mirror
+        # (fra2/fra1/... .mirror.jellyfin.org). Without this the plugin
+        # Catalog fails to fetch manifest.json / install. Wildcard covers
+        # all regional mirrors. (2026-07-16)
+        - matchPattern: "*.mirror.jellyfin.org"
         - matchName: "api.themoviedb.org"
         - matchName: "image.tmdb.org"
         - matchName: "thetvdb.com"
