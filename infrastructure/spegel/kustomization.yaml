@@ -17,7 +17,7 @@ resources:
 helmCharts:
   - name: spegel
     repo: oci://ghcr.io/spegel-org/helm-charts
-    version: "0.7.3"  # OPERATOR PINS via Renovate (helmv3 manager)
+    version: "0.7.4"  # OPERATOR PINS via Renovate (helmv3 manager)
     releaseName: spegel
     namespace: spegel
     valuesFile: values.yaml

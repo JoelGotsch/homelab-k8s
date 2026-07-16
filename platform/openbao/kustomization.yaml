@@ -14,7 +14,7 @@ kind: Kustomization
 helmCharts:
   - name: openbao
     repo: https://openbao.github.io/openbao-helm
-    version: "0.28.3" # OPERATOR PINS via Renovate
+    version: "0.28.4" # OPERATOR PINS via Renovate
     releaseName: openbao
     namespace: openbao
     valuesFile: values.yaml
