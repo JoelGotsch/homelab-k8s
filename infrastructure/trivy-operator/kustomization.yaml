@@ -30,7 +30,7 @@ namespace: trivy-system
 helmCharts:
   - name: trivy-operator
     repo: https://aquasecurity.github.io/helm-charts/
-    version: "0.33.1"  # OPERATOR PINS via Renovate
+    version: "0.34.0"  # OPERATOR PINS via Renovate
     releaseName: trivy-operator
     namespace: trivy-system
     valuesFile: values.yaml

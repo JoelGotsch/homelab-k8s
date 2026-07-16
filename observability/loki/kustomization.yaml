@@ -11,7 +11,7 @@ kind: Kustomization
 helmCharts:
   - name: loki
     repo: https://grafana.github.io/helm-charts
-    version: "6.16.0"  # OPERATOR PINS via Renovate
+    version: "6.55.0"  # OPERATOR PINS via Renovate
     releaseName: loki
     namespace: monitoring
     valuesFile: values.yaml

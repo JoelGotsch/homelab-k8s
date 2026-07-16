@@ -10,7 +10,7 @@ kind: Kustomization
 helmCharts:
   - name: alloy
     repo: https://grafana.github.io/helm-charts
-    version: "0.10.0"  # OPERATOR PINS via Renovate
+    version: "1.10.1"  # OPERATOR PINS via Renovate
     releaseName: alloy
     namespace: observability-alloy
     valuesFile: values.yaml

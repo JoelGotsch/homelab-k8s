@@ -11,7 +11,7 @@ namespace: jellyfin
 helmCharts:
   - name: jellyfin
     repo: https://jellyfin.github.io/jellyfin-helm
-    version: "2.5.0"  # OPERATOR PINS via Renovate
+    version: "2.7.0"  # OPERATOR PINS via Renovate
     releaseName: jellyfin
     namespace: jellyfin
     valuesFile: values.yaml

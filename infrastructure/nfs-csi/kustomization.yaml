@@ -8,7 +8,7 @@ kind: Kustomization
 helmCharts:
   - name: csi-driver-nfs
     repo: https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
-    version: "v4.9.0"  # OPERATOR PINS via Renovate
+    version: "v4.13.4"  # OPERATOR PINS via Renovate
     releaseName: csi-driver-nfs
     namespace: nfs-csi
     valuesFile: values.yaml
