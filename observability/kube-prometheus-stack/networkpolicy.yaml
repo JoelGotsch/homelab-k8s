@@ -79,6 +79,8 @@ spec:
           protocol: TCP
         - port: 8096   # jellyfin
           protocol: TCP
+        - port: 9000   # minio-on-nas (backup-bucket footprint metrics, WS-F 2026-07-16)
+          protocol: TCP
         - port: 9090
           protocol: TCP
         - port: 9153   # coredns

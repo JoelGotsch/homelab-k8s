@@ -24,6 +24,7 @@ spec:
     matchLabels:
       app: minio
       release: minio
+      monitoring: "true"   # excludes the minio-console svc (9001, no metrics)
   endpoints:
     # Cluster/node/resource metrics — cheap, scrape at the default cadence.
     - port: http
