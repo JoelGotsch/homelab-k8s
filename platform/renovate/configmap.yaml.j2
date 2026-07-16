@@ -1,8 +1,3 @@
-# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
-# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
-#   ansible-playbook ansible/playbooks/00-render-static.yml
-# (from the homelab-infra repo root).
-# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # Renovate global config (mounted at /usr/src/app/config.js).
 # Per-repo configs (in each repo's renovate.json5) extend the
 # central preset at homelab-infra/renovate-presets/default.json5
@@ -29,7 +24,7 @@ data:
     // configs extend the central preset).
     module.exports = {
       platform: 'gitea',
-      endpoint: 'https://forgejo.lab.vyramo.com/api/v1',
+      endpoint: 'https://forgejo.{{ homelab_internal_subdomain }}.{{ homelab_domain }}/api/v1',
       gitAuthor: 'Renovate Bot <renovate-bot@invalid.local>',
       // Username MUST match the bot user created in Forgejo.
       username: 'renovate-bot',

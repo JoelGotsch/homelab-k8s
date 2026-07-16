@@ -1,8 +1,8 @@
 # platform/renovate
 
-Self-hosted Renovate runner. Scans every repo in the Forgejo
-`<FORGEJO_ORG>` org weekly, opens dependency-update PRs against
-each, and emits a per-repo Dependency Dashboard issue.
+Self-hosted Renovate runner. Scans every repo under the
+`forgejo-admin` namespace weekly, opens dependency-update PRs
+against each, and emits a per-repo Dependency Dashboard issue.
 
 Per [ADR 0023](../../../homelab-docs/02-decisions/0023-forgejo-and-woodpecker-ci.md)
 (Forgejo as source of truth) +
@@ -35,42 +35,62 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 
 ## Post-Forgejo activation (one-time)
 
-The layer ships dormant — Argo applies the manifests but the
-CronJob's `spec.suspend: true` keeps it idle. After Forgejo +
-Woodpecker are Healthy at cold-start Step 13:
+Activated 2026-07-16. `forgejo-admin` turned out to be a plain
+Forgejo **user** namespace, not an Organization (confirmed via
+direct DB query — no `type=1` rows in `"user"` at all), so the
+org-team-membership step below doesn't apply on this instance;
+access is granted per-repo instead (step 2).
 
-### 1-4. Bot account + org membership + PAT + OpenBao seed (scripted)
+### 1. Bot account + PAT + OpenBao seed (scripted)
 
 ```sh
-FORGEJO_URL=https://forgejo.lab.<HOMELAB-DOMAIN> \
+FORGEJO_URL=https://forgejo.lab.vyramo.com \
 FORGEJO_TOKEN="$(bao kv get -field=admin_pat kv/forgejo/admin)" \
 homelab-infra/scripts/provision-forgejo-bot-pat.sh \
     --bot-username renovate-bot \
-    --bot-email "<RENOVATE_BOT_EMAIL>" \
+    --bot-email renovate-bot@invalid.local \
     --kv-path kv/platform/renovate/forgejo-token \
-    --org-name "<FORGEJO_ORG>" \
-    --org-team Owners \
     --token-name renovate-runner-cluster \
     --scopes "read:repository,write:repository,write:issue"
 ```
 
-The script creates the user, adds them to the org team,
-issues the PAT, and seeds OpenBao — replacing the four-step
-UI ceremony.
+The script creates the user, issues the PAT, and seeds OpenBao
+(no `--org-name` — see above).
 
 **Manual fallback** (if the script can't reach Forgejo, e.g.,
 during a partial outage):
 
 - Web UI → Site Administration → User Accounts → Create User
-  (`renovate-bot`, `<RENOVATE_BOT_EMAIL>`, random password)
-- Site Administration → Organizations → `<FORGEJO_ORG>` →
-  Teams → add `renovate-bot` to a team
+  (`renovate-bot`, a placeholder email, random password)
 - Login as `renovate-bot` → User Settings → Applications →
   Generate New Token (scopes: read:repository, write:repository,
   write:issue)
 - `bao kv put kv/platform/renovate/forgejo-token token=<paste>`
+- Then still run step 2 below (or its manual fallback) — a PAT
+  alone doesn't grant repo access without a collaborator/org
+  membership grant.
 
-### 5. Flip suspend
+### 2. Repo access (scripted)
+
+```sh
+FORGEJO_URL=https://forgejo.lab.vyramo.com \
+FORGEJO_TOKEN="$(bao kv get -field=admin_pat kv/forgejo/admin)" \
+homelab-infra/scripts/grant-forgejo-bot-repo-access.sh \
+    --bot-username renovate-bot \
+    --owner forgejo-admin \
+    --permission write
+```
+
+Enumerates every repo under the `forgejo-admin` namespace live
+via the API (not a static list — new repos are picked up
+automatically on re-run) and grants `renovate-bot` write
+collaborator access. Idempotent; safe to re-run after adding
+new repos.
+
+**Manual fallback**: per repo, Settings → Collaborators → Add
+Collaborator → `renovate-bot`, permission `write`.
+
+### 3. Flip suspend
 
 Edit `cronjob.yaml`:
 
@@ -81,7 +101,7 @@ spec:
 
 Commit + push to homelab-k8s; Argo reconciles.
 
-### 6. Trigger an on-demand run (verify)
+### 4. Trigger an on-demand run (verify)
 
 ```sh
 kubectl -n renovate create job --from=cronjob/renovate \
@@ -100,7 +120,7 @@ updated in each scanned repo.
 |---|---|
 | Argo sync `platform/forgejo/` | Forgejo Service + Deployment Healthy. |
 | Argo sync `platform/renovate/` | This layer — namespace, ConfigMap, ESO, CronJob (suspended). |
-| Operator runs Steps 1-5 above | CronJob un-suspended; ESO populates the Secret on next reconcile. |
+| Operator runs Steps 1-3 above | CronJob un-suspended; ESO populates the Secret on next reconcile. |
 | Saturday 05:00 UTC, then weekly | First scheduled scan. PRs land against repos with `renovate.json5`. |
 
 ## Caveats
@@ -109,13 +129,19 @@ updated in each scanned repo.
    or per-repo PAT scoping like GitHub fine-grained tokens).
    The dedicated `renovate-bot` account bounds blast radius
    — a compromised PAT yields what `renovate-bot` itself can
-   touch (read on the org; write where added as collaborator).
+   touch (repos it's been added to as a collaborator only).
 
-2. **No "GitHub App"-style installation** in Forgejo. The bot
-   is a regular user; org admin adds it as a member. New
-   repos in the org inherit team permissions but new repos
-   *outside* the org need the operator to add `renovate-bot`
-   as a collaborator manually.
+2. **No Forgejo Organization exists on this instance** (all
+   repos live under the `forgejo-admin` user namespace) and no
+   "GitHub App"-style installation model exists in Forgejo
+   either way. The bot is a regular user granted **per-repo
+   collaborator access** (step 2 above). New repos need a
+   re-run of `grant-forgejo-bot-repo-access.sh` — it's
+   idempotent and picks up new repos automatically, but isn't
+   triggered automatically on repo creation. If the operator
+   later creates a real Forgejo Organization, this step could
+   move to org-team membership instead (`provision-forgejo-bot-pat.sh`
+   already supports `--org-name`/`--org-team`).
 
 3. **`platform: gitea` may lag Forgejo API divergence.**
    Forgejo's API was Gitea-compatible at fork (Feb 2024) and
@@ -144,7 +170,12 @@ updated in each scanned repo.
    pinned versions manually. CVE landings during this window
    require manual operator attention; the
    [external-dependencies.md security-feed monitoring](../../../homelab-docs/01-architecture/external-dependencies.md)
-   row covers detection.
+   row covers detection. (Historical note: this window ran
+   far longer than intended in practice — Forgejo went
+   healthy 2026-05-02 but activation didn't happen until
+   2026-07-16, ten weeks later, during which Forgejo itself
+   drifted to an EOL version undetected. See the journal
+   entry for that date.)
 
 7. **Argo and `spec.suspend`.** Once the operator flips
    `suspend: false` in the local checkout and pushes,
