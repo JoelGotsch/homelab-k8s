@@ -33,6 +33,18 @@ resources:
 # + ResourceQuota + default-deny scaffold into the already-
 # existing ns.
 components:
+  - ../../components/site-config   # build-only ConfigMap for the replacement below
+
+# Resolve the HTTPRoute hostname from the single site-config (no hardcoded
+# domain): `openbao.FQDN_SUFFIX` -> `openbao.<fqdn_suffix>`. Provenance: this rule
+# -> ConfigMap/site-config.data.fqdn_suffix -> components/site-config/site-config.env.
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: HTTPRoute, name: openbao-ui }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }
+
 # Patch the chart-rendered StatefulSet: switch
 # podManagementPolicy from the chart's hardcoded OrderedReady
 # to Parallel. Per ADR 0018 D11 (amendment 2026-06-24): the

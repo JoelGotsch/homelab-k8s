@@ -1,8 +1,3 @@
-# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
-# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
-#   ansible-playbook ansible/playbooks/00-render-static.yml
-# (from the homelab-infra repo root).
-# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # Nextcloud HTTPRoute via Cilium Gateway.
 # Tailscale-only per ADR 0024 D5 — non-E2EE files /
 # calendar / contacts don't qualify for Cloudflare TLS
@@ -23,7 +18,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "nextcloud.lab.vyramo.com"
+    - "nextcloud.FQDN_SUFFIX"
   rules:
     - matches:
         - path:

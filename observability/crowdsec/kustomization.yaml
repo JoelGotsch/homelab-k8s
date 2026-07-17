@@ -44,6 +44,20 @@ resources:
   - httproute.yaml
   - bouncer-register-job.yaml
 
+# Build-only ConfigMap for the HTTPRoute-hostname replacement below.
+components:
+  - ../../components/site-config
+
+# Resolve the HTTPRoute hostname from the single site-config (no hardcoded
+# domain): `crowdsec.FQDN_SUFFIX` -> `crowdsec.<fqdn_suffix>`. Provenance: this rule
+# -> ConfigMap/site-config.data.fqdn_suffix -> components/site-config/site-config.env.
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: HTTPRoute, name: crowdsec-lapi }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }
+
 # Inject ndots:1 into the agent + LAPI pods. The chart's agent
 # template has no `dnsConfig` extension point (`tolerations`,
 # `affinity`, `nodeSelector` are the only pod-level escape

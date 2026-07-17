@@ -1,8 +1,3 @@
-# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
-# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
-#   ansible-playbook ansible/playbooks/00-render-static.yml
-# (from the homelab-infra repo root).
-# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # HTTPRoute for ntfy server.
 #
 # Phase 1 (current): cluster-internal only. The Cilium
@@ -32,7 +27,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "ntfy.lab.vyramo.com"
+    - "ntfy.FQDN_SUFFIX"
   rules:
     - matches:
         - path:

@@ -34,3 +34,24 @@ resources:
   - worker-cascade-rules.yaml
   - openbao-seal-rules.yaml
   - rules-longhorn.yaml
+
+components:
+  - ../../components/site-config
+
+# Resolve each HTTPRoute hostname from the single site-config (no hardcoded domain).
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: HTTPRoute, name: grafana }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: HTTPRoute, name: alertmanager }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: HTTPRoute, name: prometheus }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }

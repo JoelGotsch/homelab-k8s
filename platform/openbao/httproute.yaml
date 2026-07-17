@@ -1,8 +1,3 @@
-# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
-# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
-#   ansible-playbook ansible/playbooks/00-render-static.yml
-# (from the homelab-infra repo root).
-# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # OpenBao UI exposed via Cilium Gateway API HTTPRoute.
 # Internal-only — Tailscale-reachable per network.md (no
 # Cloudflare Tunnel for OpenBao; pulls in too much risk per
@@ -21,7 +16,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "openbao.lab.vyramo.com"
+    - "openbao.FQDN_SUFFIX"
   rules:
     - matches:
         - path:

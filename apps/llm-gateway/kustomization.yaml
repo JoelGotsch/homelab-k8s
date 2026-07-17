@@ -53,6 +53,7 @@ resources:
 # (LimitRange + ResourceQuota + default-deny NetPol scaffold).
 components:
   - ../../components/first-party-namespace
+  - ../../components/site-config
 
 # Two patches on the chart-rendered migrations Job:
 #   (1) Strategic-merge — add the PSA-restricted-compliant
@@ -79,3 +80,12 @@ patches:
         path: /spec/template/spec/containers/0/volumeMounts
       - op: remove
         path: /spec/template/spec/volumes
+
+# Hostname from the single site-config (no hardcoded domain) — see
+# components/site-config/README.md.
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: HTTPRoute, name: llm-gateway }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }

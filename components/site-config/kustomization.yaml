@@ -1,0 +1,23 @@
+# Kustomize COMPONENT — publishes the single site-config as a build-time
+# ConfigMap that `replacements:` (raw manifests) and Helm `global` values read.
+#
+# Include it from any app kustomization:
+#     components:
+#       - ../../components/site-config
+# then add `replacements:` (see example/) that source
+# ConfigMap/site-config.data.<key> into your manifests' fields. Change a value in
+# site-config.env → re-render → every consumer updates. Nothing hardcodes it.
+#
+# The ConfigMap is marked local-config so it's used for substitution but NOT
+# emitted to the cluster (it's a build-time value holder, not a deployed object).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+configMapGenerator:
+  - name: site-config
+    envs:
+      - site-config.env
+    options:
+      disableNameSuffixHash: true
+      annotations:
+        config.kubernetes.io/local-config: "true"

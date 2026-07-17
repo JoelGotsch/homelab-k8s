@@ -29,3 +29,13 @@ resources:
 # ADR 0036: cluster-wide resource-governance baseline.
 components:
   - ../../components/first-party-namespace
+  - ../../components/site-config
+
+# Hostname from the single site-config (no hardcoded domain) — see
+# components/site-config/README.md.
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: HTTPRoute, name: vaultwarden }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }

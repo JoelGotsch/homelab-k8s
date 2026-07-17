@@ -38,3 +38,17 @@ resources:
   - networkpolicy.yaml
   - httproute.yaml
   - servicemonitor.yaml
+
+# Build-only ConfigMap for the HTTPRoute-hostname replacement below.
+components:
+  - ../../components/site-config
+
+# Resolve the HTTPRoute hostname from the single site-config (no hardcoded
+# domain): `langfuse.FQDN_SUFFIX` -> `langfuse.<fqdn_suffix>`. Provenance: this rule
+# -> ConfigMap/site-config.data.fqdn_suffix -> components/site-config/site-config.env.
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: HTTPRoute, name: langfuse }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }
