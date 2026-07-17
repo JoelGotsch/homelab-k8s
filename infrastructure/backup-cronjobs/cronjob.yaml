@@ -253,10 +253,17 @@ spec:
                   restic $RESTIC_OPTS unlock
 
                   echo "=== restic backup /staging ==="
+                  # STABLE --host (was k8s-${HOSTNAME} = the per-run pod name).
+                  # A unique host per snapshot meant (a) no parent snapshot was
+                  # ever found, so every run rescanned everything, and (b) the
+                  # forget below — default grouping host+paths — put each
+                  # snapshot in its own group and kept it as "most recent
+                  # daily" FOREVER: GFS retention was a silent no-op for this
+                  # lane (found 2026-07-17).
                   restic $RESTIC_OPTS backup /staging \
                     --tag "tier-3" \
                     --tag "automated" \
-                    --host "k8s-${HOSTNAME}"
+                    --host "k8s-restic-tier-3"
 
                   echo "=== restic forget --prune (cluster lane only) ==="
                   # --tag tier-3 SCOPES this forget to the cluster lane. The
@@ -286,9 +293,14 @@ spec:
                   # NAS-personal lane, whose shares ARE cleanly class-separated,
                   # keeps true per-class GFS. Revisit at the Sept backup review
                   # if the cluster-lane footprint ever justifies the split.
+                  # --group-by paths: ignore host when grouping, so the legacy
+                  # k8s-<pod-name> snapshots land in the same GFS group as new
+                  # k8s-restic-tier-3 ones and retention finally applies to
+                  # them (everything in this lane shares the /staging path).
                   restic $RESTIC_OPTS forget \
                     --prune \
                     --tag tier-3 \
+                    --group-by paths \
                     --keep-daily 14 \
                     --keep-weekly 8 \
                     --keep-monthly 12 \
