@@ -13,7 +13,7 @@ namespace: vaultwarden
 helmCharts:
   - name: vaultwarden
     repo: https://guerzon.github.io/vaultwarden
-    version: "0.32.0"  # OPERATOR PINS via Renovate
+    version: "0.43.1"  # OPERATOR PINS via Renovate
     releaseName: vaultwarden
     namespace: vaultwarden
     valuesFile: values.yaml
