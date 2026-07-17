@@ -176,6 +176,23 @@ nextcloud:
         'overwriteprotocol' => 'https',
         'default_phone_region' => 'DE',
       );
+    # The data dir is a csi-rclone FUSE mount (NAS-encrypted share,
+    # ADR 0030) — its POSIX perms are synthetic and chmod 0770 is not
+    # honorable, so Nextcloud's default permission check aborts every
+    # occ invocation ("Your data directory is readable by other
+    # people" → "Environment not properly prepared", hit on first
+    # install 2026-07-17). Disabling the check is the documented
+    # approach for network-mounted data dirs; actual protection is
+    # the mount boundary + namespace isolation + NAS-side encryption.
+    # trusted_domains pinned here too: the entrypoint only sets them
+    # during the install branch, and that step was what the perms
+    # abort interrupted.
+    datadir.config.php: |-
+      <?php
+      $CONFIG = array(
+        'check_data_directory_permissions' => false,
+        'trusted_domains' => ['localhost', 'nextcloud.lab.vyramo.com'],
+      );
 
   # OIDC env (for the user_oidc app — operator installs +
   # configures via occ post-Authentik). The chart doesn't
