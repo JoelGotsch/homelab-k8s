@@ -1,0 +1,99 @@
+# Default-deny + least-privilege for the trust-manager namespace
+# (netpol-audit.md MEDIUM-1 residual). trust-manager distributes CA bundles
+# (Bundle CRs -> ConfigMaps/Secrets in target namespaces); with no policy it ran
+# Cilium DEFAULT-ALLOW. Lower value than openbao/ESO/cert-manager (it moves
+# public CA material, not private keys) but still an admission-webhook talking to
+# the apiserver, so it gets the same minimal lockdown. This is a DRAFT.
+#
+# ROLLOUT IS OPERATOR-ATTENDED via Cilium PolicyAuditMode + Hubble (rules
+# 14/35): a too-tight policy silently stops CA-bundle propagation (existing
+# bundles persist; new/rotated ones stop). Method mirrors
+# platform/openbao/networkpolicy.yaml (openbao-server CNP): enable
+# `cilium endpoint config <ep> PolicyAuditMode=Enabled`, apply this policy,
+# watch `hubble observe --namespace trust-manager --verdict AUDIT` across a
+# Bundle reconcile + webhook admission + Prometheus scrape, confirm ZERO
+# unexpected AUDIT verdicts, then disable audit to enforce. Do NOT merge-and-
+# apply blind.
+#
+# Flow set (chart v0.24.0; ports verified from the rendered Deployment):
+#   egress  -> kube-apiserver 443+6443   (watch Bundle CRs + source ConfigMaps/
+#                                          Secrets, write target bundles)
+#   egress  -> kube-dns:53
+#   ingress <- kube-apiserver -> pod port 6443  (validating webhook; the
+#              apiserver is a reserved entity — a namespaceSelector can NEVER
+#              match it, so MUST be fromEntities — CLAUDE.md rule 12)
+#   ingress <- monitoring -> :9402  (Prometheus scrape of trust-manager metrics)
+#
+# NOTE trust-manager serves its webhook on POD port 6443 (not 10250): match the
+# pod port — socket-LB DNATs the Service port before policy eval (rule 13).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: trust-manager-default-deny
+  namespace: trust-manager
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: trust-manager-allow
+  namespace: trust-manager
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Prometheus scrape of trust-manager metrics (:9402).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9402
+          protocol: TCP
+  egress:
+    # kube-dns.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# kube-apiserver ingress (to the webhook, pod port 6443) + egress (the
+# controller) need the reserved entity — native NetworkPolicy can't express it.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: trust-manager-apiserver
+  namespace: trust-manager
+spec:
+  endpointSelector: {}
+  ingress:
+    # apiserver -> trust-manager validating webhook, POD port 6443
+    # (socket-LB DNATs the Service port before policy eval — rule 13).
+    - fromEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+  egress:
+    # Controller reaches the API server. BOTH 443 and 6443 (socket-LB
+    # translates ClusterIP:443 -> backend:6443 before policy eval — rule 12).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP

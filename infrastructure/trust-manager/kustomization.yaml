@@ -16,3 +16,4 @@ helmCharts:
 
 resources:
   - bundles.yaml
+  - networkpolicy.yaml

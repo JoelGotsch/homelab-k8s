@@ -41,3 +41,5 @@ resources:
   # Cloudflare API token for the Ansible-owned LE ClusterIssuer
   # — ESO takes over from the cold-start seed script.
   - externalsecret-cloudflare-api-token.yaml
+  # netpol-audit.md MEDIUM-1 residual: default-deny + least-privilege.
+  - networkpolicy.yaml
