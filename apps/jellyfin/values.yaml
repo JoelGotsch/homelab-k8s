@@ -49,8 +49,22 @@ affinity:
 image:
   repository: jellyfin/jellyfin
   # OPERATOR PINS via Renovate.
-  tag: "10.10.7"
+  tag: "10.11.11"
   pullPolicy: IfNotPresent
+
+# 10.11's EF Core library-DB migration runs at startup BEFORE the web
+# server binds, and must not be interrupted (one-way; auto-saves
+# library.db.old as retry point). The chart-default liveness probe
+# (tcpSocket, ~40s to kill) would murder a slow migration mid-write —
+# give it 15 min. Chart 2.7.0 has no startupProbe support, so a fat
+# failureThreshold on liveness is the available lever. Tighten back
+# to ~6 after the upgrade has soaked (migration only runs once).
+livenessProbe:
+  tcpSocket:
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  failureThreshold: 90
 
 # Enable Jellyfin's BUILT-IN Prometheus /metrics endpoint (there is no
 # metrics plugin in the official repo — the earlier "jellyfin-plugin-metrics"
@@ -63,7 +77,7 @@ image:
 # up on the first restart after initial provisioning. (2026-07-16)
 initContainers:
   - name: enable-metrics
-    image: jellyfin/jellyfin:10.10.7
+    image: jellyfin/jellyfin:10.11.11
     command:
       - sh
       - -c
