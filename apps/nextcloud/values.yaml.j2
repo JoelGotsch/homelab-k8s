@@ -120,12 +120,13 @@ persistence:
   existingClaim: nextcloud-hot
   # subPath is a SCALAR STRING prefix, not a map (audit 2026-06-04, finding #14).
   # The chart template (nextcloud-5.5.0 templates/deployment.yaml) uses it as:
-  {% raw %}#   subPath: {{ ternary "html" (printf "%s/html" .Values.persistence.subPath) (empty .Values.persistence.subPath) }}{% endraw %}
+  {% raw %}#   subPath: {{ ternary "html" (printf "%s/html" .Values.persistence.subPath) (empty .Values.persistence.subPath) }}
   # and similarly for root, config, custom_apps, themes sub-mounts.
   # Passing a YAML map caused the `empty` check to evaluate to false (non-nil map)
   # and `printf "%s/html"` on a map object → garbled mount path. Leave empty:
   # the chart then uses bare dir names (html, config, custom_apps, themes) as
-  # the subPath within the PVC — correct for a flat single-PVC layout.
+  # the subPath within the PVC — correct for a flat single-PVC layout.{% endraw %}
+
   subPath: ""
   # Chart-native data-dir split (ADR 0030 §D2): mounts the csi-rclone
   # personal-files PVC at nextcloud.datadir (/var/www/html/data),
