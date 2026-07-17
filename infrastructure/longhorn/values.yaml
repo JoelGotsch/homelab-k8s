@@ -10,18 +10,35 @@ defaultSettings:
   # bind failure mode that triggered the 2026-07-09 incident
   # (99.6% of schedulable capacity → SecretSyncedError cascade).
   storageOverProvisioningPercentage: 200
-  # Backup target: MinIO-on-NAS `longhorn-backups` bucket per
-  # ADR 0016 D4 + ADR 0006 (warm tier). Restic CronJob at
-  # `infrastructure/backup-cronjobs/` mirrors this bucket
-  # nightly to tier-2 (friend's NAS) + tier-3 (Hetzner SB).
-  # Credentials supplied via ESO — see externalsecret.yaml
-  # (Secret keys: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
-  # AWS_ENDPOINTS). MinIO is path-style, default region
-  # us-east-1.
-  backupTarget: "s3://longhorn-backups@us-east-1/"
-  backupTargetCredentialSecret: "longhorn-minio-credentials"
   # Prometheus scrape
   upgradeChecker: false
+  # Engines do NOT auto-upgrade after a manager upgrade when this is
+  # 0 (the 1.7.2-era live value) — every volume would stay on the old
+  # engine image and the NEXT hop's pre-upgrade check would fail.
+  # Docs-recommended value 3. Required for the 1.7.2→1.12.0 staged
+  # chain (2026-07-17); harmless steady-state (only acts when a new
+  # default engine image lands). Live upgrade of attached healthy v1
+  # volumes is non-disruptive.
+  concurrentAutomaticEngineUpgradePerNodeLimit: 3
+
+# Backup target: MinIO-on-NAS `longhorn-backups` bucket per
+# ADR 0016 D4 + ADR 0006 (warm tier). Restic CronJob at
+# `infrastructure/backup-cronjobs/` mirrors this bucket
+# nightly to tier-2 (friend's NAS) + tier-3 (Hetzner SB).
+# Credentials supplied via ESO — see externalsecret.yaml
+# (Secret keys: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+# AWS_ENDPOINTS). MinIO is path-style, default region
+# us-east-1.
+#
+# Chart ≥1.8 removed defaultSettings.backupTarget/
+# backupTargetCredentialSecret in favor of this top-level block
+# (multi-backupstore support; renders into the
+# longhorn-default-resource ConfigMap feeding the default
+# BackupTarget CR — the live CR already carries these exact
+# values, so this is a handover, not a change).
+defaultBackupStore:
+  backupTarget: "s3://longhorn-backups@us-east-1/"
+  backupTargetCredentialSecret: "longhorn-minio-credentials"
 
 persistence:
   defaultClass: false  # we install non-default classes per ADR 0016
