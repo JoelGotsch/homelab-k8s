@@ -45,7 +45,14 @@ image:
   # Under the namespace's baseline PSS the apache entrypoint runs as root and
   # binds :80 fine. (Switching to fpm+nginx-non-root is the deferred hardening
   # TODO.) Fixed 2026-05-29.
-  tag: "30-apache"
+  # 34-apache directly (not staged 30→31→…→34): the 2026-07-17
+  # investigation found the instance was NEVER installed — occ
+  # `installed: false`, 0 tables in the CNPG DB, data dir contained
+  # only nextcloud.log (a half-completed maintenance:install from
+  # 2026-05-29 wrote config but no schema). Staged upgrades exist to
+  # protect data; there was none. The half-install was wiped off the
+  # hot PVC and the entrypoint auto-installs fresh at 34.
+  tag: "34-apache"
   pullPolicy: IfNotPresent
 
 # Use external CNPG. Chart's bundled Postgres dependency off.
@@ -111,11 +118,27 @@ cronjob:
 persistence:
   enabled: true
   existingClaim: nextcloud-hot
-  subPath:
-    config: /config
-    customApps: /custom_apps
-    themes: /themes
-    tmp: /tmp
+  # subPath is a SCALAR STRING prefix, not a map (audit 2026-06-04, finding #14).
+  # The chart template (nextcloud-5.5.0 templates/deployment.yaml) uses it as:
+  {% raw %}#   subPath: {{ ternary "html" (printf "%s/html" .Values.persistence.subPath) (empty .Values.persistence.subPath) }}{% endraw %}
+  # and similarly for root, config, custom_apps, themes sub-mounts.
+  # Passing a YAML map caused the `empty` check to evaluate to false (non-nil map)
+  # and `printf "%s/html"` on a map object → garbled mount path. Leave empty:
+  # the chart then uses bare dir names (html, config, custom_apps, themes) as
+  # the subPath within the PVC — correct for a flat single-PVC layout.
+  subPath: ""
+  # Chart-native data-dir split (ADR 0030 §D2): mounts the csi-rclone
+  # personal-files PVC at nextcloud.datadir (/var/www/html/data),
+  # replacing the previous top-level extraVolumes/extraVolumeMounts
+  # approach — those keys were SILENTLY DROPPED (chart only reads
+  # nextcloud.extraVolumes; found 2026-07-17: the live pod mounted only
+  # nextcloud-hot, so user data would have landed on Longhorn instead
+  # of the NAS-encrypted share). Empty subPath → files live under
+  # data/ inside the PVC (same scalar-subPath semantics as above).
+  nextcloudData:
+    enabled: true
+    existingClaim: nextcloud-personal-files
+    subPath: ""
 
 nextcloud:
   # Main 'nextcloud' container. The apache image entrypoint runs as root
@@ -171,32 +194,25 @@ nextcloud:
           name: nextcloud-oidc
           key: issuer
 
-# Cold-bucket PVCs mounted at the paths Nextcloud expects.
-# - /var/www/html/data overlays the hot bucket's data subpath
-#   so Nextcloud's `datadirectory` (default
-#   /var/www/html/data) writes to the encrypted PVC.
-# - /mnt/family-shared and /mnt/internal-archive are mount
-#   targets for the corresponding Nextcloud Group Folders;
-#   operator post-install configures Group Folders to point
-#   at these paths via `occ groupfolders:create`.
-extraVolumes:
-  - name: nextcloud-personal-files
-    persistentVolumeClaim:
-      claimName: nextcloud-personal-files
-  - name: nextcloud-family-shared
-    persistentVolumeClaim:
-      claimName: nextcloud-family-shared
-  - name: nextcloud-internal-archive
-    persistentVolumeClaim:
-      claimName: nextcloud-internal-archive
+  # Cold-bucket Group Folder mounts (ADR 0030 §D2). MUST live under
+  # `nextcloud:` — the chart only reads .Values.nextcloud.extraVolumes;
+  # the previous top-level placement was silently dropped (2026-07-17).
+  # /var/www/html/data moved to the chart-native
+  # persistence.nextcloudData block above. Operator post-install
+  # points Group Folders at these paths via `occ groupfolders:create`.
+  extraVolumes:
+    - name: nextcloud-family-shared
+      persistentVolumeClaim:
+        claimName: nextcloud-family-shared
+    - name: nextcloud-internal-archive
+      persistentVolumeClaim:
+        claimName: nextcloud-internal-archive
 
-extraVolumeMounts:
-  - name: nextcloud-personal-files
-    mountPath: /var/www/html/data
-  - name: nextcloud-family-shared
-    mountPath: /mnt/family-shared
-  - name: nextcloud-internal-archive
-    mountPath: /mnt/internal-archive
+  extraVolumeMounts:
+    - name: nextcloud-family-shared
+      mountPath: /mnt/family-shared
+    - name: nextcloud-internal-archive
+      mountPath: /mnt/internal-archive
 
 # Don't expose Service externally — Cilium HTTPRoute owns
 # ingress.
