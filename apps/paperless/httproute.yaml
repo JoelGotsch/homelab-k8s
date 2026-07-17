@@ -1,8 +1,3 @@
-# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
-# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
-#   ansible-playbook ansible/playbooks/00-render-static.yml
-# (from the homelab-infra repo root).
-# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # Paperless-ngx HTTPRoute via Cilium Gateway.
 #
 # Tailscale-only at all times — `personal` data classification
@@ -23,7 +18,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "paperless.lab.vyramo.com"
+    - "paperless.FQDN_SUFFIX"
   rules:
     - matches:
         - path:

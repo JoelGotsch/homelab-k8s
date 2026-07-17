@@ -34,3 +34,14 @@ resources:
 # (LimitRange + ResourceQuota + default-deny NetPol scaffold).
 components:
   - ../../components/first-party-namespace
+  - ../../components/site-config   # build-only ConfigMap for the replacement below
+
+# Resolve the HTTPRoute hostname from the single site-config (no hardcoded
+# domain): <prefix>.FQDN_SUFFIX -> <prefix>.<fqdn_suffix>. Provenance: this rule
+# -> ConfigMap/site-config.data.fqdn_suffix -> components/site-config/site-config.env.
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: HTTPRoute, name: nextcloud }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }

@@ -1,20 +1,15 @@
-# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
-# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
-#   ansible-playbook ansible/playbooks/00-render-static.yml
-# (from the homelab-infra repo root).
-# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # Immich HTTPRoute via Cilium Gateway.
 #
-# Phase 1 (today): Tailscale-only on
-#   immich.lab.vyramo.com
-# Phase 2: NEVER public on this hostname. Per ADR 0024 D1,
-# public album-sharing is delegated to the read-only
-# `apps/immich-public-proxy/` layer published at
-# `photos.vyramo.com` via Cloudflare Tunnel — Immich's
-# admin UI / API / mobile-backup endpoint stay Tailscale-only
-# at all times. See `04-guides/photo-management-with-immich.md`
-# §"Sharing albums with friends".
-
+# The hostname is NOT hardcoded — `immich.FQDN_SUFFIX` is resolved to
+# `immich.<internal_subdomain>.<domain>` at build time by the site-config
+# replacement in kustomization.yaml (source: components/site-config). To trace
+# it: kustomization.yaml `replacements:` → site-config.env `fqdn_suffix`.
+#
+# Phase 1 (today): Tailscale-only on immich.<internal_subdomain>.<domain>.
+# Phase 2: NEVER public on this hostname. Per ADR 0024 D1, public album-sharing
+# is delegated to the read-only `apps/immich-public-proxy/` layer published at
+# photos.<domain> via Cloudflare Tunnel — Immich's admin UI / API / mobile-backup
+# endpoint stay Tailscale-only. See `04-guides/photo-management-with-immich.md`.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -26,7 +21,7 @@ spec:
       namespace: ingress
       sectionName: https
   hostnames:
-    - "immich.lab.vyramo.com"
+    - "immich.FQDN_SUFFIX"   # -> immich.<fqdn_suffix> via site-config replacement
   rules:
     - matches:
         - path:
