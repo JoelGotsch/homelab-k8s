@@ -1,3 +1,27 @@
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ AUDIT-MODE FINDING 2026-07-17 — DO NOT RE-WIRE UNTIL RESOLVED.            │
+# │ This policy was rolled out under PolicyAuditMode and then briefly         │
+# │ enforced. A COLD verification cache (every kyverno restart) makes the     │
+# │ verify-cosign-static-key attestor fetch sigstore CTLog public keys from   │
+# │ the PUBLIC TUF root https://tuf-repo-cdn.sigstore.dev/ (34.117.62.14:443).│
+# │ The egress set below allows registry.homelab.internal + Forgejo only, so  │
+# │ that fetch is DROPPED. cosign then errors ("failed to load CTLogs public  │
+# │ keys ... i/o timeout"); the fail-CLOSED resource *mutating* webhook hangs  │
+# │ to its 10s timeout; the replicaset-controller cannot create the Pod       │
+# │ (llm-gateway wedged at ready=1/2 during the ceremony). Removing the       │
+# │ policy restored 2/2. This is fail-CLOSED for first-party image deploys,   │
+# │ not fail-open. De-wired from kustomization.yaml pending an operator        │
+# │ decision on the verification trust-root:                                  │
+# │   A) make verification offline: ship a mirrored/embedded TUF root         │
+# │      (SIGSTORE_ROOT_FILE) or set the attestor ctlog.ignoreSCT so no        │
+# │      public TUF fetch is needed — then this egress set is CORRECT as-is.   │
+# │   B) accept a public dependency: add tuf-repo-cdn.sigstore.dev (+ its      │
+# │      TUF mirror) to the toFQDNs egress below. Contradicts the air-gapped   │
+# │      first-party-image intent (ADR 0019) — least preferred.               │
+# │ The apiserver->:9443 ingress + apiserver/DNS egress + metrics were all    │
+# │ verified clean (0 AUDIT); ONLY the cosign trust-root egress is unresolved.│
+# └─────────────────────────────────────────────────────────────────────────┘
+#
 # Default-deny + least-privilege for the kyverno namespace
 # (netpol-audit.md MEDIUM-1 residual). Kyverno is the cluster's admission
 # engine (ADR 0036) — the apiserver calls its webhooks on every admission, and

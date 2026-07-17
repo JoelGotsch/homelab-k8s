@@ -15,7 +15,18 @@ helmCharts:
 
 resources:
   # netpol-audit.md MEDIUM-1 residual: default-deny + least-privilege.
-  - networkpolicy.yaml
+  # DE-WIRED 2026-07-17 — the audit-mode rollout proved this policy BREAKS
+  # first-party image admission on a cold verification cache: the
+  # verify-cosign-static-key attestor loads sigstore CTLog public keys from the
+  # public TUF root (tuf-repo-cdn.sigstore.dev), which the CNP egress does not
+  # allow. Blocked -> the fail-CLOSED resource mutating webhook times out (10s)
+  # -> replicaset-controller cannot create the Pod (llm-gateway wedged 1/2 in
+  # the ceremony). Cold cache recurs on every kyverno restart, so this is a
+  # cluster-wide landmine. Re-enable ONLY after the operator resolves the
+  # verification-trust-root question (offline TUF root / ignoreSCT vs. allowing
+  # public sigstore egress) — see networkpolicy.yaml header. The file is kept in
+  # the tree (unreferenced) so the fix lands in one place.
+  # - networkpolicy.yaml
   - clusterpolicies.yaml
   # ADR 0019 D3 — cosign verification.
   - externalsecret-cosign-public-key.yaml
