@@ -297,7 +297,15 @@ spec:
                   # k8s-<pod-name> snapshots land in the same GFS group as new
                   # k8s-restic-tier-3 ones and retention finally applies to
                   # them (everything in this lane shares the /staging path).
-                  restic $RESTIC_OPTS forget \
+                  #
+                  # sftp.connections=2 (NOT $RESTIC_OPTS): restic 0.17 refuses
+                  # the prune phase with a connection limit of one ("prune
+                  # requires a backend connection limit of at least two").
+                  # This lane never tripped it only because the old per-pod
+                  # --host made forget a no-op, so prune was always skipped.
+                  # 2 is restic's minimum; backup keeps sftp.connections=1
+                  # where the Hetzner concurrent-SFTP corruption was observed.
+                  restic -o sftp.connections=2 forget \
                     --prune \
                     --tag tier-3 \
                     --group-by paths \

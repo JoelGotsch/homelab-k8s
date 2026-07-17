@@ -135,7 +135,13 @@ spec:
                     --keep-daily 2 --keep-weekly 6 --keep-monthly 3 --keep-tag preserve
 
                   echo "=== restic prune ==="
-                  restic $RESTIC_OPTS prune
+                  # restic 0.17 refuses prune with a backend connection limit
+                  # of one ("prune requires a backend connection limit of at
+                  # least two") — found 2026-07-17, first run where forget had
+                  # snapshots to remove. Use 2 (restic's minimum) for prune
+                  # only; backup keeps sftp.connections=1 where the Hetzner
+                  # concurrent-SFTP corruption was actually observed.
+                  restic -o sftp.connections=2 prune
 
                   echo "=== restic snapshots (nas-personal lane) ==="
                   restic $RESTIC_OPTS snapshots --tag nas-personal --compact | tail -20
