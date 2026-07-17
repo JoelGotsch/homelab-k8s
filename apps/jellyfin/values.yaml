@@ -49,7 +49,7 @@ affinity:
 image:
   repository: jellyfin/jellyfin
   # OPERATOR PINS via Renovate.
-  tag: "10.10.0"
+  tag: "10.10.7"
   pullPolicy: IfNotPresent
 
 # Enable Jellyfin's BUILT-IN Prometheus /metrics endpoint (there is no
@@ -63,7 +63,7 @@ image:
 # up on the first restart after initial provisioning. (2026-07-16)
 initContainers:
   - name: enable-metrics
-    image: jellyfin/jellyfin:10.10.0
+    image: jellyfin/jellyfin:10.10.7
     command:
       - sh
       - -c
