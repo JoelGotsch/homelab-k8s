@@ -32,7 +32,7 @@ spec:
     # Forgejo (webhooks).
     - fromEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: forgejo
+            io.kubernetes.pod.namespace: forgejo
       toPorts:
         - ports:
             - port: "8000"
@@ -52,7 +52,7 @@ spec:
     # kube-DNS.
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: kube-system
+            io.kubernetes.pod.namespace: kube-system
             k8s-app: kube-dns
       toPorts:
         - ports:
@@ -63,7 +63,7 @@ spec:
     # Forgejo for OAuth + git metadata.
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: forgejo
+            io.kubernetes.pod.namespace: forgejo
       toPorts:
         - ports:
             - port: "3000"
@@ -86,7 +86,7 @@ spec:
     # kube-DNS.
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: kube-system
+            io.kubernetes.pod.namespace: kube-system
             k8s-app: kube-dns
       toPorts:
         - ports:
@@ -131,7 +131,7 @@ spec:
     # kube-DNS.
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: kube-system
+            io.kubernetes.pod.namespace: kube-system
             k8s-app: kube-dns
       toPorts:
         - ports:
@@ -142,7 +142,7 @@ spec:
     # Forgejo for git-clone (HTTPS) + Forgejo Packages push.
     - toEndpoints:
         - matchLabels:
-            k8s:io.kubernetes.pod.namespace: forgejo
+            io.kubernetes.pod.namespace: forgejo
       toPorts:
         - ports:
             - port: "3000"
@@ -164,8 +164,8 @@ spec:
     # populate its FQDN→IP cache for the toFQDNs rules below.
     - toEndpoints:
         - matchLabels:
-            "k8s:io.kubernetes.pod.namespace": kube-system
-            "k8s:k8s-app": kube-dns
+            "io.kubernetes.pod.namespace": kube-system
+            "k8s-app": kube-dns
       toPorts:
         - ports:
             - port: "53"
@@ -177,19 +177,27 @@ spec:
     - toFQDNs:
         # Forgejo (git clone via public hostname).
         # Step pods clone using `WOODPECKER_FORGEJO_URL`
-        # (https://forgejo.<internal-subdomain>.<domain>),
-        # which resolves to the Cilium Gateway VIP. Traffic
-        # egresses to the gateway and re-enters the cluster
-        # to Forgejo. `ci-woodpecker-default` allows the
-        # in-cluster forgejo-ns shortcut, but Woodpecker
-        # hardcodes the public clone URL from Forgejo's
-        # ROOT_URL, so we also need the public FQDN here
-        # for L7 DNS proxy resolution + egress.
+        # (https://forgejo.{{ homelab_internal_subdomain }}.{{ homelab_domain }}), which resolves to
+        # the Cilium Gateway VIP. Traffic egresses to the
+        # gateway and re-enters the cluster to Forgejo.
+        # `ci-woodpecker-default` allows the in-cluster
+        # forgejo-ns shortcut, but Woodpecker hardcodes the
+        # public clone URL from Forgejo's ROOT_URL, so we
+        # also need it here for FQDN-based egress to work.
         - matchName: "forgejo.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
         # Container registries
         - matchName: "registry-1.docker.io"
         - matchName: "auth.docker.io"
         - matchName: "production.cloudflare.docker.com"
+        # Docker Hub migrated buildkit blob serving from Cloudflare
+        # to CloudFront in 2026 (verified 2026-06-11 during the
+        # pr-agent-build pipeline's first docker-buildx run, which
+        # pulled moby/buildkit:buildx-stable-1 fine but failed
+        # fetching the layer blob with "dial tcp 99.84.91.38:443:
+        # i/o timeout" — that IP is a CloudFront edge node). Keep
+        # the cloudflare line too; Docker still uses it for some
+        # blob requests during the same build session.
+        - matchName: "production.cloudfront.docker.com"
         - matchName: "ghcr.io"
         - matchName: "pkg-containers.githubusercontent.com"
         - matchName: "registry.k8s.io"
@@ -200,6 +208,12 @@ spec:
         - matchName: "pypi.org"
         - matchName: "files.pythonhosted.org"
         - matchName: "registry.npmjs.org"
+        # Prisma engine binaries CDN — `prisma generate` downloads
+        # platform-specific schema-engine + query-engine from here
+        # at build time. Added 2026-06-29 for llm-gateway v0.0.11
+        # (Cloudflare-fronted, separate from production.cloudflare
+        # which covers Docker Hub).
+        - matchName: "binaries.prisma.sh"
         # GitHub (release archives, source for github-tags
         # / github-releases datasources, git+https deps)
         - matchName: "api.github.com"
@@ -213,6 +227,39 @@ spec:
         - matchName: "deb.debian.org"
         - matchName: "security.debian.org"
         - matchName: "dl-cdn.alpinelinux.org"
+        # CDN backends. Build containers spawned by buildkit get
+        # `dockerd --dns <pod-IP>` instead of the cluster Service
+        # DNS, so Cilium's L7 FQDN proxy doesn't follow CNAME chains
+        # — when apt asks for `deb.debian.org` it gets the Fastly
+        # CNAME, queries again, and the resolved IPs aren't tagged
+        # against the original matchName. Explicit pattern coverage
+        # for the Debian mirror CDN (verified 2026-06-11 during
+        # pr-agent-build pipeline #6 — "Could not connect to
+        # debian.map.fastlydns.net:80"). Same pattern applies to
+        # Cloudflare/CloudFront for Alpine + Docker mirrors but
+        # those are already covered via the registry block above.
+        - matchPattern: "*.fastlydns.net"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "80"
+              protocol: TCP
+    # CIDR fallback for Fastly's anycast block. The FQDN
+    # matchPattern above SHOULD cover *.fastlydns.net but Cilium's
+    # FQDN proxy doesn't track CNAME chains when the build pod's
+    # DNS resolution goes through buildkit's embedded dockerd
+    # resolver rather than directly through kube-dns — so the
+    # resolved IPs never get associated with the matched FQDN.
+    # 151.101.0.0/16 is Fastly's main anycast block (covers
+    # debian-cdn, alpine, npm-cdn, etc.). 199.232.0.0/16 is its
+    # secondary range. Verified 2026-06-11 by pipeline #7 still
+    # timing out on 151.101.66.132 even with the matchPattern in
+    # place. Narrower than ideal — revisit if Cilium L7 DNS proxy
+    # learns CNAME-chain tracking, but it's a small CIDR.
+    - toCIDR:
+        - "151.101.0.0/16"
+        - "199.232.0.0/16"
       toPorts:
         - ports:
             - port: "443"

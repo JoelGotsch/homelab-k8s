@@ -7,25 +7,13 @@
   // homelab-infra/renovate-presets/default.json5 (per
   // ADR 0019 + ADR 0023 + update-policy.md).
   //
-  // Status: scaffolded ahead of Forgejo + Woodpecker bring-up
-  // per the operator's "script everything scriptable now"
-  // policy (memory feedback_script-don-t-defer.md). Once
-  // Renovate is enabled against this repo (initially via the
-  // GitHub mirror; later via in-cluster Renovate against
-  // Forgejo), it picks up this config automatically.
-  //
-  // RENDERED from renovate.json5.j2 by
-  // `ansible-playbook ansible/playbooks/00-render-static.yml`
-  // (homelab-infra). `{{ operator_github_user }}` is sourced
-  // from homelab-infra/ansible/inventory/group_vars/all/main.yml.
+  // Status: live against in-cluster Renovate on Forgejo
+  // (platform/renovate/). Repos live under the forgejo-admin
+  // user namespace, not a Forgejo organization — the `local>`
+  // form below resolves the same way regardless.
 
   extends: [
-    // Pre-Forgejo (Renovate-on-GitHub-mirror):
-    "github>{{ operator_github_user }}/homelab-infra//renovate-presets/default.json5",
-    //
-    // Post-Forgejo migration (Renovate-on-Forgejo): swap
-    // to a `local>` reference per the example in
-    // homelab-infra/renovate-presets/example-per-repo.json5.
+    "local>forgejo-admin/homelab-infra//renovate-presets/default.json5",
   ],
 
   // Per-repo packageRules — additive to the central preset.

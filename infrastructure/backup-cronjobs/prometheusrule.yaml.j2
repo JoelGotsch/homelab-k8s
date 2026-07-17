@@ -45,7 +45,7 @@ spec:
             summary: Restic staging PVC > 80% full
             description: |
               `restic-staging` PVC in the `backup-cronjobs`
-              namespace is over 80% full ({{ $value | humanizePercentage }}).
+              namespace is over 80% full ({% raw %}{{ $value | humanizePercentage }}{% endraw %}).
               Source-bucket growth has outpaced the configured
               size; resize the PVC (Longhorn supports online
               resize) or reduce `mc mirror` source set in
@@ -68,7 +68,7 @@ spec:
           annotations:
             summary: Restic staging PVC > 95% full
             description: |
-              `restic-staging` PVC at {{ $value | humanizePercentage }}.
+              `restic-staging` PVC at {% raw %}{{ $value | humanizePercentage }}{% endraw %}.
               Next `mc mirror` run likely fails.
               Resize NOW per
               backup-cronjobs/README.md.
@@ -89,12 +89,12 @@ spec:
             severity: warning
             component: backup-cronjobs
           annotations:
-            summary: Backup CronJob {{ $labels.job_name }} failed
+            summary: Backup CronJob {% raw %}{{ $labels.job_name }}{% endraw %} failed
             description: |
-              CronJob `{{ $labels.job_name }}` in namespace
+              CronJob `{% raw %}{{ $labels.job_name }}{% endraw %}` in namespace
               `backup-cronjobs` reports a failed Job. Inspect:
                 kubectl -n backup-cronjobs get jobs --sort-by=.status.startTime | tail -10
-                kubectl -n backup-cronjobs logs job/{{ $labels.job_name }} --all-containers
+                kubectl -n backup-cronjobs logs job/{% raw %}{{ $labels.job_name }}{% endraw %} --all-containers
               Common causes: Hetzner SB unreachable, SSH host-key
               mismatch (post-rotation), MinIO source bucket
               empty (cnpg cluster down), Restic password rotation
@@ -127,7 +127,7 @@ spec:
             description: |
               The most recent successful Job in
               `backup-cronjobs` finished
-              {{ $value | humanizeDuration }} ago (> 24h).
+              {% raw %}{{ $value | humanizeDuration }}{% endraw %} ago (> 24h).
               CronJob may be paused / suspended, the schedule
               didn't trigger, or every recent run failed.
               Inspect:
@@ -178,7 +178,7 @@ spec:
             severity: critical
             component: backup-cronjobs
           annotations:
-            summary: "Backup CronJob {{ $labels.cronjob }} has not succeeded in 2 days"
+            summary: "Backup CronJob {% raw %}{{ $labels.cronjob }}{% endraw %} has not succeeded in 2 days"
             description: >-
               No successful restic backup run for 2+ days (or the
               CronJob was deleted / has never succeeded). Covers the

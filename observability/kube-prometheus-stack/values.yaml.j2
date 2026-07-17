@@ -93,6 +93,23 @@ alertmanager:
         release: kube-prometheus-stack
     alertmanagerConfigNamespaceSelector: {}
 
+    # Without this, the Operator wraps every route in the
+    # AlertmanagerConfig CRD with a `namespace=<crd-ns>`
+    # matcher — meaning only alerts labeled
+    # `namespace="monitoring"` can enter the tree. Every other
+    # alert (kube-system, argocd, longhorn-system, app
+    # namespaces, ...) falls through to the top-level null
+    # receiver and is silently dropped.
+    # Verified 2026-07-12: 143 of 168 firing alerts were
+    # being null-routed for this reason — the three-tier
+    # design in 03-runbooks/observability/alert-routing.md was
+    # paper only. `type: None` disables the auto-injected
+    # matcher; the CRD's own `severity=critical` /
+    # `component=deception` / etc. matchers do the routing as
+    # intended.
+    alertmanagerConfigMatcherStrategy:
+      type: None
+
     # Storage — Alertmanager state (silences, notification
     # log) needs to survive restarts.
     storage:
@@ -105,11 +122,14 @@ alertmanager:
               storage: 5Gi
 
     resources:
+      # ADR 0036 subagent brief default for Alertmanager.
+      # Raised limit 256Mi → 512Mi to give notification-fanout
+      # bursts headroom.
       requests:
         cpu: 50m
         memory: 128Mi
       limits:
-        memory: 256Mi
+        memory: 512Mi
 
   # Minimal base config the prometheus-operator merges with
   # routes from the AlertmanagerConfig CRD selected by
@@ -187,8 +207,8 @@ grafana:
       # (https://grafana.lab.vyramo.com/login/generic_oauth). Without it,
       # domain='' → Grafana infers scheme/host from the request and sends a
       # redirect_uri that doesn't match the one registered in Authentik, so SSO
-      # fails with a "redirect URI error" (fixed 2026-07-16). Behind the Gateway
-      # (TLS terminated upstream), the inferred scheme is also wrong.
+      # fails with a "redirect URI error" (diagnosed 2026-07-16). Behind the
+      # Gateway (TLS terminated upstream), the inferred scheme is also wrong.
       root_url: https://grafana.{{ homelab_internal_subdomain }}.{{ homelab_domain }}
       domain: grafana.{{ homelab_internal_subdomain }}.{{ homelab_domain }}
     auth.generic_oauth:
@@ -246,11 +266,14 @@ grafana:
           filterBySpanID: false
 
   resources:
+    # ADR 0036 subagent brief default for Grafana. Limit
+    # bumped 512Mi → 1Gi to accommodate dashboard sidecar
+    # imports plus Loki/Tempo datasource proxy load.
     requests:
       cpu: 100m
       memory: 256Mi
     limits:
-      memory: 512Mi
+      memory: 1Gi
 
 # ---------- node-exporter (DaemonSet) ----------
 nodeExporter:
@@ -258,9 +281,55 @@ nodeExporter:
   # Talos: hostNetwork + hostPID required for /proc /sys access.
   # Chart defaults handle this.
 
+# prometheus-node-exporter subchart resources — ADR 0036 D3.
+# The `nodeExporter.enabled` toggle above just gates the subchart;
+# actual container resources live under the subchart's own values
+# key. Without this, the DaemonSet ran with `resources: {}` (audit
+# 2026-07-09).
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
 # ---------- kube-state-metrics ----------
 kubeStateMetrics:
   enabled: true
+
+# Subchart pass-through: kube-state-metrics chart's own values.
+# Without `metricLabelsAllowlist`, KSM emits `kube_pod_labels`
+# series with ONLY metadata labels (name, namespace, uid) — none
+# of the user-defined Kubernetes pod labels (`openbao-active`,
+# `app.kubernetes.io/name`, etc.) make it into Prometheus.
+#
+# Discovered 2026-06-26 (#58 follow-up): the
+# OpenBaoNoActiveLeader rule's PromQL fell through to the
+# `absent(kube_pod_labels{...})` branch and fired a false
+# positive critical alert. Same blast radius affects the new
+# talos-log-sink receiver-down rule (`label_app_kubernetes_io_
+# name="talos-log-sink"` selector — without the allowlist it
+# returns 0 series → absent() → alert fires).
+#
+# `pods=[*]` exposes ALL pod labels — high cardinality (~50
+# labels × 200 pods) but acceptable for a 6-node lab. The
+# correct-by-default choice is to surface labels rather than
+# silently drop them; we can scope down later if cardinality
+# becomes a Prometheus pressure point. For nodes too since the
+# worker-cascade-rules group references node labels.
+kube-state-metrics:
+  metricLabelsAllowlist:
+    - pods=[*]
+    - nodes=[*]
+  # ADR 0036 D3 — chart-default resources: {} audit-flagged
+  # 2026-07-09.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
 
 # ---------- prometheus-operator ----------
 prometheusOperator:

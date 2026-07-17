@@ -116,7 +116,7 @@ domain: "https://vaultwarden.{{ homelab_internal_subdomain }}.{{ homelab_domain 
 signupsAllowed: false   # ADR 0024 D7 — closed-registration; operator
                         # invites family members
 invitationsAllowed: true
-showPasswordHint: false
+showPassHint: false
 
 # WebSocket support (Bitwarden clients use websockets for
 # real-time vault sync notifications).
@@ -174,9 +174,10 @@ resources:
     memory: 512Mi
 
 # Logging — JSON for Loki ingestion per ADR 0021.
+# Note: guerzon/vaultwarden chart only supports logging.logLevel
+# and logging.logFile; logging.format is not a valid chart key.
 logging:
   level: warn
-  format: json
 
 # Argon2 PBKDF2 iterations — Vaultwarden default is 600000
 # rounds matching Bitwarden 2024 baseline; bump if the
