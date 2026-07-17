@@ -37,6 +37,17 @@ resources:
 # ADR 0036: cluster-wide resource-governance baseline.
 components:
   - ../../components/first-party-namespace
+  - ../../components/site-config   # build-only ConfigMap for the replacement below
+
+# Resolve the HTTPRoute hostname from the single site-config (no hardcoded
+# domain): `forgejo.FQDN_SUFFIX` -> `forgejo.<fqdn_suffix>`. Provenance: this rule
+# -> ConfigMap/site-config.data.fqdn_suffix -> components/site-config/site-config.env.
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: HTTPRoute, name: forgejo }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }
 
 # The Helm chart creates the main app PVC (Forgejo's data dir
 # on Longhorn — git repos + config + runtime state). Patch in

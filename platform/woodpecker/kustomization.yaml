@@ -41,3 +41,17 @@ resources:
 # component to `woodpecker` (control plane) only. Punch-list
 # item — kept out of scope for the initial ADR 0036 sweep to
 # avoid unintended cross-ns admission surface.
+
+# Build-only ConfigMap for the HTTPRoute-hostname replacement below.
+components:
+  - ../../components/site-config
+
+# Resolve the HTTPRoute hostname from the single site-config (no hardcoded
+# domain): `woodpecker.FQDN_SUFFIX` -> `woodpecker.<fqdn_suffix>`. Provenance: this
+# rule -> ConfigMap/site-config.data.fqdn_suffix -> components/site-config/site-config.env.
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: HTTPRoute, name: woodpecker }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }
