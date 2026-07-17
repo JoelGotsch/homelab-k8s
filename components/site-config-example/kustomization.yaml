@@ -1,0 +1,22 @@
+# Example of the site-config pattern for RAW manifests (Helm apps use `global`
+# values instead — see ../README.md). Include the component to get the
+# ConfigMap in scope, then `replacements:` inject values into fields.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+components:
+  - ../site-config   # provides the build-only ConfigMap/site-config
+resources:
+  - httproute.yaml
+  - storageclass.yaml
+replacements:
+  # (1) constructed hostname: demo.<fqdn_suffix> via delimiter replacement.
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: HTTPRoute, name: demo }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }
+  # (2) full-value field: NAS IP straight in.
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.nas_storage_ip }
+    targets:
+      - select: { kind: StorageClass, name: demo-nfs }
+        fieldPaths: [parameters.server]
