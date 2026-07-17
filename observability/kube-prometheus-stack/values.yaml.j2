@@ -182,6 +182,15 @@ grafana:
   envFromSecrets:
     - name: grafana-oidc
   grafana.ini:
+    server:
+      # Explicit root_url so Grafana builds the correct OAuth redirect_uri
+      # (https://grafana.lab.vyramo.com/login/generic_oauth). Without it,
+      # domain='' → Grafana infers scheme/host from the request and sends a
+      # redirect_uri that doesn't match the one registered in Authentik, so SSO
+      # fails with a "redirect URI error" (fixed 2026-07-16). Behind the Gateway
+      # (TLS terminated upstream), the inferred scheme is also wrong.
+      root_url: https://grafana.{{ homelab_internal_subdomain }}.{{ homelab_domain }}
+      domain: grafana.{{ homelab_internal_subdomain }}.{{ homelab_domain }}
     auth.generic_oauth:
       enabled: true   # Authentik blueprint provisioned 2026-05-25
       name: Authentik

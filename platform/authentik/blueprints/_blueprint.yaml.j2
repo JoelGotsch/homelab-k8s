@@ -74,6 +74,7 @@ entries:
   # Application — the user-facing tile in Authentik's launcher,
   # bound to the provider above.
   - model: authentik_core.application
+    id: {{ app.slug }}-app
     identifiers:
       slug: {{ app.slug }}
     attrs:
@@ -83,3 +84,22 @@ entries:
       meta_description: "{{ app.meta_description }}"
       group: "{{ app.group }}"
       policy_engine_mode: any
+
+  # Access control — restrict this application to the listed group(s).
+  # GitOps-tracks what was previously UI-only: without these, a blueprint
+  # rebuild silently reopens every app to ANY authenticated user (incl.
+  # family-members) — a regression that would pass unnoticed. Matches the live
+  # bindings (2026-07-17): all apps operator-only. To grant family access to an
+  # app, set `access_groups: [operator, family-members]` on its oidc-apps.yml
+  # entry (defaults to [operator]). NB: akadmin (bootstrap superuser) is
+  # intentionally NOT in `operator`, so it stays break-glass-only.
+{% for grp in app.access_groups | default(['operator']) %}
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf {{ app.slug }}-app
+      group: !Find [authentik_core.group, [name, {{ grp }}]]
+    attrs:
+      order: {{ 10 + loop.index0 * 10 }}
+      enabled: true
+      negate: false
+{% endfor %}
