@@ -231,10 +231,11 @@ spec:
 #   ingress  cnpg-system  -> 8000 (instance manager/status) + 9187 (metrics)
 #   ingress  monitoring   -> 9187 (Prometheus scrape)
 #   ingress  in-ns client -> 5432 (Postgres) + peer 5432 (replication)
+#   ingress  peer         -> 8000 (instance-manager coordination, added 2026-07-17)
 #   egress   kube-apiserver 443 AND 6443 (socket-LB pre-translation, rule 12)
 #   egress   kube-dns 53 UDP+TCP
 #   egress   minio-on-nas 9000 (barman WAL/base-backup archiving)
-#   egress   peer cnpg.io/cluster 5432 (streaming replication)
+#   egress   peer cnpg.io/cluster 5432 (replication) + 8000 (instance-mgr coord)
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

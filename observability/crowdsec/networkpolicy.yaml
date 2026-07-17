@@ -221,10 +221,11 @@ spec:
 #   ingress  cnpg-system  -> 8000 (instance manager/status) + 9187 (metrics)
 #   ingress  monitoring   -> 9187 (Prometheus scrape)
 #   ingress  in-ns client -> 5432 (Postgres) + peer 5432 (replication)
+#   ingress  peer         -> 8000 (instance-manager coordination, added 2026-07-17)
 #   egress   kube-apiserver 443 AND 6443 (socket-LB pre-translation, rule 12)
 #   egress   kube-dns 53 UDP+TCP
 #   egress   minio-on-nas 9000 (barman WAL/base-backup archiving)
-#   egress   peer cnpg.io/cluster 5432 (streaming replication)
+#   egress   peer cnpg.io/cluster 5432 (replication) + 8000 (instance-mgr coord)
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -262,6 +263,19 @@ spec:
         - ports:
             - port: "5432"
               protocol: TCP
+    # Peer instance-manager coordination — CNPG instances query each other's
+    # status API on :8000 (instance->instance, distinct from the operator's
+    # cnpg-system->instance :8000 rule above). Caught in the audit-mode rollout
+    # (2026-07-17): under enforcement this peer flow drops, breaking cluster
+    # status/coordination. Scoped to peers (cnpg.io/cluster) so in-namespace
+    # app pods still cannot reach the instance manager.
+    - fromEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: crowdsec-lapi
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
   egress:
     # kube-apiserver — instance manager reads its Cluster CR. Reserved
     # entity; BOTH 443 and 6443 (socket-LB DNATs ClusterIP:443 -> :6443
@@ -293,11 +307,14 @@ spec:
         - ports:
             - port: "9000"
               protocol: TCP
-    # Replication peer (the other crowdsec-lapi instance) on 5432.
+    # Peer instance (the other crowdsec-lapi pod): streaming replication on 5432
+    # + instance-manager coordination on 8000 (see the peer :8000 ingress note).
     - toEndpoints:
         - matchLabels:
             cnpg.io/cluster: crowdsec-lapi
       toPorts:
         - ports:
             - port: "5432"
+              protocol: TCP
+            - port: "8000"
               protocol: TCP
