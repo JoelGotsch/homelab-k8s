@@ -47,6 +47,9 @@ configMapGenerator:
       - blueprints/immich.yaml
       - blueprints/paperless.yaml
       - blueprints/argocd.yaml
+      # STATIC (not rendered from _blueprint.yaml.j2) — access binding only;
+      # vaultwarden's provider/app are UI-managed (see the file's header).
+      - blueprints/vaultwarden.yaml
     options:
       # Kustomize hash suffix would force ConfigMap rename on
       # every blueprint edit + force chart re-render. Disable

@@ -1,0 +1,38 @@
+# STATIC blueprint — hand-maintained, NOT rendered from _blueprint.yaml.j2.
+# (The other blueprints in this dir ARE rendered; this one deliberately isn't.)
+#
+# WHY vaultwarden is special: its OAuth2Provider + Application are UI-managed,
+# and the LIVE provider uses sub_mode=user_email with NO property mappings/
+# scopes (verified 2026-07-17). The shared OIDC template hardcodes
+# sub_mode=hashed_user_id + scopes [openid,email,profile], so templating
+# vaultwarden through it would OVERWRITE those on the live provider — a change
+# to the `sub` claim that breaks SSO for the PASSWORD MANAGER. So we do NOT
+# recreate its provider/app here.
+#
+# What this DOES: GitOps-track the access-control binding (the actual gap — it
+# was UI-only, so a blueprint rebuild would silently reopen vaultwarden to any
+# authenticated user). It binds the existing application (via !Find) to the
+# `operator` group, matching the live binding → adopted, not duplicated.
+#
+# FULL provider templating is a separate operator-attended task (see TODO
+# "vaultwarden Authentik provider not templated"): extend _blueprint.yaml.j2
+# with sub_mode + property_mappings overrides, add a vaultwarden entry to
+# oidc-apps.yml (sub_mode: user_email, property_mappings: [], redirect_path:
+# /identity/connect/oidc-signin), and wire AUTHENTIK_BOOTSTRAP_VAULTWARDEN_
+# CLIENT_{ID,SECRET} into the authentik-oidc-clients ExternalSecret from the
+# existing OpenBao `vaultwarden/oidc` path. Verify the live provider is
+# unchanged after (client_id, redirect_uri, sub_mode) before trusting it.
+version: 1
+metadata:
+  name: vaultwarden-access
+  labels:
+    blueprints.goauthentik.io/instantiate: "true"
+entries:
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !Find [authentik_core.application, [slug, vaultwarden]]
+      group: !Find [authentik_core.group, [name, operator]]
+    attrs:
+      order: 10
+      enabled: true
+      negate: false
