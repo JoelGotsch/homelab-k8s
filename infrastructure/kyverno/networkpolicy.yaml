@@ -1,0 +1,143 @@
+# Default-deny + least-privilege for the kyverno namespace
+# (netpol-audit.md MEDIUM-1 residual). Kyverno is the cluster's admission
+# engine (ADR 0036) — the apiserver calls its webhooks on every admission, and
+# it verifies first-party image signatures (cosign). With no policy it ran
+# Cilium DEFAULT-ALLOW. This is a DRAFT.
+#
+# ROLLOUT IS OPERATOR-ATTENDED via Cilium PolicyAuditMode + Hubble (rules
+# 14/35) — and kyverno is the HIGHEST wedge risk of the three MEDIUM-1-residual
+# namespaces: if the apiserver->webhook ingress (:9443) is wrong, admission of
+# EVERY object breaks (fail-closed webhooks time out); if the cosign registry
+# egress is wrong, first-party image verification fails and those Pods are
+# denied. Method mirrors platform/openbao/networkpolicy.yaml (openbao-server
+# CNP): enable `cilium endpoint config <ep> PolicyAuditMode=Enabled` on the
+# kyverno controller endpoints, apply this policy (evaluated-not-enforced),
+# watch `hubble observe --namespace kyverno --verdict AUDIT` across admission
+# traffic + a first-party image deploy (cosign pull) + report writes +
+# Prometheus scrape, confirm ZERO unexpected AUDIT verdicts, then disable audit
+# to enforce. Do NOT merge-and-apply blind.
+#
+# Flow set (chart 3.8.2; ports verified from the rendered Deployments — all four
+# controllers share `app.kubernetes.io/part-of: kyverno`):
+#   ingress <- kube-apiserver -> pod port 9443  (admission + cleanup webhooks;
+#              the apiserver is a reserved entity — a namespaceSelector can NEVER
+#              match it, so MUST be fromEntities — CLAUDE.md rule 12)
+#   ingress <- monitoring -> :8000              (Prometheus scrape of metrics)
+#   egress  -> kube-apiserver 443+6443           (watch policies + resources,
+#                                                  write PolicyReports, SA token
+#                                                  review, generate/mutate)
+#   egress  -> kube-dns:53                        (+ toFQDNs proxy visibility)
+#   egress  -> image registries (toFQDNs)         (cosign signature verification
+#                                                  of first-party images —
+#                                                  registry.homelab.internal +
+#                                                  Forgejo Packages, per ADR 0019)
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kyverno-default-deny
+  namespace: kyverno
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kyverno-allow
+  namespace: kyverno
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Prometheus scrape of kyverno metrics (:8000 on every controller).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 8000
+          protocol: TCP
+  egress:
+    # kube-dns.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# kube-apiserver ingress (to the webhooks, pod port 9443) + egress (all
+# controllers), plus the cosign image-verification registry egress. All need
+# either the reserved kube-apiserver entity or toFQDNs — native NetworkPolicy
+# can't express either (CLAUDE.md rule 12).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kyverno-apiserver-registry
+  namespace: kyverno
+spec:
+  endpointSelector: {}
+  ingress:
+    # apiserver -> admission/cleanup webhooks on POD port 9443 (socket-LB
+    # DNATs the Service port before policy eval — rule 13).
+    - fromEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "9443"
+              protocol: TCP
+  egress:
+    # All controllers reach the API server. BOTH 443 and 6443 (socket-LB
+    # translates ClusterIP:443 -> backend:6443 before policy eval — rule 12).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # kube-dns with DNS-proxy visibility (rules.dns) so Cilium populates its
+    # FQDN->IP cache for the toFQDNs rule below (companion rule — rule 15).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # Image registries for cosign signature verification of first-party images
+    # (ADR 0019 D3). The verify-first-party-image-signature policy pulls the
+    # signature artifact from registry.homelab.internal and Forgejo Packages.
+    # registry.homelab.internal is expressed as a toFQDNs allow; Forgejo
+    # Packages is reached via its cluster Gateway (HTTPRoute on
+    # forgejo.lab.<domain>), which arrives as the reserved `ingress` entity —
+    # so the FQDN literal stays out of this GitOps file (domain-literal hook).
+    # OPERATOR CONFIRMS the exact set via Hubble AUDIT during a first-party
+    # image deploy and narrows/extends before enforcing.
+    - toFQDNs:
+        - matchName: "registry.homelab.internal"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # Forgejo Packages via the cluster Gateway (reserved `ingress` entity).
+    - toEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

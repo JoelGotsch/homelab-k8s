@@ -14,6 +14,8 @@ helmCharts:
     includeCRDs: true
 
 resources:
+  # netpol-audit.md MEDIUM-1 residual: default-deny + least-privilege.
+  - networkpolicy.yaml
   - clusterpolicies.yaml
   # ADR 0019 D3 — cosign verification.
   - externalsecret-cosign-public-key.yaml

@@ -80,3 +80,108 @@ spec:
 # encrypted shares as normal mounted filesystems via CSI;
 # if a PVC fails to bind, the pod fails to start (correct
 # behaviour — fail-closed).
+---
+# CNPG DB-pod lockdown (netpol-audit.md MEDIUM-2). DRAFT — do NOT merge-and-
+# apply blind. Until now the nextcloud-pg instances ran Cilium DEFAULT-ALLOW
+# (nothing selected `cnpg.io/cluster`), so the DB had unrestricted ingress
+# AND egress incl. the internet — the latent llm-gateway trap: the day this
+# ns gains a namespace-wide egress default-deny without the CNPG egress set,
+# the DB stalls 1/2 (`dial tcp 10.96.0.1:443: i/o timeout`). This CNP selects
+# ONLY the DB pods for BOTH directions, which flips just those pods to
+# least-privilege (default-deny + the explicit CNPG quad) while leaving every
+# app pod untouched — no namespace-wide default-deny is introduced here.
+#
+# ROLLOUT IS OPERATOR-ATTENDED via Cilium PolicyAuditMode + Hubble (rule 14 /
+# 35). Enable `cilium endpoint config <db-ep-id> PolicyAuditMode=Enabled` on
+# the nextcloud-pg endpoints, apply this policy (evaluated-not-enforced), watch
+# `hubble observe --namespace nextcloud --verdict AUDIT` across a full reconcile
+# (operator probe, metrics scrape, replication, WAL archive to MinIO,
+# apiserver reads), confirm ZERO unexpected AUDIT verdicts, then disable audit
+# to enforce. A missed egress rule wedges the DB silently. Template:
+# platform/openbao/networkpolicy.yaml (openbao-server CNP) — same audit-mode-
+# first method that locked the vault down with zero DROPPED.
+#
+# The quad (netpol-best-practices.md checklist E + CLAUDE.md rules 12/14/15):
+#   ingress  cnpg-system  -> 8000 (instance manager/status) + 9187 (metrics)
+#   ingress  monitoring   -> 9187 (Prometheus scrape)
+#   ingress  in-ns client -> 5432 (Postgres) + peer 5432 (replication)
+#   egress   kube-apiserver 443 AND 6443 (socket-LB pre-translation, rule 12)
+#   egress   kube-dns 53 UDP+TCP
+#   egress   minio-on-nas 9000 (barman WAL/base-backup archiving)
+#   egress   peer cnpg.io/cluster 5432 (streaming replication)
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: nextcloud-pg-cnpg
+  namespace: nextcloud
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: nextcloud-pg
+  ingress:
+    # CNPG operator (cnpg-system) — instance-manager status :8000 + metrics.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+            - port: "9187"
+              protocol: TCP
+    # Prometheus scrape of the CNPG metrics exporter.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "9187"
+              protocol: TCP
+    # In-namespace clients + streaming replication between instances —
+    # both hit pod port 5432.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: nextcloud
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+  egress:
+    # kube-apiserver — instance manager reads its Cluster CR. Reserved
+    # entity; BOTH 443 and 6443 (socket-LB DNATs ClusterIP:443 -> :6443
+    # before policy eval — CLAUDE.md rule 12).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # kube-dns.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # MinIO (minio-on-nas) — barman WAL + base-backup archiving.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: minio-on-nas
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+    # Replication peer (the other nextcloud-pg instance) on 5432.
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: nextcloud-pg
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP

@@ -1,0 +1,143 @@
+# Default-deny + least-privilege for the cert-manager namespace
+# (netpol-audit.md MEDIUM-1 residual — cert-manager was deferred when openbao +
+# external-secrets were locked down; this closes it). With no policy the ns ran
+# Cilium DEFAULT-ALLOW: cert-manager holds the OpenBao PKI issuer token and mints
+# every internal leaf cert, so any compromised pod cluster-wide could reach its
+# webhook / it could egress anywhere. This is a DRAFT.
+#
+# ROLLOUT IS OPERATOR-ATTENDED via Cilium PolicyAuditMode + Hubble — these
+# controllers are wedge-risk (a too-tight egress silently stops cert issuance /
+# renewal; the apiserver->webhook ingress gate, if wrong, breaks admission of
+# Certificate CRs). Do NOT merge-and-apply blind (CLAUDE.md rules 14/35).
+# Method (mirrors platform/openbao/networkpolicy.yaml, the openbao-server CNP):
+# enable `cilium endpoint config <ep> PolicyAuditMode=Enabled` on the
+# cert-manager / cainjector / webhook endpoints, apply this policy
+# (evaluated-not-enforced), watch `hubble observe --namespace cert-manager
+# --verdict AUDIT` across a full issue+renew cycle (OpenBao PKI sign, the
+# Ansible-owned Let's Encrypt DNS-01 ClusterIssuer hitting ACME + the Cloudflare
+# API, webhook admission, Prometheus scrape), confirm ZERO unexpected AUDIT
+# verdicts, then disable audit to enforce.
+#
+# Flow set (chart v1.21.0; ports verified from the rendered Deployments):
+#   Controller (app=cert-manager):
+#     egress -> openbao.openbao.svc:8200         (Vault PKI issuer sign)
+#     egress -> kube-apiserver 443+6443          (watch Certificate/Issuer CRs,
+#                                                  write Secrets, SA token review)
+#     egress -> kube-dns:53                       (+ toFQDNs proxy visibility)
+#     egress -> ACME + Cloudflare API (toFQDNs)   (LE DNS-01 ClusterIssuer,
+#                                                  Ansible-owned per ADR 0034 D1)
+#   Webhook (app=webhook):
+#     ingress <- kube-apiserver -> pod port 10250 (validating/mutating webhook;
+#                the apiserver is a reserved entity — a namespaceSelector can
+#                NEVER match it, so this MUST be fromEntities — CLAUDE.md rule 12)
+#     egress  -> kube-apiserver 443+6443          (SubjectAccessReview)
+#   cainjector: apiserver + DNS egress (injects CA bundles into webhook configs)
+#   All pods: http-metrics :9402 scrapable from monitoring.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cert-manager-default-deny
+  namespace: cert-manager
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cert-manager-allow
+  namespace: cert-manager
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Prometheus scrape of controller/cainjector/webhook metrics (:9402).
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9402
+          protocol: TCP
+  egress:
+    # kube-dns.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # OpenBao PKI issuer — the Vault ClusterIssuer signs leaf certs here.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openbao
+      ports:
+        - port: 8200
+          protocol: TCP
+---
+# kube-apiserver ingress (to the webhook) + egress (all components) need the
+# reserved entity — native NetworkPolicy can't express it (CLAUDE.md rule 12).
+# Plus the ACME / Cloudflare-API egress for the Ansible-owned Let's Encrypt
+# DNS-01 ClusterIssuer, expressed as toFQDNs (survives IP changes; auditable).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cert-manager-apiserver-acme
+  namespace: cert-manager
+spec:
+  endpointSelector: {}
+  ingress:
+    # The API server calls the cert-manager webhook on the POD port 10250
+    # (svc 443 -> containerPort 10250; socket-LB DNATs before policy eval, so
+    # match the pod port — CLAUDE.md rule 13).
+    - fromEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "10250"
+              protocol: TCP
+  egress:
+    # All components reach the API server. BOTH 443 and 6443 (socket-LB
+    # translates ClusterIP:443 -> backend:6443 before policy eval — rule 12).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # kube-dns with DNS-proxy visibility (rules.dns) so Cilium populates its
+    # FQDN->IP cache for the toFQDNs rules below (companion rule — rule 15).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # ACME (Let's Encrypt) + Cloudflare API for the Ansible-owned DNS-01
+    # ClusterIssuer (ADR 0034 D1). Only the LE issuer path leaves the cluster;
+    # the internal OpenBao PKI issuer stays in-cluster (rule above).
+    - toFQDNs:
+        - matchName: "acme-v02.api.letsencrypt.org"
+        - matchName: "acme-staging-v02.api.letsencrypt.org"
+        - matchName: "api.cloudflare.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
