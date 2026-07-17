@@ -95,6 +95,12 @@ spec:
                     restic $RESTIC_OPTS init
                   fi
 
+                  # Clear stale locks before touching the repo (see cronjob.yaml
+                  # — same rationale, 2026-07-17 stale-lock incident). Safe: only
+                  # removes locks >30 min old; live locks are refreshed ~5 min.
+                  echo "=== restic unlock (stale locks only) ==="
+                  restic $RESTIC_OPTS unlock
+
                   # Back up each share as its own snapshot (per-share restore
                   # granularity), tagged nas-personal + its data-class. A share
                   # whose PVC is empty/unmounted is skipped, not fatal.

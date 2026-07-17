@@ -244,6 +244,14 @@ spec:
                     restic $RESTIC_OPTS init
                   fi
 
+                  # Clear stale locks before touching the repo. A one-off verify
+                  # pod deleted mid-run left a stale lock that failed BOTH lanes'
+                  # forget/prune on 2026-07-17. Safe against the other lane: a
+                  # live restic process refreshes its lock every ~5 min, and
+                  # `unlock` only removes locks older than 30 min (stale).
+                  echo "=== restic unlock (stale locks only) ==="
+                  restic $RESTIC_OPTS unlock
+
                   echo "=== restic backup /staging ==="
                   restic $RESTIC_OPTS backup /staging \
                     --tag "tier-3" \
