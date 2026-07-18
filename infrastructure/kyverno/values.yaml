@@ -27,8 +27,33 @@ policyReportsCleanup:
 # enough that under normal conditions the scheduler keeps the
 # per-controller replicas on distinct hosts.
 
+# --- homelab CA trust (2026-07-18) ---
+# The engine controllers (admission/background/reports) run cosign
+# imageVerify, whose TLS client reads the container's system trust store.
+# The distroless image ships only public CAs, so pulls from
+# registry.homelab.internal (homelab-internal-issuer) x509-fail — signature
+# verification silently failed in Audit mode on every cold cache.
+# Mount trust-manager's `homelab-trust-bundle` ConfigMap (Mozilla defaults +
+# homelab roots; see infrastructure/trust-manager/bundles.yaml) AS the
+# /etc/ssl/certs directory: the bundle key is named ca-certificates.crt, so
+# Go finds it at the default path. Directory mount (no subPath) => bundle
+# rotation propagates to running pods. Replacing the directory is safe ONLY
+# because the bundle includes the public defaults (forgejo.lab.<domain>
+# serves the Let's Encrypt wildcard and must keep verifying).
+# NOT the chart's global.caCertificates knob: its `volume` variant mounts a
+# ConfigMap as a DIRECTORY at .../ca-certificates.crt (file path), which Go
+# cannot read; its `data` variant would inline the whole Mozilla bundle here.
+
 admissionController:
   replicas: 2
+  extraVolumes:
+    - name: homelab-trust-bundle
+      configMap:
+        name: homelab-trust-bundle
+  extraVolumeMounts:
+    - name: homelab-trust-bundle
+      mountPath: /etc/ssl/certs
+      readOnly: true
   resources:
     # ADR 0036 rollout raises admission-controller headroom.
     # Kyverno's admission path was previously 512Mi limit; with
@@ -49,6 +74,15 @@ admissionController:
 
 backgroundController:
   replicas: 2
+  # homelab CA trust — see the block comment above admissionController.
+  extraVolumes:
+    - name: homelab-trust-bundle
+      configMap:
+        name: homelab-trust-bundle
+  extraVolumeMounts:
+    - name: homelab-trust-bundle
+      mountPath: /etc/ssl/certs
+      readOnly: true
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {memory: 512Mi}
@@ -75,6 +109,17 @@ cleanupController:
 
 reportsController:
   replicas: 2
+  # homelab CA trust — see the block comment above admissionController.
+  # The reports-controller matters most long-term: after the verify policy
+  # moves to background-only (admission: false), IT runs the cosign pulls.
+  extraVolumes:
+    - name: homelab-trust-bundle
+      configMap:
+        name: homelab-trust-bundle
+  extraVolumeMounts:
+    - name: homelab-trust-bundle
+      mountPath: /etc/ssl/certs
+      readOnly: true
   resources:
     requests: {cpu: 25m, memory: 64Mi}
     limits: {memory: 256Mi}

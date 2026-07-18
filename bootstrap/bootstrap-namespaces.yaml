@@ -74,6 +74,11 @@ metadata:
     pod-security.kubernetes.io/enforce: restricted
     homelab.internal/first-party: "true"
     homelab.internal/data-class: internal
+    # trust-manager injects the homelab-trust-bundle ConfigMap (defaults +
+    # homelab CAs) — mounted over /etc/ssl/certs by all kyverno engine
+    # controllers so imageVerify can TLS-validate registry.homelab.internal
+    # (2026-07-18; see infrastructure/trust-manager/bundles.yaml).
+    homelab.lab/inject-ca: "true"
 ---
 apiVersion: v1
 kind: Namespace

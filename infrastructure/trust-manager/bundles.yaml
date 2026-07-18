@@ -101,3 +101,46 @@ stringData:
     PQQDAgNJADBGAiEArclhqPipBBn0deoMb1wtImM7hmf33vlRblscLoIq1+UCIQDi
     P1itTCYJiy+CC5s5BAUN89Iq8p8p2OMiR6OsVFWZEw==
     -----END CERTIFICATE-----
+---
+# System-trust bundle: DEFAULT PUBLIC CAs + the homelab roots.
+#
+# Distinct from `homelab-root-ca` above ON PURPOSE — different semantics:
+#   homelab-root-ca      = pin-only (ONLY internal roots). For consumers that
+#                          should trust nothing but the homelab PKI.
+#   homelab-trust-bundle = full system trust (Mozilla defaults via trust-
+#                          manager's debian package + homelab roots). For
+#                          consumers whose ENTIRE trust store gets replaced by
+#                          the mount and that must still reach public-CA'd
+#                          endpoints.
+#
+# First consumer: kyverno (2026-07-18). Its imageVerify TLS-fails against
+# registry.homelab.internal (homelab-internal-issuer) because the distroless
+# image trusts only public CAs — but its OTHER imageRef host,
+# forgejo.<fqdn_suffix> (see components/site-config), serves the Let's
+# Encrypt wildcard. Mounting a
+# pin-only bundle over /etc/ssl/certs would fix the registry and silently
+# break Forgejo — hence defaults + homelab here. useDefaultCAs comes from
+# trust-manager's --default-package-location (cert-manager-package-debian),
+# verified present on the running deployment.
+apiVersion: trust.cert-manager.io/v1alpha1
+kind: Bundle
+metadata:
+  name: homelab-trust-bundle
+spec:
+  sources:
+    - useDefaultCAs: true
+    - secret:
+        name: homelab-root-ca
+        key: ca.crt
+    - secret:
+        name: openbao-bootstrap-ca
+        key: ca.crt
+  target:
+    configMap:
+      # Named exactly like the file Go/distroless expects so the ConfigMap
+      # can be mounted AS the /etc/ssl/certs directory (no subPath — bundle
+      # rotation propagates to running pods).
+      key: ca-certificates.crt
+    namespaceSelector:
+      matchLabels:
+        homelab.lab/inject-ca: "true"
