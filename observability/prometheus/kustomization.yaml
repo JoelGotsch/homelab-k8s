@@ -13,3 +13,5 @@ kind: Kustomization
 
 resources:
   - external-hosts
+  - argocd-servicemonitors.yaml   # 2026-07-18 — cluster-overview Argo panels were never fed
+  - cilium-podmonitor.yaml        # 2026-07-18 — "Cilium agents up" panel never fed

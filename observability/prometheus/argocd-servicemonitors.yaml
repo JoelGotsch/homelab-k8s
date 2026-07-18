@@ -1,0 +1,63 @@
+# Argo CD metrics scraping — created 2026-07-18. The cluster-overview
+# dashboard has paneled argocd_app_info (OutOfSync / Degraded counts)
+# since it was authored, but nothing ever scraped Argo CD: the
+# upstream install.yaml ships the metrics Services (verified live:
+# argocd-metrics:8082 app-controller, argocd-server-metrics:8083,
+# argocd-notifications-controller-metrics:9001) but no
+# ServiceMonitors. Same never-wired disease as the Mac Studio
+# external-hosts layer, fixed the same day.
+#
+# `release: kube-prometheus-stack` matches the Prometheus CR's
+# serviceMonitorSelector (verified 2026-07-18);
+# serviceMonitorNamespaceSelector is {} (all namespaces), so these
+# live in monitoring and select across to argocd.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argocd-application-controller
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: [argocd]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-metrics
+  endpoints:
+    - port: metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argocd-server
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: [argocd]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-server-metrics
+  endpoints:
+    - port: metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: argocd-notifications-controller
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: [argocd]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-notifications-controller-metrics
+  endpoints:
+    - port: metrics
+      interval: 30s

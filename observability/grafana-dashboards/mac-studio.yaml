@@ -1,0 +1,131 @@
+# Mac Studio inference host dashboard — created 2026-07-18 when the
+# external-hosts scrape layer finally landed (see
+# observability/prometheus/kustomization.yaml HISTORY note).
+#
+# Two metric tiers:
+#   LIVE NOW  — node_exporter (job mac-studio-node) + mlx-exporter
+#               (job mac-studio-mlx): memory, load, disk, MLX/Ollama.
+#   PENDING   — macmon textfile metrics (mac_temp_celsius,
+#               mac_usage_ratio, mac_power_watts) appear after the
+#               operator runs the 12-mac-inference playbook
+#               (homelab-infra de6e18c + follow-up; TODO'd for
+#               vacation return).
+#
+# Sidecar picks it up via grafana_dashboard=1; lands in "Homelab".
+# Grafana: "Homelab" folder → "Mac Studio" (uid homelab-mac-studio)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-mac-studio
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/name: grafana-dashboards
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: observability
+  annotations:
+    grafana_folder: "Homelab"
+data:
+  mac-studio.json: |
+    {
+      "uid": "homelab-mac-studio",
+      "title": "Mac Studio",
+      "tags": ["homelab", "mac-studio", "inference"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "1m",
+      "time": { "from": "now-24h", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "type": "stat",
+          "title": "MLX server",
+          "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+          "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } } ] } },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+          "targets": [ { "expr": "mlx_server_up", "legendFormat": "mlx" } ]
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Ollama server",
+          "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+          "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } } ] } },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+          "targets": [ { "expr": "ollama_server_up", "legendFormat": "ollama" } ]
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Models (MLX / Ollama)",
+          "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+          "targets": [
+            { "expr": "mlx_models_total", "legendFormat": "mlx" },
+            { "expr": "ollama_models_total", "legendFormat": "ollama" }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Model store size",
+          "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "bytes" } },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+          "targets": [ { "expr": "mlx_models_bytes_total", "legendFormat": "models" } ]
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Memory used",
+          "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 75 }, { "color": "red", "value": 90 } ] } } },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+          "targets": [ { "expr": "100 * (node_memory_internal_bytes{job=\"mac-studio-node\"} + node_memory_wired_bytes{job=\"mac-studio-node\"} + node_memory_compressed_bytes{job=\"mac-studio-node\"}) / node_memory_total_bytes{job=\"mac-studio-node\"}", "legendFormat": "mem" } ]
+        },
+        {
+          "id": 6,
+          "type": "stat",
+          "title": "Load (1m)",
+          "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+          "targets": [ { "expr": "node_load1{job=\"mac-studio-node\"}", "legendFormat": "load1" } ]
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "CPU / GPU utilization (pending mac ansible run)",
+          "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
+          "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] } },
+          "targets": [ { "expr": "mac_usage_ratio", "legendFormat": "{{component}}" } ]
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "CPU / GPU temperature (pending mac ansible run)",
+          "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
+          "fieldConfig": { "defaults": { "unit": "celsius", "min": 20, "max": 110, "custom": { "lineWidth": 2, "fillOpacity": 5 }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 85 }, { "color": "red", "value": 100 } ] } } },
+          "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] } },
+          "targets": [ { "expr": "mac_temp_celsius", "legendFormat": "{{sensor}}" } ]
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "Package power (pending mac ansible run)",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+          "fieldConfig": { "defaults": { "unit": "watt", "custom": { "lineWidth": 2, "fillOpacity": 10 } } },
+          "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] } },
+          "targets": [ { "expr": "mac_power_watts", "legendFormat": "{{component}}" } ]
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "GPU frequency (pending mac ansible run)",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+          "fieldConfig": { "defaults": { "unit": "suffix:MHz", "custom": { "lineWidth": 2, "fillOpacity": 5 } } },
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+          "targets": [ { "expr": "mac_gpu_freq_mhz", "legendFormat": "gpu MHz" } ]
+        }
+      ]
+    }

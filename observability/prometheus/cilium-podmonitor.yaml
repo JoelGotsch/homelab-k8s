@@ -1,0 +1,27 @@
+# Cilium agent metrics scraping — created 2026-07-18. The
+# cluster-overview "Cilium agents up" panel queries
+# sum(up{job=~".*cilium.*"}) but nothing ever scraped the agents:
+# cilium-config already serves metrics (prometheus-serve-addr :9962,
+# container port named "prometheus" — verified live), only the
+# monitor object was missing. PodMonitor (not ServiceMonitor)
+# because the chart install created no agent metrics Service.
+#
+# Job label becomes "monitoring/cilium-agent" → matches the panel's
+# .*cilium.* regex. `release: kube-prometheus-stack` matches the
+# Prometheus CR's podMonitorSelector (verified 2026-07-18).
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: cilium-agent
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: [kube-system]
+  selector:
+    matchLabels:
+      k8s-app: cilium
+  podMetricsEndpoints:
+    - port: prometheus
+      interval: 30s
