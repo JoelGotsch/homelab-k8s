@@ -227,3 +227,20 @@ spec:
                     # setting on verify.
                     rekor:
                       ignoreTlog: true
+                    # No SCT (Signed Certificate Timestamp) check either.
+                    # This is a STATIC-KEY attestor (not keyless/Fulcio), so
+                    # there is no embedded SCT to verify. Without ignoreSCT,
+                    # cosign still bootstraps the sigstore TUF trust root from
+                    # the PUBLIC CDN (https://tuf-repo-cdn.sigstore.dev) to
+                    # load CTLog public keys — a locked-down kyverno egress
+                    # drops that, and because the fetch is on the admission
+                    # path the fail-CLOSED resource mutating webhook times out
+                    # (10s) and first-party Pod CREATE is BLOCKED on every cold
+                    # verification cache, i.e. every kyverno restart (audit-
+                    # mode finding 2026-07-17: llm-gateway wedged 1/2). This
+                    # keeps first-party verification fully offline so the
+                    # infrastructure/kyverno/networkpolicy.yaml egress set
+                    # (registry.homelab.internal + Forgejo, no public sigstore)
+                    # is correct and can be re-enforced.
+                    ctlog:
+                      ignoreSCT: true
