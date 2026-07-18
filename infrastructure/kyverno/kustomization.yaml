@@ -30,6 +30,9 @@ resources:
   - clusterpolicies.yaml
   # ADR 0019 D3 — cosign verification.
   - externalsecret-cosign-public-key.yaml
+  # Registry creds for imageVerify signature pulls — private Forgejo
+  # Packages repos reject anonymous token grants (2026-07-18).
+  - registry-pull-secret.yaml
   - policies/verify-first-party-image-signature.yaml
   # Audit-only: workloads with `httpGet path: /` probes that aren't
   # explicitly confirmed via probes.homelab.internal/root-route-confirmed

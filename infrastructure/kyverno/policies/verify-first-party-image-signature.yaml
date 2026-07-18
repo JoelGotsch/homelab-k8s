@@ -208,6 +208,17 @@ spec:
           # of mutateDigest — verifyDigest is the audit-side
           # check; mutateDigest is the rewrite side.
           verifyDigest: true
+          # Registry credentials for the signature pull. The Forgejo
+          # Packages registry rejects anonymous token grants for private
+          # repos (GET /v2/token ... UNAUTHORIZED — 2026-07-18, surfaced
+          # once the homelab-trust-bundle CA mount fixed TLS). The Secret
+          # is the standard first-party pull credential, materialized in
+          # the kyverno namespace by registry-pull-secret.yaml (ESO,
+          # kv/shared/forgejo-packages/ci). Kyverno resolves the name in
+          # its own namespace.
+          imageRegistryCredentials:
+            secrets:
+              - registry-homelab-internal-pull
           attestors:
             - count: 1
               entries:
