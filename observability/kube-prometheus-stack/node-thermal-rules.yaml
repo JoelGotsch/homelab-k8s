@@ -7,7 +7,7 @@
 # noise. Pairs with the node-thermals Grafana dashboard
 # (grafana-dashboards/node-thermals.yaml).
 #
-# Chip label: `pci.*_18_3` = AMD k10temp (PCI function 18.3 is the
+# Chip label: `pci.*18_3` = AMD k10temp (PCI function 18.3 is the
 # CPU thermal interface on this platform) — the CPU package Tctl.
 # Verified live 2026-07-18.
 #
@@ -31,7 +31,7 @@ spec:
           # cooling failure, dust, paste degradation, or ambient.
           expr: |
             max by (instance) (
-              node_hwmon_temp_celsius{chip=~"pci.*_18_3"}
+              node_hwmon_temp_celsius{chip=~"pci.*18_3"}
             ) > 90
           for: 15m
           labels:
@@ -52,7 +52,7 @@ spec:
           # of duration pattern — short `for` on purpose.
           expr: |
             max by (instance) (
-              node_hwmon_temp_celsius{chip=~"pci.*_18_3"}
+              node_hwmon_temp_celsius{chip=~"pci.*18_3"}
             ) > 95
           for: 3m
           labels:

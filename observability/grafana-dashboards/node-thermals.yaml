@@ -6,7 +6,7 @@
 # the thermal limit is invisible without a trend view.
 #
 # Metrics (verified live 2026-07-18):
-#   node_hwmon_temp_celsius{chip=~"pci.*_18_3"}  ← k10temp CPU package (Tctl)
+#   node_hwmon_temp_celsius{chip=~"pci.*18_3"}  ← k10temp CPU package (Tctl)
 #   node_hwmon_temp_celsius{chip=~"nvme.*"}      ← NVMe composite/sensor temps
 #
 # Pairs with the NodeCPUTempSustainedHigh alert
@@ -64,7 +64,7 @@ data:
           },
           "targets": [
             {
-              "expr": "max by (instance) (node_hwmon_temp_celsius{chip=~\"pci.*_18_3\"})",
+              "expr": "max by (instance) (node_hwmon_temp_celsius{chip=~\"pci.*18_3\"})",
               "legendFormat": "{{instance}}"
             }
           ]
@@ -122,7 +122,7 @@ data:
           "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
           "targets": [
             {
-              "expr": "max by (instance) (max_over_time(node_hwmon_temp_celsius{chip=~\"pci.*_18_3\"}[7d]))",
+              "expr": "max by (instance) (max_over_time(node_hwmon_temp_celsius{chip=~\"pci.*18_3\"}[7d]))",
               "legendFormat": "{{instance}}"
             }
           ]
