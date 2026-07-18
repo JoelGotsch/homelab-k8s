@@ -159,18 +159,36 @@ metadata:
       namespace, projected by the sibling ExternalSecret from
       OpenBao kv/shared/cosign/key field `public`.
 spec:
-  # background: false — verifyImages rules CAN run in
-  # background, but only as an audit pass; running them on
-  # the foreground admission path is what produces the
-  # "unsigned images don't run" property. Leaving background
-  # off avoids redundant PolicyReport churn on every
-  # background scan tick.
-  background: false
+  # failurePolicy: Ignore + background: true (2026-07-18). The previous
+  # shape (background: false + failurePolicy: Fail) was designed for the
+  # ASPIRATIONAL "unsigned images don't run" property — but failureAction
+  # below is Audit, so admission-time evaluation blocked nothing while its
+  # cosign network I/O (registry signature pull; formerly also the sigstore
+  # TUF fetch) ran inside the fail-CLOSED resource mutating webhook. Any
+  # slow/blocked egress hung the webhook to its 10s timeout and the
+  # replicaset-controller could not create ANY first-party pod (llm-gateway
+  # wedged at 1/2 twice during the 2026-07-17/18 netpol audit-mode rollout).
+  #
+  # `admission: false` would be cleaner (no admission-path network I/O at
+  # all) but kyverno rejects it for verifyImages rules ("disabling admission
+  # processing is only allowed with validation policies" — caught by
+  # dry-run 2026-07-18). failurePolicy: Ignore is the achievable shape:
+  # kyverno registers this policy's rules under the -ignore webhook entry,
+  # so a hung verification degrades to +timeoutSeconds pod-create latency
+  # instead of cluster-wide create blockage. With Audit failureAction,
+  # Ignore forfeits NOTHING (nothing was ever blocked). background: true
+  # keeps PolicyReports fresh from the reports-controller even without pod
+  # churn, now that verification results are meaningful (CA + registry
+  # creds fixed).
+  #
+  # PROMOTION PATH (when signing is actually rolled out and Enforce is
+  # wanted; ADR-worthy decision): flip failurePolicy back to Fail +
+  # failureAction: Enforce + mutateDigest: true TOGETHER, and budget for
+  # the re-coupling of pod admission to registry availability (warm
+  # imageVerify cache, webhook timeoutSeconds, registry HA).
+  background: true
   webhookConfiguration:
-    # Fail-closed: if Kyverno is unhealthy, first-party Pod
-    # admissions are rejected (rather than silently admitted
-    # without signature check). See file header.
-    failurePolicy: Fail
+    failurePolicy: Ignore
   rules:
     - name: verify-cosign-static-key
       match:
