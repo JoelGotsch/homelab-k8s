@@ -218,6 +218,12 @@ spec:
         # / github-releases datasources, git+https deps)
         - matchName: "api.github.com"
         - matchName: "objects.githubusercontent.com"
+        # GitHub release-asset downloads 302 from github.com to THIS host
+        # since GH moved assets off objects.* — found 2026-07-18 when the
+        # cosign-sign step's pinned-binary wget silently timed out (the
+        # exact "new CDN needs an allowlist edit" class this file warns
+        # about). Probe-verified from inside the ns before adding.
+        - matchName: "release-assets.githubusercontent.com"
         - matchName: "codeload.github.com"
         - matchName: "github.com"
         - matchName: "raw.githubusercontent.com"
