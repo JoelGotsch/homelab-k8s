@@ -1,0 +1,68 @@
+# Node thermal alerting — created 2026-07-18 during the worker1
+# hard-down incident. worker1's 30-day CPU max was 99.5°C (AMD Tjmax
+# for this Ryzen SoC) and NOTHING watched temperature: no dashboard,
+# no alert. The HCAR5000-MI fleet baselines mid-70s→mid-80s °C under
+# normal cluster load, so the margin to the thermal limit is ~10°C —
+# sustained excursions above 90 are a hardware-health signal, not
+# noise. Pairs with the node-thermals Grafana dashboard
+# (grafana-dashboards/node-thermals.yaml).
+#
+# Chip label: `pci.*_18_3` = AMD k10temp (PCI function 18.3 is the
+# CPU thermal interface on this platform) — the CPU package Tctl.
+# Verified live 2026-07-18.
+#
+# Routed at `severity: warning` per the worker-cascade-rules.yaml
+# convention; re-tier after signal review if it turns out to page-
+# worthy (a node at 95°C is minutes-to-hours from a thermal trip).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: node-thermal-rules
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: node-thermals
+      rules:
+        - alert: NodeCPUTempSustainedHigh
+          # 15m sustained >90°C: transient boost spikes to ~90 are
+          # normal on these compact boxes; quarter-hour plateaus are
+          # cooling failure, dust, paste degradation, or ambient.
+          expr: |
+            max by (instance) (
+              node_hwmon_temp_celsius{chip=~"pci.*_18_3"}
+            ) > 90
+          for: 15m
+          labels:
+            severity: warning
+            component: node-hardware
+          annotations:
+            summary: "{{ $labels.instance }} CPU above 90°C for 15m"
+            description: |
+              CPU package (k10temp Tctl) on {{ $labels.instance }} has
+              been above 90°C for 15 minutes (current
+              {{ $value | humanize }}°C; AMD limit ≈95-100°C).
+              Sustained operation here accelerates silicon/VRM aging
+              and precedes thermal-trip hangs (worker1 2026-07-18
+              incident, 30d max 99.5°C). Check fan, dust, ambient,
+              node load; see the node-thermals dashboard.
+        - alert: NodeCPUTempNearLimit
+          # Anything touching 95 is pre-failure territory regardless
+          # of duration pattern — short `for` on purpose.
+          expr: |
+            max by (instance) (
+              node_hwmon_temp_celsius{chip=~"pci.*_18_3"}
+            ) > 95
+          for: 3m
+          labels:
+            severity: warning
+            component: node-hardware
+          annotations:
+            summary: "{{ $labels.instance }} CPU near thermal limit (>95°C)"
+            description: |
+              CPU package on {{ $labels.instance }} above 95°C
+              (current {{ $value | humanize }}°C) — at/near Tjmax.
+              Expect throttling now and a possible hard-hang next
+              (worker1 pattern). Shed load or shut the node down
+              cleanly before the hardware does it for you.

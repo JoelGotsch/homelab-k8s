@@ -34,6 +34,7 @@ resources:
   - worker-cascade-rules.yaml
   - openbao-seal-rules.yaml
   - rules-longhorn.yaml
+  - node-thermal-rules.yaml  # 2026-07-18 worker1 incident — CPU temp watch
 
 components:
   - ../../components/site-config

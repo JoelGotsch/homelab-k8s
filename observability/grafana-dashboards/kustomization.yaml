@@ -29,3 +29,4 @@ resources:
   - cluster-overview.yaml
   - llm-gateway.yaml
   - backup-footprint.yaml   # Workstream F — backup size / pileup / restic freshness
+  - node-thermals.yaml      # 2026-07-18 worker1 incident — CPU/NVMe temp trend + 7d max

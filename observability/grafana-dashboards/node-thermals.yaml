@@ -1,0 +1,131 @@
+# Node thermals dashboard — created 2026-07-18 during the worker1
+# hard-down incident. worker1's 30-day CPU max was 99.5°C (AMD Tjmax)
+# and nothing surfaced it: no dashboard paneled node_hwmon_* and no
+# alert watched temperature. The HCAR5000-MI fleet baselines in the
+# mid-70s to mid-80s °C under normal cluster load, so drift toward
+# the thermal limit is invisible without a trend view.
+#
+# Metrics (verified live 2026-07-18):
+#   node_hwmon_temp_celsius{chip=~"pci.*_18_3"}  ← k10temp CPU package (Tctl)
+#   node_hwmon_temp_celsius{chip=~"nvme.*"}      ← NVMe composite/sensor temps
+#
+# Pairs with the NodeCPUTempSustainedHigh alert
+# (kube-prometheus-stack rules-node-thermals extra rule).
+#
+# Sidecar picks it up via grafana_dashboard=1; lands in the "Homelab" folder.
+# Grafana: "Homelab" folder → "Node thermals" (uid homelab-node-thermals)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-node-thermals
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/name: grafana-dashboards
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: observability
+  annotations:
+    grafana_folder: "Homelab"
+data:
+  node-thermals.json: |
+    {
+      "uid": "homelab-node-thermals",
+      "title": "Node thermals",
+      "tags": ["homelab", "nodes", "thermal"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "1m",
+      "time": { "from": "now-24h", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "type": "timeseries",
+          "title": "CPU package temp (k10temp Tctl) per node",
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "celsius",
+              "min": 30,
+              "max": 105,
+              "custom": { "lineWidth": 2, "fillOpacity": 5 },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 80 },
+                  { "color": "orange", "value": 90 },
+                  { "color": "red", "value": 95 }
+                ]
+              }
+            }
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }
+          },
+          "targets": [
+            {
+              "expr": "max by (instance) (node_hwmon_temp_celsius{chip=~\"pci.*_18_3\"})",
+              "legendFormat": "{{instance}}"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "NVMe temp per node",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "celsius",
+              "min": 30,
+              "max": 90,
+              "custom": { "lineWidth": 2, "fillOpacity": 5 },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 60 },
+                  { "color": "red", "value": 70 }
+                ]
+              }
+            }
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }
+          },
+          "targets": [
+            {
+              "expr": "max by (instance) (node_hwmon_temp_celsius{chip=~\"nvme.*\"})",
+              "legendFormat": "{{instance}}"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "7d max CPU temp per node",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "celsius",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 85 },
+                  { "color": "orange", "value": 90 },
+                  { "color": "red", "value": 95 }
+                ]
+              }
+            }
+          },
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+          "targets": [
+            {
+              "expr": "max by (instance) (max_over_time(node_hwmon_temp_celsius{chip=~\"pci.*_18_3\"}[7d]))",
+              "legendFormat": "{{instance}}"
+            }
+          ]
+        }
+      ]
+    }
