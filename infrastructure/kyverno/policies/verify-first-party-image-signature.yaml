@@ -200,6 +200,20 @@ spec:
         - imageReferences:
             - "registry.homelab.internal/*"
             - "forgejo.lab.vyramo.com/forgejo-admin/*"
+          # Wrapped-upstream images are DESIGN-EXCLUDED from signing:
+          # "cosign keypair signs first-party code, not third-party clones"
+          # (documented decision, homelab-infra/ansible/inventory/
+          # woodpecker-repos.yml pr-agent-build entry, 2026-06-10). Without
+          # this skip the required:true rule reports fail FOREVER for these
+          # images — permanent report noise that trains the operator to
+          # ignore fails and permanently blocks Enforce promotion. They
+          # remain covered by require-first-party-image-digest (Enforce):
+          # digest-pinned, just not signature-verified. Revisit if the
+          # wrapped-upstream builds ever get provenance attestation.
+          skipImageReferences:
+            - "registry.homelab.internal/ci-packages/pr-agent*"
+            - "registry.homelab.internal/ci-packages/minio*"
+            - "registry.homelab.internal/ci-packages/mc*"
           # failureAction lives HERE on the verifyImages
           # entry, not at the policy spec level. See file
           # header gotcha note.
