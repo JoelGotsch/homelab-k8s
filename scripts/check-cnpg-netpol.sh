@@ -17,7 +17,9 @@
 #       translates ClusterIP:443 -> backend:6443 before policy eval)
 #     - kube-dns (port 53)
 #     - MinIO object store (port 9000) for WAL/base-backup archiving
-#     - the replication peer (cnpg.io/cluster pods) on 5432
+#     - the replication peer (cnpg.io/cluster pods) on 5432 AND :8000
+#       (streaming replication + instance-manager coordination; the :8000
+#       instance->instance flow was the audit-mode finding of 2026-07-17)
 #
 # Namespaces whose DB pods run in Cilium default-allow (no egress
 # default-deny) are intentionally NOT flagged here — that is a separate
@@ -54,15 +56,27 @@ while IFS= read -r cluster; do
     continue
   fi
 
-  # Does this namespace declare an EGRESS default-deny? (native NP with an
-  # empty podSelector + Egress policyType, OR a CNP with an empty
-  # endpointSelector that carries an egress block.)
+  # Do the DB pods run under an EGRESS default-deny? Three ways to land there,
+  # all of which make the full DB egress rule set mandatory:
+  #   1. a native NP with an empty podSelector + Egress policyType (ns-wide),
+  #   2. a CNP with an empty endpointSelector that carries an egress block,
+  #   3. a CNP whose endpointSelector is scoped to the DB pods themselves
+  #      (`cnpg.io/cluster`) carrying an egress block — selecting a pod for
+  #      egress flips it to default-deny for egress. This is the DB-pod-scoped
+  #      lockdown pattern (langfuse/authentik/... from the 2026-07-17 rollout);
+  #      the ns-wide default-deny that pairs with it usually lives in the
+  #      first-party-namespace COMPONENT, which this per-dir check can't see —
+  #      so detect the scoped egress CNP directly or the check silently skips
+  #      exactly the namespaces the peer:8000 rule was added for.
   dd="$(yq ea '[
       select(.kind=="NetworkPolicy"
              and (.spec.podSelector | length == 0)
              and (.spec.policyTypes // [] | contains(["Egress"]))),
       select(.kind=="CiliumNetworkPolicy"
              and (.spec.endpointSelector | length == 0)
+             and (.spec.egress)),
+      select(.kind=="CiliumNetworkPolicy"
+             and (.spec.endpointSelector.matchLabels // {} | has("cnpg.io/cluster"))
              and (.spec.egress))
     ] | length' "$np" 2>/dev/null || echo 0)"
   [ "${dd:-0}" -gt 0 ] || continue   # default-allow ns — not this check's concern
@@ -86,6 +100,27 @@ while IFS= read -r cluster; do
                 and (.spec.egress[]?.to[]? | has("podSelector")))] | length' "$np" 2>/dev/null || echo 0)"
   [ "${samens:-0}" -gt 0 ] && peer_ok=1
   [ "$peer_ok" -eq 1 ] || miss="$miss peer-5432"
+
+  # Peer instance-manager coordination on :8000 (audit-mode finding
+  # 2026-07-17, langfuse-pg). CNPG instances poll EACH OTHER's instance-
+  # manager API on :8000 (instance->instance, distinct from the cnpg-system
+  # operator's :8000). A least-privilege CNP that scopes peer connectivity by
+  # `cnpg.io/cluster` and grants only :5432 DROPS this flow under enforcement,
+  # breaking cluster coordination. So when peer connectivity is the least-priv
+  # kind (explicit cnpg.io/cluster rule, no same-ns allow-all), require a
+  # cnpg.io/cluster-scoped rule carrying :8000 in BOTH directions. NB: a plain
+  # `grep 8000` is useless — every CNPG netpol already has the cnpg-system
+  # ->:8000 ingress rule; this MUST be structural (peer-scoped, both ways).
+  if grep -q "cnpg.io/cluster" "$np" && [ "${samens:-0}" -eq 0 ]; then
+    p8in="$(yq ea '[select(.kind=="CiliumNetworkPolicy").spec.ingress[]?
+        | select([.fromEndpoints[]?.matchLabels | has("cnpg.io/cluster")] | any)
+        | select([.toPorts[]?.ports[]?.port == "8000"] | any)] | length' "$np" 2>/dev/null || echo 0)"
+    p8eg="$(yq ea '[select(.kind=="CiliumNetworkPolicy").spec.egress[]?
+        | select([.toEndpoints[]?.matchLabels | has("cnpg.io/cluster")] | any)
+        | select([.toPorts[]?.ports[]?.port == "8000"] | any)] | length' "$np" 2>/dev/null || echo 0)"
+    [ "${p8in:-0}" -gt 0 ] || miss="$miss peer-ingress-8000"
+    [ "${p8eg:-0}" -gt 0 ] || miss="$miss peer-egress-8000"
+  fi
 
   if [ -n "$miss" ]; then
     echo "FAIL: $dir has an egress default-deny but its CNPG egress is missing:$miss"

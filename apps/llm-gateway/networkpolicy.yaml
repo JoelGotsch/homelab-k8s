@@ -288,6 +288,14 @@ spec:
         - ports:
             - port: "5432"
               protocol: TCP
+            # Instance-manager coordination: CNPG instances poll each other's
+            # status API on :8000 (instance->instance, distinct from the
+            # cnpg-system operator's :8000). Was silently DROPPED here from
+            # 2026-06-29 until the audit-mode rollout finding of 2026-07-17
+            # (llm-gateway-2 -> llm-gateway-1:8000 denied); the cluster stayed
+            # 2/2 on fallbacks but the flow is real. Paired egress below.
+            - port: "8000"
+              protocol: TCP
   # EGRESS for the CNPG instance pods. The namespace default-deny covers
   # Egress too, and this policy was the ONLY one selecting the DB pods —
   # but it shipped ingress-only (added 2026-06-29 for the operator probe).
@@ -346,4 +354,8 @@ spec:
       toPorts:
         - ports:
             - port: "5432"
+              protocol: TCP
+            # Instance-manager coordination to the peer instance (see the
+            # matching ingress rule; audit-mode finding 2026-07-17).
+            - port: "8000"
               protocol: TCP
