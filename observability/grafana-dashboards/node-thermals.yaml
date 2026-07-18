@@ -101,6 +101,37 @@ data:
           ]
         },
         {
+          "id": 4,
+          "type": "timeseries",
+          "title": "Mac Studio CPU/GPU temp (empty until the mac ansible run lands macmon)",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "celsius",
+              "min": 20,
+              "max": 110,
+              "custom": { "lineWidth": 2, "fillOpacity": 5 },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 85 },
+                  { "color": "red", "value": 100 }
+                ]
+              }
+            }
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }
+          },
+          "targets": [
+            {
+              "expr": "mac_temp_celsius",
+              "legendFormat": "{{sensor}}"
+            }
+          ]
+        },
+        {
           "id": 3,
           "type": "stat",
           "title": "7d max CPU temp per node",
