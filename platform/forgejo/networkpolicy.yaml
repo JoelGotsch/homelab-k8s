@@ -72,6 +72,37 @@ spec:
         - ports:
             - port: "3000"
               protocol: TCP
+    # kyverno imageVerify — cosign signature pulls from Forgejo Packages.
+    # IN-CLUSTER clients reaching gateway-fronted services keep their OWN
+    # pod identity at the Envoy (Cilium preserves known source identities;
+    # only EXTERNAL traffic arrives as the reserved `ingress` entity), so
+    # the fromEntities: [ingress] rule above does NOT cover them — the
+    # Envoy answers 403 "Access denied" in 0ms without ever reaching
+    # Forgejo (2026-07-18: first fresh verification after this CNP was
+    # enforced; hubble showed http-request DROPPED at the gateway).
+    # This is rule 11's INVERSE — a trap class: audit every gateway-fronted
+    # service's CNP for in-cluster clients.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kyverno
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+    # kubelet/containerd image pulls — nodes pull first-party images from
+    # registry.homelab.internal (the gateway LB) out of the HOST netns, so
+    # the preserved source identity is host/remote-node, not `ingress`.
+    # Same 403 class as above; containerd surfaces it as ErrImagePull
+    # "NotFound". Masked until 2026-07-18 because no FRESH first-party
+    # image had been node-pulled since this CNP was enforced (everything
+    # else was digest-pinned + already in the node image caches).
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
     # SSH-over-LoadBalancer (forgejo-ssh Service, 10.10.30.51:22):
     # the Service port 22 DNATs to pod port 2222, and with
     # externalTrafficPolicy: Cluster the L2-announcer node SNATs
