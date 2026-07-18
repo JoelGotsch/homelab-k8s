@@ -48,7 +48,15 @@ spec:
           # precedent. First successful CI build landed 2026-06-24
           # (Woodpecker pipeline #5 on the source repo
           # forgejo-admin/ntfy-e2ee-relay, tag 0.1.0).
-          image: "registry.homelab.internal/ci-packages/ntfy-e2ee-relay:0.1.0"  # OPERATOR PINS via Renovate
+          # Digest pin (ADR 0019 D3 — replaces the stale "OPERATOR PINS via
+          # Renovate" note). The digest is also load-bearing: after the
+          # 2026-07-18 registry blob loss + CI rebuild, Spegel peers kept
+          # advertising the STALE index for the bare `0.1.0` tag from their
+          # containerd content stores (manifest metadata survives without
+          # blobs), so tag pulls kept resolving to the dead manifest. A
+          # digest reference cannot be poisoned by stale tag resolution.
+          # Digest = the rebuilt multi-arch index as served by Forgejo.
+          image: "registry.homelab.internal/ci-packages/ntfy-e2ee-relay:0.1.0@sha256:f5ef56147681e036559c049ab69c4e9b8a0a106e8d4840ed55a384aa66c5750f"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
