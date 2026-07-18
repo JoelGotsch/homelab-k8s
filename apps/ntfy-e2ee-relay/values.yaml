@@ -15,7 +15,7 @@
 # path via pipeline #5 (commit 7d16e8d6, tag 0.1.0).
 image:
   repository: registry.homelab.internal/ci-packages/ntfy-e2ee-relay
-  tag: "0.1.0"  # OPERATOR PINS via Renovate
+  tag: "0.1.1"  # OPERATOR PINS via Renovate
   pullPolicy: IfNotPresent
 
 # Single replica — webhook proxy is stateless but write-once
