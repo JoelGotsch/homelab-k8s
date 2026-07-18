@@ -56,7 +56,7 @@ spec:
           # blobs), so tag pulls kept resolving to the dead manifest. A
           # digest reference cannot be poisoned by stale tag resolution.
           # Digest = the rebuilt multi-arch index as served by Forgejo.
-          image: "registry.homelab.internal/ci-packages/ntfy-e2ee-relay:0.1.1@sha256:f98ef4713ed1a90989dfce281c07a2f1e70b8bce28951b9b5d03509027455b1e"
+          image: "registry.homelab.internal/ci-packages/ntfy-e2ee-relay:0.1.0@sha256:f5ef56147681e036559c049ab69c4e9b8a0a106e8d4840ed55a384aa66c5750f"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
