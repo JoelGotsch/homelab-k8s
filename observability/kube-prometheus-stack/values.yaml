@@ -82,8 +82,13 @@ prometheus:
     # which marks the Prometheus CR (and the whole Argo app)
     # Degraded. Re-enable once the Mac Studio's inference IP is
     # filled in and the Secret is plumbed through Argo.
+    # ENABLED 2026-07-18: the Secret is now actually deployed —
+    # observability/prometheus/ was missing its top-level
+    # kustomization since install, so obs-prometheus managed zero
+    # resources and external-hosts/ never landed. IP placeholder
+    # filled (10.10.50.10) in the same commit.
     additionalScrapeConfigsSecret:
-      enabled: false
+      enabled: true
       name: prometheus-additional-scrape-configs
       key: prometheus-additional.yaml
 

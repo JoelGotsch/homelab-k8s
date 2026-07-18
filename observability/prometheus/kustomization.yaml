@@ -1,0 +1,15 @@
+# Prometheus extras layer — anything Prometheus-adjacent that
+# doesn't live inside the kube-prometheus-stack chart values.
+#
+# HISTORY: this file was MISSING until 2026-07-18 — the appset-
+# generated obs-prometheus app pointed here, found no kustomization
+# at the top level (Argo directory sources don't recurse), and sat
+# vacuously Synced managing ZERO resources. external-hosts/ (the
+# Mac Studio scrape config + alerts, built for ADR 0005/0026) was
+# therefore never deployed, and the chart-bundled "Node Exporter /
+# MacOS" dashboard showed No Data since install.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - external-hosts

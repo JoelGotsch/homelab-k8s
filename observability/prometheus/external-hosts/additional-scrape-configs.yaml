@@ -6,15 +6,22 @@
 #     name: prometheus-additional-scrape-configs
 #     key: prometheus-additional.yaml
 #
-# OPERATOR: replace <MAC_STUDIO_INFERENCE_IP> with the Mac Studio's
-# address on the inference VLAN (matches mac_inference_ip in
-# homelab-infra/group_vars/all/main.yml).
+# IP filled 2026-07-18 from the homelab-infra inventory (the
+# mac_inference host's host_ip on the inference VLAN). Update here
+# if the Mac Studio's address ever changes.
 
 apiVersion: v1
 kind: Secret
 metadata:
   name: prometheus-additional-scrape-configs
   namespace: monitoring
+  annotations:
+    # Not a credential: static scrape config (internal IPs only).
+    # Secret KIND is forced by the Prometheus CR's
+    # additionalScrapeConfigs contract, which only accepts a
+    # Secret ref. Reviewed 2026-07-18.
+    bypass.homelab.internal/homelab-disallow-inline-secrets: >-
+      non-secret scrape config; Prometheus CR requires Secret kind
 type: Opaque
 stringData:
   prometheus-additional.yaml: |
@@ -24,7 +31,7 @@ stringData:
       metrics_path: /metrics
       static_configs:
         - targets:
-            - <MAC_STUDIO_INFERENCE_IP>:9100
+            - 10.10.50.10:9100
           labels:
             host: mac-studio
             role: inference
@@ -36,7 +43,7 @@ stringData:
       metrics_path: /metrics
       static_configs:
         - targets:
-            - <MAC_STUDIO_INFERENCE_IP>:9101
+            - 10.10.50.10:9101
           labels:
             host: mac-studio
             role: inference
