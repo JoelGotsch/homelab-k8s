@@ -20,6 +20,28 @@
 # │      first-party-image intent (ADR 0019) — least preferred.               │
 # │ The apiserver->:9443 ingress + apiserver/DNS egress + metrics were all    │
 # │ verified clean (0 AUDIT); ONLY the cosign trust-root egress is unresolved.│
+# ├─────────────────────────────────────────────────────────────────────────┤
+# │ UPDATE 2026-07-18 — option A was chosen and PARTLY done, but re-testing   │
+# │ found the netpol is STILL not safe to re-wire. Two deeper blockers:       │
+# │  1. ctlog.ignoreSCT was added to verify-first-party-image-signature       │
+# │     (commit 4d76663) → the public TUF fetch is GONE (confirmed: zero       │
+# │     sigstore egress on a cold cache). Good, but not sufficient.           │
+# │  2. WEDGE PERSISTS under enforcement: the on-admission REGISTRY signature  │
+# │     pull (registry.homelab.internal) hangs under the toFQDNs egress on a   │
+# │     cold admission-controller, so the fail-CLOSED mutating webhook still   │
+# │     times out (10s) and first-party Pod CREATE is blocked. Without the     │
+# │     netpol the same pull fails FAST, so the hang is egress-induced.        │
+# │  3. SEPARATE pre-existing gap surfaced: the admission-controller does NOT  │
+# │     trust the homelab CA (no CA bundle mounted, SSL_CERT_* unset), so the  │
+# │     registry TLS handshake x509-fails and signature verification silently  │
+# │     fails in Audit mode (failureAction: Audit) — first-party signatures    │
+# │     are effectively unverified on any cold cache regardless of the netpol. │
+# │ To re-wire, resolve BOTH: (a) make the registry pull reliable under the    │
+# │ egress (verify how registry.homelab.internal is reached — toFQDNs vs the   │
+# │ `ingress` entity/gateway LB IP — or pre-warm the imageVerify cache / move  │
+# │ verification off the fail-closed admission path), and (b) mount the        │
+# │ homelab CA into the admission-controller so registry TLS actually          │
+# │ verifies. Until then this stays DE-WIRED.                                  │
 # └─────────────────────────────────────────────────────────────────────────┘
 #
 # Default-deny + least-privilege for the kyverno namespace
