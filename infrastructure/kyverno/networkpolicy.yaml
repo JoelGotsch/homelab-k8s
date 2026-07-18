@@ -1,48 +1,40 @@
-# ┌─────────────────────────────────────────────────────────────────────────┐
-# │ AUDIT-MODE FINDING 2026-07-17 — DO NOT RE-WIRE UNTIL RESOLVED.            │
-# │ This policy was rolled out under PolicyAuditMode and then briefly         │
-# │ enforced. A COLD verification cache (every kyverno restart) makes the     │
-# │ verify-cosign-static-key attestor fetch sigstore CTLog public keys from   │
-# │ the PUBLIC TUF root https://tuf-repo-cdn.sigstore.dev/ (34.117.62.14:443).│
-# │ The egress set below allows registry.homelab.internal + Forgejo only, so  │
-# │ that fetch is DROPPED. cosign then errors ("failed to load CTLogs public  │
-# │ keys ... i/o timeout"); the fail-CLOSED resource *mutating* webhook hangs  │
-# │ to its 10s timeout; the replicaset-controller cannot create the Pod       │
-# │ (llm-gateway wedged at ready=1/2 during the ceremony). Removing the       │
-# │ policy restored 2/2. This is fail-CLOSED for first-party image deploys,   │
-# │ not fail-open. De-wired from kustomization.yaml pending an operator        │
-# │ decision on the verification trust-root:                                  │
-# │   A) make verification offline: ship a mirrored/embedded TUF root         │
-# │      (SIGSTORE_ROOT_FILE) or set the attestor ctlog.ignoreSCT so no        │
-# │      public TUF fetch is needed — then this egress set is CORRECT as-is.   │
-# │   B) accept a public dependency: add tuf-repo-cdn.sigstore.dev (+ its      │
-# │      TUF mirror) to the toFQDNs egress below. Contradicts the air-gapped   │
-# │      first-party-image intent (ADR 0019) — least preferred.               │
-# │ The apiserver->:9443 ingress + apiserver/DNS egress + metrics were all    │
-# │ verified clean (0 AUDIT); ONLY the cosign trust-root egress is unresolved.│
-# ├─────────────────────────────────────────────────────────────────────────┤
-# │ UPDATE 2026-07-18 — option A was chosen and PARTLY done, but re-testing   │
-# │ found the netpol is STILL not safe to re-wire. Two deeper blockers:       │
-# │  1. ctlog.ignoreSCT was added to verify-first-party-image-signature       │
-# │     (commit 4d76663) → the public TUF fetch is GONE (confirmed: zero       │
-# │     sigstore egress on a cold cache). Good, but not sufficient.           │
-# │  2. WEDGE PERSISTS under enforcement: the on-admission REGISTRY signature  │
-# │     pull (registry.homelab.internal) hangs under the toFQDNs egress on a   │
-# │     cold admission-controller, so the fail-CLOSED mutating webhook still   │
-# │     times out (10s) and first-party Pod CREATE is blocked. Without the     │
-# │     netpol the same pull fails FAST, so the hang is egress-induced.        │
-# │  3. SEPARATE pre-existing gap surfaced: the admission-controller does NOT  │
-# │     trust the homelab CA (no CA bundle mounted, SSL_CERT_* unset), so the  │
-# │     registry TLS handshake x509-fails and signature verification silently  │
-# │     fails in Audit mode (failureAction: Audit) — first-party signatures    │
-# │     are effectively unverified on any cold cache regardless of the netpol. │
-# │ To re-wire, resolve BOTH: (a) make the registry pull reliable under the    │
-# │ egress (verify how registry.homelab.internal is reached — toFQDNs vs the   │
-# │ `ingress` entity/gateway LB IP — or pre-warm the imageVerify cache / move  │
-# │ verification off the fail-closed admission path), and (b) mount the        │
-# │ homelab CA into the admission-controller so registry TLS actually          │
-# │ verifies. Until then this stays DE-WIRED.                                  │
-# └─────────────────────────────────────────────────────────────────────────┘
+# RESOLVED 2026-07-18 — enforced after a three-layer fix + full audit ceremony.
+# The 2026-07-17 rollout found enforcing this policy wedged first-party Pod
+# CREATE (fail-closed mutating webhook timed out on cosign network I/O;
+# llm-gateway 1/2 twice). Peeling the onion produced four fixes, each masked
+# by the previous failure:
+#   1. ctlog.ignoreSCT on the verify policy (4d76663) — static-key attestors
+#      need no SCT check; without it cosign fetched the PUBLIC sigstore TUF
+#      root on every cold cache, which this egress rightly blocks.
+#   2. homelab-trust-bundle CA mount (3547d05) — the distroless kyverno image
+#      trusted only public CAs, so registry.homelab.internal
+#      (homelab-internal-issuer) x509-failed; verification had SILENTLY
+#      failed in Audit mode since install.
+#   3. registry pull credentials (1c8fe3d) — Forgejo Packages rejects
+#      anonymous token grants for private repos; kyverno needs its own
+#      dockerconfigjson (imageRegistryCredentials), containerd's node creds
+#      don't apply.
+#   4. webhookConfiguration.failurePolicy: Ignore (bd6961a) — with
+#      failureAction: Audit, the Fail webhook bought zero security and full
+#      wedge risk; a hung verification now costs bounded latency, never
+#      cluster-wide create blockage. (admission: false would be cleaner but
+#      kyverno rejects it for verifyImages rules.)
+# NB the 2026-07-18 "registry pull hangs under enforcement" hypothesis was
+# WRONG — that re-test ran while Argo selfHeal had reverted the then-
+# uncommitted ignoreSCT (CLAUDE.md rule 8), so it was still the TUF fetch.
+# Hubble evidence: the registry pull terminates at the gateway envoy
+# (registry.homelab.internal -> cluster_ingress_ip; identity = reserved
+# `ingress` entity, IDs 1677xxxx), i.e. the toEntities: [ingress] rule below
+# is what actually matches it. The toFQDNs registry rule below likely NEVER
+# matches (socket-LB DNATs the LB IP before egress policy eval — rule 13's
+# egress twin); kept for now as documentation-of-intent, candidate for
+# removal in the next netpol sweep.
+# Ceremony result: 0 AUDIT with all flows exercised (admission, cold-cache
+# registry pulls, background scans, scrape), enforced with 0 steady-state
+# DROPPED, cold-cache verification round-trips completing under enforcement
+# (PolicyReports fresh across namespaces). Remaining known gap — images are
+# UNSIGNED (only cluster-mcp CI signs) — is a signing-rollout workstream,
+# orthogonal to this policy.
 #
 # Default-deny + least-privilege for the kyverno namespace
 # (netpol-audit.md MEDIUM-1 residual). Kyverno is the cluster's admission
