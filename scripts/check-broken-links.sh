@@ -33,10 +33,24 @@
 # Cross-repo: when a link resolves out of this repo (e.g.,
 # `../../homelab-k8s/...`), the script follows it. Sibling
 # repos must be checked out at the same parent for cross-repo
-# links to resolve — that's the canonical layout per ADR 0001.
-# When a single repo is checked out alone, sibling-targeted
-# links will fail; that's expected and useful (catches the
-# missing-sibling case).
+# links to resolve — that's the canonical layout per ADR 0001,
+# and `repos.manifest` at the workspace root is its source of
+# truth. Unresolved links are classified against it
+# (2026-07-19; before this, 49 permanently-red failures had
+# operators SKIP-ing the whole hook, which gates nothing):
+#   - target inside this repo               -> FAIL
+#   - target in a repos.manifest sibling    -> FAIL (setup.sh
+#     guarantees manifest repos are present; a miss is real)
+#   - target anywhere else in the workspace -> WARN only
+#     (retired/aspirational/optional repos, workspace-root
+#     files — this hook can't govern what the manifest doesn't
+#     require, and 99-journal/ files are immutable so they can
+#     never be edited to keep up with such targets)
+#   - no repos.manifest found -> everything FAILs (the old
+#     strict behavior; single-repo checkout case, expected and
+#     useful — catches the missing-sibling case)
+# Adding a repo to repos.manifest auto-upgrades its links from
+# WARN to enforced.
 #
 # Exit 0 = clean. Exit 1 = at least one broken link / anchor.
 #
@@ -50,6 +64,15 @@ set -eu
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$REPO_ROOT"
+
+# Workspace manifest (see header). manifest_repos empty = no
+# manifest = old strict behavior.
+WORKSPACE_ROOT="$(dirname "$REPO_ROOT")"
+MANIFEST="$WORKSPACE_ROOT/repos.manifest"
+manifest_repos=""
+if [ -f "$MANIFEST" ]; then
+    manifest_repos=$(awk '!/^[[:space:]]*#/ && NF>=3 {print $1}' "$MANIFEST")
+fi
 
 # Find every markdown file. Excludes: .git/, the scripts/
 # directory itself (this script + its siblings shouldn't be
@@ -151,9 +174,33 @@ out=$(
                 check_path="${full_path%/}"
             fi
 
-            # Path resolution.
+            # Path resolution. Unresolved links are classified
+            # against repos.manifest — see header. FAIL goes to
+            # stdout (collected into the fail set); WARN goes to
+            # stderr (visible, not gating).
             if [ ! -e "$check_path" ] && [ ! -e "$check_path/" ]; then
-                echo "FAIL: $md → $link (path not found at $full_path)"
+                classify="fail"
+                if [ -n "$manifest_repos" ]; then
+                    abs_missing=$(realpath -m "$full_path" 2>/dev/null || echo "")
+                    case "$abs_missing" in
+                        "$REPO_ROOT"/*)
+                            classify="fail" ;;
+                        "$WORKSPACE_ROOT"/*)
+                            rel="${abs_missing#"$WORKSPACE_ROOT"/}"
+                            first="${rel%%/*}"
+                            if printf '%s\n' "$manifest_repos" | grep -Fxq "$first"; then
+                                classify="fail"
+                            else
+                                classify="warn"
+                            fi
+                            ;;
+                    esac
+                fi
+                if [ "$classify" = "warn" ]; then
+                    echo "WARN: $md → $link (target outside the repos.manifest workspace; not enforced)" >&2
+                else
+                    echo "FAIL: $md → $link (path not found at $full_path)"
+                fi
                 continue
             fi
 

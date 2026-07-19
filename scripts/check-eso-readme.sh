@@ -33,15 +33,23 @@ cd "$REPO_ROOT"
 # We use the filename pattern as primary (avoids parsing yaml in
 # bash); content scan as fallback to catch atypical names.
 
+# Vendored upstream charts excluded ('*/charts/*'): the ESO chart
+# ships its own CRD files matching '*externalsecret*' (e.g.
+# charts/external-secrets-0.10.5/.../templates/crds/) — those are
+# not first-party layers (false positive found 2026-07-19; same
+# fix as docs' check-cold-start-completeness.sh, which duplicates
+# this logic).
 eso_dirs=$(
   {
     find apps infrastructure platform observability -type f \
       \( -iname '*externalsecret*.yaml' -o -iname '*externalsecret*.yml' \) \
       ! -iname '*.template.yaml' ! -iname '*.j2' \
+      -not -path '*/charts/*' \
       -printf '%h\n' 2>/dev/null
     grep -rln '^kind: ExternalSecret' apps infrastructure platform observability \
       --include='*.yaml' --include='*.yml' \
-      --exclude='*.template.yaml' --exclude='*.j2' 2>/dev/null \
+      --exclude='*.template.yaml' --exclude='*.j2' \
+      --exclude-dir=charts 2>/dev/null \
       | xargs -I{} dirname {}
   } | sort -u
 )
