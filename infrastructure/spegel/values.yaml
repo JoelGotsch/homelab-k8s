@@ -100,7 +100,24 @@ spegel:
   # single-cluster homelab the cache-hit math favors mirroring
   # the full pull set; per-registry filters are only useful at
   # multi-tenant scale.
-  mirroredRegistries: []
+  # THIRD-PARTY registries only (2026-07-19). The earlier "mirror all"
+  # setting rested on a FALSE assumption (the comment above claims no
+  # Talos machine.registries config exists — the containerd-registry
+  # patch WAS applied to all 6 nodes on 2026-07-13): Spegel's _default
+  # wildcard displaced the Talos per-registry hosts.toml
+  # (server fallback + CA) into _backup/ on every node. Every FRESH
+  # first-party pull then dead-ended at Spegel's 404 (containerd
+  # NotFound -> ImagePullBackOff; approval-channel down 27h after its
+  # failover reschedule). First-party images are in-cluster via the
+  # ADR 0038 direct path — P2P caching buys nothing there; scoping
+  # Spegel to the big third-party registries restores the Talos config
+  # for everything first-party.
+  mirroredRegistries:
+    - https://docker.io
+    - https://ghcr.io
+    - https://quay.io
+    - https://registry.k8s.io
+    - https://gcr.io
 
   # Resolve tags to digests so peer cache hits work even when
   # the upstream registry's tag→digest mapping is unavailable.
