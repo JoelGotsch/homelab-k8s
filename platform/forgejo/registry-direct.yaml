@@ -34,6 +34,9 @@ spec:
   issuerRef:
     name: homelab-internal-issuer
     kind: ClusterIssuer
+  # OpenBao's PKI role requires a CN ("the common_name field is required"
+  # 400 on the first issuance attempt without it — 2026-07-19).
+  commonName: registry.homelab.internal
   dnsNames:
     - registry.homelab.internal
 ---
