@@ -123,6 +123,10 @@ spec:
             - {name: conf, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf, readOnly: true}
             - {name: tls, mountPath: /tls, readOnly: true}
             - {name: tmp, mountPath: /tmp}
+            # nginx creates its default *_temp dirs under /var/cache/nginx
+            # even when nginx.conf overrides the paths it actually uses —
+            # with readOnlyRootFilesystem that mkdir [emerg]s (2026-07-19).
+            - {name: cache, mountPath: /var/cache/nginx}
           readinessProbe:
             httpGet: {path: /healthz, port: 8443, scheme: HTTPS}
             initialDelaySeconds: 2
@@ -135,6 +139,8 @@ spec:
         - name: tls
           secret: {secretName: registry-direct-tls}
         - name: tmp
+          emptyDir: {}
+        - name: cache
           emptyDir: {}
 ---
 apiVersion: v1
