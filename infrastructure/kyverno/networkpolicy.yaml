@@ -166,11 +166,22 @@ spec:
     # so the FQDN literal stays out of this GitOps file (domain-literal hook).
     # OPERATOR CONFIRMS the exact set via Hubble AUDIT during a first-party
     # image deploy and narrows/extends before enforcing.
-    - toFQDNs:
-        - matchName: "registry.homelab.internal"
+    # registry-direct proxy (ADR 0038) — signature pulls go to the
+    # dedicated registry path (LB 10.10.30.52 -> registry-direct pod
+    # :8443, POD port per rule 13), NOT the gateway. Replaces the old
+    # `toFQDNs registry.homelab.internal` rule, which never matched
+    # (socket-LB DNATs the LB IP before egress policy eval) — under the
+    # gateway path the flow rode the toEntities:[ingress] rule and got
+    # 403'd at the Envoy (client-egress evaluated at the proxy upstream
+    # hop; the trap that motivated ADR 0038). Inert until the operator's
+    # unbound cutover flips DNS to 10.10.30.52.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: forgejo
+            app.kubernetes.io/name: registry-direct
       toPorts:
         - ports:
-            - port: "443"
+            - port: "8443"
               protocol: TCP
     # Forgejo Packages via the cluster Gateway (reserved `ingress` entity).
     - toEntities:

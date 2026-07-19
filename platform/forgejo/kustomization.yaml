@@ -32,6 +32,8 @@ resources:
   - httproute.yaml
   - httproute-registry.yaml
   - networkpolicy.yaml
+  # ADR 0038 — dedicated registry path (TLS proxy + LB 10.10.30.52).
+  - registry-direct.yaml
   - servicemonitor.yaml
 
 # ADR 0036: cluster-wide resource-governance baseline.
