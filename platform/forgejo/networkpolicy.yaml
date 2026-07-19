@@ -342,6 +342,15 @@ spec:
         - ports:
             - port: "8443"
               protocol: TCP
+    # trivy-operator scanners — vulnerability scans pull first-party image
+    # metadata through the direct path too (observed DROPPED 2026-07-19).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: trivy-system
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:
