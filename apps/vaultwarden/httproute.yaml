@@ -1,20 +1,21 @@
 # Vaultwarden HTTPRoute via Cilium Gateway.
 #
 # Phase 1 (today): Tailscale-only on
-#   vaultwarden.lab.vyramo.com
+#   vaultwarden.<fqdn_suffix>
 # Operator + family-shared accounts reach via Tailscale.
 # Useful for testing the OIDC + admin path before exposing
 # externally.
 #
 # Phase 2 (when infrastructure/cloudflare-tunnel/ lands per
 # ADR 0024 D1): public-facing on
-#   vaultwarden.vyramo.com
+#   vaultwarden.<domain>
 # via Cloudflare Tunnel. The CF Tunnel manifest declares the
 # upstream as `vaultwarden-http.vaultwarden.svc:80`. Family-
 # shared clients work through CF without operator-side
 # Tailscale config.
 #
-# OPERATOR FILLS vyramo.com.
+# Hostname resolves from components/site-config (fqdn_suffix) — see the
+# replacement in this directory's kustomization.yaml. Nothing to fill.
 
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

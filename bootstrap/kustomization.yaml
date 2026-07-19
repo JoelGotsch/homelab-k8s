@@ -26,3 +26,47 @@ resources:
   - applicationsets/platform.yaml
   - applicationsets/observability.yaml
   - applicationsets/apps.yaml
+
+# ADR 0001 amendment / site-config phase 2: repoURLs resolve from the single
+# site-config (no hardcoded forge host). Provenance: replacements below ->
+# ConfigMap/site-config.data.forgejo_fqdn -> components/site-config/site-config.env.
+components:
+  - ../components/site-config
+
+replacements:
+  # ApplicationSets: both the git generator and the app template source.
+  # Placeholder form in the files: https://FORGEJO_FQDN/forgejo-admin/homelab-k8s
+  # -> delimiter '/' index 2 is the host token.
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_fqdn }
+    targets:
+      - select: { kind: ApplicationSet, name: infrastructure }
+        fieldPaths:
+          - spec.generators.0.git.repoURL
+          - spec.template.spec.source.repoURL
+        options: { delimiter: '/', index: 2 }
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_fqdn }
+    targets:
+      - select: { kind: ApplicationSet, name: platform }
+        fieldPaths:
+          - spec.generators.0.git.repoURL
+          - spec.template.spec.source.repoURL
+        options: { delimiter: '/', index: 2 }
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_fqdn }
+    targets:
+      - select: { kind: ApplicationSet, name: observability }
+        fieldPaths:
+          - spec.generators.0.git.repoURL
+          - spec.template.spec.source.repoURL
+        options: { delimiter: '/', index: 2 }
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_fqdn }
+    targets:
+      - select: { kind: ApplicationSet, name: apps }
+        fieldPaths:
+          - spec.generators.0.git.repoURL
+          - spec.template.spec.source.repoURL
+        options: { delimiter: '/', index: 2 }
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_fqdn }
+    targets:
+      - select: { kind: Application, name: argocd-self }
+        fieldPaths: [spec.source.repoURL]
+        options: { delimiter: '/', index: 2 }

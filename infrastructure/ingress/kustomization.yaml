@@ -17,3 +17,29 @@ resources:
   - gateway.yaml
   - loadbalancer-ippool.yaml
   - l2announcement.yaml
+
+# Site-config phase 2: wildcard hostnames + cert names resolve from the single
+# site-config. Listener indices 0/1 are the stable wildcard listeners; the
+# registry listeners (2/3) are AFTER them and slated for removal at ADR 0038
+# D4 — removing them does not shift these indices.
+components:
+  - ../../components/site-config
+
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: Gateway, name: homelab-gateway }
+        fieldPaths:
+          - spec.listeners.0.hostname
+          - spec.listeners.1.hostname
+        options: { delimiter: '.', index: 1 }
+      - select: { kind: Certificate, name: homelab-wildcard-tls }
+        fieldPaths:
+          - spec.dnsNames.1
+        options: { delimiter: '.', index: 1 }
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: Certificate, name: homelab-wildcard-tls }
+        fieldPaths:
+          - spec.commonName
+          - spec.dnsNames.0

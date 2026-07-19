@@ -80,3 +80,24 @@ patches:
   #   target:
   #     kind: ConfigMap
   #     name: argocd-cm
+
+# Site-config phase 2 (see bootstrap/kustomization.yaml for the pattern).
+# NB oidc-config.yaml stays ansible-rendered: the issuer URL lives INSIDE the
+# `oidc.config` string blob, which replacements cannot reach into (documented
+# .j2 boundary — components/site-config/README.md).
+components:
+  - ../../components/site-config
+
+replacements:
+  # Forgejo repo credential ExternalSecret: url host token.
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_fqdn }
+    targets:
+      - select: { kind: ExternalSecret, name: argocd-repo-forgejo }
+        fieldPaths: [spec.target.template.data.url]
+        options: { delimiter: '/', index: 2 }
+  # argocd-cm public URL: https://argocd.FQDN_SUFFIX -> argocd.<fqdn_suffix>.
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: ConfigMap, name: argocd-cm }
+        fieldPaths: [data.url]
+        options: { delimiter: '.', index: 1 }

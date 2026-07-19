@@ -68,3 +68,33 @@ This is the pattern + a proven example. Converting the ~40 hardcoded manifests t
 reference site-config is the deliberate reusability pass tracked in
 `homelab/reusability-architecture.md` (Workstream B) — do it per-app, verifying
 each render against live, behind the CI equality gate.
+
+## Phase 2 (2026-07-19): what resolves from here vs. what stays rendered
+
+Migrated onto replacements (`.j2` siblings deleted):
+- all 14 HTTPRoutes (phase 1)
+- `bootstrap/applicationsets/*` + `bootstrap/argocd-self.yaml` (repoURLs, via
+  `forgejo_fqdn`), `bootstrap/argocd/{externalsecret-repo-forgejo, patches/argocd-cm}`
+- `infrastructure/ingress/gateway.yaml` (wildcard listeners + wildcard cert)
+- `infrastructure/ingress/loadbalancer-ippool.yaml` (its `.j2` had no live
+  variables at all)
+
+**Intentionally still ansible-rendered** — the `.j2` boundary, with reasons:
+- **Helm `values.yaml.j2` (9 files):** kustomize replacements cannot reach
+  inside a `helmCharts.valuesFile`; patching the post-render resources
+  field-by-field would recreate the wrong-chart-key trap.
+- **Free-text blobs:** `renovate.json5.j2`, app configmaps (ntfy, pr-agent,
+  cloudflare-tunnel, llm-gateway policies), `bootstrap/argocd/patches/
+  oidc-config.yaml.j2` (issuer URL lives INSIDE the `oidc.config` string),
+  authentik `_blueprint` generator — replacements cannot substitute inside
+  strings.
+- **Index-brittle rule arrays:** netpol `.j2`s (woodpecker/langfuse/crowdsec/
+  immich) and `backup-cronjobs/prometheusrule.yaml.j2` — their FQDNs sit at
+  `spec.<rules>.N.M...` paths whose indices shift on every rule edit (netpol
+  rules were inserted twice in the week this was decided); a replacement that
+  silently retargets the wrong rule is worse than a render step.
+
+Derived keys (`forgejo_fqdn`) exist because replacements substitute whole
+delimiter-tokens and cannot compose `forgejo.` + `fqdn_suffix` inside a URL
+token. `scripts/check-site-config.sh` (pre-commit) makes derivation drift
+impossible and verifies every placeholder-bearing file pulls this component.

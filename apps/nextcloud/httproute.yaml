@@ -5,7 +5,8 @@
 # app investigation surfaces a viable encrypted-at-rest
 # story (per TODO.md "Investigate Nextcloud E2EE").
 #
-# OPERATOR FILLS vyramo.com.
+# Hostname resolves from components/site-config (fqdn_suffix) — see the
+# replacement in this directory's kustomization.yaml. Nothing to fill.
 
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

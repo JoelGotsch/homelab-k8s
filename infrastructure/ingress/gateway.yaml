@@ -23,7 +23,7 @@ spec:
     - name: https
       port: 443
       protocol: HTTPS
-      hostname: "*.lab.vyramo.com"
+      hostname: "*.FQDN_SUFFIX"
       tls:
         mode: Terminate
         certificateRefs:
@@ -45,7 +45,7 @@ spec:
     - name: http
       port: 80
       protocol: HTTP
-      hostname: "*.lab.vyramo.com"
+      hostname: "*.FQDN_SUFFIX"
       allowedRoutes:
         namespaces:
           from: All
@@ -113,10 +113,10 @@ spec:
   issuerRef:
     name: letsencrypt-production
     kind: ClusterIssuer
-  commonName: "lab.vyramo.com"
+  commonName: "FQDN_SUFFIX"
   dnsNames:
-    - "lab.vyramo.com"
-    - "*.lab.vyramo.com"
+    - "FQDN_SUFFIX"
+    - "*.FQDN_SUFFIX"
   # LE certs are 90-day; renew at 30 days remaining (default cert-
   # manager behavior, but pin explicitly so it's not opaque).
   duration: 2160h     # 90 days

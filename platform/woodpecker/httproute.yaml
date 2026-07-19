@@ -1,7 +1,8 @@
 # Woodpecker UI exposed via Cilium Gateway API HTTPRoute.
 # Tailscale-only, same shape as Forgejo's HTTPRoute.
 #
-# OPERATOR FILLS vyramo.com.
+# Hostname resolves from components/site-config (fqdn_suffix) — see the
+# replacement in this directory's kustomization.yaml. Nothing to fill.
 
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

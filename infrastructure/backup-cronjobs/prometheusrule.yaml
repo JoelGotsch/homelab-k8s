@@ -50,7 +50,7 @@ spec:
               size; resize the PVC (Longhorn supports online
               resize) or reduce `mc mirror` source set in
               cronjob.yaml.
-            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+            runbook_url: https://github.com/JoelGotsch/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
 
         - alert: ResticStagingPVCCritical
           # Critical at 95% — almost-out-of-space; next mirror
@@ -72,7 +72,7 @@ spec:
               Next `mc mirror` run likely fails.
               Resize NOW per
               backup-cronjobs/README.md.
-            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+            runbook_url: https://github.com/JoelGotsch/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
 
     - name: backup-cronjobs.job-failed
       interval: 1m
@@ -99,7 +99,7 @@ spec:
               mismatch (post-rotation), MinIO source bucket
               empty (cnpg cluster down), Restic password rotation
               skipped a step.
-            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+            runbook_url: https://github.com/JoelGotsch/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
 
         # NOTE (2026-07-07 verification): kube_job_status_completion_time
         # has NO series in this namespace when no completed Job exists in
@@ -133,7 +133,7 @@ spec:
               Inspect:
                 kubectl -n backup-cronjobs get cronjobs
                 kubectl -n backup-cronjobs get jobs --sort-by=.status.startTime
-            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+            runbook_url: https://github.com/JoelGotsch/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
 
     - name: backup-cronjobs.staleness
       interval: 1m
@@ -185,4 +185,4 @@ spec:
               quiet-failure path: a suspended/deleted CronJob or a
               credentials failure produces NO failure event. Review
               finding docs-improvements.md L4/H1.
-            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+            runbook_url: https://github.com/JoelGotsch/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
