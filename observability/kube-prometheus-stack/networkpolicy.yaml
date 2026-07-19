@@ -110,6 +110,16 @@ spec:
           protocol: TCP
         - port: 8443   # kube-state-metrics, prometheus-operator
           protocol: TCP
+        # argocd metrics — notifications-controller :9001, server :8083,
+        # repo-server :8084. ServiceMonitors landed with the argocd v3.4.5
+        # sync (2026-07-18); these ports were never in this allowlist so
+        # the new targets went straight to TargetDown (rule 17). 2026-07-19.
+        - port: 9001
+          protocol: TCP
+        - port: 8083
+          protocol: TCP
+        - port: 8084
+          protocol: TCP
         - port: 10250  # kubelet metrics
           protocol: TCP
     # External hosts via additional-scrape-configs (Mac Studio
