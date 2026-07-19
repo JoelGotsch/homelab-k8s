@@ -136,6 +136,7 @@ each is a repo-local script under [scripts/](scripts/):
 |---|---|---|
 | `check-bare-tokens.sh` | bare ALL_CAPS placeholder tokens at value-bearing keys (`cidr:`, `server:`, `endpoint:`, etc.) — must be `<UPPER_SNAKE>` form so `check-placeholders.sh` catches them | pre-commit |
 | `check-eso-readme.sh` | every kustomize layer with an ExternalSecret has the `## OpenBao paths to seed` section in its README | pre-commit |
+| `check-temporary-notification-routes.sh` | exact P0-07 containment inventory for current operational Signal and recipient-incompatible custom-relay routes; rejects expansion or semantic changes before ntfy receipt + conditional fallback are proven | pre-commit |
 | `check-placeholders.sh` | unfilled `<PLACEHOLDER>` tokens — **deploy-time** (cold-start.md Step 13a), not commit-time. Run manually before `kubectl apply -k` / Argo apply. | manual |
 | `check-helm-values-keys.sh` | every key path in a layer's `values.yaml` exists in the chart's published `helm show values` tree — catches the wrong-chart-key class that bit 4 apps in the 2026-05-29→31 bring-up ([journal](../homelab-docs/99-journal/2026-05-31-langfuse-and-vaultwarden-bringup-saga.md)). v1 is manual-run because charts with undocumented back-compat shims produce false positives; a per-layer `.helmcheckignore` baseline-file refinement is queued in TODO. | manual |
 

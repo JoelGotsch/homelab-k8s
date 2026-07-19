@@ -105,10 +105,13 @@ falcosidekick:
     # chart; operator reaches via kubectl port-forward.
     enabled: true
   config:
-    # Webhook → ntfy-e2ee-relay. Per the audit TODO from
-    # 2026-04-29-known-caveats-and-mac-studio-runbooks.md:
-    # the relay is deployed but never receives events
-    # without this wiring.
+    # P0-07-TEMPORARY-DRIFT(falcosidekick-custom-ntfy-relay)
+    # TEMPORARY incompatible custom-relay route in the layer's dormant resume
+    # values (the Helm block is suspended in kustomization.yaml). The relay's
+    # encrypted wire format is not readable by the current mobile client, so it
+    # is not working alert coverage. Do not activate or expand it. Remove it
+    # only after a synthetic Falco event has produced a readable receipt through
+    # the parallel Falcosidekick -> Alertmanager -> formatter -> ntfy path.
     webhook:
       address: http://ntfy-e2ee-relay.ntfy-e2ee-relay.svc.cluster.local:8000/webhook
       checkcert: false  # cluster-internal HTTP; not TLS-terminated
@@ -131,13 +134,12 @@ falcosidekick:
       # would reject as "no org id."
       checkcert: false  # cluster-internal HTTP
 
-    # Alertmanager output — enabled 2026-04-30 with
-    # kube-prometheus-stack landing. Per ADR 0021 D7,
-    # Alertmanager-routed events go to ntfy + (deferred)
-    # Signal. Falcosidekick → Alertmanager + Falcosidekick →
-    # webhook → relay are PARALLEL paths; the operator's
-    # phone receives via the relay+ntfy chain regardless of
-    # which Falcosidekick output fires.
+    # Alertmanager output — the supported primary path when this suspended
+    # layer is resumed. It reaches the Alertmanager formatter -> ntfy route;
+    # critical events also inherit the explicitly baselined temporary
+    # operational Signal fan-out there. Falcosidekick -> Alertmanager and
+    # Falcosidekick -> custom relay are parallel in these dormant values, but
+    # only the former can become verified recipient coverage.
     alertmanager:
       hostport: http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093
 

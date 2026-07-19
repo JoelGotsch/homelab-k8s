@@ -37,6 +37,18 @@ repos:
         pass_filenames: false
         files: '(externalsecret.*\.ya?ml|README\.md)$'
 
+      - id: check-temporary-notification-routes
+        name: contain temporary operational Signal and incompatible custom-relay routes
+        entry: scripts/check-temporary-notification-routes.sh
+        language: script
+        pass_filenames: false
+        files: '(\.ya?ml$|scripts/check-temporary-notification-routes\.sh$)'
+        # P0-07 freezes the exact current alert-routing drift without changing
+        # active delivery. Any YAML may introduce a direct/custom-relay route,
+        # so the hook intentionally runs for all manifest changes. Baseline
+        # expansion is an explicit reviewable policy diff, never an implicit
+        # exception in this hook.
+
       - id: check-broken-links
         name: relative markdown links + #anchor fragments resolve (cross-repo aware)
         entry: scripts/check-broken-links.sh

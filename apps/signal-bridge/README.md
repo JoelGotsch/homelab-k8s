@@ -1,14 +1,27 @@
 # apps/signal-bridge
 
-The Signal-cli transport layer. Per ADR 0009 D1 (Signal as
-default approval transport) + ADR 0021 D7 (Signal as
-high-severity alert sink).
+The Signal-cli transport layer. Signal is the intended approval transport and,
+after the notification migration, a conditional ntfy-outage fallback for
+operational alerts.
 
 `bbernhard/signal-cli-rest-api` wraps signal-cli with a small
 HTTP API; this layer deploys it. The higher-level
 alert-formatting + audit + approval-state-machine logic
 lives at [`apps/approval-channel/`](../approval-channel/) —
 this layer is **transport only**.
+
+## Route classification and temporary watchdog drift
+
+Signal transport does not make all callers approval workflows. The current
+OpenBao seal watchdog invokes `/v2/send` directly with an operational alert; it
+does not create or mutate an approval item. P0-07 labels and exact-baselines
+that direct send as temporary drift.
+
+Keep the watchdog for circular-dependency coverage until the same source has a
+readable ntfy receipt and conditional Signal fallback is proven. This is not
+authority to remove it early, and no active route behavior changes under the
+containment. Actual approval messages must remain distinguishable by their
+typed command ID/digest/reply semantics, not merely by using this transport.
 
 ## Why a separate layer (not a sidecar to approval-channel)
 
@@ -85,10 +98,10 @@ holds the recipient list (operator's other phone, etc.).
    the native build; alerts queued during outage are lost
    unless approval-channel has its own buffer — it does
    not, today).
-2. **No HA path within this layer.** Multi-instance
-   signal-cli is upstream-unsupported. The architectural
-   answer is "Signal is degraded → fall back to ntfy"
-   handled at approval-channel.
+2. **No HA path within this layer.** Multi-instance signal-cli is
+   upstream-unsupported. Operational alerts use ntfy as primary; Signal is the
+   intended fallback only when ntfy degradation is evidenced. Approval
+   availability is a separate workflow concern.
 3. **Image is a community wrapper.** `bbernhard/
    signal-cli-rest-api` is well-maintained but not
    first-party Signal. Renovate-pinned per
@@ -119,8 +132,8 @@ holds the recipient list (operator's other phone, etc.).
 - [ADR 0009](../../../homelab-docs/02-decisions/0009-approval-channel.md)
   — approval channel design; D1 pins Signal as the default
   transport.
-- [ADR 0021 D7](../../../homelab-docs/02-decisions/0021-observability-stack.md)
-  — Signal as high-severity alert sink.
+- [`scripts/temporary-notification-route-baseline.yaml`](../../scripts/temporary-notification-route-baseline.yaml)
+  — exact containment for the watchdog and other temporary alert routes.
 - [signal-webhook runbook](../../../homelab-docs/03-runbooks/observability/signal-webhook.md)
   — end-to-end pipeline from Alertmanager / Falcosidekick /
   Langfuse → approval-channel → signal-bridge → operator phone.

@@ -171,6 +171,10 @@ spec:
         groupInterval: 30s
         repeatInterval: 30m
         continue: true
+      # P0-07-TEMPORARY-DRIFT(alertmanager-deception-signal)
+      # Operational alert route, not an approval workflow. Keep only until a
+      # readable ntfy receipt from this source and conditional Signal fallback
+      # have both been proven; the exact route is frozen by the static baseline.
       - matchers:
           - name: component
             value: deception
@@ -209,6 +213,10 @@ spec:
         # (groupWait 5s); repeat is only the nag cadence. 2026-07-20.
         repeatInterval: 6h
         continue: true
+      # P0-07-TEMPORARY-DRIFT(alertmanager-critical-signal)
+      # Unconditional operational Signal fan-out. This is containment, not the
+      # intended steady state; do not remove it before the ntfy receipt and
+      # conditional-fallback gates in the reviewed baseline are satisfied.
       - matchers:
           - name: severity
             value: critical
@@ -224,6 +232,10 @@ spec:
       # after 55 minutes of continuous firing. Opt-in per rule
       # (see the runbook for the candidate list); default
       # warnings stay Tier 2 only.
+      # P0-07-TEMPORARY-DRIFT(alertmanager-warning-time-escalation-signal)
+      # Time alone is not evidence that ntfy is degraded. Retain this temporary
+      # route only for coverage while conditional fallback is implemented and
+      # the primary ntfy path is proven at the recipient.
       - matchers:
           - name: severity
             value: warning
@@ -282,7 +294,11 @@ spec:
         - url: http://alert-formatter.monitoring.svc.cluster.local:8080/publish?topic=homelab-alerts
           sendResolved: true
 
-    # ===== Tier 1 sink B — Signal via approval-channel =====
+    # ===== Temporary operational Signal sink via approval-channel =====
+    # ROUTE CLASS: operational alert, not approval. Alertmanager posts an alert
+    # payload to /v1/alert; it cannot create or mutate an approval item. The
+    # service name is historical and must not be used as proof of approval-state
+    # semantics. P0-07 freezes the routes which reference this receiver.
     - name: approval-channel-alert
       webhookConfigs:
         - url: http://approval-channel.approval-channel.svc.cluster.local:8000/v1/alert
@@ -297,7 +313,9 @@ spec:
                 name: am-inbound-tokens
                 key: approval-channel
 
-    # ===== Deception sink — Signal (dedicated) =====
+    # ===== Temporary operational deception Signal sink =====
+    # ROUTE CLASS: operational alert, not approval. /v1/deception is another
+    # one-way alert formatter endpoint and is covered by the same P0-07 gates.
     - name: approval-channel-deception
       webhookConfigs:
         - url: http://approval-channel.approval-channel.svc.cluster.local:8000/v1/deception

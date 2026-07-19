@@ -308,6 +308,10 @@ spec:
                     "$OPERATOR_SIGNAL_NUMBER" \
                     "$(printf %b "$MSG" | sed 's/"/\\"/g' | awk 'BEGIN{ORS="\\n"}{print}')")
                   echo "Dispatching Signal alert via signal-bridge (from $SOURCE_SIGNAL_NUMBER to $OPERATOR_SIGNAL_NUMBER)..."
+                  # P0-07-TEMPORARY-DRIFT(openbao-watchdog-direct-signal)
+                  # Unconditional operational Signal send, not an approval.
+                  # Preserve for circular-dependency coverage until readable
+                  # ntfy receipt and conditional fallback are both proven.
                   HTTP=$(curl -sS -m 30 -o /tmp/resp.json -w "%{http_code}" -X POST \
                     -H 'Content-Type: application/json' \
                     --data "$PAYLOAD" \

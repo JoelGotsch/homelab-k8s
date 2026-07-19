@@ -3,35 +3,45 @@
 Falco DaemonSet + Falcosidekick fanout — runtime HIDS per
 [ADR 0021 D4 + D7](../../../homelab-docs/02-decisions/0021-observability-stack.md).
 
-Falco DaemonSet runs on every node (CO-RE eBPF probe; kmod
-unavailable on Talos per ADR 0013). Events flow:
+**Status: suspended.** `kustomization.yaml` comments out the Helm chart and all
+Falco-dependent resources because no tested Falco driver currently loads on the
+running Talos kernel. Argo therefore applies only the shared `monitoring`
+namespace from this layer; no Falco/Falcosidekick pod or notification route is
+active from these manifests.
+
+If the documented wake-up criteria are satisfied, the dormant `values.yaml`
+currently describes this fan-out:
 
 ```
-Falco DaemonSet  ──[HTTP POST]──>  Falcosidekick  ──┬── webhook → ntfy-e2ee-relay  → ntfy server  → operator's F-Droid
-                                                    │
-                                                    ├── (deferred) Loki — retrospection store
-                                                    │
-                                                    └── (deferred) Alertmanager → Signal (high-severity per ADR 0021 D7)
+Falco ──> Falcosidekick ──┬──> Alertmanager ──> formatter ──> ntfy (primary)
+                          ├──> Loki (retrospection)
+                          └──> ntfy-e2ee-relay ──> ntfy (temporary; unreadable wire format)
 ```
 
-## Closes the audit TODO
+Critical events entering Alertmanager would also inherit its separately
+baselined temporary operational Signal fan-out.
 
-The `Falcosidekick WEBHOOK_ADDRESS config` audit-flagged
-TODO from the
-[2026-04-29 known-caveats journal](../../../homelab-docs/99-journal/2026-04-29-known-caveats-and-mac-studio-runbooks.md):
-the relay is deployed but never receives webhooks without
-this wiring. `values.yaml`'s `falcosidekick.config.webhook.address`
-points at
-`http://ntfy-e2ee-relay.ntfy-e2ee-relay.svc.cluster.local:8000/webhook` — the relay's pre-existing route. Falcosidekick's webhook output sends the full event JSON with `output` as the human-readable rule message; the relay's `_extract_message` (per `ntfy-e2ee-relay/ntfy_relay/server.py`) handles that shape first.
+## Temporary custom-relay containment
+
+The dormant `falcosidekick.config.webhook.address` route to `ntfy-e2ee-relay`
+has a custom encrypted payload which cannot be read by the current mobile
+client. Suspension means it is not live, but it is still unsafe resume
+configuration and cannot count as working alert coverage. P0-07 labels and
+exact-baselines it so activation or another relay dependency is review-visible.
+
+Do not remove it based on configuration inspection alone. First inject a
+synthetic Falco event through Falcosidekick -> Alertmanager -> alert-formatter
+-> ntfy and confirm a readable recipient receipt. Do not send raw Falco JSON
+straight to alert-formatter; that service expects Alertmanager webhook shape.
 
 ## Layout
 
 | File | Purpose |
 |---|---|
-| `kustomization.yaml` | Pins falco Helm chart 4.20.0 (with falcosidekick subchart enabled). |
+| `kustomization.yaml` | Suspends the chart/resources and records exact driver wake-up criteria; the commented candidate pin is 8.0.5. |
 | `namespace.yaml` | `monitoring` namespace; PSA `privileged` (Falco DaemonSet needs to read `/proc` + load eBPF). |
-| `values.yaml` | `driver: modern_ebpf`; tolerations for CP-tainted nodes; rule files (upstream + local overlay); Falcosidekick webhook → relay; Loki/Alertmanager outputs disabled-with-TODO until those layers land. |
-| `networkpolicy.yaml` | Falco egress to Falcosidekick + kube-DNS; Falcosidekick ingress from Falco + Prometheus, egress to ntfy-e2ee-relay + kube-DNS. |
+| `values.yaml` | Dormant resume values: interim `driver: ebpf`, tolerations, rule files, Alertmanager/Loki outputs, and the temporary custom-relay webhook. |
+| `networkpolicy.yaml` | Dormant until resume: Falco/Falcosidekick ingress and egress policy. |
 | `servicemonitor.yaml` | Self-metrics scrape for both Falco + Falcosidekick. |
 | `rules-configmap.yaml` | Operator's local rule overlay (mounted at `/etc/falco/rules.d`). Today carries: csi-rclone driver allowlist (`user_privileged_containers` + `user_sensitive_mount_containers` extension entries for `ghcr.io/veloxpack/csi-driver-rclone`) + a homelab rule "Unexpected /dev/fuse access outside csi-rclone" defense-in-depth signal. Conventions documented inline. |
 
@@ -44,29 +54,20 @@ Sequencing:
 | Bring-up step | What lands |
 |---|---|
 | [Step 9 — Cluster bring-up](../../../homelab-docs/04-guides/cold-start.md) | Cilium + OpenBao + Argo CD ready |
-| Argo sync of this layer | `monitoring` ns + Falco DaemonSet + Falcosidekick + ServiceMonitors + NetworkPolicies |
-| ntfy-e2ee-relay must be Healthy | for the webhook output to actually deliver — check via the layer's pre-deployment Ready gate |
-| **(later) kube-prometheus-stack rollout** | enables ServiceMonitor scrape; Loki output enable; Alertmanager output enable + Signal high-severity routing |
+| Current Argo sync | Shared `monitoring` namespace only; Falco chart and dependent resources remain commented out. |
+| Resume after a wake-up criterion | Prove one Falco pod loads first, then enable Falcosidekick/Loki/Alertmanager resources in lockstep. |
+| Notification gate during resume | Inject a synthetic Falco event through Alertmanager + formatter + ntfy and confirm readable receipt; do not activate the custom relay. |
 | **(later) deception layer per [ADR 0010](../../../homelab-docs/02-decisions/0010-deception-controls.md)** | populate `rules-configmap.yaml` with deception rules (honeycred reads, etc.) |
 
 ## OpenBao paths to seed
 
 Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 
-**At first install: none.** Falco doesn't need any operator-
-provided secrets at scaffold time. The webhook output to
-ntfy-e2ee-relay reaches via cluster-internal HTTP (no auth).
+**At first install: none.** The layer is suspended and creates no Falco
+workload. Its dormant output configuration declares no credential.
 
-When Loki + Alertmanager outputs enable later:
-
-| Path | Keys | Source |
-|---|---|---|
-| `kv/prod/falcosidekick/loki-bearer` | `token` | (Loki may or may not require auth depending on operator's Loki config; if it does, capture the bearer + write here) |
-| `kv/prod/falcosidekick/alertmanager-basic` | `username`, `password` | (Alertmanager auth, if enabled per the kube-prometheus-stack values) |
-
-Both are operator-fillable at observability-layer rollout
-time — included here as documented forward-compatibility,
-not a current install requirement.
+Current Loki, Alertmanager, and custom-relay outputs are cluster-internal and
+declare no Falcosidekick credential here.
 
 ## Operator inputs
 
@@ -102,24 +103,19 @@ not a current install requirement.
    [03-runbooks/observability/rule-tuning.md](../../../homelab-docs/03-runbooks/observability/rule-tuning.md):
    quarterly review of false positives + rule overlay
    updates in `rules-configmap.yaml`.
-5. **Falco's webhook output sends ALL severities** without
-   filtering at first install (`minimumpriority: notice`).
-   When Alertmanager output enables, route filtering moves
-   there (Alertmanager → Signal at >= warning per ADR 0021
-   D7); the webhook output to relay stays all-severities
-   for ntfy. Operator can tighten if alert-fatigue surfaces.
+5. **If resumed unchanged, the custom-relay webhook would send all events at or
+   above `notice`.** Its recipient-incompatible format means it is temporary
+   drift, not verified delivery. The parallel Alertmanager setting is the
+   candidate supported path but still requires a synthetic receipt test.
 6. **`monitoring` namespace co-locates Falco (privileged)
    with Prometheus (restricted).** PSA at the namespace
    level is `privileged` (the floor); each pod's
    `securityContext` enforces the actual posture. Standard
    pattern; documented inline in `namespace.yaml`.
-7. **Loki + Alertmanager outputs are disabled with comments
-   in `values.yaml`.** Without them, Falcosidekick's only
-   output is the webhook to ntfy-e2ee-relay → ntfy. Once
-   Loki lands, retrospection becomes possible; once
-   Alertmanager lands, Signal high-severity routing per
-   ADR 0021 D7 becomes possible. Both are observability-
-   layer-rollout follow-ups.
+7. **On resume, Signal fan-out would be inherited from Alertmanager, not a
+   Falcosidekick approval route.** Critical Falco events would dual-send under
+   the current P0-07 Alertmanager baseline. That operational path remains
+   distinct from a future approval item/state flow.
 8. **k8s audit-log integration depends on Talos config.**
    Per ADR 0021 D4 the K8s audit-log plugin is enabled in
    `values.yaml` — but Talos must route the audit log to
@@ -137,10 +133,9 @@ not a current install requirement.
   when honeycred files land.
 - [03-runbooks/observability/rule-tuning.md](../../../homelab-docs/03-runbooks/observability/rule-tuning.md)
   — quarterly false-positive review + suppression patterns.
-- [03-runbooks/observability/signal-webhook.md](../../../homelab-docs/03-runbooks/observability/signal-webhook.md)
-  — Signal output wiring (lands when Alertmanager output
-  enables here).
+- [`scripts/temporary-notification-route-baseline.yaml`](../../scripts/temporary-notification-route-baseline.yaml)
+  — exact custom-relay and operational-Signal containment inventory.
 - [apps/ntfy-e2ee-relay/](../../apps/ntfy-e2ee-relay/) —
   the webhook target for this layer's Falcosidekick output.
-- [apps/ntfy/](../../apps/ntfy/) — the eventual delivery
-  endpoint (relay encrypts + posts here).
+- [apps/ntfy/](../../apps/ntfy/) — the primary delivery endpoint through the
+  Alertmanager formatter path.

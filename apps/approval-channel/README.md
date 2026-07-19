@@ -9,6 +9,20 @@ implements the **alert-delivery half** of approval-channel; the
 agent-approval state machine (approve / refuse / duress / abstain
 on consequential writes) is a separate scope and lands later.
 
+## Route classification
+
+Despite this layer's historical name, the implemented `/v1/alert` and
+`/v1/deception` endpoints are **operational alert** formatters. Alertmanager
+calls cannot create, approve, refuse, or mutate an approval item. The current
+routes to these endpoints are temporary operational Signal drift, exact-
+baselined under P0-07 until readable ntfy receipt and conditional fallback are
+proven.
+
+The future approval workflow is not present in these manifests. It must use a
+typed approval protocol with immutable command identity/digest and explicit
+reply semantics, so alert delivery and approvals remain distinguishable even
+though both may use signal-bridge as transport.
+
 Source code: [`/approval-channel/`](../../../approval-channel/)
 at the workspace root.
 
@@ -64,7 +78,7 @@ bao kv put kv/approval-channel/signal \
 | Argo sync `apps/signal-bridge/` | signal-cli daemon up; operator runs the registration ceremony per signal-bridge README. |
 | Operator seeds `kv/approval-channel/signal/{sender,recipients}` | ESO can populate the Secret. |
 | Argo sync this layer | approval-channel Deployment Ready; `/healthz` returns 200. |
-| Argo sync `observability/kube-prometheus-stack/` (alertmanager-config with the approval-channel routes uncommented) | Critical alerts + deception events flow end-to-end. |
+| Argo sync `observability/kube-prometheus-stack/` | The active, temporary critical/deception operational-alert routes call these endpoints. |
 
 ## Caveats
 
@@ -73,8 +87,9 @@ bao kv put kv/approval-channel/signal \
    retries. Acceptable; recorded in
    [`/approval-channel/README.md`](../../../approval-channel/README.md)
    caveat 1.
-2. **No inbound webhook auth.** NetworkPolicy gates ingress to
-   Alertmanager only. HMAC headers are an upgrade path.
+2. **Inbound bearer auth plus NetworkPolicy, but no message signature.**
+   Alertmanager supplies the `am-inbound-tokens` credential and NetworkPolicy
+   limits ingress. A source-bound HMAC/signature remains an upgrade path.
 3. **Single-replica Deployment.** Stateless; HA isn't useful at
    homelab scale. AM retries cover transient unavailability.
 4. **One formatter for both endpoints.** `/v1/alert` and

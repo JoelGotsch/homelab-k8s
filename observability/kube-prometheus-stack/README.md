@@ -24,10 +24,29 @@ discovery via this layer's `serviceMonitorSelector` /
 | `kustomization.yaml` | Pins kube-prometheus-stack chart 65.5.1. |
 | `namespace.yaml` | `monitoring` ns (shared with falco-stack); PSA `privileged`. |
 | `values.yaml` | Prometheus 30d retention on Longhorn-encrypted PVC; Alertmanager + Grafana persistence; chart-default ServiceMonitor / Rule selectors; node-exporter + kube-state-metrics enabled; OIDC commented-with-TODO until Authentik lands. |
-| `alertmanager-config.yaml` | AlertmanagerConfig CRD — webhook → ntfy-e2ee-relay (parallel to Falcosidekick's webhook); deception events tighter grouping; Signal high-severity routing commented-with-TODO. |
+| `alertmanager-config.yaml` | AlertmanagerConfig CRD — readable formatter → ntfy primary routes plus explicitly baselined temporary operational Signal fan-out. |
 | `externalsecret.yaml` | Grafana admin user + password from `kv/grafana/admin`. |
 | `httproute.yaml` | Three HTTPRoutes: `grafana.lab.<HOMELAB-DOMAIN>`, `alertmanager.lab.<HOMELAB-DOMAIN>`, `prometheus.lab.<HOMELAB-DOMAIN>`. All Tailscale-fronted phase 1; Grafana intentionally NOT Cloudflare-Tunnel-served per ADR 0024 (dashboards surface internal-class data). |
-| `networkpolicy.yaml` | Three NetworkPolicies — Prometheus (wide scrape egress, intentional), Alertmanager (egress to ntfy-e2ee-relay), Grafana (data sources + ingress from cluster Gateway). |
+| `networkpolicy.yaml` | Prometheus/Alertmanager/Grafana policy, including Alertmanager egress to alert-formatter and the temporary approval-channel operational-alert endpoints. |
+
+## Temporary notification-route containment
+
+The current critical, deception, and time-based warning-escalation routes send
+operational alerts to Signal as well as ntfy. They are **temporary drift**, not
+the approval-channel steady state. In particular, Alertmanager's `/v1/alert`
+and `/v1/deception` calls are one-way operational-alert delivery; they do not
+create, approve, refuse, or mutate an approval item.
+
+[`scripts/temporary-notification-route-baseline.yaml`](../../scripts/temporary-notification-route-baseline.yaml)
+records the exact receiver URLs, matchers, grouping timings, and `continue`
+semantics. The pre-commit guard rejects another route or any broadening. Do not
+remove the existing Signal leg until both gates are proven:
+
+1. a synthetic alert from the same source produces a readable ntfy receipt at
+   the recipient; and
+2. Signal is available only as a tested, conditional ntfy-outage fallback.
+
+This containment changes no live routing behavior.
 
 ## OpenBao paths to seed
 
@@ -98,7 +117,7 @@ keeps working throughout.
 | Pre-existing ServiceMonitors + PrometheusRules (4 layers) | Auto-discovered by the chart's selector match; scrape + rule-eval start within ~30s |
 | AlertmanagerConfig in this layer | Picked up by Alertmanager via `alertmanagerConfigSelector` |
 | **(later) Loki layer** | Grafana data source for log dashboards; Falcosidekick + Alertmanager log-shipping outputs enable; uncomment NetworkPolicy egress rule |
-| **(later) Signal-bridge sidecar** per [observability/signal-webhook.md](../../../homelab-docs/03-runbooks/observability/signal-webhook.md) | Alertmanager `signal` receiver enables in alertmanager-config.yaml; deception + critical routes get `continue: true` to fan to both ntfy + Signal |
+| Current temporary Signal fan-out | Critical, deception, and opted-in long-running warnings also reach Signal through `/v1/alert` or `/v1/deception`; P0-07 freezes this until ntfy receipt + conditional fallback are proven. |
 | **(later) Authentik OIDC** | Grafana `auth.generic_oauth` block enables; admin password becomes break-glass-only |
 
 ## Caveats
@@ -130,12 +149,12 @@ keeps working throughout.
    chart values). If the chart's default ever changes
    shape, our override might leak the chart-default
    behavior; verify at chart-bump time.
-5. **Signal high-severity routing is commented-with-TODO.**
-   Until the Signal-bridge sidecar lands per the approval
-   channel, all severities go to ntfy (via the relay).
-   Critical alerts get the same delivery path as warning;
-   acceptable for a homelab, less acceptable for a
-   production service.
+5. **Operational Signal routes are temporary drift.** Critical and deception
+   alerts dual-send to ntfy and Signal; selected warnings escalate to Signal
+   after 55 minutes even without ntfy-failure evidence. The static containment
+   baseline prevents expansion. Removal waits for readable ntfy receipt and a
+   tested conditional fallback, so this documentation is not authority to
+   delete coverage early.
 6. **Grafana OIDC commented-with-TODO until Authentik
    lands.** First-install operator logs in with the
    ESO-projected admin password directly. When Authentik
@@ -175,11 +194,11 @@ keeps working throughout.
 - [ADR 0024](../../../homelab-docs/02-decisions/0024-external-access-for-internal-services.md)
   — why Grafana stays Tailscale-only.
 - [observability/falco-stack/](../falco-stack/) — peer
-  observability layer; Falcosidekick's webhook output
-  parallels this layer's Alertmanager webhook output.
+  observability layer, currently suspended; its dormant Alertmanager output is
+  the candidate supported ntfy path and its custom-relay setting is separately
+  contained as unsafe resume drift.
 - [03-runbooks/observability/rule-tuning.md](../../../homelab-docs/03-runbooks/observability/rule-tuning.md)
   — quarterly false-positive review across both
   Prometheus rules + Falco rules.
-- [03-runbooks/observability/signal-webhook.md](../../../homelab-docs/03-runbooks/observability/signal-webhook.md)
-  — Signal-bridge sidecar that this layer's Alertmanager
-  routes to once it's up.
+- [`scripts/temporary-notification-route-baseline.yaml`](../../scripts/temporary-notification-route-baseline.yaml)
+  — exact reviewed inventory and removal gates for temporary routes.
