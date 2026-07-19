@@ -215,13 +215,18 @@ spec:
         # typically completes inside 2m; 10m means the pod is
         # genuinely stuck.
         - alert: OpenBaoMissingReplica
+          # ready-replica count from the StatefulSet, NOT a namespace pod
+          # count. The original expr counted EVERY Running pod in the
+          # openbao namespace, so the hourly raft-snapshot CronJob pod
+          # (openbao-raft-snapshot-hourly, `5 * * * *`) pushed the count
+          # to 3 for ~2 minutes each hour: alert resolved at :04, went
+          # pending at :06, re-fired at :16 — an hourly firing/resolved
+          # notification pair for one continuous condition (2026-07-19).
           expr: |
-            count(
-              kube_pod_status_phase{
-                namespace="openbao",
-                phase="Running"
-              } == 1
-            ) < 3
+            kube_statefulset_status_replicas_ready{
+              namespace="openbao",
+              statefulset="openbao"
+            } < 3
           for: 10m
           labels:
             severity: critical
