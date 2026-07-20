@@ -20,7 +20,7 @@ spec:
   generators:
     - list:
         elements:
-          - {name: approval-channel,    repo: homelab-k8s, path: apps/approval-channel,    autoSync: "false"}
+          - {name: approval-channel,    repo: approval-channel, path: k8s, autoSync: "false"}
           - {name: frigate,             repo: homelab-k8s, path: apps/frigate,             autoSync: "true"}
           - {name: immich,              repo: homelab-k8s, path: apps/immich,              autoSync: "true"}
           - {name: immich-public-proxy, repo: immich-public-proxy, path: k8s, autoSync: "true"}
