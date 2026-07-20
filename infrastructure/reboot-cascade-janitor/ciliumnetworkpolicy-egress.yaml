@@ -1,0 +1,28 @@
+# The namespace is selected by Kyverno's default-deny NetworkPolicy because it
+# carries the first-party label. The janitor only needs one network flow: its
+# in-cluster kubectl client lists Kubernetes API objects and deletes a bounded
+# set of controller-owned pods. Cilium socket-LB translates the
+# kubernetes.default ClusterIP port 443 to a control-plane endpoint on 6443
+# before policy evaluation, so permit both ports to the reserved
+# kube-apiserver entity (Cilium 1.16 policy language).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: reboot-cascade-janitor-apiserver-egress
+  namespace: reboot-cascade-janitor
+  labels:
+    app.kubernetes.io/name: reboot-cascade-janitor
+    app.kubernetes.io/component: egress-policy
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: reboot-cascade-janitor
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP

@@ -20,3 +20,4 @@ kind: Kustomization
 
 resources:
   - reboot-cascade-janitor.yaml
+  - ciliumnetworkpolicy-egress.yaml
