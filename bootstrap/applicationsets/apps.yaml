@@ -26,7 +26,7 @@ spec:
           - {name: immich-public-proxy, repo: immich-public-proxy, path: k8s, autoSync: "true"}
           - {name: jellyfin,            repo: jellyfin, path: k8s, autoSync: "true"}
           - {name: knowledge-graph,     repo: homelab-k8s, path: apps/knowledge-graph,     autoSync: "true"}
-          - {name: llm-gateway,         repo: homelab-k8s, path: apps/llm-gateway,         autoSync: "true"}
+          - {name: llm-gateway,         repo: homelab-k8s, path: apps/llm-gateway,         autoSync: "false"}
           - {name: nextcloud,           repo: homelab-k8s, path: apps/nextcloud,           autoSync: "true"}
           - {name: ntfy,                repo: ntfy, path: k8s, autoSync: "true"}
           - {name: ntfy-e2ee-relay,     repo: ntfy-e2ee-relay, path: k8s, autoSync: "true"}
