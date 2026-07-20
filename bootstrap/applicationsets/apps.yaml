@@ -33,7 +33,7 @@ spec:
           - {name: paperless,           repo: homelab-k8s, path: apps/paperless,           autoSync: "true"}
           - {name: personal-agent,      repo: homelab-k8s, path: apps/personal-agent,      autoSync: "true"}
           - {name: signal-bridge,       repo: signal-bridge, path: k8s, autoSync: "true"}
-          - {name: vaultwarden,         repo: homelab-k8s, path: apps/vaultwarden,         autoSync: "true"}
+          - {name: vaultwarden,         repo: homelab-k8s, path: apps/vaultwarden,         autoSync: "false"}
           - {name: website,             repo: homelab-k8s, path: apps/website,             autoSync: "true"}
           - {name: whatsapp-bridge,     repo: homelab-k8s, path: apps/whatsapp-bridge,     autoSync: "true"}
           - {name: windmill,            repo: homelab-k8s, path: apps/windmill,            autoSync: "true"}
