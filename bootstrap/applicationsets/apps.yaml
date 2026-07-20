@@ -29,7 +29,7 @@ spec:
           - {name: llm-gateway,         repo: homelab-k8s, path: apps/llm-gateway,         autoSync: "true"}
           - {name: nextcloud,           repo: homelab-k8s, path: apps/nextcloud,           autoSync: "true"}
           - {name: ntfy,                repo: homelab-k8s, path: apps/ntfy,                autoSync: "true"}
-          - {name: ntfy-e2ee-relay,     repo: homelab-k8s, path: apps/ntfy-e2ee-relay,     autoSync: "true"}
+          - {name: ntfy-e2ee-relay,     repo: homelab-k8s, path: apps/ntfy-e2ee-relay,     autoSync: "false"}
           - {name: paperless,           repo: homelab-k8s, path: apps/paperless,           autoSync: "true"}
           - {name: personal-agent,      repo: homelab-k8s, path: apps/personal-agent,      autoSync: "true"}
           - {name: signal-bridge,       repo: homelab-k8s, path: apps/signal-bridge,       autoSync: "true"}
