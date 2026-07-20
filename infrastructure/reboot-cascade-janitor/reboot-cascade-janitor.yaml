@@ -209,13 +209,17 @@ spec:
                   echo "[step 1] reboot-cascade-janitor starting (dry_run=$DRY_RUN, cap=$MAX_ACTIONS_PER_RUN, threshold=${STUCK_THRESHOLD_SECONDS}s)"
                   NOW_TS=$(date -u +%s)
 
-                  # [step 2] List pods once. Do not list every cluster Event
-                  # into one shell variable: this cluster's Event JSON is
-                  # already ~15 MiB and the kubectl + shell copies exceeded the
-                  # 192 MiB cgroup limit. Events are fetched by pod UID only
-                  # after a pod passes the cheap candidate gates below.
-                  PODS_JSON=$(kubectl get pods -A -o json)
-                  echo "[step 2] listed $(echo "$PODS_JSON" | jq '.items|length') pods"
+                  # [step 2] Ask the API server for Pending pods only. The
+                  # first implementation materialized every cluster Pod and
+                  # Event as JSON; kubectl's decode plus shell copies exceeded
+                  # the 192 MiB cgroup limit before jq ran. Every actionable
+                  # signature is Pending, so filtering at the API boundary is
+                  # both equivalent and bounded. Per-pod Events and the
+                  # csi-rclone plugin are queried only if a candidate needs
+                  # them.
+                  PODS_JSON=$(kubectl get pods -A \
+                    --field-selector 'status.phase=Pending' -o json)
+                  echo "[step 2] listed $(echo "$PODS_JSON" | jq '.items|length') Pending pods"
 
                   # [step 3] candidate pods: common gates (1)-(4).
                   # Emits ns|name|node|uid rows. The UID keys the later Event
@@ -228,11 +232,6 @@ spec:
                       ($excl | split(" ")) as $ex
                       | .items[]
                       | select(.metadata.namespace as $n | $ex | index($n) | not)
-                      | select(.status.phase == "Pending"
-                          or ([.status.containerStatuses[]?
-                               | select(.state.waiting.reason == "ContainerCreating")]
-                              | length > 0))
-                      | select(.status.phase != "Succeeded" and .status.phase != "Running")
                       | select(($now - (.metadata.creationTimestamp | fromdateiso8601)) > $thr)
                       | select([.metadata.ownerReferences[]?
                                 | select(.kind == "ReplicaSet" or .kind == "StatefulSet"
@@ -287,10 +286,12 @@ spec:
                       case "$RESTARTED_NODES" in
                         *" $NODE "*) echo "[step 6] plugin on $NODE already restarted this run" ;;
                         *)
-                          PLUGIN=$(echo "$PODS_JSON" | jq -r --arg ns "$CSI_RCLONE_NAMESPACE" --arg pfx "$CSI_RCLONE_POD_PREFIX" --arg node "$NODE" '
-                            .items[] | select(.metadata.namespace==$ns)
-                            | select(.metadata.name | startswith($pfx))
-                            | select(.spec.nodeName==$node) | .metadata.name' | head -1)
+                          PLUGIN=$(kubectl get pods -n "$CSI_RCLONE_NAMESPACE" \
+                            --field-selector "spec.nodeName=$NODE" -o json \
+                            | jq -r --arg pfx "$CSI_RCLONE_POD_PREFIX" '
+                              .items[]
+                              | select(.metadata.name | startswith($pfx))
+                              | .metadata.name' | head -1)
                           if [ -n "$PLUGIN" ]; then
                             echo "[step 6] restarting csi-rclone plugin $PLUGIN on $NODE (graceful delete)"
                             kubectl delete pod "$PLUGIN" -n "$CSI_RCLONE_NAMESPACE" --wait=false || echo "[step 6] WARN plugin delete failed"
