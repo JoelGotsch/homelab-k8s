@@ -140,6 +140,25 @@ spec:
         repeatInterval: 12h
         continue: false
 
+      # ===== Node-outage fallout rollup — one notification per class =====
+      # A single NotReady node fans KubePodNotReady / DaemonSetRolloutStuck /
+      # StatefulSet* / PDB across many namespaces; with the default groupBy
+      # (alertname, namespace, severity) that was 13+ separate groups, each
+      # repeating independently (2026-07-19/20 worker1 outage: ~44 of 106
+      # daily notifications). Group these by alertname alone — one batch per
+      # class, per-namespace detail stays in the payload. They are also
+      # inhibited entirely while KubeNodeNotReady fires (see inhibitRules);
+      # this route matters for NON-node causes (bad rollouts).
+      - matchers:
+          - name: alertname
+            matchType: "=~"
+            value: "KubePodNotReady|KubeDaemonSetRolloutStuck|KubeStatefulSetReplicasMismatch|KubeStatefulSetUpdateNotRolledOut|KubeDeploymentReplicasMismatch|KubePdbNotEnoughHealthyPods"
+        receiver: ntfy-direct
+        groupBy: [alertname]
+        groupWait: 5m
+        groupInterval: 30m
+        repeatInterval: 12h
+
       # ===== Deception fan-out (ADR 0021 D10) =====
       # Honey-asset hits: zero-latency dedicated route to the
       # direct-ntfy Tier-1 topic AND approval-channel /v1/
@@ -184,7 +203,11 @@ spec:
         receiver: ntfy-critical
         groupWait: 5s
         groupInterval: 1m
-        repeatInterval: 1h
+        # 6h, not 1h: a persistent known critical (OpenBaoMissingReplica
+        # through the 2026-07 worker1 outage) re-paged BOTH media hourly —
+        # ~48 of 106 daily notifications. First page stays immediate
+        # (groupWait 5s); repeat is only the nag cadence. 2026-07-20.
+        repeatInterval: 6h
         continue: true
       - matchers:
           - name: severity
@@ -192,7 +215,7 @@ spec:
         receiver: approval-channel-alert
         groupWait: 5s
         groupInterval: 1m
-        repeatInterval: 1h
+        repeatInterval: 6h   # see ntfy-critical note above (2026-07-20)
 
       # ===== Tier 2 escalate-after opt-in =====
       # Per the alert-routing runbook "escalate-after"
@@ -296,6 +319,25 @@ spec:
         - name: severity
           value: warning
       equal: [alertname, namespace]
+
+    # ===== Node-outage cascade suppression (2026-07-20) =====
+    # While a node is NotReady, its mechanical fallout (unschedulable pods,
+    # stuck DaemonSet/StatefulSet rollouts, PDB shortfall, capacity math)
+    # carries no extra information — the 2026-07 worker1 outage produced a
+    # ~25-alert storm describing one fact. KubeNodeNotReady is the canonical
+    # page; the fallout classes are suppressed while it fires. Deliberately
+    # NOT suppressed: TargetDown (it caught the unrelated argocd scrape gap
+    # DURING this outage), OpenBaoMissingReplica (service-level critical),
+    # and anything unlisted. Trade-off: a genuinely new pod failure
+    # elsewhere is also muted during a node outage — accepted; the operator
+    # is engaged during outages, and criticals still page.
+    - sourceMatch:
+        - name: alertname
+          value: KubeNodeNotReady
+      targetMatch:
+        - name: alertname
+          matchType: "=~"
+          value: "KubePodNotReady|KubeDaemonSetRolloutStuck|KubeStatefulSetReplicasMismatch|KubeStatefulSetUpdateNotRolledOut|KubeDeploymentReplicasMismatch|KubePdbNotEnoughHealthyPods|KubeCPUQuotaOvercommit|KubeMemoryQuotaOvercommit|KubeletInstanceUnreachable|KubeNodeUnreachable"
 
     # InstanceDown / NodeNotReady inhibit other alerts for
     # that instance — the instance being down explains the
