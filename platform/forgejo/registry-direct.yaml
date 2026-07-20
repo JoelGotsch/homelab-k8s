@@ -55,6 +55,20 @@ data:
       access_log /dev/stdout;
       client_body_temp_path /tmp/client_body;
       proxy_temp_path /tmp/proxy;
+      # A headless Service endpoint changes whenever the single Forgejo Pod
+      # rolls. A literal proxy_pass hostname is resolved only while nginx
+      # loads its config and left this proxy targeting a dead Pod IP after
+      # the 2026-07-20 rollout. nginx >=1.27.3 supports open-source dynamic
+      # upstream resolution; this image currently carries nginx 1.29.x.
+      # nginx's resolver directive needs a nameserver address (it cannot use
+      # a Kubernetes Service DNS name to bootstrap resolution). This is the
+      # kube-dns ClusterIP from the cluster's fixed service CIDR.
+      resolver 10.96.0.10 valid=10s ipv6=off;
+      resolver_timeout 5s;
+      upstream forgejo_backend {
+        zone forgejo_backend 64k;
+        server forgejo-http.forgejo.svc.cluster.local:3000 resolve;
+      }
       # OCI blobs are large; never buffer to disk, stream both ways.
       client_max_body_size 0;
       proxy_buffering off;
@@ -68,15 +82,21 @@ data:
         # Only the OCI surface — this is a registry endpoint, not a
         # general Forgejo mirror. Everything else 404s here.
         location /v2/ {
-          # Headless service, trailing dot to skip search-domain walk
-          # (ts.net search-domain trap — see forgejo CNP comments).
-          proxy_pass http://forgejo-http.forgejo.svc.cluster.local.:3000;
+          proxy_pass http://forgejo_backend;
           proxy_set_header Host $host;
           proxy_set_header X-Forwarded-Proto https;
           proxy_http_version 1.1;
           # ADR 0038 D2: keep the whole OCI auth dance on THIS host.
           proxy_hide_header WWW-Authenticate;
           add_header WWW-Authenticate 'Bearer realm="https://registry.homelab.internal/v2/token",service="container_registry"' always;
+        }
+        # Readiness follows the upstream, not just nginx's local socket. A
+        # stale/unreachable Forgejo endpoint must remove this Pod from the
+        # Service instead of advertising a healthy registry that returns 504.
+        location = /readyz {
+          proxy_pass http://forgejo_backend/api/healthz;
+          proxy_set_header Host $host;
+          proxy_http_version 1.1;
         }
         location = /healthz { return 200 "ok\n"; }
         location / { return 404; }
@@ -107,9 +127,9 @@ spec:
       containers:
         - name: nginx
           # Unprivileged variant — PSS restricted namespace. Third-party
-          # image: tag-pinned, Renovate adds the digest pin (audit-
-          # third-party-image-digest is Audit).
-          image: docker.io/nginxinc/nginx-unprivileged:1.29-alpine
+          # Digest observed from the running 1.29 image; Renovate owns future
+          # tag/digest updates as one reviewable change.
+          image: docker.io/nginxinc/nginx-unprivileged:1.29-alpine@sha256:0c79d56aee561a1d81c63f00eee5fb5fe29279560cdc55e91425133104c7fbe6
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: ["ALL"]}
@@ -128,7 +148,7 @@ spec:
             # with readOnlyRootFilesystem that mkdir [emerg]s (2026-07-19).
             - {name: cache, mountPath: /var/cache/nginx}
           readinessProbe:
-            httpGet: {path: /healthz, port: 8443, scheme: HTTPS}
+            httpGet: {path: /readyz, port: 8443, scheme: HTTPS}
             initialDelaySeconds: 2
           livenessProbe:
             httpGet: {path: /healthz, port: 8443, scheme: HTTPS}

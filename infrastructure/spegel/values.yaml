@@ -90,20 +90,16 @@ spegel:
   containerdRegistryConfigPath: /etc/cri/conf.d/hosts
   containerdContentPath: /var/lib/containerd/io.containerd.content.v1.content
 
-  # Spegel writes the mirror config on first start (init
-  # container). Nothing else writes to /etc/cri/conf.d/hosts
-  # in this cluster — no Talos machine.registries config —
-  # so it's safe for Spegel to own that directory fully.
+  # Spegel writes only the explicitly listed third-party registry subdirs.
+  # Talos machine.registries owns the two first-party subdirs; the scopes
+  # must remain disjoint because Spegel moves pre-existing entries it owns
+  # under `_backup` during initialization.
   containerdMirrorAdd: true
 
-  # Empty = mirror all registries (chart default). With a
-  # single-cluster homelab the cache-hit math favors mirroring
-  # the full pull set; per-registry filters are only useful at
-  # multi-tenant scale.
   # THIRD-PARTY registries only (2026-07-19). The earlier "mirror all"
-  # setting rested on a FALSE assumption (the comment above claims no
-  # Talos machine.registries config exists — the containerd-registry
-  # patch WAS applied to all 6 nodes on 2026-07-13): Spegel's _default
+  # setting rested on the false assumption that no Talos
+  # machine.registries config existed. The containerd-registry patch was
+  # applied to all 6 nodes on 2026-07-13, and Spegel's _default
   # wildcard displaced the Talos per-registry hosts.toml
   # (server fallback + CA) into _backup/ on every node. Every FRESH
   # first-party pull then dead-ended at Spegel's 404 (containerd

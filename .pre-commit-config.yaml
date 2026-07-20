@@ -150,6 +150,16 @@ repos:
         # kube-apiserver (443+6443), DNS, MinIO, and their replication
         # peer — or the instance manager CrashLoopBackOffs. Local script.
 
+      - id: check-registry-critical-path
+        name: first-party registry ownership and dynamic upstream invariants
+        entry: scripts/check-registry-critical-path.sh
+        language: script
+        pass_filenames: false
+        files: '(infrastructure/spegel/values\.yaml|platform/forgejo/registry-direct\.yaml|scripts/check-registry-critical-path\.sh)$'
+        # A warm Spegel cache masked both failures. This hook keeps Talos in
+        # sole ownership of first-party registry hosts and ensures the direct
+        # proxy follows headless-Service endpoint changes.
+
       - id: check-site-config
 
         name: site-config.env derived keys consistent + placeholders component-backed
