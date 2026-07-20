@@ -27,7 +27,7 @@ spec:
           - {name: jellyfin,            repo: jellyfin, path: k8s, autoSync: "true"}
           - {name: knowledge-graph,     repo: homelab-k8s, path: apps/knowledge-graph,     autoSync: "true"}
           - {name: llm-gateway,         repo: llm-gateway, path: k8s, autoSync: "true"}
-          - {name: nextcloud,           repo: homelab-k8s, path: apps/nextcloud,           autoSync: "true"}
+          - {name: nextcloud,           repo: homelab-k8s, path: apps/nextcloud,           autoSync: "false"}
           - {name: ntfy,                repo: ntfy, path: k8s, autoSync: "true"}
           - {name: ntfy-e2ee-relay,     repo: ntfy-e2ee-relay, path: k8s, autoSync: "true"}
           - {name: paperless,           repo: homelab-k8s, path: apps/paperless,           autoSync: "true"}
