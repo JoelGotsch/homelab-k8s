@@ -38,7 +38,7 @@ repos:
         files: '(externalsecret.*\.ya?ml|README\.md)$'
 
       - id: check-openbao-snapshot-auth
-        name: OpenBao snapshot token is explicit, bounded, and marked temporary
+        name: OpenBao snapshot auth is short-lived, scoped, and static-token-free
         entry: scripts/check-openbao-snapshot-auth.sh
         language: script
         pass_filenames: false
@@ -57,6 +57,20 @@ repos:
         language: script
         pass_filenames: false
         files: '(bootstrap/applicationsets/infrastructure\.yaml|infrastructure/(kyverno|clickhouse-operator)/|scripts/check-known-argocd-drift\.sh$)'
+
+      - id: test-openbao-snapshot-workload
+        name: OpenBao snapshot workload failure and credential-hygiene tests
+        entry: scripts/test-openbao-snapshot-workload.sh
+        language: script
+        pass_filenames: false
+        files: '(platform/openbao/snapshot-(auth|upload)\.sh|scripts/test-openbao-snapshot-workload\.sh$)'
+
+      - id: test-openbao-snapshot-auth-guard
+        name: OpenBao snapshot auth guard rejects scope mutations
+        entry: scripts/test-openbao-snapshot-auth-guard.sh
+        language: script
+        pass_filenames: false
+        files: '(platform/openbao/|scripts/(check|test)-openbao-snapshot-auth.*\.sh$)'
 
       - id: check-temporary-notification-routes
         name: contain temporary operational Signal and incompatible custom-relay routes

@@ -1,0 +1,64 @@
+# Snapshot pods have no ingress surface. Hourly can reach only DNS + OpenBao;
+# daily additionally reaches the exact versioned Storage Box FQDN on SSH/23.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: openbao-raft-snapshot-hourly
+  namespace: openbao
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbao-raft-snapshot
+      app.kubernetes.io/component: hourly-local
+  ingress: []
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - { port: "53", protocol: UDP }
+            - { port: "53", protocol: TCP }
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: openbao
+            app.kubernetes.io/name: openbao
+            component: server
+      toPorts:
+        - ports:
+            - { port: "8200", protocol: TCP }
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: openbao-raft-snapshot-daily
+  namespace: openbao
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbao-raft-snapshot
+      app.kubernetes.io/component: daily-offsite
+  ingress: []
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - { port: "53", protocol: UDP }
+            - { port: "53", protocol: TCP }
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: openbao
+            app.kubernetes.io/name: openbao
+            component: server
+      toPorts:
+        - ports:
+            - { port: "8200", protocol: TCP }
+    - toFQDNs:
+        - matchName: u609156.your-storagebox.de
+      toPorts:
+        - ports:
+            - { port: "23", protocol: TCP }

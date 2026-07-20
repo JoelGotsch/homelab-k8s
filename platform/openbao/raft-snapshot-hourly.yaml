@@ -1,38 +1,17 @@
-# Hourly Raft snapshot to a local Longhorn volume.
-# Per ADR 0018 D5 + backup-and-dr.md §"OpenBao":
-# "Hourly Raft snapshot via `bao operator raft snapshot save`
-# to local Longhorn volume."
-#
-# Closes the gap surfaced by
-# 99-journal/2026-05-02-backup-topology-gap-check.md item 2 —
-# the daily-to-Hetzner CronJob (raft-snapshot-cronjob.yaml)
-# was the only snapshot path; this scaffolds the architecture-
-# documented hourly-local tier.
-#
-# Snapshot token Secret (`openbao-snapshot-token`) is already
-# projected by raft-snapshot-cronjob.yaml's ExternalSecret;
-# this CronJob reuses it.
-
+# Hourly Raft snapshot to the local Longhorn tier. Authentication is a
+# bounded-audience projected Kubernetes JWT exchanged for a 15-minute OpenBao
+# batch token at run time; no static OpenBao token or Kubernetes Secret exists.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: openbao-raft-snapshots
   namespace: openbao
   labels:
-    # Per infrastructure/longhorn/recurring-jobs.yaml: opt the
-    # snapshot-storage PVC itself into Longhorn's
-    # `secret-personal` group so the snapshots-of-the-snapshots
-    # PVC also gets hourly Longhorn-volume snapshots. The chain
-    # is intentional — Raft-snapshot fidelity at hourly cadence
-    # both at file-level (this CronJob) and at block-level
-    # (Longhorn).
     recurring-job-group.longhorn.io/secret-personal: "enabled"
   annotations:
-    # ADR 0036: -retain SCs require a rationale.
     retention.homelab.internal/reason: "Hourly Raft snapshots — the local tier-1 of the OpenBao backup chain (per ADR 0018 D5)."
 spec:
   accessModes: [ReadWriteOnce]
-  # 2026-07-09 ADR 0036: migrate to -retain family.
   storageClassName: longhorn-replica2
   resources:
     requests:
@@ -44,42 +23,37 @@ metadata:
   name: openbao-raft-snapshot-hourly
   namespace: openbao
 spec:
-  schedule: "5 * * * *"  # hourly at :05 (offset within the hour per
-  # 2026-06-09 OOM-cascade RCA §"Recommended fixes" #3 / commit 1b405df:
-  # openbao bucket of the staggered-snapshot allocation).
-  # Hardening per 2026-06-08 + 2026-06-09 OpenBao incidents: a wedged
-  # Longhorn VolumeAttachment kept the snapshot pod in ContainerCreating;
-  # its finalizer blocked fresh VAs and the operator had to force-delete
-  # the pod each time. activeDeadlineSeconds bounds the wedge,
-  # ttl + startingDeadlineSeconds prevent pod / missed-run accumulation.
-  # concurrencyPolicy is `Forbid` (not Replace) per 2026-06-09 RCA §3:
-  # under a cascade, Replace would kill the previous pod mid-snapshot,
-  # leaving a half-flushed file on the snapshot PVC and re-triggering
-  # the VA churn that started the cascade. Forbid skips overlap instead.
+  schedule: "5 * * * *"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 60
-  successfulJobsHistoryLimit: 1
-  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 2
       activeDeadlineSeconds: 600
-      ttlSecondsAfterFinished: 300
+      ttlSecondsAfterFinished: 86400
       template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: openbao-raft-snapshot
+            app.kubernetes.io/component: hourly-local
+            app.kubernetes.io/part-of: openbao
         spec:
           restartPolicy: OnFailure
-          serviceAccountName: openbao
+          serviceAccountName: openbao-raft-snapshot
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile: { type: RuntimeDefault }
           containers:
             - name: snapshot
-              image: quay.io/openbao/openbao:2.5.4  # OPERATOR PINS via Renovate. Match the
-              # server image; docker.io/openbao/openbao:0.10.0 doesn't exist → ImagePullBackOff.
-              # Fixed 2026-05-29.
+              image: quay.io/openbao/openbao:2.5.5@sha256:6150c4a6b62067db6141c8da7a6a6b5763f4f47c315343d0c848b40fecdfd452
+              imagePullPolicy: IfNotPresent
               env:
-                - name: BAO_TOKEN
-                  valueFrom:
-                    secretKeyRef:
-                      name: openbao-snapshot-token
-                      key: token
                 - name: BAO_ADDR
                   value: https://openbao.openbao.svc:8200
                 - name: BAO_CACERT
@@ -89,39 +63,41 @@ spec:
                 - -c
                 - |
                   set -eu
-                  TS=$(date -u +%Y%m%dT%H%M%SZ)
-                  bao operator raft snapshot save \
-                    /snapshots/bao-${TS}.snap
-                  # Prune: keep latest 168 hourly snapshots
-                  # (7 days at hourly cadence — matches
-                  # backup-and-dr.md §"Retention schedules"
-                  # tier-1 row for `secret` class).
-                  ls -1t /snapshots/bao-*.snap 2>/dev/null \
-                    | tail -n +169 \
-                    | xargs -r rm -f
-              # Per 2026-06-09 OOM-cascade RCA §"Recommended fixes" #4
-              # (commit 1b405df): bound the snapshot pod's anon RSS so
-              # it can't drift up alongside an instance-manager spike
-              # and push the worker over Talos's node-OOM threshold.
-              # 128Mi is enough for `bao operator raft snapshot save`
-              # at our raft size; bump if the snapshot file grows past
-              # 80MB on disk.
+                  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+                  SNAPSHOT_OUTPUT="/snapshots/bao-${ts}.snap" /app/snapshot-auth.sh
+                  # Seven days at hourly cadence. Remove each checksum with its
+                  # snapshot so evidence cannot outlive the file it describes.
+                  ls -1t /snapshots/bao-*.snap 2>/dev/null | tail -n +169 |
+                    while IFS= read -r old; do rm -f "$old" "${old}.sha256"; done
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: { drop: [ALL] }
+                readOnlyRootFilesystem: true
               resources:
-                requests:
-                  cpu: 10m
-                  memory: 64Mi
-                limits:
-                  memory: 128Mi
+                requests: { cpu: 10m, memory: 64Mi }
+                limits: { cpu: 100m, memory: 128Mi }
               volumeMounts:
-                - name: tls
-                  mountPath: /vault/userconfig/openbao-tls
-                  readOnly: true
-                - name: snapshots
-                  mountPath: /snapshots
+                - { name: tls, mountPath: /vault/userconfig/openbao-tls, readOnly: true }
+                - { name: snapshots, mountPath: /snapshots }
+                - { name: workload-jwt, mountPath: /var/run/secrets/openbao-auth, readOnly: true }
+                - { name: snapshot-scripts, mountPath: /app, readOnly: true }
+                - { name: tmp, mountPath: /tmp }
           volumes:
             - name: tls
-              secret:
-                secretName: openbao-tls
+              secret: { secretName: openbao-tls }
             - name: snapshots
-              persistentVolumeClaim:
-                claimName: openbao-raft-snapshots
+              persistentVolumeClaim: { claimName: openbao-raft-snapshots }
+            - name: workload-jwt
+              projected:
+                defaultMode: 0400
+                sources:
+                  - serviceAccountToken:
+                      audience: openbao
+                      expirationSeconds: 900
+                      path: token
+            - name: snapshot-scripts
+              configMap:
+                name: openbao-snapshot-scripts
+                defaultMode: 0555
+            - name: tmp
+              emptyDir: { medium: Memory, sizeLimit: 4Mi }

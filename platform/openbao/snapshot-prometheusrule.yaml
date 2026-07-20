@@ -1,0 +1,100 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbao-raft-snapshots
+  namespace: openbao
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: openbao.raft-snapshots
+      interval: 1m
+      rules:
+        - alert: OpenBaoRaftSnapshotJobFailed
+          expr: |
+            (
+              kube_job_status_failed{
+                namespace="openbao",
+                job_name=~"openbao-raft-snapshot.*"
+              } > 0
+            )
+            and on (namespace, job_name)
+            (
+              time() - kube_job_status_start_time{
+                namespace="openbao",
+                job_name=~"openbao-raft-snapshot.*"
+              } < 3600
+            )
+          for: 1m
+          labels:
+            severity: critical
+            component: openbao-backup
+          annotations:
+            summary: "OpenBao Raft snapshot Job {{ $labels.job_name }} failed"
+            description: >-
+              Inspect the retained Job and its redacted termination message with
+              `kubectl -n openbao describe job {{ $labels.job_name }}` and
+              `kubectl -n openbao logs job/{{ $labels.job_name }} --all-containers`.
+            runbook_url: https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/openbao/restore-drill.md
+        - alert: OpenBaoHourlyRaftSnapshotStale
+          expr: |
+            (
+              time() - kube_cronjob_status_last_successful_time{
+                namespace="openbao",
+                cronjob="openbao-raft-snapshot-hourly"
+              } > 7200
+            )
+            or
+            (
+              (time() - kube_cronjob_created{
+                namespace="openbao",
+                cronjob="openbao-raft-snapshot-hourly"
+              } > 7200)
+              unless kube_cronjob_status_last_successful_time{
+                namespace="openbao",
+                cronjob="openbao-raft-snapshot-hourly"
+              }
+            )
+            or
+            absent(kube_cronjob_created{
+              namespace="openbao",
+              cronjob="openbao-raft-snapshot-hourly"
+            })
+          for: 15m
+          labels:
+            severity: critical
+            component: openbao-backup
+          annotations:
+            summary: OpenBao hourly Raft snapshot has not succeeded in two hours
+            runbook_url: https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/openbao/restore-drill.md
+        - alert: OpenBaoDailyRaftSnapshotStale
+          expr: |
+            (
+              time() - kube_cronjob_status_last_successful_time{
+                namespace="openbao",
+                cronjob="openbao-raft-snapshot"
+              } > 129600
+            )
+            or
+            (
+              (time() - kube_cronjob_created{
+                namespace="openbao",
+                cronjob="openbao-raft-snapshot"
+              } > 129600)
+              unless kube_cronjob_status_last_successful_time{
+                namespace="openbao",
+                cronjob="openbao-raft-snapshot"
+              }
+            )
+            or
+            absent(kube_cronjob_created{
+              namespace="openbao",
+              cronjob="openbao-raft-snapshot"
+            })
+          for: 30m
+          labels:
+            severity: critical
+            component: openbao-backup
+          annotations:
+            summary: OpenBao off-site Raft snapshot has not succeeded in 36 hours
+            runbook_url: https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/openbao/restore-drill.md

@@ -1,32 +1,6 @@
-# Daily Raft snapshot to Hetzner Storage Box.
-# Per ADR 0018 D5 (daily snapshot to cold tier per ADR 0006).
-#
-# TEMPORARY BRIDGE: the static token at
-# kv/prod/openbao/snapshot-token is a no-default-policy,
-# non-renewable orphan capped at 720h and expires
-# 2026-08-19T21:40:48Z. OBA-02 replaces this with short-lived
-# Kubernetes auth. Do not renew or recreate another static token.
-#
-# Hetzner Storage Box credentials staged the same way at
-# kv/prod/backup/hetzner-storage-box → Secret hetzner-sb-creds.
-
-apiVersion: external-secrets.io/v1beta1
-kind: ExternalSecret
-metadata:
-  name: openbao-snapshot-token
-  namespace: openbao
-spec:
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: openbao
-  target:
-    name: openbao-snapshot-token
-  data:
-    - secretKey: token
-      remoteRef:
-        key: prod/openbao/snapshot-token
-        property: token
----
+# Daily Raft snapshot to the off-site Hetzner Storage Box tier. An init
+# container obtains the short-lived OpenBao workload token and writes a verified
+# snapshot; the uploader never receives that token or the projected JWT.
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
@@ -39,29 +13,8 @@ spec:
   target:
     name: hetzner-sb-creds
   data:
-    - secretKey: host
-      remoteRef:
-        key: prod/backup/hetzner-storage-box
-        property: host
-    - secretKey: user
-      remoteRef:
-        key: prod/backup/hetzner-storage-box
-        property: user
-    - secretKey: ssh_key
-      remoteRef:
-        key: prod/backup/hetzner-storage-box
-        property: ssh_key
-    - secretKey: ssh_known_host
-      remoteRef:
-        key: prod/backup/hetzner-storage-box
-        property: ssh_known_host
-        # Optional. If set, snapshot CronJob skips ssh-keyscan
-        # and pins the expected host fingerprint (TOFU → pinned).
-        # Captured + written via:
-        #   bao kv put kv/prod/backup/hetzner-storage-box \
-        #     ssh_known_host="<known_hosts line>"
-        # Same path as backup-cronjobs's ssh_known_host —
-        # both cronjobs read from the same OpenBao path.
+    - secretKey: SSH_KEY
+      remoteRef: { key: prod/backup/hetzner-storage-box, property: ssh_key }
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -69,41 +22,41 @@ metadata:
   name: openbao-raft-snapshot
   namespace: openbao
 spec:
-  schedule: "5 3 * * *"  # 03:05 daily (offset within the hour per
-  # 2026-06-09 OOM-cascade RCA §"Recommended fixes" #3 / commit 1b405df).
-  # Original `0 3 * * *` collided with every other on-the-hour cronjob.
-  # Hardening per 2026-06-08 + 2026-06-09 OpenBao incidents (see sibling
-  # raft-snapshot-hourly.yaml): same wedged-Longhorn-VA failure mode
-  # applies here, so the same activeDeadlineSeconds / ttl /
-  # startingDeadlineSeconds bounds are applied. concurrencyPolicy is
-  # `Forbid` (not Replace) per RCA §3: under a cascade Replace would
-  # kill the previous pod mid-snapshot-save, leaving a half-flushed file
-  # and re-triggering the same VA churn that started the cascade.
-  # Forbid skips overlapping runs instead.
+  schedule: "5 3 * * *"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 60
-  successfulJobsHistoryLimit: 1
-  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 2
       activeDeadlineSeconds: 600
-      ttlSecondsAfterFinished: 300
+      ttlSecondsAfterFinished: 86400
       template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: openbao-raft-snapshot
+            app.kubernetes.io/component: daily-offsite
+            app.kubernetes.io/part-of: openbao
         spec:
-          restartPolicy: OnFailure
-          serviceAccountName: openbao
-          containers:
-            - name: snapshot
-              image: quay.io/openbao/openbao:2.5.4  # OPERATOR PINS via Renovate. Match the
-              # server image (platform/openbao statefulset); docker.io/openbao/openbao:0.10.0
-              # doesn't exist → ImagePullBackOff. Fixed 2026-05-29.
+          restartPolicy: Never
+          serviceAccountName: openbao-raft-snapshot
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile: { type: RuntimeDefault }
+          initContainers:
+            # Deliberately not named `snapshot`: the previous manifest used
+            # that name for the main container. A distinct name keeps the
+            # SSA migration valid even while another field manager still
+            # observes the old list entry during a dry-run.
+            - name: create-snapshot
+              image: quay.io/openbao/openbao:2.5.5@sha256:6150c4a6b62067db6141c8da7a6a6b5763f4f47c315343d0c848b40fecdfd452
+              imagePullPolicy: IfNotPresent
               env:
-                - name: BAO_TOKEN
-                  valueFrom:
-                    secretKeyRef:
-                      name: openbao-snapshot-token
-                      key: token
                 - name: BAO_ADDR
                   value: https://openbao.openbao.svc:8200
                 - name: BAO_CACERT
@@ -112,49 +65,77 @@ spec:
                 - /bin/sh
                 - -c
                 - |
-                  set -eu
-                  TS=$(date -u +%Y%m%dT%H%M%SZ)
-                  bao operator raft snapshot save /tmp/snapshot-${TS}.snap
-                  # Upload to Hetzner Storage Box via SFTP
-                  mkdir -p ~/.ssh
-                  echo "$SSH_KEY" > ~/.ssh/id_ed25519
-                  chmod 600 ~/.ssh/id_ed25519
-                  # Host-key trust path: pin if SSH_KNOWN_HOST
-                  # is set (post-TOFU), else ssh-keyscan
-                  # (first-install). Per ntfy/rotation.md +
-                  # 99-journal/2026-04-29-restic-tier-3-cronjob.md
-                  # D5.
-                  if [ -n "${SSH_KNOWN_HOST:-}" ]; then
-                    echo "$SSH_KNOWN_HOST" > ~/.ssh/known_hosts
-                  else
-                    ssh-keyscan -H ${HSB_HOST} > ~/.ssh/known_hosts 2>/dev/null
-                  fi
-                  chmod 600 ~/.ssh/known_hosts
-                  scp -i ~/.ssh/id_ed25519 \
-                    /tmp/snapshot-${TS}.snap \
-                    ${HSB_USER}@${HSB_HOST}:/openbao-snapshots/
-                  rm -f /tmp/snapshot-${TS}.snap
-              envFrom:
-                - secretRef:
-                    name: hetzner-sb-creds
-              # Per 2026-06-09 OOM-cascade RCA §"Recommended fixes" #4
-              # (commit 1b405df): every cronjob pod whose container
-              # execs `bao` / `kubectl` against the cluster gets a
-              # 64Mi/128Mi floor+cap so it cannot anonymously pad up
-              # a tight worker's memory profile and trigger the
-              # Talos OOM-controller. 128Mi is enough for raft
-              # snapshot save + scp upload (steady ~25MB RSS).
+                  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+                  SNAPSHOT_OUTPUT="/work/bao-${ts}.snap" /app/snapshot-auth.sh
+              securityContext:
+                runAsUser: 100
+                runAsGroup: 1000
+                allowPrivilegeEscalation: false
+                capabilities: { drop: [ALL] }
+                readOnlyRootFilesystem: true
               resources:
-                requests:
-                  cpu: 10m
-                  memory: 64Mi
-                limits:
-                  memory: 128Mi
+                requests: { cpu: 10m, memory: 64Mi }
+                limits: { cpu: 100m, memory: 128Mi }
               volumeMounts:
-                - name: tls
-                  mountPath: /vault/userconfig/openbao-tls
-                  readOnly: true
+                - { name: tls, mountPath: /vault/userconfig/openbao-tls, readOnly: true }
+                - { name: work, mountPath: /work }
+                - { name: workload-jwt, mountPath: /var/run/secrets/openbao-auth, readOnly: true }
+                - { name: snapshot-scripts, mountPath: /app, readOnly: true }
+                # Do not share scratch space with the uploader: a SIGKILL
+                # could otherwise leave the short-lived Bao token readable by
+                # the following container before the EXIT trap removes it.
+                - { name: snapshot-tmp, mountPath: /tmp }
+          containers:
+            - name: upload
+              # This digest-pinned image is already used by backup-cronjobs. A
+              # disposable image probe on 2026-07-21 verified ssh/scp/sftp.
+              image: restic/restic:0.17.3@sha256:8f5a62b422a2cb1277ea0dd6e826fe1acf649e5b9f02d60e5268d5fd1976255a
+              imagePullPolicy: IfNotPresent
+              command: [/bin/sh, -c, /app/snapshot-upload.sh]
+              env:
+                - { name: HOME, value: /tmp }
+                # Routing identity is public configuration, not a credential.
+                # Keep it in Git and byte-couple it to the CNP/known_hosts gate;
+                # only the private SSH key comes from OpenBao.
+                - { name: HSB_HOST, value: u609156.your-storagebox.de }
+                - { name: HSB_USER, value: u609156 }
+                - { name: HSB_PORT, value: "23" }
+              envFrom:
+                - secretRef: { name: hetzner-sb-creds }
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: { drop: [ALL] }
+                readOnlyRootFilesystem: true
+              resources:
+                requests: { cpu: 10m, memory: 64Mi }
+                limits: { cpu: 100m, memory: 128Mi }
+              volumeMounts:
+                - { name: work, mountPath: /work, readOnly: true }
+                - { name: snapshot-scripts, mountPath: /app, readOnly: true }
+                - { name: uploader-config, mountPath: /etc/openbao-snapshot-ssh, readOnly: true }
+                - { name: uploader-config, mountPath: /etc/passwd, subPath: passwd, readOnly: true }
+                - { name: uploader-config, mountPath: /etc/group, subPath: group, readOnly: true }
+                - { name: upload-tmp, mountPath: /tmp }
           volumes:
             - name: tls
-              secret:
-                secretName: openbao-tls
+              secret: { secretName: openbao-tls }
+            - name: work
+              emptyDir: { sizeLimit: 256Mi }
+            - name: workload-jwt
+              projected:
+                defaultMode: 0400
+                sources:
+                  - serviceAccountToken:
+                      audience: openbao
+                      expirationSeconds: 900
+                      path: token
+            - name: snapshot-scripts
+              configMap:
+                name: openbao-snapshot-scripts
+                defaultMode: 0555
+            - name: uploader-config
+              configMap: { name: openbao-snapshot-uploader-config }
+            - name: snapshot-tmp
+              emptyDir: { medium: Memory, sizeLimit: 4Mi }
+            - name: upload-tmp
+              emptyDir: { medium: Memory, sizeLimit: 16Mi }

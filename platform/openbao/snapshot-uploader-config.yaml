@@ -1,0 +1,21 @@
+# Public, independently verified Storage Box host keys plus the minimal uid 1000
+# identity files required by the digest-pinned restic image's OpenSSH client.
+# `scripts/check-openbao-snapshot-auth.sh` enforces byte equality with the
+# backup-cronjobs copies so one key rotation cannot silently leave this lane stale.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbao-snapshot-uploader-config
+  namespace: openbao
+data:
+  known_hosts: |
+    u609156.your-storagebox.de,[u609156.your-storagebox.de]:22,[u609156.your-storagebox.de]:23 ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEA5EB5p/5Hp3hGW1oHok+PIOH9Pbn7cnUiGmUEBrCVjnAw+HrKyN8bYVV0dIGllswYXwkG/+bgiBlE6IVIBAq+JwVWu1Sss3KarHY3OvFJUXZoZyRRg/Gc/+LRCE7lyKpwWQ70dbelGRyyJFH36eNv6ySXoUYtGkwlU5IVaHPApOxe4LHPZa/qhSRbPo2hwoh0orCtgejRebNtW5nlx00DNFgsvn8Svz2cIYLxsPVzKgUxs8Zxsxgn+Q/UvR7uq4AbAhyBMLxv7DjJ1pc7PJocuTno2Rw9uMZi1gkjbnmiOh6TTXIEWbnroyIhwc8555uto9melEUmWNQ+C+PwAK+MPw==
+    u609156.your-storagebox.de,[u609156.your-storagebox.de]:22,[u609156.your-storagebox.de]:23 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIICf9svRenC/PLKIL9nk6K/pxQgoiFC41wTNvoIncOxs
+  passwd: |
+    root:x:0:0:root:/root:/bin/sh
+    backup:x:1000:1000:backup:/tmp:/bin/sh
+    nobody:x:65534:65534:nobody:/nonexistent:/sbin/nologin
+  group: |
+    root:x:0:
+    backup:x:1000:
+    nobody:x:65534:

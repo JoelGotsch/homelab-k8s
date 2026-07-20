@@ -20,10 +20,23 @@ helmCharts:
     valuesFile: values.yaml
     includeCRDs: true
 resources:
+  - snapshot-serviceaccount.yaml
+  # Transitional rollback bridge only. Snapshot workloads do not reference it;
+  # remove it after the one-off, natural schedules, checksum, and restore gates.
+  - snapshot-token-rollback-bridge.yaml
   - raft-snapshot-cronjob.yaml
   - raft-snapshot-hourly.yaml
+  - snapshot-uploader-config.yaml
+  - snapshot-networkpolicy.yaml
+  - snapshot-prometheusrule.yaml
   - httproute.yaml
   - networkpolicy.yaml
+configMapGenerator:
+  - name: openbao-snapshot-scripts
+    namespace: openbao
+    files:
+      - snapshot-auth.sh
+      - snapshot-upload.sh
 # ADR 0036: cluster-wide resource-governance baseline.
 # NOTE: the openbao namespace itself is bootstrapped by
 # homelab-k8s/bootstrap/bootstrap-namespaces.yaml (ansible
