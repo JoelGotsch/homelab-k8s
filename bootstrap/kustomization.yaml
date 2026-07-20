@@ -62,7 +62,6 @@ replacements:
     targets:
       - select: { kind: ApplicationSet, name: apps }
         fieldPaths:
-          - spec.generators.0.git.repoURL
           - spec.template.spec.source.repoURL
         options: { delimiter: '/', index: 2 }
   - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_fqdn }

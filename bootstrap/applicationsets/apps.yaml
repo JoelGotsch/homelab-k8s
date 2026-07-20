@@ -1,7 +1,8 @@
-# ApplicationSet for apps/*. Sync wave 10 — after everything
-# else. App deployment manifests live in each subdirectory;
-# operator's per-app initial-setup runbooks (under
-# homelab-docs/03-runbooks/) populate them.
+# ApplicationSet for user applications. The explicit list keeps each existing
+# app-<name> Application owned by this one ApplicationSet while individual
+# apps move from homelab-k8s/apps/<name> to an app-owned repository. A cutover
+# changes only that app's `repo` and `path` entry; the Application object,
+# namespace, sync policy, and live workload identity remain unchanged.
 
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
@@ -12,28 +13,42 @@ spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
   generators:
-    - git:
-        repoURL: https://FORGEJO_FQDN/forgejo-admin/homelab-k8s
-        revision: main
-        directories:
-          - path: apps/*
+    - list:
+        elements:
+          - {name: approval-channel,    repo: homelab-k8s, path: apps/approval-channel}
+          - {name: frigate,             repo: homelab-k8s, path: apps/frigate}
+          - {name: immich,              repo: homelab-k8s, path: apps/immich}
+          - {name: immich-public-proxy, repo: homelab-k8s, path: apps/immich-public-proxy}
+          - {name: jellyfin,            repo: homelab-k8s, path: apps/jellyfin}
+          - {name: knowledge-graph,     repo: homelab-k8s, path: apps/knowledge-graph}
+          - {name: llm-gateway,         repo: homelab-k8s, path: apps/llm-gateway}
+          - {name: nextcloud,           repo: homelab-k8s, path: apps/nextcloud}
+          - {name: ntfy,                repo: homelab-k8s, path: apps/ntfy}
+          - {name: ntfy-e2ee-relay,     repo: homelab-k8s, path: apps/ntfy-e2ee-relay}
+          - {name: paperless,           repo: homelab-k8s, path: apps/paperless}
+          - {name: personal-agent,      repo: homelab-k8s, path: apps/personal-agent}
+          - {name: signal-bridge,       repo: homelab-k8s, path: apps/signal-bridge}
+          - {name: vaultwarden,         repo: homelab-k8s, path: apps/vaultwarden}
+          - {name: website,             repo: homelab-k8s, path: apps/website}
+          - {name: whatsapp-bridge,     repo: homelab-k8s, path: apps/whatsapp-bridge}
+          - {name: windmill,            repo: homelab-k8s, path: apps/windmill}
   template:
     metadata:
-      name: 'app-{{.path.basename}}'
+      name: 'app-{{.name}}'
       labels:
         layer: apps
-        component: '{{.path.basename}}'
+        component: '{{.name}}'
       annotations:
         argocd.argoproj.io/sync-wave: '10'
     spec:
       project: default
       source:
-        repoURL: https://FORGEJO_FQDN/forgejo-admin/homelab-k8s
+        repoURL: 'https://FORGEJO_FQDN/forgejo-admin/{{.repo}}'
         targetRevision: main
-        path: '{{.path.path}}'
+        path: '{{.path}}'
       destination:
         server: https://kubernetes.default.svc
-        namespace: '{{.path.basename}}'
+        namespace: '{{.name}}'
       syncPolicy:
         automated:
           prune: true
