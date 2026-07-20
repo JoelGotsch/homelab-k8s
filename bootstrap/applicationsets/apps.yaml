@@ -24,7 +24,7 @@ spec:
           - {name: frigate,             repo: homelab-k8s, path: apps/frigate,             autoSync: "true"}
           - {name: immich,              repo: homelab-k8s, path: apps/immich,              autoSync: "true"}
           - {name: immich-public-proxy, repo: immich-public-proxy, path: k8s, autoSync: "true"}
-          - {name: jellyfin,            repo: homelab-k8s, path: apps/jellyfin,            autoSync: "false"}
+          - {name: jellyfin,            repo: jellyfin, path: k8s, autoSync: "false"}
           - {name: knowledge-graph,     repo: homelab-k8s, path: apps/knowledge-graph,     autoSync: "true"}
           - {name: llm-gateway,         repo: homelab-k8s, path: apps/llm-gateway,         autoSync: "true"}
           - {name: nextcloud,           repo: homelab-k8s, path: apps/nextcloud,           autoSync: "true"}
