@@ -67,7 +67,10 @@ spec:
               value: critical
           groupWait: 5s
           groupInterval: 1m
-          repeatInterval: 1h
+          # Match the reviewed 2026-07-20 anti-noise cadence. This baseline
+          # records current drift; it does not authorize Signal as the normal
+          # critical-alert transport.
+          repeatInterval: 6h
           continue: false
 
         - id: alertmanager-warning-time-escalation-signal
