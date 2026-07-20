@@ -209,13 +209,18 @@ spec:
                   echo "[step 1] reboot-cascade-janitor starting (dry_run=$DRY_RUN, cap=$MAX_ACTIONS_PER_RUN, threshold=${STUCK_THRESHOLD_SECONDS}s)"
                   NOW_TS=$(date -u +%s)
 
-                  # [step 2] one pods list + one events list per tick.
+                  # [step 2] List pods once. Do not list every cluster Event
+                  # into one shell variable: this cluster's Event JSON is
+                  # already ~15 MiB and the kubectl + shell copies exceeded the
+                  # 192 MiB cgroup limit. Events are fetched by pod UID only
+                  # after a pod passes the cheap candidate gates below.
                   PODS_JSON=$(kubectl get pods -A -o json)
-                  EVENTS_JSON=$(kubectl get events -A -o json)
-                  echo "[step 2] listed $(echo "$PODS_JSON" | jq '.items|length') pods, $(echo "$EVENTS_JSON" | jq '.items|length') events"
+                  echo "[step 2] listed $(echo "$PODS_JSON" | jq '.items|length') pods"
 
                   # [step 3] candidate pods: common gates (1)-(4).
-                  # Emits ns|name|node rows.
+                  # Emits ns|name|node|uid rows. The UID keys the later Event
+                  # query so events from an older pod with a reused name can
+                  # never count as evidence for the replacement.
                   CANDS=$(echo "$PODS_JSON" | jq -r \
                     --argjson now "$NOW_TS" \
                     --argjson thr "$STUCK_THRESHOLD_SECONDS" \
@@ -233,7 +238,7 @@ spec:
                                 | select(.kind == "ReplicaSet" or .kind == "StatefulSet"
                                          or .kind == "DaemonSet" or .kind == "Job")]
                                | length > 0)
-                      | "\(.metadata.namespace)|\(.metadata.name)|\(.spec.nodeName // "?")"
+                      | "\(.metadata.namespace)|\(.metadata.name)|\(.spec.nodeName // "?")|\(.metadata.uid)"
                     ')
                   if [ -z "$CANDS" ]; then
                     echo "[step 3] no stuck candidate pods — done"
@@ -243,15 +248,15 @@ spec:
 
                   ACTIONS=0
                   RESTARTED_NODES=" "
-                  echo "$CANDS" | while IFS='|' read -r NS NAME NODE; do
+                  echo "$CANDS" | while IFS='|' read -r NS NAME NODE POD_UID; do
                     [ "$ACTIONS" -ge "$MAX_ACTIONS_PER_RUN" ] && { echo "[cap] MAX_ACTIONS_PER_RUN reached; remaining candidates wait for next tick"; break; }
 
                     # [step 4] fresh events for this pod.
-                    POD_EV=$(echo "$EVENTS_JSON" | jq -r \
-                      --arg ns "$NS" --arg name "$NAME" \
+                    POD_EV=$(kubectl get events -n "$NS" \
+                      --field-selector "involvedObject.uid=$POD_UID" -o json \
+                      | jq -r \
                       --argjson now "$NOW_TS" --argjson fresh "$EVENT_FRESH_SECONDS" '
                         [.items[]
-                         | select(.involvedObject.namespace == $ns and .involvedObject.name == $name)
                          | select(((.lastTimestamp // .eventTime // "1970-01-01T00:00:00Z")
                                    | sub("\\.[0-9]+";"") | fromdateiso8601) > ($now - $fresh))
                          | {reason, message}]')
