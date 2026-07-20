@@ -47,6 +47,10 @@ resources:
   # Forgejo; harmless (SecretSyncedError) before that.
   - externalsecret-repo-forgejo.yaml
 
+  # Prefix credential for app-owned repositories below the current
+  # forgejo-admin owner. This reuses the same read-only svc-argocd token.
+  - externalsecret-repo-creds-forgejo-owner.yaml
+
 patches:
   - path: patches/argocd-cmd-params.yaml
     target:
@@ -93,6 +97,9 @@ replacements:
   - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_fqdn }
     targets:
       - select: { kind: ExternalSecret, name: argocd-repo-forgejo }
+        fieldPaths: [spec.target.template.data.url]
+        options: { delimiter: '/', index: 2 }
+      - select: { kind: ExternalSecret, name: argocd-repo-creds-forgejo-org }
         fieldPaths: [spec.target.template.data.url]
         options: { delimiter: '/', index: 2 }
   # argocd-cm public URL: https://argocd.FQDN_SUFFIX -> argocd.<fqdn_suffix>.

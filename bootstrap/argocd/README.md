@@ -103,7 +103,7 @@ extends to cover argocd as a follow-up.
 |---|---|---|
 | `kv/argocd/admin-password` | `password` | `externalsecret.yaml` (admin login until OIDC) |
 | `kv/argocd/oidc` | `client_id`, `client_secret` | `externalsecret.yaml` → `oidc.authentik` Secret |
-| `kv/argocd/forgejo-repo-cred` | `username`, `token` | `externalsecret-repo-forgejo.yaml` → Argo repo credential for in-cluster Forgejo (ADR 0037) |
+| `kv/argocd/forgejo-repo-cred` | `username`, `token` | `externalsecret-repo-forgejo.yaml` and `externalsecret-repo-creds-forgejo-owner.yaml` → Argo credentials for homelab-k8s and app-owned Forgejo repositories (ADR 0037) |
 
 Seed snippet for the repo credential (generates the `svc-argocd`
 PAT inside the forgejo pod and pipes it into OpenBao without it
