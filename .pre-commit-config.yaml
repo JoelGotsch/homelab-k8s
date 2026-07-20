@@ -44,6 +44,13 @@ repos:
         pass_filenames: false
         files: '(platform/openbao/|scripts/check-openbao-snapshot-auth\.sh$)'
 
+      - id: check-hermetic-kustomize
+        name: Kustomize Helm renders are isolated and repo-server mounts the wrapper
+        entry: scripts/check-hermetic-kustomize.sh
+        language: script
+        pass_filenames: false
+        files: '(bootstrap/argocd/|scripts/(check-|test-)?hermetic-kustomize|scripts/fixtures/fake-kustomize)'
+
       - id: check-temporary-notification-routes
         name: contain temporary operational Signal and incompatible custom-relay routes
         entry: scripts/check-temporary-notification-routes.sh

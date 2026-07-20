@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Argo may generate several Applications concurrently from one cached Git
+# checkout. Kustomize's built-in Helm inflator downloads charts below the
+# source layer, so concurrent native builds otherwise race on charts/.
+# Build a committed, per-invocation snapshot and leave the cache read-only.
+set -euo pipefail
+
+real_kustomize="${HERMETIC_KUSTOMIZE_REAL:-/usr/local/bin/kustomize}"
+
+if [[ "${1:-}" != "build" ]]; then
+  exec "$real_kustomize" "$@"
+fi
+
+build_args=("${@:2}")
+target_index=-1
+expect_value=false
+
+# DIR is the sole positional build argument. Account for every value-taking
+# flag exposed by Kustomize 5.8.1 so the wrapper also supports local/manual
+# invocations where flags precede DIR.
+for index in "${!build_args[@]}"; do
+  argument="${build_args[$index]}"
+  if [[ "$expect_value" == true ]]; then
+    expect_value=false
+    continue
+  fi
+  case "$argument" in
+    -e|--env|-o|--output|--load-restrictor|--helm-api-versions|--helm-command|--helm-kube-version|--mount|--network-name)
+      expect_value=true
+      ;;
+    --*=*|--as-current-user|--enable-alpha-plugins|--enable-exec|--enable-helm|--helm-debug|--network|--stack-trace|-h|--help)
+      ;;
+    -*)
+      # Let the real CLI diagnose an unknown flag. Do not guess whether its
+      # following argument is a value and risk snapshotting the wrong path.
+      exec "$real_kustomize" build "${build_args[@]}"
+      ;;
+    *)
+      target_index=$index
+      break
+      ;;
+  esac
+done
+
+if (( target_index >= 0 )); then
+  source_target="${build_args[$target_index]}"
+else
+  source_target=.
+fi
+
+if [[ ! -d "$source_target" ]]; then
+  # Remote Git URLs are already materialized by Kustomize in their own
+  # temporary directory. Preserve that native path.
+  exec "$real_kustomize" build "${build_args[@]}"
+fi
+
+git_clean=(env -u GIT_INDEX_FILE -u GIT_DIR -u GIT_WORK_TREE -u GIT_PREFIX git)
+repo_root=$("${git_clean[@]}" -C "$source_target" rev-parse --show-toplevel 2>/dev/null) || {
+  echo "hermetic-kustomize: build target is not inside a Git checkout: $source_target" >&2
+  exit 2
+}
+target_prefix=$("${git_clean[@]}" -C "$source_target" rev-parse --show-prefix)
+isolated_root=$(mktemp -d "${TMPDIR:-/tmp}/hermetic-kustomize.XXXXXX")
+trap 'rm -rf -- "$isolated_root"' EXIT INT TERM
+
+"${git_clean[@]}" -C "$repo_root" archive --format=tar HEAD | tar -xf - -C "$isolated_root"
+isolated_target="$isolated_root/${target_prefix%/}"
+
+if (( target_index >= 0 )); then
+  build_args[target_index]="$isolated_target"
+  "$real_kustomize" build "${build_args[@]}"
+else
+  cd "$isolated_target"
+  "$real_kustomize" build "${build_args[@]}"
+fi

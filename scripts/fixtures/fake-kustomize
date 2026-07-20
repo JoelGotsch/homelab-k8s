@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Deliberately models Kustomize's source-local Helm chart inflation. Two calls
+# against one directory collide; the hermetic wrapper gives each its own copy.
+set -euo pipefail
+
+if [[ "${1:-}" == version ]]; then
+  echo "fake-kustomize v1"
+  exit 0
+fi
+[[ "${1:-}" == build ]] || exit 2
+shift
+
+target=
+expect_value=false
+for argument in "$@"; do
+  if [[ "$expect_value" == true ]]; then
+    expect_value=false
+    continue
+  fi
+  case "$argument" in
+    -e|--env|-o|--output|--load-restrictor|--helm-api-versions|--helm-command|--helm-kube-version|--mount|--network-name)
+      expect_value=true
+      ;;
+    --*=*|--enable-helm)
+      ;;
+    *)
+      target=$argument
+      break
+      ;;
+  esac
+done
+target=${target:-.}
+
+mkdir -p "$target/charts"
+mkdir "$target/charts/chart-1"
+sleep 0.2
+cat "$target/fixture.txt"

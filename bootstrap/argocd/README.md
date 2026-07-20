@@ -33,8 +33,18 @@ ownership of its own deployment. From that point:
 | `patches/argocd-cm.yaml` | Main config (`url`, resource exclusions). |
 | `patches/server-resources.yaml` | argocd-server resource limits. |
 | `patches/repo-server-resources.yaml` | argocd-repo-server resource limits. |
+| `scripts/hermetic-kustomize` + `patches/repo-server-hermetic-kustomize.yaml` | KVAL-01 wrapper: render each Kustomize application from a unique committed snapshot so Helm chart inflation cannot mutate or race in Argo's shared Git cache. |
 | `patches/application-controller-resources.yaml` | argocd-application-controller resource limits. |
 | `patches/oidc-config.yaml` | Authentik OIDC config — un-commented in `kustomization.yaml` patches[] when Authentik is up. |
+
+The hermetic wrapper deliberately snapshots `HEAD` for every `kustomize build`.
+This fixes the Kustomize Helm inflator's source-local `charts/` writes without
+serializing unrelated Applications. Application-level `source.kustomize` overrides
+are not currently used: Argo implements those with `kustomize edit` before build,
+and the repository guard rejects adding that field until generation moves to a
+per-request plugin or the edit session is isolated too. Chart downloads still occur
+inside each temporary snapshot; integrity-checked vendoring remains a separate
+KVAL-01 acceptance item.
 
 ## Operator first-commit fills
 

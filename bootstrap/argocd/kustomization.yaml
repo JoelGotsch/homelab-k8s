@@ -72,6 +72,11 @@ patches:
       kind: Deployment
       name: argocd-repo-server
 
+  - path: patches/repo-server-hermetic-kustomize.yaml
+    target:
+      kind: Deployment
+      name: argocd-repo-server
+
   - path: patches/application-controller-resources.yaml
     target:
       kind: StatefulSet
@@ -91,6 +96,17 @@ patches:
 # .j2 boundary — components/site-config/README.md).
 components:
   - ../../components/site-config
+
+# KVAL-01: route repo-server Kustomize invocations through a per-build Git
+# snapshot so Helm inflation never writes into Argo's shared cached checkout.
+# The content-hashed name rolls the Deployment whenever the wrapper changes.
+configMapGenerator:
+  - name: argocd-hermetic-kustomize
+    files:
+      - kustomize=scripts/hermetic-kustomize
+    options:
+      annotations:
+        argocd.argoproj.io/sync-wave: "-1"
 
 replacements:
   # Forgejo repo credential ExternalSecret: url host token.
