@@ -1,0 +1,324 @@
+# Reboot-cascade janitor — auto-remediates the three post-reboot
+# failure signatures documented 2026-07-20 (known-caveats + journal
+# 2026-07-18/20). Sibling of longhorn-va-janitor; same safety
+# philosophy: strict multi-criteria detection, minimal RBAC,
+# bounded blast radius, log-everything.
+#
+# WHY: during the 2026-07-20 worker BIOS/reboot session, EVERY node
+# reboot produced manual-recovery work on the surviving nodes:
+#   A. Spegel P2P mesh-break → peers' containerd silently wedges on
+#      NEW image pulls (stuck ContainerCreating, "Pulling image" as
+#      last event, NO error events — hung 30+ min; openbao-1).
+#      Recovery: delete the pod → fresh pull against healed mesh.
+#   B. csi-rclone stuck operation lock → FailedMount "An operation
+#      with the given Volume ID ... already exists" (forgejo,
+#      nextcloud — took the GitOps source down). Recovery: restart
+#      that node's csi-rclone-node plugin, then delete the pod.
+#   C. csi-rclone orphaned FUSE mount → FailedMount "directory
+#      already mounted" (forgejo after plugin restart). Recovery:
+#      delete the pod (new pod UID = fresh mount path).
+# Kubelet graceful shutdown (talos patch, applied 2026-07-20)
+# prevents most of this for PLANNED reboots; this janitor is the
+# net for WATCHDOG hard-resets and anything that slips through.
+#
+# ============================================================
+# DETECTION CRITERIA (safety boundary — reviewer, read this)
+# ============================================================
+# Common gates for ALL signatures — a pod is only ever touched if:
+#   (1) It is NOT Running/Succeeded (phase Pending, or stuck
+#       ContainerCreating per containerStatuses).
+#   (2) It is OLDER than STUCK_THRESHOLD_SECONDS (default 600).
+#       Legit slow pulls (multi-GB images) and slow mounts finish
+#       well inside 10 min on this LAN; a false-positive delete of
+#       a slow-pulling pod is low-harm (layers are cached, the
+#       replacement resumes the pull).
+#   (3) It HAS a controller ownerReference (ReplicaSet/StatefulSet/
+#       DaemonSet/Job) — NEVER delete a naked pod; it would not
+#       come back.
+#   (4) Its namespace is not in EXCLUDE_NAMESPACES (kube-system and
+#       longhorn-system manage their own lifecycles).
+#   (5) Total actions this run < MAX_ACTIONS_PER_RUN (default 5) —
+#       a mass-wedge (e.g. mid-reboot listing) must not trigger a
+#       mass-delete; the 5-min tick will drain it gradually.
+# Signature discrimination (checked in order, first match wins):
+#   B: pod has a FailedMount event matching OP_EXISTS_PATTERN with
+#      lastTimestamp inside the last EVENT_FRESH_SECONDS →
+#      restart csi-rclone-node on that pod's node (at most ONE
+#      plugin restart per node per run), then delete the pod.
+#   C: pod has a FailedMount event matching ALREADY_MOUNTED_PATTERN
+#      (fresh) → delete the pod only.
+#   A: pod has a fresh "Pulling" event AND NO fresh error-ish event
+#      (Failed/BackOff/ErrImagePull/FailedMount) — i.e. the SILENT
+#      hang, not a normal retrying ImagePullBackOff (those recover
+#      on their own and are NOT touched) → delete the pod.
+# Deletes are GRACEFUL (default grace period). NEVER --force: on
+# Longhorn-backed pods a force-delete orphans the VolumeAttachment
+# (the 2026-07-20 langfuse lesson; see known-caveats).
+#
+# DRY_RUN=true logs decisions without acting — used for the initial
+# smoke test and available for re-verification any time.
+#
+# FAILURE-INJECTION STATUS (rule 35/40): detection logic smoke-
+# tested against a healthy fleet (0 findings) 2026-07-20. Full
+# injection test rides on the next reboot-bearing session (CP BIOS
+# trips) — the janitor is expected to clear the cascade UNAIDED;
+# that observation closes the paper-guarantee gap. Tracked in TODO.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: reboot-cascade-janitor
+  labels:
+    app.kubernetes.io/name: reboot-cascade-janitor
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: reboot-cascade-janitor
+  namespace: reboot-cascade-janitor
+  labels:
+    app.kubernetes.io/name: reboot-cascade-janitor
+---
+# RBAC — the janitor's power is deliberately blunt-scoped but
+# criteria-gated in code:
+#   pods get/list/delete cluster-wide: needed to bounce wedged pods
+#     in ANY app namespace (the cascade hits arbitrary victims) and
+#     to restart the csi-rclone node plugin. No patch/exec/create.
+#   events get/list: signature discrimination.
+# The real safety boundary is the detection criteria + action cap
+# above, mirrored from longhorn-va-janitor's design.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: reboot-cascade-janitor
+  labels:
+    app.kubernetes.io/name: reboot-cascade-janitor
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: reboot-cascade-janitor
+  labels:
+    app.kubernetes.io/name: reboot-cascade-janitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: reboot-cascade-janitor
+subjects:
+  - kind: ServiceAccount
+    name: reboot-cascade-janitor
+    namespace: reboot-cascade-janitor
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: reboot-cascade-janitor-config
+  namespace: reboot-cascade-janitor
+  labels:
+    app.kubernetes.io/name: reboot-cascade-janitor
+data:
+  # Pod must be older than this before any signature applies.
+  STUCK_THRESHOLD_SECONDS: "600"
+  # An event only counts as evidence if this fresh (matches the
+  # kubelet's mount-retry cadence; stale events from a resolved
+  # incident must not trigger actions).
+  EVENT_FRESH_SECONDS: "600"
+  # Hard cap on remediations per tick.
+  MAX_ACTIONS_PER_RUN: "5"
+  # Namespaces the janitor never touches.
+  EXCLUDE_NAMESPACES: "kube-system longhorn-system"
+  # csi-rclone node-plugin location (signature B remediation).
+  CSI_RCLONE_NAMESPACE: "csi-rclone"
+  CSI_RCLONE_POD_PREFIX: "csi-rclone-node"
+  # Signature match patterns (fixed strings, grep -F).
+  OP_EXISTS_PATTERN: "already exists"
+  ALREADY_MOUNTED_PATTERN: "directory already mounted"
+  # Set "true" to log decisions without acting.
+  DRY_RUN: "false"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: reboot-cascade-janitor
+  namespace: reboot-cascade-janitor
+  labels:
+    app.kubernetes.io/name: reboot-cascade-janitor
+spec:
+  # Every 5 minutes, same reasoning as longhorn-va-janitor: the
+  # signatures persist for 10+ min untreated, so worst-case
+  # detection latency of threshold+tick (~15 min) matches what a
+  # human operator achieved manually today — without the human.
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 180
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: reboot-cascade-janitor
+        spec:
+          restartPolicy: Never
+          serviceAccountName: reboot-cascade-janitor
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: janitor
+              # Same image as longhorn-va-janitor: kubectl + jq.
+              image: docker.io/alpine/k8s:1.30.5@sha256:0d03af14f8539df28e51e8afc12ee6d78891c630b88226243307f08a6fab3538
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - configMapRef:
+                    name: reboot-cascade-janitor-config
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 64Mi
+                limits:
+                  memory: 192Mi
+              command: [/bin/sh, -c]
+              args:
+                - |
+                  set -eu
+                  echo "[step 1] reboot-cascade-janitor starting (dry_run=$DRY_RUN, cap=$MAX_ACTIONS_PER_RUN, threshold=${STUCK_THRESHOLD_SECONDS}s)"
+                  NOW_TS=$(date -u +%s)
+
+                  # [step 2] one pods list + one events list per tick.
+                  PODS_JSON=$(kubectl get pods -A -o json)
+                  EVENTS_JSON=$(kubectl get events -A -o json)
+                  echo "[step 2] listed $(echo "$PODS_JSON" | jq '.items|length') pods, $(echo "$EVENTS_JSON" | jq '.items|length') events"
+
+                  # [step 3] candidate pods: common gates (1)-(4).
+                  # Emits ns|name|node rows.
+                  CANDS=$(echo "$PODS_JSON" | jq -r \
+                    --argjson now "$NOW_TS" \
+                    --argjson thr "$STUCK_THRESHOLD_SECONDS" \
+                    --arg excl "$EXCLUDE_NAMESPACES" '
+                      ($excl | split(" ")) as $ex
+                      | .items[]
+                      | select(.metadata.namespace as $n | $ex | index($n) | not)
+                      | select(.status.phase == "Pending"
+                          or ([.status.containerStatuses[]?
+                               | select(.state.waiting.reason == "ContainerCreating")]
+                              | length > 0))
+                      | select(.status.phase != "Succeeded" and .status.phase != "Running")
+                      | select(($now - (.metadata.creationTimestamp | fromdateiso8601)) > $thr)
+                      | select([.metadata.ownerReferences[]?
+                                | select(.kind == "ReplicaSet" or .kind == "StatefulSet"
+                                         or .kind == "DaemonSet" or .kind == "Job")]
+                               | length > 0)
+                      | "\(.metadata.namespace)|\(.metadata.name)|\(.spec.nodeName // "?")"
+                    ')
+                  if [ -z "$CANDS" ]; then
+                    echo "[step 3] no stuck candidate pods — done"
+                    exit 0
+                  fi
+                  echo "[step 3] candidates:"; echo "$CANDS" | sed 's/^/  /'
+
+                  ACTIONS=0
+                  RESTARTED_NODES=" "
+                  echo "$CANDS" | while IFS='|' read -r NS NAME NODE; do
+                    [ "$ACTIONS" -ge "$MAX_ACTIONS_PER_RUN" ] && { echo "[cap] MAX_ACTIONS_PER_RUN reached; remaining candidates wait for next tick"; break; }
+
+                    # [step 4] fresh events for this pod.
+                    POD_EV=$(echo "$EVENTS_JSON" | jq -r \
+                      --arg ns "$NS" --arg name "$NAME" \
+                      --argjson now "$NOW_TS" --argjson fresh "$EVENT_FRESH_SECONDS" '
+                        [.items[]
+                         | select(.involvedObject.namespace == $ns and .involvedObject.name == $name)
+                         | select(((.lastTimestamp // .eventTime // "1970-01-01T00:00:00Z")
+                                   | sub("\\.[0-9]+";"") | fromdateiso8601) > ($now - $fresh))
+                         | {reason, message}]')
+                    HAS_OP_EXISTS=$(echo "$POD_EV" | jq -r --arg p "$OP_EXISTS_PATTERN" '[.[] | select(.reason=="FailedMount") | select(.message | contains($p))] | length')
+                    HAS_ALREADY_MOUNTED=$(echo "$POD_EV" | jq -r --arg p "$ALREADY_MOUNTED_PATTERN" '[.[] | select(.reason=="FailedMount") | select(.message | contains($p))] | length')
+                    HAS_PULLING=$(echo "$POD_EV" | jq -r '[.[] | select(.reason=="Pulling")] | length')
+                    HAS_ERRORISH=$(echo "$POD_EV" | jq -r '[.[] | select(.reason=="Failed" or .reason=="BackOff" or .reason=="ErrImagePull" or .reason=="FailedMount" or .reason=="FailedAttachVolume")] | length')
+
+                    SIG=""
+                    if [ "$HAS_OP_EXISTS" != "0" ]; then SIG="B:csi-op-exists"
+                    elif [ "$HAS_ALREADY_MOUNTED" != "0" ]; then SIG="C:orphaned-mount"
+                    elif [ "$HAS_PULLING" != "0" ] && [ "$HAS_ERRORISH" = "0" ]; then SIG="A:silent-pull-hang"
+                    fi
+                    if [ -z "$SIG" ]; then
+                      echo "[step 4] $NS/$NAME: no signature match (pulling=$HAS_PULLING errorish=$HAS_ERRORISH op=$HAS_OP_EXISTS mounted=$HAS_ALREADY_MOUNTED) — leaving alone"
+                      continue
+                    fi
+                    echo "[step 5] $NS/$NAME on $NODE matches signature $SIG"
+
+                    if [ "$DRY_RUN" = "true" ]; then
+                      echo "[dry-run] would remediate $NS/$NAME ($SIG)"
+                      continue
+                    fi
+
+                    # [step 6] signature B: restart csi-rclone node
+                    # plugin on that node first (once per node per run).
+                    if [ "$SIG" = "B:csi-op-exists" ]; then
+                      case "$RESTARTED_NODES" in
+                        *" $NODE "*) echo "[step 6] plugin on $NODE already restarted this run" ;;
+                        *)
+                          PLUGIN=$(echo "$PODS_JSON" | jq -r --arg ns "$CSI_RCLONE_NAMESPACE" --arg pfx "$CSI_RCLONE_POD_PREFIX" --arg node "$NODE" '
+                            .items[] | select(.metadata.namespace==$ns)
+                            | select(.metadata.name | startswith($pfx))
+                            | select(.spec.nodeName==$node) | .metadata.name' | head -1)
+                          if [ -n "$PLUGIN" ]; then
+                            echo "[step 6] restarting csi-rclone plugin $PLUGIN on $NODE (graceful delete)"
+                            kubectl delete pod "$PLUGIN" -n "$CSI_RCLONE_NAMESPACE" --wait=false || echo "[step 6] WARN plugin delete failed"
+                            RESTARTED_NODES="$RESTARTED_NODES$NODE "
+                            sleep 10
+                          else
+                            echo "[step 6] WARN: no $CSI_RCLONE_POD_PREFIX pod found on $NODE"
+                          fi
+                          ;;
+                      esac
+                    fi
+
+                    # [step 7] graceful pod delete — NEVER --force
+                    # (stale-VA lesson, known-caveats 2026-07-20).
+                    echo "[step 7] deleting $NS/$NAME (graceful; controller recreates)"
+                    kubectl delete pod "$NAME" -n "$NS" --wait=false || echo "[step 7] WARN delete failed on $NS/$NAME"
+                    ACTIONS=$((ACTIONS+1))
+                  done
+                  echo "[step 8] janitor pass complete"
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                - name: kube-cache
+                  mountPath: /.kube
+                - name: cache
+                  mountPath: /.cache
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 32Mi
+            - name: kube-cache
+              emptyDir:
+                sizeLimit: 32Mi
+            - name: cache
+              emptyDir:
+                sizeLimit: 32Mi

@@ -1,0 +1,22 @@
+# Reboot-cascade janitor.
+#
+# Auto-remediates the three post-reboot failure signatures from the
+# 2026-07-20 worker BIOS session (journal + known-caveats):
+#   A. Spegel-wedged image pull (pod silently stuck ContainerCreating
+#      on "Pulling image" — containerd blocked on a mesh-broken peer)
+#   B. csi-rclone stuck operation lock ("operation with the given
+#      Volume ID already exists")
+#   C. csi-rclone orphaned FUSE mount ("directory already mounted")
+#
+# This is the ONLY mitigation layer that also covers watchdog
+# hard-resets (no shutdown path → kubelet graceful shutdown can't
+# help). Sibling of longhorn-va-janitor; same structure and safety
+# philosophy — strict multi-criteria detection, minimal RBAC,
+# bounded actions per run.
+#
+# ArgoCD picks this up via the infrastructure ApplicationSet.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - reboot-cascade-janitor.yaml

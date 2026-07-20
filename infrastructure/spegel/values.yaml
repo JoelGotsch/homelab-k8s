@@ -141,6 +141,17 @@ spegel:
   # cache inspection (`kubectl port-forward ds/spegel 29020`).
   debugWebEnabled: true
 
+# Liveness probe (/livez on the registry port) — 2026-07-20
+# reboot-cascade hardening. A mesh-broken Spegel (routing table
+# empty after a PEER's reboot) hangs containerd pulls and never
+# self-heals, though a pod restart fixes it in <1s; without a
+# liveness probe nothing ever restarts it. Chart 0.7.4 top-level
+# key, verified against the pulled chart template (adds httpGet
+# /livez). The reboot-cascade janitor covers whatever /livez
+# doesn't (known-caveats 2026-07-20).
+livenessProbe:
+  enabled: true
+
 service:
   registry:
     port: 5000
