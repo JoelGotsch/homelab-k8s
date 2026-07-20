@@ -7,9 +7,10 @@
 # fails, while changing this file produces an obvious policy diff.
 #
 # This baseline does NOT declare these routes desirable steady state. It records
-# temporary drift while notification delivery is migrated to the clarified
-# contract: operational alerts use ntfy; Signal carries approval items and an
-# explicitly conditional ntfy-outage fallback only.
+# remaining temporary drift while notification delivery is migrated to the
+# clarified contract. Alertmanager fan-out and the incompatible Falco relay are
+# gone; the app-owned OpenBao watchdog is the final baselined route until its
+# ntfy-first implementation lands.
 
 apiVersion: homelab.internal/v1alpha1
 kind: TemporaryNotificationRouteBaseline
@@ -34,70 +35,10 @@ spec:
     alertmanager:
       config: observability/kube-prometheus-stack/alertmanager-config.yaml
 
-      # These are operational-alert webhook sinks. The `approval-channel`
-      # service name does not make /v1/alert or /v1/deception approval flows.
-      # Alertmanager cannot originate an approval item.
-      operationalSignalReceivers:
-        - name: approval-channel-alert
-          url: http://approval-channel.approval-channel.svc.cluster.local:8000/v1/alert
-          sendResolved: true
-        - name: approval-channel-deception
-          url: http://approval-channel.approval-channel.svc.cluster.local:8000/v1/deception
-          sendResolved: true
+      operationalSignalReceivers: []
+      operationalSignalRoutes: []
 
-      operationalSignalRoutes:
-        - id: alertmanager-deception-signal
-          file: observability/kube-prometheus-stack/alertmanager-config.yaml
-          marker: P0-07-TEMPORARY-DRIFT(alertmanager-deception-signal)
-          receiver: approval-channel-deception
-          matchers:
-            - name: component
-              value: deception
-          groupWait: 0s
-          groupInterval: 30s
-          repeatInterval: 15m
-          continue: false
-
-        - id: alertmanager-critical-signal
-          file: observability/kube-prometheus-stack/alertmanager-config.yaml
-          marker: P0-07-TEMPORARY-DRIFT(alertmanager-critical-signal)
-          receiver: approval-channel-alert
-          matchers:
-            - name: severity
-              value: critical
-          groupWait: 5s
-          groupInterval: 1m
-          # Match the reviewed 2026-07-20 anti-noise cadence. This baseline
-          # records current drift; it does not authorize Signal as the normal
-          # critical-alert transport.
-          repeatInterval: 6h
-          continue: false
-
-        - id: alertmanager-warning-time-escalation-signal
-          file: observability/kube-prometheus-stack/alertmanager-config.yaml
-          marker: P0-07-TEMPORARY-DRIFT(alertmanager-warning-time-escalation-signal)
-          receiver: approval-channel-alert
-          matchers:
-            - name: severity
-              value: warning
-            - name: escalate_after
-              value: 1h
-          groupWait: 55m
-          groupInterval: 15m
-          repeatInterval: 4h
-          continue: true
-
-    customRelayRoutes:
-      # The relay emits a custom encrypted payload which the current mobile
-      # client cannot read. Falco is currently suspended in kustomization.yaml,
-      # so this is dormant resume configuration rather than a live route. Do
-      # not activate or retain it after the parallel Falcosidekick ->
-      # Alertmanager -> formatter -> ntfy path has produced a readable
-      # synthetic-event receipt.
-      - id: falcosidekick-custom-ntfy-relay
-        file: observability/falco-stack/values.yaml
-        marker: P0-07-TEMPORARY-DRIFT(falcosidekick-custom-ntfy-relay)
-        url: http://ntfy-e2ee-relay.ntfy-e2ee-relay.svc.cluster.local:8000/webhook
+    customRelayRoutes: []
 
     directOperationalSignalRoutes:
       # This OpenBao circular-dependency watchdog deliberately bypasses

@@ -1,14 +1,9 @@
-# Alertmanager routing config. Per ADR 0021 D7 and the
-# three-tier design in
-# 03-runbooks/observability/alert-routing.md (2026-07-10):
+# Alertmanager routing config. Per ADR 0039 and the three-tier design in
+# 03-runbooks/observability/alert-routing.md:
 #
-#   Tier 1 (Signal — page): critical severity, operator eyes
-#     within minutes. Fans out to BOTH direct ntfy (topic
-#     `homelab-alerts`) AND approval-channel (Signal via
-#     signal-bridge). Neither leg is E2EE — the ntfy server
-#     is Tailscale-only, so its plaintext view is inside the
-#     trust boundary; approval-channel talks to signal-bridge
-#     inside the cluster.
+#   Tier 1 (ntfy — urgent): critical severity, operator eyes within minutes.
+#     The alert-formatter tries ntfy first and invokes the one-way Signal
+#     fallback only when that publish returns an error.
 #   Tier 2 (ntfy — attention): warning severity, operator sees
 #     within hours. Direct ntfy publish to a dedicated
 #     `homelab-alerts-warning` topic. Same shape as Tier 1's
@@ -159,10 +154,9 @@ spec:
         groupInterval: 30m
         repeatInterval: 12h
 
-      # ===== Deception fan-out (ADR 0021 D10) =====
-      # Honey-asset hits: zero-latency dedicated route to the
-      # direct-ntfy Tier-1 topic AND approval-channel /v1/
-      # deception path (Signal buzz).
+      # ===== Deception (ADR 0039) =====
+      # Honey-asset hits keep zero-latency grouping and use the urgent ntfy
+      # topic. Signal is selected inside alert-formatter only if ntfy fails.
       - matchers:
           - name: component
             value: deception
@@ -170,23 +164,10 @@ spec:
         groupWait: 0s
         groupInterval: 30s
         repeatInterval: 30m
-        continue: true
-      # P0-07-TEMPORARY-DRIFT(alertmanager-deception-signal)
-      # Operational alert route, not an approval workflow. Keep only until a
-      # readable ntfy receipt from this source and conditional Signal fallback
-      # have both been proven; the exact route is frozen by the static baseline.
-      - matchers:
-          - name: component
-            value: deception
-        receiver: approval-channel-deception
-        groupWait: 0s
-        groupInterval: 30s
-        repeatInterval: 15m
 
       # ===== Tier 1 (severity: critical) =====
-      # Two-branch fan-out: direct ntfy (topic `homelab-alerts`,
-      # non-E2EE) AND Signal via approval-channel. Both fire;
-      # operator gets one push per medium.
+      # One receiver: alert-formatter -> ntfy. The formatter owns conditional
+      # Signal fallback, so Alertmanager never performs unconditional fan-out.
       #
       # Historical note: this used to go through
       # `ntfy-e2ee-relay` with AES-256-GCM client-side
@@ -208,44 +189,10 @@ spec:
         groupWait: 5s
         groupInterval: 1m
         # 6h, not 1h: a persistent known critical (OpenBaoMissingReplica
-        # through the 2026-07 worker1 outage) re-paged BOTH media hourly —
+        # through the 2026-07 worker1 outage) re-paged both media hourly —
         # ~48 of 106 daily notifications. First page stays immediate
         # (groupWait 5s); repeat is only the nag cadence. 2026-07-20.
         repeatInterval: 6h
-        continue: true
-      # P0-07-TEMPORARY-DRIFT(alertmanager-critical-signal)
-      # Unconditional operational Signal fan-out. This is containment, not the
-      # intended steady state; do not remove it before the ntfy receipt and
-      # conditional-fallback gates in the reviewed baseline are satisfied.
-      - matchers:
-          - name: severity
-            value: critical
-        receiver: approval-channel-alert
-        groupWait: 5s
-        groupInterval: 1m
-        repeatInterval: 6h   # see ntfy-critical note above (2026-07-20)
-
-      # ===== Tier 2 escalate-after opt-in =====
-      # Per the alert-routing runbook "escalate-after"
-      # mechanism: alerts labeled `escalate_after: "1h"` at the
-      # PrometheusRule level get an additional Signal fan-out
-      # after 55 minutes of continuous firing. Opt-in per rule
-      # (see the runbook for the candidate list); default
-      # warnings stay Tier 2 only.
-      # P0-07-TEMPORARY-DRIFT(alertmanager-warning-time-escalation-signal)
-      # Time alone is not evidence that ntfy is degraded. Retain this temporary
-      # route only for coverage while conditional fallback is implemented and
-      # the primary ntfy path is proven at the recipient.
-      - matchers:
-          - name: severity
-            value: warning
-          - name: escalate_after
-            value: "1h"
-        receiver: approval-channel-alert
-        groupWait: 55m       # give the operator a chance to see + ack the ntfy first
-        groupInterval: 15m
-        repeatInterval: 4h
-        continue: true       # also fall through to ntfy-direct via default
 
       # (no explicit Tier 2 route needed — anything not matched
       # above falls through to the default receiver = ntfy-direct.)
@@ -294,39 +241,6 @@ spec:
         - url: http://alert-formatter.monitoring.svc.cluster.local:8080/publish?topic=homelab-alerts
           sendResolved: true
 
-    # ===== Temporary operational Signal sink via approval-channel =====
-    # ROUTE CLASS: operational alert, not approval. Alertmanager posts an alert
-    # payload to /v1/alert; it cannot create or mutate an approval item. The
-    # service name is historical and must not be used as proof of approval-state
-    # semantics. P0-07 freezes the routes which reference this receiver.
-    - name: approval-channel-alert
-      webhookConfigs:
-        - url: http://approval-channel.approval-channel.svc.cluster.local:8000/v1/alert
-          sendResolved: true
-          # Alertmanager retries on 5xx; approval-channel
-          # returns 502 if signal-bridge is unreachable.
-          # That gives the durability layer.
-          httpConfig:
-            authorization:
-              type: Bearer
-              credentials:
-                name: am-inbound-tokens
-                key: approval-channel
-
-    # ===== Temporary operational deception Signal sink =====
-    # ROUTE CLASS: operational alert, not approval. /v1/deception is another
-    # one-way alert formatter endpoint and is covered by the same P0-07 gates.
-    - name: approval-channel-deception
-      webhookConfigs:
-        - url: http://approval-channel.approval-channel.svc.cluster.local:8000/v1/deception
-          sendResolved: true
-          httpConfig:
-            authorization:
-              type: Bearer
-              credentials:
-                name: am-inbound-tokens
-                key: approval-channel
-
   inhibitRules:
     # critical inhibits warning for the same (alertname,
     # namespace) — avoid double-paging.
@@ -374,7 +288,7 @@ spec:
   # Named time intervals referenced by routes' muteTimeIntervals.
   # `overnight-quiet` silences low-urgency digests (Trivy CVEs)
   # between midnight and 09:00 local — a held batch delivers at
-  # 09:00. Only Tier-1 pages (Signal, deception) bypass this by
+  # 09:00. Urgent ntfy/deception routes bypass this by
   # not referencing it. 2026-07-14.
   muteTimeIntervals:
     - name: overnight-quiet

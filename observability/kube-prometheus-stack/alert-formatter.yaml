@@ -1,163 +1,9 @@
-# alert-formatter — tiny AM-webhook → ntfy adapter
-#
-# Problem it solves: Alertmanager's webhook receiver posts its
-# own JSON schema as the request body. When AM posts that
-# directly to an ntfy topic URL, ntfy stores the raw JSON as
-# the message — unreadable on the F-Droid app (nested JSON,
-# the actual alert text buried in `alerts[].annotations`).
-#
-# This service receives the AM webhook, extracts a readable
-# summary, and re-publishes to ntfy with a proper Title /
-# Priority / Tags. Both alert tiers point at it (topic passed
-# as a query param), so one service formats both the Tier-1
-# `homelab-alerts` and Tier-2 `homelab-alerts-warning` streams.
-#
-# Design choices:
-# - stdlib-only Python (http.server + urllib) so it runs on the
-#   already-present `ci-packages/python:3.12-slim` image with
-#   no build step — same "no new image" pattern as
-#   observability/crowdsec/cidrgroup-sync-cronjob.yaml.
-# - Holds the ntfy publish token (from am-inbound-tokens, key
-#   ntfy-am-direct — the `am-direct` ntfy user, write-only on
-#   both topics). AM → formatter is NetPol-gated only (no
-#   inter-service auth); the real secret (ntfy token) lives
-#   only here. The formatter → ntfy leg carries the Bearer.
-# - readOnlyRootFilesystem-safe: http.server writes nothing to
-#   disk.
-#
-# Reversal note: if a future need for E2EE returns (ADR 0024
-# D1 phase-2), route Tier 1 back through ntfy-e2ee-relay
-# instead — see 99-journal/2026-07-13 for the E2EE-removal
-# rationale.
+# alert-formatter is the single operational-alert delivery owner.
+# Alertmanager posts one grouped webhook here. The mounted alert_router.py
+# formats and publishes to ntfy; only a synchronous ntfy error opens the
+# one-way Signal fallback through approval-channel. If both fail, the router
+# returns 502 and Alertmanager retains/retries the notification.
 
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: alert-formatter-script
-  namespace: monitoring
-data:
-  formatter.py: |
-    """AM-webhook -> ntfy adapter. stdlib only. Per
-    03-runbooks/observability/alert-routing.md."""
-    import json
-    import os
-    import sys
-    import urllib.error
-    import urllib.request
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    from urllib.parse import parse_qs, urlparse
-
-    NTFY_BASE_URL = os.environ["NTFY_BASE_URL"].rstrip("/")
-    NTFY_TOKEN = os.environ["NTFY_TOKEN"]
-
-    # ntfy priority: 5=max(buzz through DND), 3=default, 2=low.
-    PRIORITY = {"critical": "5", "warning": "3", "info": "2"}
-    # ntfy tag = emoji shown next to the title.
-    def _tag(status, severity):
-        if status == "resolved":
-            return "white_check_mark"
-        return {
-            "critical": "rotating_light",
-            "warning": "warning",
-            "info": "information_source",
-        }.get(severity, "bell")
-
-    def _format(payload):
-        status = payload.get("status", "firing")
-        alerts = payload.get("alerts") or []
-        group = payload.get("groupLabels") or {}
-        common = payload.get("commonLabels") or {}
-        alertname = group.get("alertname") or common.get("alertname") or "alert"
-        severity = (
-            common.get("severity")
-            or group.get("severity")
-            or (alerts[0].get("labels", {}).get("severity") if alerts else None)
-        )
-        n = len(alerts)
-        prefix = "RESOLVED" if status == "resolved" else "FIRING"
-        title = f"[{prefix}] {alertname}"
-        if n > 1:
-            title = f"[{prefix}] {alertname} ({n} alerts)"
-        lines = []
-        for a in alerts[:20]:
-            labels = a.get("labels") or {}
-            ann = a.get("annotations") or {}
-            sev = labels.get("severity", "?")
-            loc = labels.get("namespace") or labels.get("pod") or ""
-            text = (
-                ann.get("summary")
-                or ann.get("description")
-                or labels.get("alertname", "")
-            )
-            lines.append(f"{sev}" + (f" · {loc}" if loc else "") + f": {text}")
-        if n > 20:
-            lines.append(f"... +{n - 20} more")
-        body = "\n".join(lines) if lines else alertname
-        priority = PRIORITY.get(severity or "", "3")
-        return title, body, priority, _tag(status, severity)
-
-    class Handler(BaseHTTPRequestHandler):
-        def _send(self, code, msg=b""):
-            self.send_response(code)
-            self.send_header("Content-Length", str(len(msg)))
-            self.end_headers()
-            if msg:
-                self.wfile.write(msg)
-
-        def do_GET(self):
-            if urlparse(self.path).path == "/healthz":
-                self._send(200, b"ok")
-            else:
-                self._send(404)
-
-        def do_POST(self):
-            parsed = urlparse(self.path)
-            if parsed.path != "/publish":
-                self._send(404)
-                return
-            topic = (parse_qs(parsed.query).get("topic") or [""])[0]
-            if not topic:
-                self._send(400, b"missing topic query param")
-                return
-            length = int(self.headers.get("Content-Length", 0))
-            raw = self.rfile.read(length) if length else b"{}"
-            try:
-                payload = json.loads(raw)
-            except Exception:
-                self._send(400, b"bad json")
-                return
-            title, body, priority, tag = _format(payload)
-            req = urllib.request.Request(
-                f"{NTFY_BASE_URL}/{topic}",
-                data=body.encode("utf-8"),
-                method="POST",
-                headers={
-                    "Authorization": f"Bearer {NTFY_TOKEN}",
-                    # ntfy header values must be single-line;
-                    # alertname + severity are always single-line.
-                    "Title": title,
-                    "Priority": priority,
-                    "Tags": tag,
-                    "Content-Type": "text/plain; charset=utf-8",
-                },
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    resp.read()
-                self._send(204)
-            except urllib.error.HTTPError as e:
-                sys.stderr.write(f"ntfy error {e.code}: {e.read()[:200]!r}\n")
-                self._send(502)
-            except Exception as e:  # noqa: BLE001
-                sys.stderr.write(f"ntfy publish failed: {e}\n")
-                self._send(502)
-
-        def log_message(self, *args):
-            return  # quiet — Alloy ships stderr, and we log only failures
-
-    if __name__ == "__main__":
-        ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -166,6 +12,8 @@ metadata:
   labels:
     app.kubernetes.io/name: alert-formatter
 spec:
+  # First rollout stays at one replica per the minimal-blast-radius rule. Scale
+  # only after an uncached-node image pull and a live fallback drill are proven.
   replicas: 1
   selector:
     matchLabels:
@@ -184,23 +32,12 @@ spec:
           type: RuntimeDefault
       containers:
         - name: formatter
-          # Upstream Docker Hub image, NOT the ci-packages
-          # mirror. The mirror serves the manifest fine over
-          # HTTP, but containerd/Spegel can't resolve a
-          # registry.homelab.internal ref that no node has ever
-          # pulled (ci-packages/python is only used as a
-          # build-FROM inside Woodpecker, which pulls from the
-          # Forgejo host directly — a different hostname — so
-          # it never lands in any node's containerd cache, and
-          # Spegel has no peer to serve it). For a stdlib-only
-          # runner the mirror buys nothing; upstream is simpler
-          # and pulls anonymously like every other kps image
-          # (grafana, kube-state-metrics, etc.). Digest-pinned
-          # for reproducibility + the audit-digest-pinning
-          # policy; bump via Renovate.
+          # stdlib-only runtime; digest-pinned for reproducibility. The source
+          # and machine-readable channel policy are generated into the mounted
+          # ConfigMap by this layer's kustomization.
           image: docker.io/library/python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a1bfc852199fbf
           imagePullPolicy: IfNotPresent
-          command: ["python", "/app/formatter.py"]
+          command: ["python", "/app/alert_router.py"]
           ports:
             - containerPort: 8080
               name: http
@@ -212,6 +49,15 @@ spec:
                 secretKeyRef:
                   name: am-inbound-tokens
                   key: ntfy-am-direct
+            - name: SIGNAL_FALLBACK_BASE_URL
+              value: http://approval-channel.approval-channel.svc.cluster.local:8000
+            - name: SIGNAL_FALLBACK_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: am-inbound-tokens
+                  key: approval-channel
+            - name: NOTIFICATION_CHANNEL_POLICY_PATH
+              value: /app/notification-channel-policy.json
           volumeMounts:
             - name: script
               mountPath: /app
@@ -223,6 +69,9 @@ spec:
             initialDelaySeconds: 3
             periodSeconds: 30
           readinessProbe:
+            # Readiness validates that the router process and policy loaded.
+            # It deliberately does not require ntfy: ntfy failure is the state
+            # in which this pod must remain ready to provide Signal fallback.
             httpGet:
               path: /healthz
               port: http
@@ -259,8 +108,8 @@ spec:
       targetPort: http
       name: http
 ---
-# NetworkPolicy — the formatter accepts webhook POSTs only from
-# Alertmanager, and egresses only to kube-DNS + the ntfy server.
+# Only Alertmanager can submit alerts. The router can resolve DNS, publish to
+# ntfy, and call approval-channel's one-way fallback endpoint—nothing else.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -292,11 +141,20 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # ntfy server — the publish target.
     - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: ntfy
       ports:
         - port: 80
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: approval-channel
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: approval-channel
+      ports:
+        - port: 8000
           protocol: TCP

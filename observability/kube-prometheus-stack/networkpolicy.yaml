@@ -8,8 +8,8 @@
 #
 # Alertmanager:
 # - Ingress from Prometheus (alert delivery).
-# - Egress to ntfy-e2ee-relay (webhook receiver per
-#   alertmanager-config.yaml).
+# - Egress to the same-namespace alert-formatter only. The formatter owns ntfy
+#   primary delivery and conditional Signal fallback per ADR 0039.
 #
 # Grafana:
 # - Ingress from cluster Gateway (HTTPRoute) + same-ns workloads.
@@ -212,15 +212,6 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # ntfy-e2ee-relay — Tier 1 fan-out A per
-    # alertmanager-config.yaml (E2EE stream).
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ntfy-e2ee-relay
-      ports:
-        - port: 8000
-          protocol: TCP
     # alert-formatter (same namespace) — both ntfy tiers now
     # route through the formatter, which extracts a readable
     # summary and re-publishes to ntfy. Per alertmanager-
@@ -233,26 +224,6 @@ spec:
               app.kubernetes.io/name: alert-formatter
       ports:
         - port: 8080
-          protocol: TCP
-    # ntfy server (direct publish) — kept for the
-    # openbao-seal-watchdog CronJob's direct publish path and
-    # as a fallback; AM's own alert publishes now go via the
-    # formatter above. Non-E2EE, Tailscale-only server.
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ntfy
-      ports:
-        - port: 80
-          protocol: TCP
-    # approval-channel — Tier 1 fan-out B (Signal via
-    # signal-bridge) per alertmanager-config.yaml.
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: approval-channel
-      ports:
-        - port: 8000
           protocol: TCP
     # Alertmanager peer-mesh (3-replica HA when scaled).
     - to:

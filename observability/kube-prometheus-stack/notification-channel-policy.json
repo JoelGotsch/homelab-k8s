@@ -1,0 +1,18 @@
+{
+  "apiVersion": "homelab.internal/v1alpha1",
+  "kind": "NotificationChannelPolicy",
+  "traffic": {
+    "operationalAlert": {
+      "primary": "ntfy",
+      "signal": "conditional-fallback-only",
+      "fallbackEvidence": "synchronous-ntfy-publish-error",
+      "approvalStateAccess": "forbidden"
+    },
+    "approvalItem": {
+      "primary": "signal",
+      "ntfy": "informational-only",
+      "requiresImmutableCommandDigest": true,
+      "typedResponses": ["approve", "refuse", "expire"]
+    }
+  }
+}

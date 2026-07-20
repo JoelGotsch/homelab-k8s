@@ -99,9 +99,9 @@ done <"$expected/markers"
 alertmanager_config="$(yq -r '.spec.reviewedDrift.alertmanager.config' "$baseline")"
 [ -f "$alertmanager_config" ] || fail "Alertmanager config missing: $alertmanager_config"
 
-yq -r '.spec.reviewedDrift.alertmanager.operationalSignalReceivers[] |
+yq -r '.spec.reviewedDrift.alertmanager.operationalSignalReceivers[]? |
   [.name, .url, (.sendResolved | tostring)] | @tsv' "$baseline" \
-  | sed '/^$/d' >"$expected/alertmanager-receivers"
+  | sed '/^[[:space:]]*$/d' >"$expected/alertmanager-receivers"
 
 yq -r '.spec.receivers[] as $receiver | $receiver.webhookConfigs[]? |
   select(.url | test("^https?://(approval-channel|signal-bridge)\\.")) |
@@ -113,11 +113,11 @@ compare_inventory "Alertmanager operational Signal receivers" \
 
 # A full route fingerprint prevents a new fan-out, matcher broadening, timing
 # change, or `continue` change from hiding behind an existing receiver name.
-yq -r '.spec.reviewedDrift.alertmanager.operationalSignalRoutes[] |
+yq -r '.spec.reviewedDrift.alertmanager.operationalSignalRoutes[]? |
   [.receiver, ((.matchers // []) | to_json(0)), (.groupWait // ""),
    (.groupInterval // ""), (.repeatInterval // ""),
    ((.continue // false) | tostring)] | @tsv' "$baseline" \
-  >"$expected/alertmanager-routes"
+  | sed '/^[[:space:]]*$/d' >"$expected/alertmanager-routes"
 
 cut -f1 "$actual/alertmanager-receivers" | LC_ALL=C sort -u \
   >"$actual/alertmanager-receiver-names"
@@ -141,8 +141,8 @@ compare_inventory "Alertmanager operational Signal routes" \
 # the disabled Cloudflare example inside a ConfigMap block as a route. Dormant
 # values are included so a suspended layer cannot resume with an unreviewed
 # incompatible route.
-yq -r '.spec.reviewedDrift.customRelayRoutes[] | [.file, .url] | @tsv' \
-  "$baseline" >"$expected/custom-relay-routes"
+yq -r '.spec.reviewedDrift.customRelayRoutes[]? | [.file, .url] | @tsv' \
+  "$baseline" | sed '/^[[:space:]]*$/d' >"$expected/custom-relay-routes"
 : >"$actual/custom-relay-routes"
 while IFS= read -r file; do
   [ -f "$file" ] || continue
@@ -189,4 +189,4 @@ done < <(git ls-files '*.yaml' '*.yml')
 compare_inventory "direct operational Signal routes" \
   "$expected/direct-signal-routes" "$actual/direct-signal-routes"
 
-echo "OK: temporary notification drift is exactly contained: 3 Alertmanager Signal routes, 1 custom-relay route, 1 direct Signal route."
+echo "OK: Alertmanager has no operational Signal/custom-relay route; the one app-owned direct watchdog route remains exactly contained."

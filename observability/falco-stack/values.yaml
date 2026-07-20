@@ -105,22 +105,6 @@ falcosidekick:
     # chart; operator reaches via kubectl port-forward.
     enabled: true
   config:
-    # P0-07-TEMPORARY-DRIFT(falcosidekick-custom-ntfy-relay)
-    # TEMPORARY incompatible custom-relay route in the layer's dormant resume
-    # values (the Helm block is suspended in kustomization.yaml). The relay's
-    # encrypted wire format is not readable by the current mobile client, so it
-    # is not working alert coverage. Do not activate or expand it. Remove it
-    # only after a synthetic Falco event has produced a readable receipt through
-    # the parallel Falcosidekick -> Alertmanager -> formatter -> ntfy path.
-    webhook:
-      address: http://ntfy-e2ee-relay.ntfy-e2ee-relay.svc.cluster.local:8000/webhook
-      checkcert: false  # cluster-internal HTTP; not TLS-terminated
-      method: POST
-      # Falcosidekick sends the full event JSON with
-      # `output` as the human-readable rule message —
-      # matches the relay's _extract_message preference
-      # order (Falcosidekick `output` wins first).
-
     # Loki output — full event stream goes here for
     # retrospection per ADR 0021 D4. Webhook (above) is the
     # primary alert-delivery; Loki is the searchable
@@ -134,19 +118,15 @@ falcosidekick:
       # would reject as "no org id."
       checkcert: false  # cluster-internal HTTP
 
-    # Alertmanager output — the supported primary path when this suspended
-    # layer is resumed. It reaches the Alertmanager formatter -> ntfy route;
-    # critical events also inherit the explicitly baselined temporary
-    # operational Signal fan-out there. Falcosidekick -> Alertmanager and
-    # Falcosidekick -> custom relay are parallel in these dormant values, but
-    # only the former can become verified recipient coverage.
+    # Alertmanager output — the only notification path when this suspended
+    # layer is resumed. It reaches alert-formatter -> ntfy, with conditional
+    # Signal fallback owned by the formatter. The incompatible custom relay was
+    # removed rather than leaving an unsafe dormant resume path.
     alertmanager:
       hostport: http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093
 
-    # Severity filtering. Per ADR 0021 D7: "ntfy default for
-    # all alerts, Signal high-severity only." With only
-    # webhook → relay enabled, all severities reach ntfy.
-    # When Alertmanager enables, route there at >= warning.
+    # Severity filtering. Per ADR 0039, operational alerts go to ntfy through
+    # Alertmanager; urgency does not select Signal directly.
     minimumpriority: notice
 
     # Outputs that are explicitly NOT enabled (per

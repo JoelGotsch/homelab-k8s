@@ -36,6 +36,13 @@ resources:
   - rules-longhorn.yaml
   - node-thermal-rules.yaml  # 2026-07-18 worker1 incident — CPU temp watch
 
+configMapGenerator:
+  - name: alert-formatter-script
+    namespace: monitoring
+    files:
+      - alert_router.py
+      - notification-channel-policy.json
+
 components:
   - ../../components/site-config
 
