@@ -32,7 +32,7 @@ spec:
           - {name: ntfy-e2ee-relay,     repo: ntfy-e2ee-relay, path: k8s, autoSync: "true"}
           - {name: paperless,           repo: homelab-k8s, path: apps/paperless,           autoSync: "true"}
           - {name: personal-agent,      repo: homelab-k8s, path: apps/personal-agent,      autoSync: "true"}
-          - {name: signal-bridge,       repo: homelab-k8s, path: apps/signal-bridge,       autoSync: "false"}
+          - {name: signal-bridge,       repo: signal-bridge, path: k8s, autoSync: "false"}
           - {name: vaultwarden,         repo: homelab-k8s, path: apps/vaultwarden,         autoSync: "true"}
           - {name: website,             repo: homelab-k8s, path: apps/website,             autoSync: "true"}
           - {name: whatsapp-bridge,     repo: homelab-k8s, path: apps/whatsapp-bridge,     autoSync: "true"}
