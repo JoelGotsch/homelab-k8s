@@ -37,6 +37,13 @@ repos:
         pass_filenames: false
         files: '(externalsecret.*\.ya?ml|README\.md)$'
 
+      - id: check-openbao-snapshot-auth
+        name: OpenBao snapshot token is explicit, bounded, and marked temporary
+        entry: scripts/check-openbao-snapshot-auth.sh
+        language: script
+        pass_filenames: false
+        files: '(platform/openbao/|scripts/check-openbao-snapshot-auth\.sh$)'
+
       - id: check-temporary-notification-routes
         name: contain temporary operational Signal and incompatible custom-relay routes
         entry: scripts/check-temporary-notification-routes.sh

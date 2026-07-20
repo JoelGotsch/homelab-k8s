@@ -35,30 +35,24 @@ that's expected on day one.
 
 | Path | Keys | Source |
 |---|---|---|
-| `kv/prod/openbao/snapshot-token` | `token` | `bao token create -policy=snapshot -ttl=8760h -orphan` (after applying the `snapshot` policy below). Yearly rotation. |
+| `kv/prod/openbao/snapshot-token` | `token` | **Temporary bridge only:** one `snapshot`-policy, no-default-policy, non-renewable orphan capped at 720h. Current bridge expires `2026-08-19T21:40:48Z`. OBA-02 replaces this static path with short-lived Kubernetes auth before expiry. Do not issue another long-lived token. |
 | `kv/prod/backup/hetzner-storage-box` | `host`, `user`, `port`, `ssh_key`, `ssh_known_host` *(optional)* | from Hetzner Robot account; SSH key is operator-generated ed25519 keypair, public half added to Storage Box console. **Reused** by [infrastructure/backup-cronjobs/](../../infrastructure/backup-cronjobs/). The `ssh_known_host` field is the post-TOFU pinned host-key — capture procedure in [backup-cronjobs/README §Host-key pinning](../../infrastructure/backup-cronjobs/README.md). |
 
-**First-install seed (after OpenBao initialized + unsealed):**
+**Snapshot authentication is not an ordinary first-install seed.** OpenBao's live
+token mount caps ordinary tokens at 32 days, so the former 8,760-hour request could
+never provide its documented yearly lifetime. The snapshot policy/role belongs in
+the convergent OpenBao day-two workflow. Until OBA-02 lands, bootstrap must stop with
+an actionable error rather than silently generating or printing a static token.
+
+The current 720-hour bridge is incident containment. Its value was written through a
+non-printing CAS-protected procedure; it must not be copied into a shell recipe. After
+the dedicated `openbao-raft-snapshot` ServiceAccount authenticates through OpenBao's
+Kubernetes auth method, remove this ExternalSecret and KV path and revoke the bridge.
+
+**Remaining first-install seed (after OpenBao initialized + unsealed):**
 
 ```sh
-# 1. Apply the snapshot-only policy:
-cat > /tmp/snapshot.hcl <<'EOF'
-path "sys/storage/raft/snapshot" {
-  capabilities = ["read"]
-}
-EOF
-bao policy write snapshot /tmp/snapshot.hcl
-shred -u /tmp/snapshot.hcl
-
-# 2. Issue a long-lived orphan token bound to the snapshot policy:
-SNAPSHOT_TOKEN=$(bao token create \
-  -policy=snapshot -ttl=8760h -orphan \
-  -format=json | jq -r .auth.client_token)
-
-bao kv put kv/prod/openbao/snapshot-token value="$SNAPSHOT_TOKEN"
-unset SNAPSHOT_TOKEN
-
-# 3. Hetzner SB SSH key (one-time; reused by backup-cronjobs).
+# Hetzner SB SSH key (one-time; reused by backup-cronjobs).
 # Skip if already populated by the backup-cronjobs bring-up.
 ssh-keygen -t ed25519 -f /tmp/hetzner-sb -N ''
 # Add /tmp/hetzner-sb.pub to Hetzner Robot → Storage Box → SSH Keys.

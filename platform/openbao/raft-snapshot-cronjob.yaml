@@ -1,13 +1,11 @@
 # Daily Raft snapshot to Hetzner Storage Box.
 # Per ADR 0018 D5 (daily snapshot to cold tier per ADR 0006).
 #
-# Operator stages OpenBao snapshot token via:
-#   bao policy write snapshot - <<EOF
-#     path "sys/storage/raft/snapshot" { capabilities = ["read"] }
-#   EOF
-#   bao token create -policy=snapshot -ttl=8760h -orphan
-# and stores at kv/prod/openbao/snapshot-token (loaded via
-# external-secrets into a Secret openbao-snapshot-token).
+# TEMPORARY BRIDGE: the static token at
+# kv/prod/openbao/snapshot-token is a no-default-policy,
+# non-renewable orphan capped at 720h and expires
+# 2026-08-19T21:40:48Z. OBA-02 replaces this with short-lived
+# Kubernetes auth. Do not renew or recreate another static token.
 #
 # Hetzner Storage Box credentials staged the same way at
 # kv/prod/backup/hetzner-storage-box → Secret hetzner-sb-creds.
@@ -27,6 +25,7 @@ spec:
     - secretKey: token
       remoteRef:
         key: prod/openbao/snapshot-token
+        property: token
 ---
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
