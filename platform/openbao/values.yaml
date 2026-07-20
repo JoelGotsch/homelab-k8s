@@ -37,6 +37,22 @@ injector:
 # them — source verification 2026-06-25). Only the env-var pattern
 # above + empty HCL stanza work in combination.
 server:
+  # Digest-pinned image (2026-07-20). The chart otherwise renders a
+  # bare `quay.io/openbao/openbao:<appVersion>` TAG. During the 2.5.5
+  # rollout, worker3's Spegel P2P mesh had lost connectivity after
+  # worker1's reboot, so its containerd blocked on the local Spegel
+  # mirror (which cannot resolve TAGS, only digests) and never fell
+  # back to quay — openbao-1 hung 30+ min in ContainerCreating while
+  # quorum held at 2/3. A DIGEST reference is servable P2P by any peer
+  # that has the image (worker1/worker2 did), sidestepping tag
+  # resolution entirely, and also satisfies the digest-pinning Kyverno
+  # policy that had been warning on every openbao pod. `:2.5.5@sha256`
+  # keeps the human-readable tag; containerd uses the digest. Bump BOTH
+  # tag and digest together on the next chart appVersion change.
+  image:
+    registry: "quay.io"
+    repository: "openbao/openbao"
+    tag: "2.5.5@sha256:6150c4a6b62067db6141c8da7a6a6b5763f4f47c315343d0c848b40fecdfd452"
   affinity: "podAntiAffinity:\n  requiredDuringSchedulingIgnoredDuringExecution:\n\
     \    - labelSelector:\n        matchLabels:\n          app.kubernetes.io/name:\
     \ openbao\n          app.kubernetes.io/instance: openbao\n          component:\
