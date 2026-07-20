@@ -22,7 +22,7 @@ spec:
         elements:
           - {name: approval-channel,    repo: approval-channel, path: k8s, autoSync: "true"}
           - {name: frigate,             repo: homelab-k8s, path: apps/frigate,             autoSync: "true"}
-          - {name: immich,              repo: immich, path: k8s, autoSync: "false"}
+          - {name: immich,              repo: immich, path: k8s, autoSync: "true"}
           - {name: immich-public-proxy, repo: immich-public-proxy, path: k8s, autoSync: "true"}
           - {name: jellyfin,            repo: jellyfin, path: k8s, autoSync: "true"}
           - {name: knowledge-graph,     repo: homelab-k8s, path: apps/knowledge-graph,     autoSync: "true"}
