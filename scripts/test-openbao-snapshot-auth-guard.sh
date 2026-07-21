@@ -77,6 +77,25 @@ yq -i 'select(.kind == "CiliumNetworkPolicy" and
   "$test_tmp/hourly-dns-observation/platform/openbao/snapshot-networkpolicy.yaml"
 expect_rejected hourly-dns-observation
 
+make_fixture missing-daily-ndots
+yq -i 'del(select(.kind == "CronJob" and .metadata.name == "openbao-raft-snapshot") |
+  .spec.jobTemplate.spec.template.spec.dnsConfig)' \
+  "$test_tmp/missing-daily-ndots/platform/openbao/raft-snapshot-cronjob.yaml"
+expect_rejected missing-daily-ndots
+
+make_fixture default-daily-ndots
+yq -i '(select(.kind == "CronJob" and .metadata.name == "openbao-raft-snapshot") |
+  .spec.jobTemplate.spec.template.spec.dnsConfig.options[0].value) = "5"' \
+  "$test_tmp/default-daily-ndots/platform/openbao/raft-snapshot-cronjob.yaml"
+expect_rejected default-daily-ndots
+
+make_fixture hourly-ndots
+yq -i '(select(.kind == "CronJob" and .metadata.name == "openbao-raft-snapshot-hourly") |
+  .spec.jobTemplate.spec.template.spec.dnsConfig.options) =
+  [{"name":"ndots","value":"1"}]' \
+  "$test_tmp/hourly-ndots/platform/openbao/raft-snapshot-hourly.yaml"
+expect_rejected hourly-ndots
+
 make_fixture daily-private-mode
 yq -i '(select(.kind == "CronJob" and .metadata.name == "openbao-raft-snapshot") |
   .spec.jobTemplate.spec.template.spec.initContainers[0].env[] |
@@ -104,4 +123,4 @@ yq -i '(select(.kind == "ExternalSecret" and
   "$test_tmp/secret-routing/platform/openbao/raft-snapshot-cronjob.yaml"
 expect_rejected secret-routing
 
-printf '%s\n' 'PASS: identity, token isolation, artifact modes/groups, secret routing, DNS observation, and egress mutations are rejected.'
+printf '%s\n' 'PASS: identity, token isolation, artifact modes/groups, secret routing, DNS observation/resolver scope, and egress mutations are rejected.'

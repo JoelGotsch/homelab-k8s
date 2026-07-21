@@ -109,6 +109,28 @@ yq ea -e '
 ' "$hourly" >/dev/null \
   || fail 'hourly snapshot and checksum must remain owner-only at mode 0600'
 
+# The digest-pinned restic image uses musl. The daily uploader must resolve its
+# dotted external hostname before applying Kubernetes search suffixes; hourly
+# has no external FQDN and must not inherit this workload-specific override.
+# shellcheck disable=SC2016 # $pod is a yq variable, not shell interpolation
+yq ea -e '
+  select(.kind == "CronJob" and .metadata.name == "openbao-raft-snapshot") |
+  .spec.jobTemplate.spec.template.spec as $pod |
+  [
+    ($pod.dnsConfig | length == 1),
+    ($pod.dnsConfig.options | length == 1),
+    ($pod.dnsConfig.options[0].name == "ndots"),
+    ($pod.dnsConfig.options[0].value == "1"),
+    ($pod.dnsConfig.options[0] | length == 2)
+  ] | all
+' "$daily" >/dev/null \
+  || fail 'daily musl uploader requires the exact pod-level ndots:1 resolver override'
+yq ea -e '
+  select(.kind == "CronJob" and .metadata.name == "openbao-raft-snapshot-hourly") |
+  (.spec.jobTemplate.spec.template.spec | has("dnsConfig") | not)
+' "$hourly" >/dev/null \
+  || fail 'hourly snapshot must not inherit the daily-only resolver override'
+
 # shellcheck disable=SC2016 # this is a yq expression, not shell interpolation
 yq ea -e '
   select(.kind == "CronJob" and .metadata.name == "openbao-raft-snapshot") |

@@ -17,7 +17,7 @@ Box.
 | `httproute.yaml` | Internal HTTPRoute (Tailscale-only — operator reaches the UI / API via tailnet). |
 | `snapshot-serviceaccount.yaml`, `snapshot-auth.sh` | Dedicated, no-automount workload identity. Each Job exchanges a 15-minute, `audience=openbao` projected JWT for a fixed-TTL batch token carrying only the `snapshot` policy. |
 | `snapshot-token-rollback-bridge.yaml` | Temporary, unused rollback bridge retaining the already-issued static token while rollout evidence accrues. Remove only after the one-off, natural hourly/daily, remote-checksum, and restore gates pass; never issue a replacement. |
-| `raft-snapshot-cronjob.yaml`, `snapshot-upload.sh` | Daily 03:05 UTC snapshot, SHA-256 verification, atomic SCP publish, and remote checksum comparison on Hetzner Storage Box port 23. Snapshot and upload run in separate containers; only the verified snapshot and checksum cross their shared fsGroup at mode `0640`, while the uploader cannot read the OpenBao JWT/token or init-only scratch. |
+| `raft-snapshot-cronjob.yaml`, `snapshot-upload.sh` | Daily 03:05 UTC snapshot, SHA-256 verification, atomic SCP publish, and remote checksum comparison on Hetzner Storage Box port 23. Snapshot and upload run in separate containers; only the verified snapshot and checksum cross their shared fsGroup at mode `0640`, while the uploader cannot read the OpenBao JWT/token or init-only scratch. Its pod-level `ndots: "1"` override makes the musl uploader try the dotted external hostname before Kubernetes search suffixes. |
 | `raft-snapshot-hourly.yaml` | Hourly snapshot to a local Longhorn PVC (`openbao-raft-snapshots`, 10Gi, replica2), 168 retain (= 7d), with an owner-only (`0600`) checksum sidecar per file. |
 | `snapshot-networkpolicy.yaml`, `snapshot-prometheusrule.yaml` | No-ingress and exact egress policy plus failed/stale snapshot alerts. The daily policy sends only kube-dns TCP/UDP 53 through Cilium's L7 DNS proxy so its Storage Box `toFQDNs` rule can learn the resolved IP; hourly has no FQDN rule and remains L3/L4-only. Jobs and redacted termination evidence are retained for 24 hours. |
 
@@ -98,6 +98,16 @@ The daily Cilium policy allows all DNS *questions* only to the cluster's trusted
 external egress: the separate destination rule still permits only that exact FQDN
 on TCP/23. Do not add the L7 DNS rule to the hourly policy, which has no FQDN-based
 destination to populate.
+
+The uploader image uses musl's resolver. Rollout diagnostics proved that CoreDNS,
+the Cilium DNS proxy, and direct DNS queries were healthy, but libc/SSH resolution
+of the external hostname failed under the pod default `ndots:5`; the explicitly
+absolute trailing-dot form succeeded. A same-label disposable pod with pod-level
+`ndots: "1"` then resolved the ordinary non-trailing hostname 10/10 times. The
+daily pod therefore overrides only this resolver option: a name containing a dot
+is tried as absolute before cluster search suffixes. The default `ClusterFirst`
+policy, kube-dns nameserver, and search domains are unchanged. Hourly has no
+external hostname and intentionally carries no override.
 
 Quarterly restore drill per
 [`openbao/restore-drill.md`](../../../homelab-docs/03-runbooks/openbao/restore-drill.md)
