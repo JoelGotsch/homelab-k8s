@@ -51,7 +51,7 @@ the workload runs *unchecked* — not more-strict.
 | File | Kind | Purpose |
 |---|---|---|
 | `kustomization.yaml` | `Component` | Aggregates the resources below. |
-| `limitrange.yaml` | `LimitRange` | Container-level default `{cpu: 500m, memory: 512Mi}` / defaultRequest `{cpu: 50m, memory: 128Mi}`; PVC `min: 100Mi, max: 100Gi`. |
+| `limitrange.yaml` | `LimitRange` | Container-level default `{cpu: 500m, memory: 512Mi}` / defaultRequest `{cpu: 50m, memory: 128Mi}`; PVC `min: 100Mi`. Capacity ceilings live in per-StorageClass `ResourceQuota` fields so NAS claims are not constrained by Longhorn limits. |
 | `resourcequota.yaml` | `ResourceQuota` | Per-namespace ceilings (`requests.memory: 16Gi`, `count/persistentvolumeclaims: 20`, `count/services.loadbalancers: 0`, etc.). |
 | `networkpolicy-default-deny.yaml` | `NetworkPolicy` | Vanilla K8s `podSelector: {}` deny-all; defence-in-depth alongside Cilium. |
 | `ciliumnetworkpolicy-egress-scaffold.yaml` | (comments only) | Template CNP with kube-DNS + kube-apiserver (443 AND 6443) + FQDN allowlist. App copies + edits + registers. |
@@ -64,7 +64,6 @@ more headroom override in their own overlay.
 | Field | Override how | When |
 |---|---|---|
 | `LimitRange.spec.limits[type=Container].default.{cpu,memory}` | Strategic-merge patch in the app kustomization. | App has a genuine per-container ceiling (JVM, ClickHouse, ML inference). |
-| `LimitRange.spec.limits[type=PersistentVolumeClaim].max.storage` | Same. | Media caches, Prometheus TSDB, Jellyfin. Prefer routing to a NAS-backed class if data is bulk. |
 | `ResourceQuota.spec.hard.requests.memory` (and siblings) | Same. | App has a well-understood aggregate above the default. |
 | `ResourceQuota.spec.hard.count/persistentvolumeclaims` | Same. | App creates >20 PVCs by design (Woodpecker CI historically hit this — see ADR 0023 D5 lineage). |
 | `ciliumnetworkpolicy-egress-scaffold.yaml` | The scaffold is commented; app copies it into `apps/<name>/ciliumnetworkpolicy.yaml` and fills in labels + FQDNs. | Always — the scaffold is a template, not a policy. |

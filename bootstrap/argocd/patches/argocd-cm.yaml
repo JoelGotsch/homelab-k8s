@@ -119,11 +119,6 @@ data:
       - '.spec.data[].remoteRef.decodingStrategy'
       - '.spec.data[].remoteRef.metadataPolicy'
       - '.spec.target.deletionPolicy'
-  resource.customizations.ignoreDifferences.storage.k8s.io_StorageClass: |
-    jsonPointers:
-      - /parameters/allow_other
-      - /parameters/uid
-      - /parameters/gid
   resource.customizations.ignoreDifferences.apps_Deployment: |
     jqPathExpressions:
       - '.spec.template.metadata.annotations."checksum/config"'

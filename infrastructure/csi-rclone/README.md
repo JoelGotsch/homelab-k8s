@@ -24,7 +24,7 @@ they never see `/dev/fuse`, never run privileged.
 | `namespace.yaml` | `csi-rclone` ns; PSA **privileged** (driver needs `/dev/fuse` + mount propagation). |
 | `kustomization.yaml` | Helm chart `oci://ghcr.io/veloxpack/charts/csi-driver-rclone` v0.4.11; resource list below. |
 | `values.yaml` | Node DaemonSet + Controller + driver-level rclone defaults (`--vfs-cache-mode=full --vfs-cache-max-size=5G --vfs-cache-max-age=1h`); ServiceMonitor enabled. |
-| `storageclasses.yaml` | Per-share `nas-crypt-*` StorageClasses. Today: `nas-crypt-personal-photos` (Immich), `nas-crypt-personal-files` + `nas-crypt-family-shared` + `nas-crypt-internal-archive` (Nextcloud), `nas-crypt-forgejo-lfs` + `nas-crypt-registry-blobs` (Forgejo), `nas-crypt-personal-documents` (Paperless). Add new SCs as new encrypted consumer apps land. |
+| `storageclasses.yaml` | Per-share `nas-crypt-*` StorageClasses. Today: `nas-crypt-personal-photos` (Immich), `nas-crypt-personal-files` + `nas-crypt-family-shared` + `nas-crypt-internal-archive` (Nextcloud), `nas-crypt-forgejo-lfs` + `nas-crypt-registry-blobs` (Forgejo), `nas-crypt-personal-documents` (Paperless). Immutable driver parameters (`allow_other`, `uid`, `gid`) are explicit because they cannot be added or removed after creation. Add new SCs as new encrypted consumer apps land. |
 | `externalsecret.yaml` | One ExternalSecret per StorageClass (7 today), each pulling the share's rclone INI from `kv/prod/nas-encryption/<share>/rclone_config`. Per-share keys per ADR 0025 D8 — compromise of one share doesn't expose another. |
 | `networkpolicy.yaml` | Ingress: Prometheus scrape only. Egress: kube-DNS + `<NAS_IP>:2049/111` (NFS). |
 

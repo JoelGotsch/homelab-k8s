@@ -8,6 +8,8 @@ applicationset="$repo_root/bootstrap/applicationsets/infrastructure.yaml"
 policy_dir="$repo_root/infrastructure/kyverno/policies"
 argocd_cm="$repo_root/bootstrap/argocd/patches/argocd-cm.yaml"
 argocd_cmd_params="$repo_root/bootstrap/argocd/patches/argocd-cmd-params.yaml"
+storageclasses="$repo_root/infrastructure/csi-rclone/storageclasses.yaml"
+namespace_limits="$repo_root/components/first-party-namespace/limitrange.yaml"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -26,6 +28,21 @@ if rg -q 'resource\.customizations\.ignoreDifferences\.kyverno\.io_ClusterPolicy
   "$argocd_cm"; then
   fail "top-level Kyverno policy behavior must not be hidden globally"
 fi
+if rg -q 'resource\.customizations\.ignoreDifferences\.storage\.k8s\.io_StorageClass' \
+  "$argocd_cm"; then
+  fail "immutable StorageClass parameters must be explicit, not globally ignored"
+fi
+
+storageclass_count=$(yq ea '[select(.kind == "StorageClass")] | length' "$storageclasses")
+explicit_storageclass_count=$(yq ea '[select(.kind == "StorageClass") |
+  select(.parameters.allow_other == "true" and .parameters.uid == "0" and
+    .parameters.gid == "0")] | length' "$storageclasses")
+[[ "$storageclass_count" -gt 0 && "$explicit_storageclass_count" == "$storageclass_count" ]] ||
+  fail "every rclone StorageClass must declare its immutable allow_other/uid/gid values"
+
+[[ $(yq '[.spec.limits[] | select(.type == "PersistentVolumeClaim" and
+  .min.storage == "100Mi" and (has("max") | not))] | length' "$namespace_limits") == 1 ]] ||
+  fail "shared PVC LimitRange must keep its floor without capping NAS claims"
 
 while IFS= read -r policy; do
   if yq '[.. | select(tag == "!!map" and has("apiCall")) | .apiCall |

@@ -3,7 +3,7 @@
 # Seeds every namespace labelled `homelab.internal/first-party: "true"`
 # with the resource-governance floor mandated by ADR 0036 D2:
 #
-#   - LimitRange           — per-container defaults + a PVC size ceiling
+#   - LimitRange           — per-container defaults + a PVC size floor
 #   - ResourceQuota        — per-namespace resource + object-count cap
 #   - default-deny NetPol  — vanilla K8s NetworkPolicy defence-in-depth
 #                             layer alongside Cilium CNPs
