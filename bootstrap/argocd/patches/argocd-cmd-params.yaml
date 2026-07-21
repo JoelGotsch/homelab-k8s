@@ -13,6 +13,11 @@ data:
   controller.repo.server.timeout.seconds: "60"
   timeout.reconciliation: "180s"
 
+  # Use an API-server dry-run to predict live state during comparisons. This
+  # is the documented Argo CD 3.4 controller-level switch; changing it
+  # requires an application-controller restart.
+  controller.diff.server.side: "true"
+
   # Don't expose Argo CD over HTTP redirects (we'll wire
   # ingress + TLS via Gateway API).
   server.insecure: "false"

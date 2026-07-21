@@ -45,14 +45,12 @@ data:
   #
   # Three-prong fix, layered:
   #
-  #   1. Server-Side Diff (`serverSideDiff: true` below).
-  #      Kubernetes 1.22+ tags every managed field with the
-  #      manager that wrote it. Argo CD's server-side diff path
-  #      compares against a predicted live state derived from
-  #      its field-manager ownership. Eliminates drift where
-  #      the CRD declares per-field ownership granularity.
-  #      Per Argo CD docs:
-  #      https://argo-cd.readthedocs.io/en/stable/user-guide/diffing/#server-side-diff
+  #   1. Server-Side Diff (`controller.diff.server.side: "true"`
+  #      in argocd-cmd-params-cm). Argo CD asks the API server
+  #      to predict the result with server-side apply dry-run,
+  #      so validation and defaulting participate in comparison.
+  #      Per the pinned Argo CD 3.4 docs:
+  #      https://argo-cd.readthedocs.io/en/release-3.4/user-guide/diff-strategies/#server-side-diff
   #
   #   2. Server-Side Apply at sync time (`ServerSideApply=true`
   #      in each ApplicationSet's syncPolicy.syncOptions, see
@@ -75,13 +73,7 @@ data:
   #      = atomic ownership of the whole array), so the
   #      defaulted conversionStrategy/decodingStrategy/
   #      metadataPolicy fields show as drift even with
-  #      serverSideDiff enabled.
-  resource.compareOptions: |
-    # Use server-side diff for all resources. Field-manager
-    # ownership decides what Argo's diff sees — gives the right
-    # answer for granular-ownership CRDs (most core kinds).
-    # Atomic-list CRDs still need ignoreDifferences below.
-    serverSideDiff: true
+  #      server-side diff enabled.
 
   # ignoreDifferences entries below. Each suppresses CRD-default
   # writeback the operator never declared. Validated 2026-06-03

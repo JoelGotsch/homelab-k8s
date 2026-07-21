@@ -6,6 +6,8 @@ set -euo pipefail
 repo_root=$(git rev-parse --show-toplevel)
 applicationset="$repo_root/bootstrap/applicationsets/infrastructure.yaml"
 policy_dir="$repo_root/infrastructure/kyverno/policies"
+argocd_cm="$repo_root/bootstrap/argocd/patches/argocd-cm.yaml"
+argocd_cmd_params="$repo_root/bootstrap/argocd/patches/argocd-cmd-params.yaml"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -14,6 +16,12 @@ fail() {
 
 command -v yq >/dev/null || fail "yq is required"
 command -v rg >/dev/null || fail "rg is required"
+
+[[ $(yq '.data."controller.diff.server.side"' "$argocd_cmd_params") == true ]] ||
+  fail "Argo CD server-side diff must use controller.diff.server.side in cmd params"
+if rg -q 'resource\.compareOptions|serverSideDiff:' "$argocd_cm"; then
+  fail "argocd-cm contains the obsolete/non-functional server-side diff shape"
+fi
 
 while IFS= read -r policy; do
   if yq '[.. | select(tag == "!!map" and has("apiCall")) | .apiCall |
