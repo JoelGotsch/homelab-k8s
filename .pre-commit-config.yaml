@@ -195,3 +195,20 @@ repos:
         # netpol posture AND is the entry point for the backup decision; it
         # is NOT enforced at admission by Kyverno, so this shift-left guard
         # keeps a new namespace from shipping without a classification.
+
+      - id: check-retention-contract
+        name: cluster-owned Longhorn selectors match the finite lifecycle contract
+        entry: scripts/check-retention-contract.sh
+        language: script
+        pass_filenames: false
+        files: '^(infrastructure|platform|observability|components)/.*\.ya?ml(\.j2)?$|^scripts/(check-retention-contract\.sh|retention-contract\.yaml)$'
+        # Distributed app ownership is an enforcement boundary: this hook
+        # scans only cluster-owned manifests. Each app repo carries the same
+        # repository-local contract; a workspace aggregate checks coverage.
+
+      - id: test-retention-contract
+        name: retention lifecycle contract rejects inventory and policy mutations
+        entry: scripts/test-retention-contract.sh
+        language: script
+        pass_filenames: false
+        files: '^scripts/(check-retention-contract\.sh|test-retention-contract\.sh|retention-contract\.yaml)$'

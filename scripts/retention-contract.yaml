@@ -1,0 +1,410 @@
+# Static Longhorn lifecycle contract owned by homelab-k8s.
+#
+# Scope boundary: this file inventories only cluster-owned manifests under
+# infrastructure/, platform/, observability/, and components/. User apps whose
+# ApplicationSet entry points at another Forgejo repository MUST carry the same
+# contract and checker in that owning repository. The workspace aggregate is a
+# separate check; adding another repository path here would recreate the
+# ownership bug this contract replaces.
+#
+# `known-mismatch` means fresh desired state still selects a Delete-policy class
+# although the declared lifecycle requires Retain. It is containment, not an
+# exception and not evidence that a live PV is safe. Never edit an immutable
+# claim/template merely to make this file green; KST-03 owns attended migration.
+version: 1
+owner_repository: homelab-k8s
+declared_count: 18
+
+scope:
+  roots:
+    - infrastructure
+    - platform
+    - observability
+    - components
+  excluded_directory_names:
+    - charts
+    - testdata
+  storage_selector_keys:
+    - storageClass
+    - storageClassName
+
+storage_classes:
+  source: infrastructure/longhorn/storageclasses.yaml
+  delete:
+    - longhorn-replica1
+    - longhorn-replica2
+    - longhorn-replica3
+  retain:
+    - longhorn-replica2-retain
+    - longhorn-replica3-retain
+
+entries:
+  - id: restic-staging
+    workload: backup-cronjobs/restic-staging
+    namespace: backup-cronjobs
+    claim: PersistentVolumeClaim/restic-staging
+    source:
+      file: infrastructure/backup-cronjobs/pvc.yaml
+      value_path: 'select(.kind == "PersistentVolumeClaim" and .metadata.name == "restic-staging") | .spec.storageClassName'
+    current_storage_class: longhorn-replica1
+    target_storage_class: longhorn-replica1
+    desired_reclaim_policy: Delete
+    state: compliant
+    data_class: internal
+    data_value: transient copy of MinIO objects while Restic mirrors them
+    backup_tier: none; source objects remain in MinIO and the completed Restic repository
+    rpo: not applicable to staging
+    rto: next successful mirror run
+    migration_owner: none
+    required_restore_test: recreate the staging claim and complete a no-change mirror
+    reason: staging is disposable and must not create orphaned Longhorn volumes
+
+  - id: crowdsec-postgres
+    workload: crowdsec-lapi CNPG cluster
+    namespace: observability-crowdsec
+    claim: Cluster/crowdsec-lapi instances
+    source:
+      file: observability/crowdsec/cnpg-cluster.yaml
+      value_path: 'select(.kind == "Cluster" and .metadata.name == "crowdsec-lapi") | .spec.storage.storageClass'
+    current_storage_class: longhorn-replica3
+    target_storage_class: longhorn-replica3-retain
+    desired_reclaim_policy: Retain
+    state: known-mismatch
+    data_class: internal
+    data_value: CrowdSec LAPI Postgres state and decisions
+    backup_tier: declared CNPG WAL/base to tier-1 MinIO, then tier-3 Restic; live evidence pending
+    rpo: 4 hours policy target; WAL path should reduce this to minutes when healthy
+    rto: 24 hours
+    migration_owner: KST-03 crowdsec CNPG migration
+    required_restore_test: recover a disposable CNPG cluster from an off-volume base backup plus WAL
+    reason: ADR 0036 requires CNPG primary storage to survive claim deletion
+
+  - id: prometheus-tsdb
+    workload: kube-prometheus-stack Prometheus
+    namespace: monitoring
+    claim: Prometheus/kube-prometheus-stack-prometheus storage
+    source:
+      file: observability/kube-prometheus-stack/values.yaml
+      value_path: '.prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName'
+      mirrors:
+        - observability/kube-prometheus-stack/values.yaml.j2
+    current_storage_class: longhorn-replica2
+    target_storage_class: longhorn-replica2
+    desired_reclaim_policy: Delete
+    state: compliant
+    data_class: internal
+    data_value: rebuildable local metrics history
+    backup_tier: tier-1 Longhorn snapshots only; no offsite membership declared
+    rpo: scrape-forward after loss is accepted by ADR 0036
+    rto: hours to recreate and resume scraping
+    migration_owner: none
+    required_restore_test: recreate a disposable Prometheus data claim and verify scrape recovery
+    reason: ADR 0036 explicitly classifies Prometheus TSDB as rebuildable
+
+  - id: alertmanager-state
+    workload: kube-prometheus-stack Alertmanager
+    namespace: monitoring
+    claim: Alertmanager/kube-prometheus-stack-alertmanager storage
+    source:
+      file: observability/kube-prometheus-stack/values.yaml
+      value_path: '.alertmanager.alertmanagerSpec.storage.volumeClaimTemplate.spec.storageClassName'
+      mirrors:
+        - observability/kube-prometheus-stack/values.yaml.j2
+    current_storage_class: longhorn-replica2
+    target_storage_class: longhorn-replica2
+    desired_reclaim_policy: Delete
+    state: compliant
+    data_class: internal
+    data_value: silences and notification log; routing configuration remains in Git
+    backup_tier: tier-1 Longhorn snapshots only; no offsite membership declared
+    rpo: loss of current silences and notification log is accepted
+    rto: hours to recreate and reload routing from Git
+    migration_owner: none
+    required_restore_test: recreate a disposable claim and prove routing configuration reloads
+    reason: operational history is useful but not a source of truth
+
+  - id: grafana-data
+    workload: kube-prometheus-stack Grafana
+    namespace: monitoring
+    claim: PersistentVolumeClaim/kube-prometheus-stack-grafana
+    source:
+      file: observability/kube-prometheus-stack/values.yaml
+      value_path: '.grafana.persistence.storageClassName'
+      mirrors:
+        - observability/kube-prometheus-stack/values.yaml.j2
+    current_storage_class: longhorn-replica2
+    target_storage_class: longhorn-replica2-retain
+    desired_reclaim_policy: Retain
+    state: known-mismatch
+    data_class: internal
+    data_value: user-created dashboards, annotations, and local Grafana state
+    backup_tier: tier-1 Longhorn snapshots only; no declared tier-3 membership
+    rpo: 4 hours policy target
+    rto: 24 hours
+    migration_owner: KST-03 Grafana PVC migration
+    required_restore_test: restore Grafana data to a disposable instance and verify a user-created dashboard
+    reason: ADR 0036 migration matrix explicitly requires retained Grafana state
+
+  - id: langfuse-clickhouse-data
+    workload: langfuse ClickHouse data
+    namespace: langfuse
+    claim: ClickHouseInstallation/langfuse data-volume
+    source:
+      file: observability/langfuse/clickhouseinstallation.yaml
+      value_path: 'select(.kind == "ClickHouseInstallation" and .metadata.name == "langfuse") | .spec.templates.volumeClaimTemplates[] | select(.name == "data-volume") | .spec.storageClassName'
+    current_storage_class: longhorn-replica2
+    target_storage_class: longhorn-replica2-retain
+    desired_reclaim_policy: Retain
+    state: known-mismatch
+    data_class: personal
+    data_value: Langfuse trace history; possible but expensive to regenerate from telemetry
+    backup_tier: tier-1 Longhorn snapshots only; independent off-volume backup is not declared
+    rpo: 1 hour policy target
+    rto: 4 to 24 hours
+    migration_owner: KST-03 Langfuse ClickHouse migration
+    required_restore_test: restore a workload-consistent ClickHouse backup outside the affected Longhorn volume
+    reason: ADR 0036 migration matrix explicitly requires retained ClickHouse trace data
+
+  - id: langfuse-clickhouse-log
+    workload: langfuse ClickHouse logs
+    namespace: langfuse
+    claim: ClickHouseInstallation/langfuse log-volume
+    source:
+      file: observability/langfuse/clickhouseinstallation.yaml
+      value_path: 'select(.kind == "ClickHouseInstallation" and .metadata.name == "langfuse") | .spec.templates.volumeClaimTemplates[] | select(.name == "log-volume") | .spec.storageClassName'
+    current_storage_class: longhorn-replica2
+    target_storage_class: longhorn-replica2
+    desired_reclaim_policy: Delete
+    state: compliant
+    data_class: personal
+    data_value: disposable ClickHouse operational logs
+    backup_tier: none
+    rpo: log loss is accepted
+    rto: recreated with the ClickHouse pod
+    migration_owner: none
+    required_restore_test: recreate a disposable log claim and verify ClickHouse starts
+    reason: logs are not the trace source of truth
+
+  - id: langfuse-postgres
+    workload: langfuse-pg CNPG cluster
+    namespace: langfuse
+    claim: Cluster/langfuse-pg instances
+    source:
+      file: observability/langfuse/cnpg-cluster.yaml
+      value_path: 'select(.kind == "Cluster" and .metadata.name == "langfuse-pg") | .spec.storage.storageClass'
+    current_storage_class: longhorn-replica3
+    target_storage_class: longhorn-replica3-retain
+    desired_reclaim_policy: Retain
+    state: known-mismatch
+    data_class: personal
+    data_value: Langfuse relational metadata and configuration
+    backup_tier: declared CNPG WAL/base to tier-1 MinIO, then tier-3 Restic; live evidence pending
+    rpo: 1 hour policy target; WAL path should reduce this to minutes when healthy
+    rto: 4 to 24 hours
+    migration_owner: KST-03 langfuse CNPG migration
+    required_restore_test: recover a disposable CNPG cluster from an off-volume base backup plus WAL
+    reason: ADR 0036 requires CNPG primary storage to survive claim deletion
+
+  - id: langfuse-valkey
+    workload: langfuse Valkey primary
+    namespace: langfuse
+    claim: StatefulSet/langfuse-redis-primary valkey-data
+    source:
+      file: observability/langfuse/values.yaml
+      value_path: '.redis.primary.persistence.storageClass'
+      mirrors:
+        - observability/langfuse/values.yaml.j2
+    current_storage_class: longhorn-replica2
+    target_storage_class: longhorn-replica2
+    desired_reclaim_policy: Delete
+    state: compliant
+    data_class: personal
+    data_value: rebuildable queue and cache state
+    backup_tier: none
+    rpo: queued work may be retried after loss
+    rto: hours to recreate and repopulate
+    migration_owner: none
+    required_restore_test: recreate a disposable Valkey claim and verify Langfuse reconnects
+    reason: Postgres and ClickHouse hold the durable state
+
+  - id: loki-local
+    workload: Loki single-binary local storage
+    namespace: monitoring
+    claim: StatefulSet/loki storage
+    source:
+      file: observability/loki/values.yaml
+      value_path: '.singleBinary.persistence.storageClass'
+    current_storage_class: longhorn-replica2
+    target_storage_class: longhorn-replica2
+    desired_reclaim_policy: Delete
+    state: compliant
+    data_class: internal
+    data_value: local Loki cache and working state; chunks live in MinIO
+    backup_tier: object data follows the MinIO backup path; local claim is not backed up
+    rpo: bounded by object-store writes
+    rto: hours to recreate and reconnect to MinIO
+    migration_owner: none
+    required_restore_test: recreate local storage and query retained chunks from MinIO
+    reason: durable log chunks are outside this claim
+
+  - id: tempo-wal
+    workload: Tempo monolithic WAL
+    namespace: observability-tempo
+    claim: StatefulSet/tempo storage
+    source:
+      file: observability/tempo/values.yaml
+      value_path: '.persistence.storageClassName'
+    current_storage_class: longhorn-replica2
+    target_storage_class: longhorn-replica2
+    desired_reclaim_policy: Delete
+    state: compliant
+    data_class: personal
+    data_value: local trace WAL; durable blocks live in MinIO
+    backup_tier: object data follows the MinIO backup path; local claim is not backed up
+    rpo: current WAL window may be lost
+    rto: hours to recreate and reconnect to MinIO
+    migration_owner: none
+    required_restore_test: recreate local storage and query retained blocks from MinIO
+    reason: durable trace blocks are outside this claim
+
+  - id: authentik-postgres
+    workload: authentik-pg CNPG cluster
+    namespace: authentik
+    claim: Cluster/authentik-pg instances
+    source:
+      file: platform/authentik/cnpg-cluster.yaml
+      value_path: 'select(.kind == "Cluster" and .metadata.name == "authentik-pg") | .spec.storage.storageClass'
+    current_storage_class: longhorn-replica3-retain
+    target_storage_class: longhorn-replica3-retain
+    desired_reclaim_policy: Retain
+    state: compliant
+    data_class: internal
+    data_value: identity-provider users, clients, flows, and policies
+    backup_tier: declared CNPG WAL/base to tier-1 MinIO, then tier-3 Restic; live evidence pending
+    rpo: 4 hours policy target; WAL path should reduce this to minutes when healthy
+    rto: 24 hours
+    migration_owner: none
+    required_restore_test: recover a disposable CNPG cluster from an off-volume base backup plus WAL
+    reason: loss causes a full identity re-enrolment cascade
+
+  - id: forgejo-postgres
+    workload: forgejo-pg CNPG cluster
+    namespace: forgejo
+    claim: Cluster/forgejo-pg instances
+    source:
+      file: platform/forgejo/cnpg-cluster.yaml
+      value_path: 'select(.kind == "Cluster" and .metadata.name == "forgejo-pg") | .spec.storage.storageClass'
+    current_storage_class: longhorn-replica3-retain
+    target_storage_class: longhorn-replica3-retain
+    desired_reclaim_policy: Retain
+    state: compliant
+    data_class: internal
+    data_value: Forgejo issues, pull requests, hooks, and user metadata
+    backup_tier: declared CNPG WAL/base to tier-1 MinIO, then tier-3 Restic; live evidence pending
+    rpo: 4 hours policy target; WAL path should reduce this to minutes when healthy
+    rto: 24 hours
+    migration_owner: none
+    required_restore_test: recover a disposable CNPG cluster from an off-volume base backup plus WAL
+    reason: relational forge metadata is a source of truth
+
+  - id: forgejo-app-data
+    workload: Forgejo application data
+    namespace: forgejo
+    claim: PersistentVolumeClaim/gitea-shared-storage
+    source:
+      file: platform/forgejo/values.yaml
+      value_path: '.persistence.storageClass'
+      mirrors:
+        - platform/forgejo/values.yaml.j2
+    current_storage_class: longhorn-replica3
+    target_storage_class: longhorn-replica3-retain
+    desired_reclaim_policy: Retain
+    state: known-mismatch
+    data_class: internal
+    data_value: Git repositories, application configuration, and runtime state
+    backup_tier: declared tier-1 snapshots plus selective Longhorn backup to tier-3; live evidence pending
+    rpo: 4 hours
+    rto: 24 hours
+    migration_owner: KST-03 Forgejo application PVC migration
+    required_restore_test: restore the application claim outside the affected volume and verify clone plus push
+    reason: Forgejo Git history is a source of truth
+
+  - id: openbao-raft-snapshots
+    workload: OpenBao hourly Raft snapshots
+    namespace: openbao
+    claim: PersistentVolumeClaim/openbao-raft-snapshots
+    source:
+      file: platform/openbao/raft-snapshot-hourly.yaml
+      value_path: 'select(.kind == "PersistentVolumeClaim" and .metadata.name == "openbao-raft-snapshots") | .spec.storageClassName'
+    current_storage_class: longhorn-replica2
+    target_storage_class: longhorn-replica2-retain
+    desired_reclaim_policy: Retain
+    state: known-mismatch
+    data_class: secret
+    data_value: local tier-1 OpenBao Raft snapshot lineage
+    backup_tier: hourly local snapshot with daily verified upload to tier-3 after OBA-02 rollout
+    rpo: 1 hour
+    rto: 2 to 4 hours
+    migration_owner: KST-03 OpenBao snapshot PVC migration
+    required_restore_test: restore a copied snapshot into a disposable OpenBao cluster and verify expected keys
+    reason: local recovery material must survive accidental claim deletion
+
+  - id: openbao-audit-data
+    workload: OpenBao audit data
+    namespace: openbao
+    claim: StatefulSet/openbao audit
+    source:
+      file: platform/openbao/values.yaml
+      value_path: '.server.auditStorage.storageClass'
+    current_storage_class: longhorn-replica2
+    target_storage_class: longhorn-replica2-retain
+    desired_reclaim_policy: Retain
+    state: known-mismatch
+    data_class: internal
+    data_value: tamper-evidence trail for secret access
+    backup_tier: tier-1 Longhorn snapshots only; independent off-volume audit backup is not declared
+    rpo: 4 hours
+    rto: 24 hours
+    migration_owner: KST-03 OpenBao audit claim-template migration
+    required_restore_test: restore audit data outside the affected volume and verify record continuity
+    reason: audit history must survive accidental claim deletion
+
+  - id: openbao-raft-data
+    workload: OpenBao Raft data
+    namespace: openbao
+    claim: StatefulSet/openbao data
+    source:
+      file: platform/openbao/values.yaml
+      value_path: '.server.dataStorage.storageClass'
+    current_storage_class: longhorn-replica2
+    target_storage_class: longhorn-replica2-retain
+    desired_reclaim_policy: Retain
+    state: known-mismatch
+    data_class: secret
+    data_value: source-of-truth OpenBao Raft state
+    backup_tier: hourly Raft snapshot with daily verified upload to tier-3 after OBA-02 rollout
+    rpo: 1 hour
+    rto: 2 to 4 hours
+    migration_owner: KST-03 OpenBao Raft claim-template migration
+    required_restore_test: restore a tier-3 Raft snapshot into a disposable OpenBao cluster and verify expected keys
+    reason: OpenBao is the source of truth for homelab secrets
+
+  - id: woodpecker-sqlite
+    workload: Woodpecker server SQLite
+    namespace: woodpecker
+    claim: StatefulSet/woodpecker-server data
+    source:
+      file: platform/woodpecker/values.yaml
+      value_path: '.server.persistentVolume.storageClass'
+    current_storage_class: longhorn-replica2
+    target_storage_class: longhorn-replica2
+    desired_reclaim_policy: Delete
+    state: compliant
+    data_class: internal
+    data_value: CI pipeline history and jobs in flight
+    backup_tier: tier-1 Longhorn snapshots only; no declared tier-3 membership
+    rpo: hours of pipeline history loss accepted
+    rto: 24 hours
+    migration_owner: none
+    required_restore_test: recreate a disposable claim and verify Woodpecker starts with an empty history
+    reason: pipeline definitions remain in Git and running jobs are retryable
