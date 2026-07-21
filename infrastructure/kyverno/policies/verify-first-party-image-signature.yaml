@@ -240,6 +240,9 @@ spec:
           # of mutateDigest — verifyDigest is the audit-side
           # check; mutateDigest is the rewrite side.
           verifyDigest: true
+          # Kyverno 3.8.2 defaults this to true. Keep the cache decision
+          # explicit because it changes registry/verification traffic.
+          useCache: true
           # Registry credentials for the signature pull. The Forgejo
           # Packages registry rejects anonymous token grants for private
           # repos (GET /v2/token ... UNAUTHORIZED — 2026-07-18, surfaced
@@ -254,7 +257,8 @@ spec:
           attestors:
             - count: 1
               entries:
-                - keys:
+                - signatureAlgorithm: sha256
+                  keys:
                     # Per-rule Secret reference. The Secret
                     # MUST live in the kyverno namespace and
                     # MUST contain a field named `cosign.pub`

@@ -123,6 +123,17 @@ reportsController:
   resources:
     requests: {cpu: 25m, memory: 64Mi}
     limits: {memory: 256Mi}
+  # Background reports evaluate Cilium network-policy resources. Kyverno
+  # deliberately does not grant arbitrary CRD reads by default, so add only
+  # the two exact kinds matched by homelab-disallow-open-egress-cnp.
+  rbac:
+    clusterRole:
+      extraResources:
+        - apiGroups: [cilium.io]
+          resources:
+            - ciliumnetworkpolicies
+            - ciliumclusterwidenetworkpolicies
+          verbs: [get, list, watch]
   topologySpreadConstraints:
     - maxSkew: 1
       topologyKey: kubernetes.io/hostname

@@ -54,6 +54,7 @@ spec:
       context:
         - name: quotaCount
           apiCall:
+            method: GET
             urlPath: "/api/v1/namespaces/{{ request.object.metadata.name }}/resourcequotas"
             jmesPath: "length(items || `[]`)"
       validate:

@@ -98,11 +98,13 @@ spec:
         # 1. Look up the PV by name (Volume.metadata.name == PV name).
         - name: pv
           apiCall:
+            method: GET
             urlPath: "/api/v1/persistentvolumes/{{ request.object.metadata.name }}"
             jmesPath: "@"
         # 2. Resolve the bound PVC via spec.claimRef.
         - name: pvc
           apiCall:
+            method: GET
             urlPath: "/api/v1/namespaces/{{ pv.spec.claimRef.namespace }}/persistentvolumeclaims/{{ pv.spec.claimRef.name }}"
             jmesPath: "@"
         # 3. Pull the recurring-job labels out of the PVC. We can't

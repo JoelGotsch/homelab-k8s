@@ -79,6 +79,11 @@ spec:
             - /spec/admission
           jqPathExpressions:
             - '.spec.rules[].skipBackgroundRequests'
+            # Kyverno 3.8.2 also writes the deprecated copy of its
+            # default `sha256` value below `keys`. The supported sibling
+            # field is declared explicitly in the policy source; ignore
+            # only this compatibility writeback.
+            - '.spec.rules[].verifyImages[].attestors[].entries[].keys.signatureAlgorithm'
         # Altinity ClickHouse operator patches its own
         # Deployment labels at runtime (`clickhouse.altinity.com/*`).
         # Field manager `clickhouse-operator` (op=Update) owns
@@ -93,6 +98,14 @@ spec:
             - /metadata/labels/clickhouse.altinity.com~1chop
             - /metadata/labels/clickhouse.altinity.com~1chop-commit
             - /metadata/labels/clickhouse.altinity.com~1chop-date
+          # The chart renders its four empty scheduling defaults, while
+          # the API server omits them. Ignore only empty values so a real
+          # image-pull or placement constraint still registers as drift.
+          jqPathExpressions:
+            - '.spec.template.spec.imagePullSecrets | select(length == 0)'
+            - '.spec.template.spec.nodeSelector | select(length == 0)'
+            - '.spec.template.spec.tolerations | select(length == 0)'
+            - '.spec.template.spec.topologySpreadConstraints | select(length == 0)'
         # Longhorn CRD drift: chart ships `spec.preserveUnknownFields:
         # false` (v1beta1-era compat field). K8s v1.29+ strips it
         # on v1 CRDs (implied). Chart also ships caBundle: ""
@@ -103,3 +116,7 @@ spec:
           jsonPointers:
             - /spec/preserveUnknownFields
             - /spec/conversion/webhook/clientConfig/caBundle
+          jqPathExpressions:
+            # Kubernetes adds this default to CRDs which declare no
+            # conversion stanza. A real webhook conversion is not hidden.
+            - '.spec.conversion | select(.strategy == "None")'

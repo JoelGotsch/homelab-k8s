@@ -1,6 +1,14 @@
 # Altinity ClickHouse Operator chart values.
 # Per ADR 0028.
 
+# Kustomize's helmCharts entry already renders all seven chart CRDs through
+# includeCRDs: true. Disable the redundant Helm pre-install/pre-upgrade hook:
+# it otherwise creates broad temporary CRD RBAC and runs an unpinned
+# bitnami/kubectl:latest container which does not satisfy this namespace's
+# restricted Pod Security posture. The rendered CRDs remain Argo-owned.
+crdHook:
+  enabled: false
+
 # Operator runs cluster-wide (watches ClickHouseInstallation
 # CRs in any namespace). Same pattern as CNPG.
 operator:
