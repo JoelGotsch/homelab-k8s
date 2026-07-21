@@ -9,6 +9,7 @@ CHECK="$SCRIPT_DIR/check-retention-render-fixtures.sh"
 CLAIM_CHECK="$SCRIPT_DIR/check-rendered-retention-claims.sh"
 FIXTURE="$SCRIPT_DIR/fixtures/retention-rendered-projection.yaml"
 RENDERED_CLAIM_FIXTURE="$SCRIPT_DIR/fixtures/retention-rendered-claim-test.yaml"
+IMPLICIT_CLAIM_FIXTURE="$SCRIPT_DIR/fixtures/retention-rendered-implicit-claim-test.yaml"
 CONTRACT="$SCRIPT_DIR/retention-contract.yaml"
 
 for required_tool in yq mktemp cp mkdir rm rg; do
@@ -29,10 +30,15 @@ trap cleanup EXIT
 
 make_repo_fixture() {
   local fixture_root="$1"
-  mkdir -p "$fixture_root/observability" "$fixture_root/platform"
+  mkdir -p "$fixture_root/observability" "$fixture_root/platform" \
+    "$fixture_root/infrastructure/longhorn"
   cp -R "$REPO_ROOT/observability/langfuse" "$fixture_root/observability/langfuse"
   cp -R "$REPO_ROOT/observability/crowdsec" "$fixture_root/observability/crowdsec"
   cp -R "$REPO_ROOT/platform/woodpecker" "$fixture_root/platform/woodpecker"
+  cp "$REPO_ROOT/infrastructure/longhorn/storageclasses.yaml" \
+    "$fixture_root/infrastructure/longhorn/storageclasses.yaml"
+  cp "$REPO_ROOT/infrastructure/longhorn/values.yaml" \
+    "$fixture_root/infrastructure/longhorn/values.yaml"
 }
 
 expect_pass() {
@@ -113,10 +119,85 @@ if empty_output="$($CLAIM_CHECK --rendered "$empty_class_render" \
   printf 'FAIL: rendered StatefulSet claim template with empty class passed\n' >&2
   exit 1
 fi
-printf '%s\n' "$empty_output" | rg -q 'implicit default' || {
-  printf 'FAIL: empty rendered claim-template class did not report implicit default\n' >&2
+printf '%s\n' "$empty_output" | rg -q 'explicitly empty.*disables dynamic defaulting' || {
+  printf 'FAIL: empty rendered claim-template class did not report disabled defaulting\n' >&2
   exit 1
 }
+
+if ! "$CLAIM_CHECK" --rendered "$IMPLICIT_CLAIM_FIXTURE" \
+  --layer platform/woodpecker --fixture "$FIXTURE" >/dev/null; then
+  printf 'FAIL: expected exact Woodpecker implicit-default fixture to pass\n' >&2
+  exit 1
+fi
+
+present_empty_implicit="$TEMP_ROOT/present-empty-implicit.yaml"
+cp "$IMPLICIT_CLAIM_FIXTURE" "$present_empty_implicit"
+yq e -i '
+  (select(.kind == "StatefulSet" and .metadata.name == "woodpecker-agent") |
+   .spec.volumeClaimTemplates[] | select(.metadata.name == "agent-config") |
+   .spec.storageClassName) = ""
+' "$present_empty_implicit"
+if "$CLAIM_CHECK" --rendered "$present_empty_implicit" --layer platform/woodpecker \
+  --fixture "$FIXTURE" >/dev/null 2>&1; then
+  printf 'FAIL: present-but-empty Woodpecker agent class passed\n' >&2
+  exit 1
+fi
+
+additional_implicit="$TEMP_ROOT/additional-implicit.yaml"
+cp "$IMPLICIT_CLAIM_FIXTURE" "$additional_implicit"
+yq e -i '
+  (select(.kind == "StatefulSet" and .metadata.name == "woodpecker-agent") |
+   .spec.volumeClaimTemplates) += [{
+     "metadata": {"name": "unreviewed"},
+     "spec": {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "1Gi"}}}
+   }]
+' "$additional_implicit"
+if "$CLAIM_CHECK" --rendered "$additional_implicit" --layer platform/woodpecker \
+  --fixture "$FIXTURE" >/dev/null 2>&1; then
+  printf 'FAIL: additional implicit claim passed\n' >&2
+  exit 1
+fi
+
+moved_implicit="$TEMP_ROOT/moved-implicit.yaml"
+cp "$IMPLICIT_CLAIM_FIXTURE" "$moved_implicit"
+yq e -i '
+  (select(.kind == "StatefulSet" and .metadata.name == "woodpecker-agent") |
+   .spec.volumeClaimTemplates[] | select(.metadata.name == "agent-config") |
+   .spec.storageClassName) = "longhorn-replica2" |
+  (select(.kind == "StatefulSet" and .metadata.name == "woodpecker-server") |
+   .spec.volumeClaimTemplates[] | select(.metadata.name == "data") |
+   .spec) |= del(.storageClassName)
+' "$moved_implicit"
+if "$CLAIM_CHECK" --rendered "$moved_implicit" --layer platform/woodpecker \
+  --fixture "$FIXTURE" >/dev/null 2>&1; then
+  printf 'FAIL: moving the implicit omission from agent to server passed\n' >&2
+  exit 1
+fi
+
+renamed_owner="$TEMP_ROOT/renamed-implicit-owner.yaml"
+cp "$IMPLICIT_CLAIM_FIXTURE" "$renamed_owner"
+yq e -i '
+  (select(.kind == "StatefulSet" and .metadata.name == "woodpecker-agent") |
+   .metadata.name) = "woodpecker-agent-renamed"
+' "$renamed_owner"
+if "$CLAIM_CHECK" --rendered "$renamed_owner" --layer platform/woodpecker \
+  --fixture "$FIXTURE" >/dev/null 2>&1; then
+  printf 'FAIL: renamed implicit claim owner passed\n' >&2
+  exit 1
+fi
+
+renamed_claim="$TEMP_ROOT/renamed-implicit-claim.yaml"
+cp "$IMPLICIT_CLAIM_FIXTURE" "$renamed_claim"
+yq e -i '
+  (select(.kind == "StatefulSet" and .metadata.name == "woodpecker-agent") |
+   .spec.volumeClaimTemplates[] | select(.metadata.name == "agent-config") |
+   .metadata.name) = "agent-config-renamed"
+' "$renamed_claim"
+if "$CLAIM_CHECK" --rendered "$renamed_claim" --layer platform/woodpecker \
+  --fixture "$FIXTURE" >/dev/null 2>&1; then
+  printf 'FAIL: renamed implicit claim passed\n' >&2
+  exit 1
+fi
 
 secret_root="$TEMP_ROOT/secret-key-drift"
 make_repo_fixture "$secret_root"
@@ -179,6 +260,37 @@ yq e -i '
 set_fixture_layer_digest "$mirror_root" "$mirror_fixture" observability/langfuse
 expect_fail "authoritative values mirror secret refs cannot drift" \
   --root "$mirror_root" --fixture "$mirror_fixture" --contract "$CONTRACT"
+
+default_removed_root="$TEMP_ROOT/default-removed"
+make_repo_fixture "$default_removed_root"
+default_removed_fixture="$TEMP_ROOT/default-removed.yaml"
+cp "$FIXTURE" "$default_removed_fixture"
+yq e -i '
+  (select(.kind == "StorageClass" and .metadata.name == "longhorn-replica2") |
+   .metadata.annotations) |= del(."storageclass.kubernetes.io/is-default-class")
+' "$default_removed_root/infrastructure/longhorn/storageclasses.yaml"
+expect_fail "removing the sole declared default StorageClass is rejected" \
+  --root "$default_removed_root" --fixture "$default_removed_fixture" --contract "$CONTRACT"
+
+multiple_defaults_root="$TEMP_ROOT/multiple-defaults"
+make_repo_fixture "$multiple_defaults_root"
+multiple_defaults_fixture="$TEMP_ROOT/multiple-defaults.yaml"
+cp "$FIXTURE" "$multiple_defaults_fixture"
+yq e -i '
+  (select(.kind == "StorageClass" and .metadata.name == "longhorn-replica3") |
+   .metadata.annotations."storageclass.kubernetes.io/is-default-class") = "true"
+' "$multiple_defaults_root/infrastructure/longhorn/storageclasses.yaml"
+expect_fail "multiple declared default StorageClasses are rejected" \
+  --root "$multiple_defaults_root" --fixture "$multiple_defaults_fixture" --contract "$CONTRACT"
+
+chart_default_root="$TEMP_ROOT/chart-default-enabled"
+make_repo_fixture "$chart_default_root"
+chart_default_fixture="$TEMP_ROOT/chart-default-enabled.yaml"
+cp "$FIXTURE" "$chart_default_fixture"
+yq e -i '.persistence.defaultClass = true' \
+  "$chart_default_root/infrastructure/longhorn/values.yaml"
+expect_fail "Longhorn chart cannot generate a competing default StorageClass" \
+  --root "$chart_default_root" --fixture "$chart_default_fixture" --contract "$CONTRACT"
 
 externalsecret_mirror_root="$TEMP_ROOT/externalsecret-mirror-drift"
 make_repo_fixture "$externalsecret_mirror_root"

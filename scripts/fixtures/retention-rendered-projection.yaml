@@ -7,7 +7,14 @@ provenance:
   mode: reviewed-render-projection
   kustomize_version: v5.8.1
   helm_version: v4.2.0
-
+cluster_defaults:
+  storage_class:
+    name: longhorn-replica2
+    reclaim_policy: Delete
+    source_file: infrastructure/longhorn/storageclasses.yaml
+    chart_default_source_file: infrastructure/longhorn/values.yaml
+    chart_default_value_path: .persistence.defaultClass
+    chart_default_enabled: false
 layers:
   - path: observability/langfuse
     input_digest_sha256: d4a09ce1da87a033513b16b81def5989db4c6f3943304b67a1cb368dc707be37
@@ -20,6 +27,7 @@ layers:
       values_mirrors:
         - values.yaml.j2
     declared_claim_count: 2
+    declared_implicit_default_claim_count: 0
     declared_secret_reference_count: 12
     declared_externalsecret_mirror_count: 2
     declared_externalsecret_projection_count: 6
@@ -75,6 +83,7 @@ layers:
         claim_name: langfuse-s3
         selector_path: spec.storageClassName
         storage_class: longhorn-replica2
+        storage_class_mode: explicit
       - contract_id: langfuse-valkey
         rendered_claim_id: langfuse-redis-primary/valkey-data
         kind: StatefulSet
@@ -82,6 +91,7 @@ layers:
         claim_name: valkey-data
         selector_path: spec.volumeClaimTemplates.0.spec.storageClassName
         storage_class: longhorn-replica2
+        storage_class_mode: explicit
     secret_references:
       - workload_kind: Deployment
         workload_name: langfuse-web
@@ -191,7 +201,6 @@ layers:
         source_value_path: .s3.mediaUpload.secretAccessKey.value
         source_name_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.name
         source_key_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.key
-
   - path: observability/crowdsec
     input_digest_sha256: a444575aa8e75c11a981c87023fa395da1c2144f9fd0adaaf0f38588905786e6
     chart:
@@ -201,6 +210,7 @@ layers:
       app_version: "v1.7.8"
       package_sha256: fa383e922a46536db813a514e2bf082bab355081bab4aefaa964fbdbbfd7f8f1
     declared_claim_count: 1
+    declared_implicit_default_claim_count: 0
     declared_secret_reference_count: 0
     declared_externalsecret_mirror_count: 0
     declared_externalsecret_projection_count: 0
@@ -218,10 +228,10 @@ layers:
         claim_name: crowdsec-db-pvc
         selector_path: spec.storageClassName
         storage_class: longhorn-replica2
+        storage_class_mode: explicit
     secret_references: []
-
   - path: platform/woodpecker
-    input_digest_sha256: bd747072e60e6e405f4ecc5018941d1cb0b0d4aa050ff657bd7f411f727e25d7
+    input_digest_sha256: 7d0a3094264a7f2bbe7d4a8311995393e618bdf6a49b8ca35690581cf697be65
     chart:
       name: woodpecker
       repository: https://woodpecker-ci.org/
@@ -231,6 +241,7 @@ layers:
       values_mirrors:
         - values.yaml.j2
     declared_claim_count: 2
+    declared_implicit_default_claim_count: 1
     declared_secret_reference_count: 0
     declared_externalsecret_mirror_count: 0
     declared_externalsecret_projection_count: 0
@@ -248,6 +259,9 @@ layers:
         claim_name: agent-config
         selector_path: spec.volumeClaimTemplates.0.spec.storageClassName
         storage_class: longhorn-replica2
+        storage_class_mode: implicit-default
+        exception_owner: KST-03 Woodpecker agent StatefulSet recreation and explicit class adoption
+        exception_removal_condition: recreate only the Woodpecker agent StatefulSet controller in an attended window with the explicit template, preserve and reuse the existing agent-config-* PVC, verify that PVC remains longhorn-replica2 and the agent is healthy, then retire this exception atomically
       - contract_id: woodpecker-sqlite
         rendered_claim_id: woodpecker-server/data
         kind: StatefulSet
@@ -255,4 +269,5 @@ layers:
         claim_name: data
         selector_path: spec.volumeClaimTemplates.0.spec.storageClassName
         storage_class: longhorn-replica2
+        storage_class_mode: explicit
     secret_references: []

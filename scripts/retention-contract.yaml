@@ -14,6 +14,7 @@
 version: 1
 owner_repository: homelab-k8s
 declared_count: 22
+declared_implicit_default_count: 1
 
 scope:
   roots:
@@ -31,6 +32,11 @@ scope:
 
 storage_classes:
   source: infrastructure/longhorn/storageclasses.yaml
+  default: longhorn-replica2
+  chart_default:
+    source: infrastructure/longhorn/values.yaml
+    value_path: .persistence.defaultClass
+    enabled: false
   delete:
     - longhorn-replica1
     - longhorn-replica2
@@ -524,6 +530,7 @@ entries:
     workload: Woodpecker agent configuration
     namespace: woodpecker
     claim: StatefulSet/woodpecker-agent agent-config
+    storage_class_selection: implicit-default
     source:
       file: platform/woodpecker/values.yaml
       value_path: '.agent.persistence.storageClass'
@@ -541,6 +548,7 @@ entries:
     backup_tier: none
     rpo: no durable pipeline source-of-truth data is stored here
     rto: hours to recreate the claim and restart the agent
-    migration_owner: none
+    migration_owner: KST-03 Woodpecker agent StatefulSet recreation and explicit class adoption
+    exception_removal_condition: recreate only the Woodpecker agent StatefulSet controller in an attended window with the explicit template, preserve and reuse the existing agent-config-* PVC, verify that PVC remains longhorn-replica2 and the agent is healthy, then retire this exception atomically
     required_restore_test: recreate a disposable agent claim and verify the agent reconnects to the server
-    reason: the agent configuration is reconstructable and must not leave orphaned volumes
+    reason: the live immutable claim template omits storageClassName; the explicit empty chart value preserves Argo convergence while the bounded exception proves the effective Delete-policy default until attended recreation

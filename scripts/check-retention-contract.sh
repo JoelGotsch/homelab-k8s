@@ -55,6 +55,7 @@ done
 
 problems=0
 checked_entries=0
+implicit_default_entries=0
 
 error() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -75,6 +76,11 @@ declared_count="$(yq e -r '.declared_count // ""' "$CONTRACT")"
 entry_count="$(yq e -r '.entries | length' "$CONTRACT")"
 [ "$declared_count" = "$entry_count" ] || \
   error "$CONTRACT: declared_count=$declared_count but entries=$entry_count"
+declared_implicit_default_count="$(yq e -r '.declared_implicit_default_count // ""' "$CONTRACT")"
+[[ "$declared_implicit_default_count" =~ ^[0-9]+$ ]] || \
+  error "$CONTRACT: declared_implicit_default_count must be a non-negative integer"
+[ "$declared_implicit_default_count" = "1" ] || \
+  error "$CONTRACT: this repository permits exactly one bounded implicit-default exception"
 
 declare -A class_policy=()
 declare -A entry_ids=()
@@ -95,7 +101,16 @@ done < <(yq e -r '.storage_classes.retain[]' "$CONTRACT" | strip_yq_stream_marke
 
 [ "${#class_policy[@]}" -gt 0 ] || error "$CONTRACT: StorageClass catalog is empty"
 
+default_storage_class="$(yq e -r '.storage_classes.default // ""' "$CONTRACT")"
+[ -n "$default_storage_class" ] || error "$CONTRACT: storage_classes.default is required"
+[ "$default_storage_class" = "longhorn-replica2" ] || \
+  error "$CONTRACT: bounded implicit exception requires storage_classes.default: longhorn-replica2"
+[ -n "${class_policy[$default_storage_class]:-}" ] || \
+  error "$CONTRACT: default StorageClass '$default_storage_class' is absent from the policy catalog"
+
 storageclass_source_rel="$(yq e -r '.storage_classes.source // ""' "$CONTRACT")"
+[ "$storageclass_source_rel" = "infrastructure/longhorn/storageclasses.yaml" ] || \
+  error "$CONTRACT: StorageClass source must remain infrastructure/longhorn/storageclasses.yaml"
 if [ -n "$storageclass_source_rel" ]; then
   storageclass_source="$REPO_ROOT/$storageclass_source_rel"
   [ -f "$storageclass_source" ] || error "missing StorageClass catalog source: $storageclass_source_rel"
@@ -115,7 +130,46 @@ if [ -n "$storageclass_source_rel" ]; then
       [ "$actual_policies" = "$expected_policy" ] || \
         error "$storageclass_source_rel: StorageClass/$storage_class is '$actual_policies', contract says '$expected_policy'"
     done
+
+    default_rows="$(yq e -r '
+      select(.kind == "StorageClass" and
+        .metadata.annotations."storageclass.kubernetes.io/is-default-class" == "true") |
+      [.metadata.name, .reclaimPolicy] | @tsv
+    ' "$storageclass_source" | strip_yq_stream_markers)"
+    default_count="$(printf '%s\n' "$default_rows" | awk 'NF' | wc -l | tr -d ' ')"
+    if [ "$default_count" -ne 1 ]; then
+      error "$storageclass_source_rel: expected exactly one default StorageClass, found $default_count"
+    else
+      IFS=$'\t' read -r actual_default_class actual_default_policy <<<"$default_rows"
+      [ "$actual_default_class" = "$default_storage_class" ] || \
+        error "$storageclass_source_rel: default StorageClass is '$actual_default_class', contract requires '$default_storage_class'"
+      [ "$actual_default_policy" = "${class_policy[$default_storage_class]:-}" ] || \
+        error "$storageclass_source_rel: default StorageClass/$actual_default_class policy is '$actual_default_policy', expected '${class_policy[$default_storage_class]:-}'"
+    fi
   fi
+fi
+
+chart_default_source_rel="$(yq e -r '.storage_classes.chart_default.source // ""' "$CONTRACT")"
+chart_default_value_path="$(yq e -r '.storage_classes.chart_default.value_path // ""' "$CONTRACT")"
+chart_default_enabled="$(yq e -r '.storage_classes.chart_default.enabled' "$CONTRACT")"
+[ "$chart_default_source_rel" = "infrastructure/longhorn/values.yaml" ] && \
+  [ "$chart_default_value_path" = ".persistence.defaultClass" ] || \
+  error "$CONTRACT: chart default-class guard must remain infrastructure/longhorn/values.yaml at .persistence.defaultClass"
+[ "$chart_default_enabled" = "false" ] || \
+  error "$CONTRACT: storage_classes.chart_default.enabled must remain false"
+if [ -n "$chart_default_source_rel" ] && [ -n "$chart_default_value_path" ]; then
+  chart_default_source="$REPO_ROOT/$chart_default_source_rel"
+  [ -f "$chart_default_source" ] || error "missing chart default-class source: $chart_default_source_rel"
+  if [ -f "$chart_default_source" ]; then
+    actual_chart_default="$(yq e -r "$chart_default_value_path" "$chart_default_source" 2>/dev/null)" || {
+      error "$chart_default_source_rel: could not evaluate $chart_default_value_path"
+      actual_chart_default=""
+    }
+    [ "$actual_chart_default" = "false" ] || \
+      error "$chart_default_source_rel: $chart_default_value_path must remain false, got '$actual_chart_default'"
+  fi
+else
+  error "$CONTRACT: chart default-class source and value_path are required"
 fi
 
 read_source_locator() {
@@ -128,6 +182,7 @@ read_source_locator() {
 
 for ((entry_index = 0; entry_index < entry_count; entry_index++)); do
   id="$(yq e -r ".entries[$entry_index].id // \"\"" "$CONTRACT")"
+  storage_class_selection="$(yq e -r ".entries[$entry_index].storage_class_selection // \"explicit\"" "$CONTRACT")"
   source_rel="$(yq e -r ".entries[$entry_index].source.file // \"\"" "$CONTRACT")"
   value_path="$(yq e -r ".entries[$entry_index].source.value_path // \"\"" "$CONTRACT")"
   document_index="$(yq e -r ".entries[$entry_index].source.document_index // \"\"" "$CONTRACT")"
@@ -137,6 +192,8 @@ for ((entry_index = 0; entry_index < entry_count; entry_index++)); do
   desired_policy="$(yq e -r ".entries[$entry_index].desired_reclaim_policy // \"\"" "$CONTRACT")"
   state="$(yq e -r ".entries[$entry_index].state // \"\"" "$CONTRACT")"
   migration_owner="$(yq e -r ".entries[$entry_index].migration_owner // \"\"" "$CONTRACT")"
+  rendered_claim_id="$(yq e -r ".entries[$entry_index].rendered_claim_id // \"\"" "$CONTRACT")"
+  exception_removal_condition="$(yq e -r ".entries[$entry_index].exception_removal_condition // \"\"" "$CONTRACT")"
 
   [ -n "$id" ] || { error "$CONTRACT: entry $entry_index has no id"; continue; }
   [ -z "${entry_ids[$id]:-}" ] || { error "$CONTRACT: duplicate entry id '$id'"; continue; }
@@ -158,15 +215,47 @@ for ((entry_index = 0; entry_index < entry_count; entry_index++)); do
   [ -n "$target_class" ] || { error "$CONTRACT: $id has no target_storage_class"; continue; }
   [ -n "${class_policy[$current_class]:-}" ] || error "$CONTRACT: $id uses unknown current class '$current_class'"
   [ -n "${class_policy[$target_class]:-}" ] || error "$CONTRACT: $id uses unknown target class '$target_class'"
+  case "$storage_class_selection" in
+    explicit|implicit-default) ;;
+    *) error "$CONTRACT: $id has invalid storage_class_selection '$storage_class_selection'" ;;
+  esac
   case "$desired_policy" in Delete|Retain) ;; *) error "$CONTRACT: $id has invalid desired policy '$desired_policy'" ;; esac
   [ "${class_policy[$target_class]:-}" = "$desired_policy" ] || \
     error "$CONTRACT: $id target $target_class does not implement $desired_policy"
 
   expected_state="known-mismatch"
   [ "${class_policy[$current_class]:-}" = "$desired_policy" ] && expected_state="compliant"
+  if [ "$storage_class_selection" = "implicit-default" ]; then
+    implicit_default_entries=$((implicit_default_entries + 1))
+    [ "$current_class" = "$default_storage_class" ] || \
+      error "$CONTRACT: $id implicit-default class '$current_class' must equal cluster default '$default_storage_class'"
+    [ "$current_class" = "longhorn-replica2" ] && \
+      [ "$target_class" = "longhorn-replica2" ] && \
+      [ "$desired_policy" = "Delete" ] || \
+      error "$CONTRACT: Woodpecker implicit-default lifecycle must remain longhorn-replica2 -> longhorn-replica2 / Delete"
+    [ -n "$rendered_claim_id" ] || \
+      error "$CONTRACT: $id implicit-default exception requires rendered_claim_id"
+    [ -n "$exception_removal_condition" ] || \
+      error "$CONTRACT: $id implicit-default exception requires exception_removal_condition"
+    [ "$id" = "woodpecker-agent-config" ] && \
+      [ "$source_rel" = "platform/woodpecker/values.yaml" ] && \
+      [ "$value_path" = ".agent.persistence.storageClass" ] && \
+      [ "$document_index" = "0" ] && \
+      [ "$selector_path" = "agent.persistence.storageClass" ] && \
+      [ "$rendered_claim_id" = "woodpecker-agent/agent-config" ] || \
+      error "$CONTRACT: implicit-default exception is restricted to the exact Woodpecker agent source and rendered claim"
+    implicit_namespace="$(yq e -r ".entries[$entry_index].namespace // \"\"" "$CONTRACT")"
+    implicit_claim="$(yq e -r ".entries[$entry_index].claim // \"\"" "$CONTRACT")"
+    [ "$implicit_namespace" = "woodpecker" ] && \
+      [ "$implicit_claim" = "StatefulSet/woodpecker-agent agent-config" ] || \
+      error "$CONTRACT: implicit-default exception namespace/claim identity may not move"
+  fi
   [ "$state" = "$expected_state" ] || \
     error "$CONTRACT: $id state is '$state', expected '$expected_state' from current and desired policies"
-  if [ "$state" = "known-mismatch" ]; then
+  if [ "$storage_class_selection" = "implicit-default" ]; then
+    [ -n "$migration_owner" ] && [ "$migration_owner" != "none" ] || \
+      error "$CONTRACT: $id implicit-default exception requires a concrete migration_owner"
+  elif [ "$state" = "known-mismatch" ]; then
     [ -n "$migration_owner" ] && [ "$migration_owner" != "none" ] || \
       error "$CONTRACT: $id known mismatch requires a concrete migration_owner"
   else
@@ -190,10 +279,22 @@ for ((entry_index = 0; entry_index < entry_count; entry_index++)); do
     error "$CONTRACT: $id expected document $document_index in $source_rel, got $actual_document_index"
   [ "$actual_selector_path" = "$selector_path" ] || \
     error "$CONTRACT: $id expected path $selector_path in $source_rel, got '$actual_selector_path'"
-  [ "$actual_value" = "$current_class" ] || \
-    error "$CONTRACT: $id expected $current_class in $source_rel, got '$actual_value'; update or retire the contract in the same review"
+  if [ "$storage_class_selection" = "implicit-default" ]; then
+    [ -z "$actual_value" ] || \
+      error "$CONTRACT: $id implicit-default source must be explicitly empty in $source_rel; retire the exception during attended recreation"
+  else
+    [ "$actual_value" = "$current_class" ] || \
+      error "$CONTRACT: $id expected $current_class in $source_rel, got '$actual_value'; update or retire the contract in the same review"
+  fi
 
   mirror_count="$(yq e -r ".entries[$entry_index].source.mirrors // [] | length" "$CONTRACT")"
+  if [ "$storage_class_selection" = "implicit-default" ]; then
+    [ "$mirror_count" -eq 1 ] || \
+      error "$CONTRACT: $id implicit-default exception requires exactly one authoritative mirror"
+    implicit_mirror="$(yq e -r ".entries[$entry_index].source.mirrors[0] // \"\"" "$CONTRACT")"
+    [ "$implicit_mirror" = "platform/woodpecker/values.yaml.j2" ] || \
+      error "$CONTRACT: $id implicit-default mirror must remain platform/woodpecker/values.yaml.j2"
+  fi
   for ((mirror_index = 0; mirror_index < mirror_count; mirror_index++)); do
     mirror_rel="$(yq e -r ".entries[$entry_index].source.mirrors[$mirror_index]" "$CONTRACT")"
     mirror_file="$REPO_ROOT/$mirror_rel"
@@ -212,24 +313,34 @@ for ((entry_index = 0; entry_index < entry_count; entry_index++)); do
       error "$CONTRACT: $id mirror expected document $document_index in $mirror_rel, got $mirror_document_index"
     [ "$mirror_selector_path" = "$selector_path" ] || \
       error "$CONTRACT: $id mirror expected path $selector_path in $mirror_rel, got '$mirror_selector_path'"
-    [ "$mirror_value" = "$current_class" ] || \
-      error "$CONTRACT: $id mirror expected $current_class in $mirror_rel, got '$mirror_value'"
-    mirror_fingerprint="$mirror_rel|$document_index|$selector_path|$current_class"
-    if [ -n "${declared_selectors[$mirror_fingerprint]:-}" ]; then
-      error "$CONTRACT: $id mirror duplicates exact selector owned by ${declared_selectors[$mirror_fingerprint]}: $mirror_fingerprint"
+    if [ "$storage_class_selection" = "implicit-default" ]; then
+      [ -z "$mirror_value" ] || \
+        error "$CONTRACT: $id implicit-default mirror must be explicitly empty in $mirror_rel"
     else
-      declared_selectors["$mirror_fingerprint"]="$id mirror"
+      [ "$mirror_value" = "$current_class" ] || \
+        error "$CONTRACT: $id mirror expected $current_class in $mirror_rel, got '$mirror_value'"
+      mirror_fingerprint="$mirror_rel|$document_index|$selector_path|$current_class"
+      if [ -n "${declared_selectors[$mirror_fingerprint]:-}" ]; then
+        error "$CONTRACT: $id mirror duplicates exact selector owned by ${declared_selectors[$mirror_fingerprint]}: $mirror_fingerprint"
+      else
+        declared_selectors["$mirror_fingerprint"]="$id mirror"
+      fi
     fi
   done
 
-  selector_fingerprint="$source_rel|$document_index|$selector_path|$current_class"
-  if [ -n "${declared_selectors[$selector_fingerprint]:-}" ]; then
-    error "$CONTRACT: $id duplicates exact selector owned by ${declared_selectors[$selector_fingerprint]}: $selector_fingerprint"
-  else
-    declared_selectors["$selector_fingerprint"]="$id"
+  if [ "$storage_class_selection" = "explicit" ]; then
+    selector_fingerprint="$source_rel|$document_index|$selector_path|$current_class"
+    if [ -n "${declared_selectors[$selector_fingerprint]:-}" ]; then
+      error "$CONTRACT: $id duplicates exact selector owned by ${declared_selectors[$selector_fingerprint]}: $selector_fingerprint"
+    else
+      declared_selectors["$selector_fingerprint"]="$id"
+    fi
   fi
   checked_entries=$((checked_entries + 1))
 done
+
+[ "$implicit_default_entries" = "$declared_implicit_default_count" ] || \
+  error "$CONTRACT: declared_implicit_default_count=$declared_implicit_default_count but checked entries=$implicit_default_entries"
 
 selector_key_allowed() {
   local candidate="$1"
@@ -314,6 +425,60 @@ while IFS= read -r scope_root; do
   )
 done < <(yq e -r '.scope.roots[]' "$CONTRACT" | strip_yq_stream_markers)
 
+declare -A repo_default_storage_classes=()
+while IFS=$'\t' read -r default_source_rel default_source_name; do
+  if [ "$default_source_rel" = "__PARSE_ERROR__" ]; then
+    error "$default_source_name: StorageClass/default-annotation candidate cannot be parsed"
+    continue
+  fi
+  [ -n "$default_source_rel" ] && [ -n "$default_source_name" ] || continue
+  default_identity="$default_source_rel|$default_source_name"
+  repo_default_storage_classes["$default_identity"]=1
+done < <(
+  while IFS= read -r scope_root; do
+    [ -n "$scope_root" ] || continue
+    while IFS= read -r -d '' storageclass_file; do
+      relative_file="${storageclass_file#"$REPO_ROOT"/}"
+      path_is_excluded "$relative_file" && continue
+      # Jinja sources without a literal Longhorn selector are skipped by the
+      # selector inventory above. Default-class ownership is broader: any file
+      # which may define a StorageClass or either supported default annotation
+      # must parse cleanly so templating cannot hide a competing default.
+      if ! rg -q \
+        '(^|[[:space:]])kind:[[:space:]]*StorageClass([[:space:]]|$)|storageclass\.(kubernetes\.io|k8s\.io)/is-default-class' \
+        "$storageclass_file"; then
+        continue
+      fi
+      if ! yq e '.' "$storageclass_file" >/dev/null 2>&1; then
+        # This loop feeds a parent-shell inventory through process
+        # substitution. Emit an explicit sentinel so the parent increments the
+        # shared problem count; calling error here would mutate only a subshell.
+        printf '__PARSE_ERROR__\t%s\n' "$relative_file"
+        continue
+      fi
+      yq e -r '
+        select(.kind == "StorageClass") |
+        select(
+          (.metadata.annotations."storageclass.kubernetes.io/is-default-class" == "true") or
+          (.metadata.annotations."storageclass.k8s.io/is-default-class" == "true") or
+          (.metadata.annotations."storageclass.kubernetes.io/is-default-class" == true) or
+          (.metadata.annotations."storageclass.k8s.io/is-default-class" == true)
+        ) | .metadata.name
+      ' "$storageclass_file" | strip_yq_stream_markers | \
+        awk -v source="$relative_file" '{print source "\t" $0}'
+    done < <(
+      find "$REPO_ROOT/$scope_root" -type f \
+        \( -name '*.yaml' -o -name '*.yml' -o -name '*.yaml.j2' -o -name '*.yml.j2' \) -print0
+    )
+  done < <(yq e -r '.scope.roots[]' "$CONTRACT" | strip_yq_stream_markers)
+)
+
+[ "${#repo_default_storage_classes[@]}" -eq 1 ] || \
+  error "repository source must declare exactly one default StorageClass, found ${#repo_default_storage_classes[@]}"
+expected_default_identity="$storageclass_source_rel|$default_storage_class"
+[ -n "${repo_default_storage_classes[$expected_default_identity]:-}" ] || \
+  error "repository default StorageClass must remain $expected_default_identity"
+
 for fingerprint in "${!declared_selectors[@]}"; do
   [ -n "${discovered_selectors[$fingerprint]:-}" ] || \
     error "contract selector not discovered at its exact identity: $fingerprint"
@@ -332,5 +497,6 @@ if [ "$problems" -ne 0 ]; then
 fi
 
 known_mismatches="$(yq e -r '[.entries[] | select(.state == "known-mismatch")] | length' "$CONTRACT")"
-printf 'PASS: %s retention contract is complete for its static scope (%d entries, %d known mismatches).\n' \
-  "$owner_repository" "$checked_entries" "$known_mismatches"
+known_exceptions="$(yq e -r '[.entries[] | select((.storage_class_selection // "explicit") == "implicit-default")] | length' "$CONTRACT")"
+printf 'PASS: %s retention contract is complete for its static scope (%d entries, %d known mismatches, %d bounded exceptions).\n' \
+  "$owner_repository" "$checked_entries" "$known_mismatches" "$known_exceptions"

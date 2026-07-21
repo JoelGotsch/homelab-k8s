@@ -129,6 +129,7 @@ fi
 
 problems=0
 checked_claims=0
+checked_implicit_default_claims=0
 checked_secret_refs=0
 checked_externalsecret_mirrors=0
 checked_externalsecret_projections=0
@@ -153,6 +154,64 @@ fixture_version="$(yq e -r '.version // ""' "$FIXTURE")"
 fixture_mode="$(yq e -r '.provenance.mode // ""' "$FIXTURE")"
 [ "$fixture_mode" = "reviewed-render-projection" ] || \
   error "$FIXTURE: provenance.mode must be reviewed-render-projection"
+
+default_storage_class="$(yq e -r '.cluster_defaults.storage_class.name // ""' "$FIXTURE")"
+default_reclaim_policy="$(yq e -r '.cluster_defaults.storage_class.reclaim_policy // ""' "$FIXTURE")"
+default_source_rel="$(yq e -r '.cluster_defaults.storage_class.source_file // ""' "$FIXTURE")"
+chart_default_source_rel="$(yq e -r '.cluster_defaults.storage_class.chart_default_source_file // ""' "$FIXTURE")"
+chart_default_value_path="$(yq e -r '.cluster_defaults.storage_class.chart_default_value_path // ""' "$FIXTURE")"
+chart_default_enabled="$(yq e -r '.cluster_defaults.storage_class.chart_default_enabled' "$FIXTURE")"
+[ "$default_storage_class" = "longhorn-replica2" ] && [ "$default_reclaim_policy" = "Delete" ] || \
+  error "$FIXTURE: bounded implicit claim requires default longhorn-replica2 with Delete policy"
+[ "$default_source_rel" = "infrastructure/longhorn/storageclasses.yaml" ] || \
+  error "$FIXTURE: default StorageClass source path may not move"
+[ "$chart_default_source_rel" = "infrastructure/longhorn/values.yaml" ] && \
+  [ "$chart_default_value_path" = ".persistence.defaultClass" ] && \
+  [ "$chart_default_enabled" = "false" ] || \
+  error "$FIXTURE: Longhorn chart default-class guard must remain false at the reviewed source path"
+
+contract_default_storage_class="$(yq e -r '.storage_classes.default // ""' "$CONTRACT")"
+contract_default_source_rel="$(yq e -r '.storage_classes.source // ""' "$CONTRACT")"
+contract_chart_default_source_rel="$(yq e -r '.storage_classes.chart_default.source // ""' "$CONTRACT")"
+contract_chart_default_value_path="$(yq e -r '.storage_classes.chart_default.value_path // ""' "$CONTRACT")"
+contract_chart_default_enabled="$(yq e -r '.storage_classes.chart_default.enabled' "$CONTRACT")"
+[ "$contract_default_storage_class" = "$default_storage_class" ] && \
+  [ "$contract_default_source_rel" = "$default_source_rel" ] || \
+  error "$FIXTURE: cluster default name/source must match the retention contract"
+[ "$contract_chart_default_source_rel" = "$chart_default_source_rel" ] && \
+  [ "$contract_chart_default_value_path" = "$chart_default_value_path" ] && \
+  [ "$contract_chart_default_enabled" = "$chart_default_enabled" ] || \
+  error "$FIXTURE: chart default-class guard must match the retention contract"
+
+default_source="$REPO_ROOT/$default_source_rel"
+[ -f "$default_source" ] || error "$FIXTURE: missing default StorageClass source $default_source_rel"
+if [ -f "$default_source" ]; then
+  default_rows="$(yq e -r '
+    select(.kind == "StorageClass") |
+    select(
+      (.metadata.annotations."storageclass.kubernetes.io/is-default-class" == "true") or
+      (.metadata.annotations."storageclass.k8s.io/is-default-class" == "true") or
+      (.metadata.annotations."storageclass.kubernetes.io/is-default-class" == true) or
+      (.metadata.annotations."storageclass.k8s.io/is-default-class" == true)
+    ) | [.metadata.name, .reclaimPolicy] | @tsv
+  ' "$default_source" | strip_yq_stream_markers)"
+  default_count="$(printf '%s\n' "$default_rows" | awk 'NF' | wc -l | tr -d ' ')"
+  [ "$default_count" -eq 1 ] || \
+    error "$default_source_rel: expected exactly one declared default StorageClass, found $default_count"
+  [ "$default_rows" = "$default_storage_class"$'\t'"$default_reclaim_policy" ] || \
+    error "$default_source_rel: default StorageClass must remain $default_storage_class/$default_reclaim_policy"
+fi
+
+chart_default_source="$REPO_ROOT/$chart_default_source_rel"
+[ -f "$chart_default_source" ] || error "$FIXTURE: missing chart default-class source $chart_default_source_rel"
+if [ -f "$chart_default_source" ]; then
+  actual_chart_default="$(yq e -r "$chart_default_value_path" "$chart_default_source" 2>/dev/null)" || {
+    error "$chart_default_source_rel: could not evaluate $chart_default_value_path"
+    actual_chart_default=""
+  }
+  [ "$actual_chart_default" = "false" ] || \
+    error "$chart_default_source_rel: $chart_default_value_path must remain false, got '$actual_chart_default'"
+fi
 
 layer_count="$(yq e -r '.layers | length' "$FIXTURE")"
 [[ "$layer_count" =~ ^[0-9]+$ ]] || { printf 'ERROR: invalid layers list\n' >&2; exit 2; }
@@ -182,6 +241,7 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
   chart_app_version="$(yq e -r ".layers[$layer_index].chart.app_version // \"\"" "$FIXTURE")"
   package_digest="$(yq e -r ".layers[$layer_index].chart.package_sha256 // \"\"" "$FIXTURE")"
   declared_claim_count="$(yq e -r ".layers[$layer_index].declared_claim_count // \"\"" "$FIXTURE")"
+  declared_implicit_default_claim_count="$(yq e -r ".layers[$layer_index].declared_implicit_default_claim_count // \"\"" "$FIXTURE")"
   declared_secret_ref_count="$(yq e -r ".layers[$layer_index].declared_secret_reference_count // \"\"" "$FIXTURE")"
   declared_externalsecret_mirror_count="$(yq e -r ".layers[$layer_index].declared_externalsecret_mirror_count // \"\"" "$FIXTURE")"
   declared_externalsecret_projection_count="$(yq e -r ".layers[$layer_index].declared_externalsecret_projection_count // \"\"" "$FIXTURE")"
@@ -203,6 +263,8 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
   [ -n "$chart_version" ] || error "$FIXTURE: $layer_rel has no chart version"
   [ -n "$chart_app_version" ] || error "$FIXTURE: $layer_rel has no chart app_version"
   [[ "$declared_claim_count" =~ ^[0-9]+$ ]] || error "$FIXTURE: $layer_rel has invalid declared_claim_count"
+  [[ "$declared_implicit_default_claim_count" =~ ^[0-9]+$ ]] || \
+    error "$FIXTURE: $layer_rel has invalid declared_implicit_default_claim_count"
   [[ "$declared_secret_ref_count" =~ ^[0-9]+$ ]] || \
     error "$FIXTURE: $layer_rel has invalid declared_secret_reference_count"
   [[ "$declared_externalsecret_mirror_count" =~ ^[0-9]+$ ]] || \
@@ -338,21 +400,51 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
     claim_name="$(yq e -r "$claim_base.claim_name // \"\"" "$FIXTURE")"
     selector_path="$(yq e -r "$claim_base.selector_path // \"\"" "$FIXTURE")"
     storage_class="$(yq e -r "$claim_base.storage_class // \"\"" "$FIXTURE")"
+    storage_class_mode="$(yq e -r "$claim_base.storage_class_mode // \"\"" "$FIXTURE")"
+    exception_owner="$(yq e -r "$claim_base.exception_owner // \"\"" "$FIXTURE")"
+    exception_removal_condition="$(yq e -r "$claim_base.exception_removal_condition // \"\"" "$FIXTURE")"
 
     [ -n "$contract_id" ] || { error "$FIXTURE: $layer_rel claim $claim_index has no contract_id"; continue; }
     [ -n "$claim_id" ] || { error "$FIXTURE: $contract_id has no rendered_claim_id"; continue; }
     [ -z "${fixture_claim_ids[$claim_id]:-}" ] || error "$FIXTURE: duplicate rendered claim id '$claim_id'"
     fixture_claim_ids["$claim_id"]="$contract_id"
     contract_rows="$(CONTRACT_ID="$contract_id" yq e -r \
-      '.entries[] | select(.id == strenv(CONTRACT_ID)) | [.rendered_claim_id, .current_storage_class] | @tsv' \
+      '.entries[] | select(.id == strenv(CONTRACT_ID)) |
+       [.rendered_claim_id, .current_storage_class,
+        (.storage_class_selection // "explicit"), .state, .migration_owner,
+        (.exception_removal_condition // "")] | @tsv' \
       "$CONTRACT" | strip_yq_stream_markers)"
     contract_count="$(printf '%s\n' "$contract_rows" | awk 'NF' | wc -l | tr -d ' ')"
     [ "$contract_count" -eq 1 ] || { error "$CONTRACT: expected exactly one entry $contract_id"; continue; }
-    IFS=$'\t' read -r contract_claim_id contract_storage_class <<<"$contract_rows"
+    IFS=$'\t' read -r contract_claim_id contract_storage_class contract_selection \
+      contract_state contract_migration_owner contract_removal_condition <<<"$contract_rows"
     [ "$contract_claim_id" = "$claim_id" ] || \
       error "$FIXTURE: $contract_id claim id '$claim_id' does not match contract '$contract_claim_id'"
     [ "$contract_storage_class" = "$storage_class" ] || \
       error "$FIXTURE: $contract_id class '$storage_class' does not match contract '$contract_storage_class'"
+    [ "$contract_selection" = "$storage_class_mode" ] || \
+      error "$FIXTURE: $contract_id selection '$storage_class_mode' does not match contract '$contract_selection'"
+    case "$storage_class_mode" in
+      explicit)
+        [ -z "$exception_owner" ] && [ -z "$exception_removal_condition" ] || \
+          error "$FIXTURE: explicit claim $claim_id cannot carry implicit-default exception metadata"
+        ;;
+      implicit-default)
+        checked_implicit_default_claims=$((checked_implicit_default_claims + 1))
+        [ "$layer_rel" = "platform/woodpecker" ] && \
+          [ "$contract_id" = "woodpecker-agent-config" ] && \
+          [ "$claim_id" = "woodpecker-agent/agent-config" ] && \
+          [ "$storage_class" = "longhorn-replica2" ] && \
+          [ "$contract_state" = "compliant" ] || \
+          error "$FIXTURE: implicit-default exception is restricted to the compliant Woodpecker agent claim"
+        [ -n "$exception_owner" ] && [ "$exception_owner" = "$contract_migration_owner" ] || \
+          error "$FIXTURE: $claim_id exception owner must match its contract migration owner"
+        [ -n "$exception_removal_condition" ] && \
+          [ "$exception_removal_condition" = "$contract_removal_condition" ] || \
+          error "$FIXTURE: $claim_id exception removal condition must match its contract"
+        ;;
+      *) error "$FIXTURE: $claim_id has invalid storage_class_mode '$storage_class_mode'" ;;
+    esac
     case "$kind" in
       PersistentVolumeClaim)
         [ "$claim_id" = "$resource_name" ] || error "$FIXTURE: PVC $claim_id must equal resource_name"
@@ -368,25 +460,12 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
       *) error "$FIXTURE: $claim_id has unsupported kind '$kind'" ;;
     esac
 
-    if [ -n "$rendered_file" ]; then
-      if [ "$kind" = "PersistentVolumeClaim" ]; then
-        actual_claim_values="$(RESOURCE_NAME="$resource_name" yq e -r \
-          'select(.kind == "PersistentVolumeClaim" and .metadata.name == strenv(RESOURCE_NAME)) | .spec.storageClassName' \
-          "$rendered_file" | strip_yq_stream_markers)"
-      else
-        actual_claim_values="$(RESOURCE_NAME="$resource_name" CLAIM_NAME="$claim_name" yq e -r \
-          'select(.kind == "StatefulSet" and .metadata.name == strenv(RESOURCE_NAME)) |
-           .spec.volumeClaimTemplates[]? | select(.metadata.name == strenv(CLAIM_NAME)) | .spec.storageClassName' \
-          "$rendered_file" | strip_yq_stream_markers)"
-      fi
-      actual_claim_count="$(printf '%s\n' "$actual_claim_values" | awk 'NF' | wc -l | tr -d ' ')"
-      [ "$actual_claim_count" -eq 1 ] || \
-        error "$layer_rel render: expected exactly one $kind/$claim_id claim selector, found $actual_claim_count"
-      [ "$actual_claim_values" = "$storage_class" ] || \
-        error "$layer_rel render: $claim_id class is '$actual_claim_values', fixture says '$storage_class'"
-    fi
     checked_claims=$((checked_claims + 1))
   done
+  layer_implicit_default_count="$(yq e -r ".layers[$layer_index].claims |
+    [ .[] | select(.storage_class_mode == \"implicit-default\") ] | length" "$FIXTURE")"
+  [ "$layer_implicit_default_count" = "$declared_implicit_default_claim_count" ] || \
+    error "$FIXTURE: $layer_rel declares $declared_implicit_default_claim_count implicit claims but contains $layer_implicit_default_count"
 
   secret_ref_count="$(yq e -r ".layers[$layer_index].secret_references // [] | length" "$FIXTURE")"
   [ "$secret_ref_count" = "$declared_secret_ref_count" ] || \
@@ -615,6 +694,9 @@ while IFS=$'\t' read -r contract_id claim_id; do
     error "$CONTRACT: rendered claim $contract_id/$claim_id is missing from $FIXTURE"
 done < <(yq e -r '.entries[] | select(.rendered_claim_id != null) | [.id, .rendered_claim_id] | @tsv' "$CONTRACT")
 
+[ "$checked_implicit_default_claims" -eq 1 ] || \
+  error "$FIXTURE: expected exactly one bounded implicit-default claim, checked $checked_implicit_default_claims"
+
 if [ "$problems" -ne 0 ]; then
   printf '\nFAIL: rendered retention projection found %d problem(s).\n' "$problems" >&2
   printf '%s\n' 'Refresh the projection only after reviewing a verified render of the pinned chart package.' >&2
@@ -623,6 +705,6 @@ fi
 
 mode="offline"
 [ "$RENDER" = true ] && mode="verified-render"
-printf 'PASS: %s retention projection covers %d chart claims, %d secret references, %d ExternalSecret source projections across %d mirrors, %d pod selectors, and %d forbidden literal paths.\n' \
-  "$mode" "$checked_claims" "$checked_secret_refs" "$checked_externalsecret_projections" \
+printf 'PASS: %s retention projection covers %d chart claims (%d bounded implicit), %d secret references, %d ExternalSecret source projections across %d mirrors, %d pod selectors, and %d forbidden literal paths.\n' \
+  "$mode" "$checked_claims" "$checked_implicit_default_claims" "$checked_secret_refs" "$checked_externalsecret_projections" \
   "$checked_externalsecret_mirrors" "$checked_pod_selectors" "$checked_forbidden_literals"

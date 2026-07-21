@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CHECK="$SCRIPT_DIR/check-retention-contract.sh"
 CONTRACT="$SCRIPT_DIR/retention-contract.yaml"
 
-for required_tool in yq mktemp cp mkdir rm; do
+for required_tool in yq mktemp cp mkdir rm rg; do
   command -v "$required_tool" >/dev/null 2>&1 || {
     printf 'ERROR: %s is required\n' "$required_tool" >&2
     exit 2
@@ -36,6 +36,7 @@ make_fixture() {
   done < <(
     {
       yq e -r '.storage_classes.source' "$CONTRACT"
+      yq e -r '.storage_classes.chart_default.source' "$CONTRACT"
       yq e -r '.entries[].source.file' "$CONTRACT"
       yq e -r '.entries[].source.mirrors[]?' "$CONTRACT"
     } | sort -u
@@ -113,6 +114,105 @@ yq e -i '.persistence.storageClass = "longhorn-replica3-retain"' \
   "$mirror_drift_root/platform/forgejo/values.yaml.j2"
 expect_fail "render-source mirror drift" \
   --root "$mirror_drift_root" --contract "$CONTRACT"
+
+implicit_source_explicit_root="$TEMP_ROOT/implicit-source-explicit"
+make_fixture "$implicit_source_explicit_root"
+yq e -i '.agent.persistence.storageClass = "longhorn-replica2"' \
+  "$implicit_source_explicit_root/platform/woodpecker/values.yaml" \
+  "$implicit_source_explicit_root/platform/woodpecker/values.yaml.j2"
+expect_fail "implicit exception cannot survive explicit source restoration" \
+  --root "$implicit_source_explicit_root" --contract "$CONTRACT"
+
+implicit_mirror_drift_root="$TEMP_ROOT/implicit-mirror-drift"
+make_fixture "$implicit_mirror_drift_root"
+yq e -i '.agent.persistence.storageClass = "longhorn-replica2"' \
+  "$implicit_mirror_drift_root/platform/woodpecker/values.yaml.j2"
+expect_fail "Woodpecker implicit source mirror cannot drift" \
+  --root "$implicit_mirror_drift_root" --contract "$CONTRACT"
+
+expanded_exception_root="$TEMP_ROOT/expanded-implicit-exception"
+make_fixture "$expanded_exception_root"
+expanded_exception_contract="$TEMP_ROOT/expanded-implicit-exception-contract.yaml"
+cp "$CONTRACT" "$expanded_exception_contract"
+yq e -i '
+  .declared_count += 1 |
+  .declared_implicit_default_count = 2 |
+  .entries += [(.entries[] | select(.id == "woodpecker-agent-config") |
+    .id = "woodpecker-agent-config-copy")]
+' "$expanded_exception_contract"
+expect_fail "implicit-default exception count and identity cannot expand" \
+  --root "$expanded_exception_root" --contract "$expanded_exception_contract"
+
+default_removed_root="$TEMP_ROOT/default-removed"
+make_fixture "$default_removed_root"
+yq e -i '
+  (select(.kind == "StorageClass" and .metadata.name == "longhorn-replica2") |
+   .metadata.annotations) |= del(."storageclass.kubernetes.io/is-default-class")
+' "$default_removed_root/infrastructure/longhorn/storageclasses.yaml"
+expect_fail "sole default StorageClass annotation cannot disappear" \
+  --root "$default_removed_root" --contract "$CONTRACT"
+
+extra_default_root="$TEMP_ROOT/extra-default"
+make_fixture "$extra_default_root"
+mkdir -p "$extra_default_root/platform/extra-default"
+yq e '
+  select(.kind == "StorageClass" and .metadata.name == "longhorn-replica3") |
+  .metadata.name = "extra-default" |
+  .metadata.annotations."storageclass.kubernetes.io/is-default-class" = "true"
+' "$extra_default_root/infrastructure/longhorn/storageclasses.yaml" > \
+  "$extra_default_root/platform/extra-default/storageclass.yaml"
+if extra_default_output="$($CHECK --root "$extra_default_root" --contract "$CONTRACT" 2>&1)"; then
+  printf 'FAIL: expected failure: a second repository-owned default StorageClass cannot appear\n' >&2
+  exit 1
+fi
+printf '%s\n' "$extra_default_output" | \
+  rg -q 'repository source must declare exactly one default StorageClass, found 2' || {
+    printf 'FAIL: second default mutation did not exercise the repository-wide default guard\n' >&2
+    exit 1
+  }
+
+unparseable_default_root="$TEMP_ROOT/unparseable-default"
+make_fixture "$unparseable_default_root"
+mkdir -p "$unparseable_default_root/platform/unparseable-default"
+cp "$SCRIPT_DIR/fixtures/retention-unparseable-default-storageclass.yaml.j2" \
+  "$unparseable_default_root/platform/unparseable-default/storageclass.yaml.j2"
+if unparseable_default_output="$($CHECK --root "$unparseable_default_root" \
+  --contract "$CONTRACT" 2>&1)"; then
+  printf 'FAIL: expected failure: unparseable templated default StorageClass cannot be skipped\n' >&2
+  exit 1
+fi
+printf '%s\n' "$unparseable_default_output" | \
+  rg -q 'StorageClass/default-annotation candidate cannot be parsed' || {
+    printf 'FAIL: unparseable default J2 did not exercise the fail-closed candidate guard\n' >&2
+    exit 1
+  }
+
+chart_default_root="$TEMP_ROOT/chart-default-enabled"
+make_fixture "$chart_default_root"
+yq e -i '.persistence.defaultClass = true' \
+  "$chart_default_root/infrastructure/longhorn/values.yaml"
+expect_fail "Longhorn chart cannot generate a competing default StorageClass" \
+  --root "$chart_default_root" --contract "$CONTRACT"
+
+coordinated_default_drift_root="$TEMP_ROOT/coordinated-default-drift"
+make_fixture "$coordinated_default_drift_root"
+coordinated_default_drift_contract="$TEMP_ROOT/coordinated-default-drift-contract.yaml"
+cp "$CONTRACT" "$coordinated_default_drift_contract"
+yq e -i '
+  (select(.kind == "StorageClass" and .metadata.name == "longhorn-replica2") |
+   .metadata.annotations."storageclass.kubernetes.io/is-default-class") = "false" |
+  (select(.kind == "StorageClass" and .metadata.name == "longhorn-replica3") |
+   .metadata.annotations."storageclass.kubernetes.io/is-default-class") = "true"
+' "$coordinated_default_drift_root/infrastructure/longhorn/storageclasses.yaml"
+yq e -i '
+  .storage_classes.default = "longhorn-replica3" |
+  (.entries[] | select(.id == "woodpecker-agent-config") |
+    .current_storage_class) = "longhorn-replica3" |
+  (.entries[] | select(.id == "woodpecker-agent-config") |
+    .target_storage_class) = "longhorn-replica3"
+' "$coordinated_default_drift_contract"
+expect_fail "coordinated default-class drift remains outside the bounded exception" \
+  --root "$coordinated_default_drift_root" --contract "$coordinated_default_drift_contract"
 
 duplicate_locator_root="$TEMP_ROOT/duplicate-locator"
 make_fixture "$duplicate_locator_root"

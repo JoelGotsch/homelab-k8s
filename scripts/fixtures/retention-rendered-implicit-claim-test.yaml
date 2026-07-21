@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: woodpecker-agent
+spec:
+  selector:
+    matchLabels:
+      app: woodpecker-agent
+  serviceName: woodpecker-agent
+  template:
+    metadata:
+      labels:
+        app: woodpecker-agent
+    spec:
+      containers:
+        - name: agent
+          image: example.invalid/woodpecker-agent:test
+  volumeClaimTemplates:
+    - metadata:
+        name: agent-config
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: woodpecker-server
+spec:
+  selector:
+    matchLabels:
+      app: woodpecker-server
+  serviceName: woodpecker-server
+  template:
+    metadata:
+      labels:
+        app: woodpecker-server
+    spec:
+      containers:
+        - name: server
+          image: example.invalid/woodpecker-server:test
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: longhorn-replica2
+        resources:
+          requests:
+            storage: 10Gi

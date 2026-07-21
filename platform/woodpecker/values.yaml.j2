@@ -135,11 +135,15 @@ server:
 
 agent:
   # Agent-local configuration is reconstructable from Git and projected
-  # secrets. Keep persistence enabled but select the Delete-policy class
-  # explicitly; chart-default "" would bypass the retention inventory.
+  # secrets. Keep the chart value explicitly empty because the live
+  # StatefulSet claim template was created without storageClassName and that
+  # field is immutable. The bounded rendered-claim exception resolves this to
+  # the declared cluster default (longhorn-replica2); KST-03 must recreate the
+  # controller before this can become an explicit class without Argo diff
+  # failure. Do not add a class here as an unattended source-only change.
   persistence:
     enabled: true
-    storageClass: longhorn-replica2
+    storageClass: ""
   enabled: true
 
   image:

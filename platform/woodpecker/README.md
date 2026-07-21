@@ -133,6 +133,21 @@ steps:
    currently declared. If churn grows, switch to CNPG via
    `WOODPECKER_DATABASE_DRIVER=postgres`.
 
+   The separate agent `agent-config` claim contains only reconstructable
+   configuration. Its live StatefulSet template predates the explicit storage
+   contract and omits the immutable `storageClassName` field. Source therefore
+   keeps the pinned chart's `agent.persistence.storageClass` explicitly empty,
+   which renders the key absent and lets the claim resolve to the sole cluster
+   default, `longhorn-replica2` (`Delete`). The retention gates hard-bind this
+   as the only implicit-default exception and reject a second/moved omission,
+   a different/default-missing StorageClass, a present-but-empty rendered key,
+   or source/`.j2` drift. KST-03 owns an attended recreation of only the
+   StatefulSet controller under an explicit template. Preserve and reuse the
+   existing `agent-config-*` PVC; after verifying that PVC remains on
+   `longhorn-replica2` and the agent is healthy, retire the exception and
+   restore the explicit chart value atomically. Do not delete/recreate the PVC
+   or make that immutable controller change unattended.
+
 2. **Single agent replica + 4 concurrent workflows.** At
    homelab scale this caps total parallel step Pods at ~8
    (pipelines × steps-in-flight). Increase

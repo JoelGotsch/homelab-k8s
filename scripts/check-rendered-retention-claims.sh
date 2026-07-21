@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Compare every rendered Longhorn PVC/claim template with one fixture layer.
-# Missing or empty storageClassName is always an error: it would silently bind
-# to cluster-default behavior (or disable provisioning) outside the contract.
+# Missing storageClassName is allowed only for the exact reviewed Woodpecker
+# agent exception. A present-but-empty field always disables dynamic defaulting
+# and is therefore never equivalent to omission.
 
 set -euo pipefail
 
@@ -62,8 +63,11 @@ done
 
 problems=0
 explicit_non_longhorn=0
+actual_implicit_defaults=0
 declare -A fixture_claims=()
+declare -A fixture_claim_modes=()
 declare -A actual_longhorn_claims=()
+declare -A actual_claim_modes=()
 declare -A actual_claim_ids=()
 
 error() {
@@ -82,17 +86,50 @@ layer_count="$(LAYER_PATH="$LAYER_PATH" yq e -r \
   exit 1
 }
 
-while IFS=$'\t' read -r claim_id storage_class; do
+default_storage_class="$(yq e -r '.cluster_defaults.storage_class.name // ""' "$FIXTURE")"
+[ -n "$default_storage_class" ] || {
+  printf 'ERROR: fixture cluster default StorageClass is required\n' >&2
+  exit 1
+}
+# `$layer` is a yq variable, not a shell interpolation.
+# shellcheck disable=SC2016
+global_implicit_rows="$(yq e -r '
+  .layers[] as $layer | $layer.claims[]? |
+  select(.storage_class_mode == "implicit-default") |
+  [$layer.path, .rendered_claim_id] | @tsv
+' "$FIXTURE" | strip_yq_stream_markers)"
+global_implicit_count="$(printf '%s\n' "$global_implicit_rows" | awk 'NF' | wc -l | tr -d ' ')"
+[ "$global_implicit_count" -eq 1 ] && \
+  [ "$global_implicit_rows" = $'platform/woodpecker\twoodpecker-agent/agent-config' ] || {
+    printf 'ERROR: fixture must contain exactly the bounded platform/woodpecker Woodpecker-agent implicit claim\n' >&2
+    exit 1
+  }
+
+while IFS=$'\t' read -r claim_id storage_class storage_class_mode; do
   [ -n "$claim_id" ] || continue
   [ -z "${fixture_claims[$claim_id]:-}" ] || error "$FIXTURE: duplicate rendered claim '$claim_id'"
-  case "$storage_class" in
-    longhorn*) fixture_claims["$claim_id"]="$storage_class" ;;
-    *) error "$FIXTURE: projected claim $claim_id must declare an explicit Longhorn class" ;;
+  case "$storage_class_mode" in
+    explicit)
+      case "$storage_class" in
+        longhorn*) ;;
+        *) error "$FIXTURE: projected claim $claim_id must declare an explicit Longhorn class" ;;
+      esac
+      ;;
+    implicit-default)
+      [ "$LAYER_PATH" = "platform/woodpecker" ] && \
+        [ "$claim_id" = "woodpecker-agent/agent-config" ] || \
+        error "$FIXTURE: implicit-default claim identity may not move: $LAYER_PATH/$claim_id"
+      [ "$storage_class" = "$default_storage_class" ] || \
+        error "$FIXTURE: implicit-default claim $claim_id must resolve to $default_storage_class"
+      ;;
+    *) error "$FIXTURE: projected claim $claim_id has invalid storage_class_mode '$storage_class_mode'" ;;
   esac
+  fixture_claims["$claim_id"]="$storage_class"
+  fixture_claim_modes["$claim_id"]="$storage_class_mode"
 done < <(
   LAYER_PATH="$LAYER_PATH" yq e -r '
     .layers[] | select(.path == strenv(LAYER_PATH)) | .claims[]? |
-    [.rendered_claim_id, .storage_class] | @tsv
+    [.rendered_claim_id, .storage_class, .storage_class_mode] | @tsv
   ' "$FIXTURE" | strip_yq_stream_markers
 )
 
@@ -100,13 +137,29 @@ while IFS=$'\t' read -r claim_id has_storage_class storage_class; do
   [ -n "$claim_id" ] || continue
   [ -z "${actual_claim_ids[$claim_id]:-}" ] || error "$LAYER_PATH render: duplicate claim identity '$claim_id'"
   actual_claim_ids["$claim_id"]=1
-  if [ "$has_storage_class" != "true" ] || [ -z "$storage_class" ]; then
-    error "$LAYER_PATH render: implicit default storage class is forbidden for '$claim_id' (storageClassName absent or empty)"
+  if [ "$has_storage_class" = "true" ] && [ -z "$storage_class" ]; then
+    error "$LAYER_PATH render: storageClassName is explicitly empty for '$claim_id'; this disables dynamic defaulting"
+    continue
+  fi
+  if [ "$has_storage_class" != "true" ]; then
+    if [ "${fixture_claim_modes[$claim_id]:-}" != "implicit-default" ]; then
+      error "$LAYER_PATH render: unreviewed implicit default StorageClass for '$claim_id'"
+      continue
+    fi
+    actual_longhorn_claims["$claim_id"]="$default_storage_class"
+    actual_claim_modes["$claim_id"]="implicit-default"
+    actual_implicit_defaults=$((actual_implicit_defaults + 1))
     continue
   fi
   case "$storage_class" in
-    longhorn*) actual_longhorn_claims["$claim_id"]="$storage_class" ;;
-    *) explicit_non_longhorn=$((explicit_non_longhorn + 1)) ;;
+    longhorn*)
+      actual_longhorn_claims["$claim_id"]="$storage_class"
+      actual_claim_modes["$claim_id"]="explicit"
+      ;;
+    *)
+      explicit_non_longhorn=$((explicit_non_longhorn + 1))
+      actual_claim_modes["$claim_id"]="explicit"
+      ;;
   esac
 done < <(
   # `$owner` is a yq variable, not a shell interpolation.
@@ -128,6 +181,8 @@ for claim_id in "${!fixture_claims[@]}"; do
   }
   [ "${actual_longhorn_claims[$claim_id]}" = "${fixture_claims[$claim_id]}" ] || \
     error "$LAYER_PATH render: $claim_id class is '${actual_longhorn_claims[$claim_id]}', fixture says '${fixture_claims[$claim_id]}'"
+  [ "${actual_claim_modes[$claim_id]:-}" = "${fixture_claim_modes[$claim_id]}" ] || \
+    error "$LAYER_PATH render: $claim_id selection mode is '${actual_claim_modes[$claim_id]:-missing}', fixture says '${fixture_claim_modes[$claim_id]}'"
 done
 
 for claim_id in "${!actual_longhorn_claims[@]}"; do
@@ -141,6 +196,6 @@ if [ "$problems" -ne 0 ]; then
 fi
 
 if [ "$QUIET" = false ]; then
-  printf 'PASS: %s rendered claims match (%d Longhorn, %d explicit non-Longhorn).\n' \
-    "$LAYER_PATH" "${#actual_longhorn_claims[@]}" "$explicit_non_longhorn"
+  printf 'PASS: %s rendered claims match (%d effective Longhorn, %d bounded implicit, %d explicit non-Longhorn).\n' \
+    "$LAYER_PATH" "${#actual_longhorn_claims[@]}" "$actual_implicit_defaults" "$explicit_non_longhorn"
 fi

@@ -24,8 +24,19 @@ The checker accepts `--root DIR --contract FILE`, so the mutation suite can
 exercise a fixture or a workspace aggregate can invoke an app contract without
 changing the app checkout.
 
-Each explicit Longhorn `storageClass` or `storageClassName` in the declared
-scope must have exactly one matrix entry. Identity is the full
+Each Longhorn-backed selector in the declared scope must have exactly one
+matrix entry. Twenty-one entries use an explicit `storageClass` or
+`storageClassName`. One bounded `implicit-default` exception is allowed only
+for `platform/woodpecker`'s `woodpecker-agent/agent-config` claim template:
+the chart source and its `.j2` mirror both carry `storageClass: ""`, which the
+pinned chart renders by omitting `storageClassName` to remain compatible with
+the existing immutable StatefulSet template. The checker resolves that claim
+to the declared cluster default, requires that default to be exactly
+`longhorn-replica2` with `Delete`, rejects any second or relocated default,
+and requires the Longhorn chart's separate `persistence.defaultClass` switch
+to remain `false`.
+
+Explicit-selector identity is the full
 `source.file` + YAML `document_index` + scalar `selector_path` + value tuple;
 two rows pointing at the same file/class cannot mask an omitted selector. The
 human-readable `value_path` must evaluate to exactly that recorded identity.
@@ -38,7 +49,19 @@ migration owner, and required restore test. The check rejects:
 - an inaccurate StorageClass reclaim-policy catalog;
 - duplicate/incomplete entries;
 - a target class that does not implement the declared lifecycle; and
-- a mismatch without a named migration owner.
+- a mismatch without a named migration owner; or
+- expansion, relocation, source/mirror drift, or default-class drift of the
+  single Woodpecker implicit-default exception; or
+- an owned YAML/Jinja source which mentions `kind: StorageClass` or a supported
+  default-class annotation but cannot be parsed and classified.
+
+The exception owner is KST-03. Remove it only in the same attended change that
+recreates only the Woodpecker agent StatefulSet controller under the explicit
+template, preserves and reuses the existing `agent-config-*` PVC, verifies the
+PVC still uses `longhorn-replica2` and the agent is healthy, and restores
+explicit source selection. Do not delete or recreate the PVC, and do not turn
+the source value explicit before that controller recreation: Argo would
+attempt an immutable claim-template update.
 
 ## Chart-generated claims
 
@@ -65,10 +88,13 @@ scripts/check-retention-render-fixtures.sh --render
 That command downloads each exact version, rejects a package whose SHA-256 no
 longer matches the reviewed archive, renders from the verified local package,
 rejects every generated PVC or StatefulSet claim template whose
-`storageClassName` is absent or empty, and compares all generated Longhorn
-claims, S3 `secretKeyRef` pairs, and pod labels against the projection. An
-explicit non-Longhorn class remains outside this Longhorn contract. The command
-does not call Kubernetes. Review the render
+`storageClassName` is absent except the exact Woodpecker agent exception. A
+present-but-empty `storageClassName` is always rejected because Kubernetes
+treats it as disabling dynamic defaulting, not as selecting the default. The
+render gate also rejects an extra or relocated omission and compares all
+effective Longhorn claims, S3 `secretKeyRef` pairs, and pod labels against the
+projection. An explicit non-Longhorn class remains outside this Longhorn
+contract. The command does not call Kubernetes. Review the render
 before updating the package hash, layer digest, or projection; those fields are
 evidence, not cache values to refresh blindly.
 
