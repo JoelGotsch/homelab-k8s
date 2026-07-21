@@ -78,8 +78,8 @@ entry_count="$(yq e -r '.entries | length' "$CONTRACT")"
 
 declare -A class_policy=()
 declare -A entry_ids=()
-declare -A declared_selector_counts=()
-declare -A discovered_selector_counts=()
+declare -A declared_selectors=()
+declare -A discovered_selectors=()
 
 while IFS= read -r storage_class; do
   [ -n "$storage_class" ] || continue
@@ -118,29 +118,20 @@ if [ -n "$storageclass_source_rel" ]; then
   fi
 fi
 
-read_source_value() {
+read_source_locator() {
   local source_file="$1"
   local value_path="$2"
-  yq e -r "$value_path" "$source_file" 2>/dev/null | strip_yq_stream_markers
-}
-
-increment_count() {
-  local array_name="$1"
-  local key="$2"
-  local current
-  if [ "$array_name" = "declared" ]; then
-    current="${declared_selector_counts[$key]:-0}"
-    declared_selector_counts["$key"]=$((current + 1))
-  else
-    current="${discovered_selector_counts[$key]:-0}"
-    discovered_selector_counts["$key"]=$((current + 1))
-  fi
+  yq e -r \
+    "$value_path | [documentIndex, (path | join(\".\")), .] | @tsv" \
+    "$source_file" 2>/dev/null | strip_yq_stream_markers
 }
 
 for ((entry_index = 0; entry_index < entry_count; entry_index++)); do
   id="$(yq e -r ".entries[$entry_index].id // \"\"" "$CONTRACT")"
   source_rel="$(yq e -r ".entries[$entry_index].source.file // \"\"" "$CONTRACT")"
   value_path="$(yq e -r ".entries[$entry_index].source.value_path // \"\"" "$CONTRACT")"
+  document_index="$(yq e -r ".entries[$entry_index].source.document_index // \"\"" "$CONTRACT")"
+  selector_path="$(yq e -r ".entries[$entry_index].source.selector_path // \"\"" "$CONTRACT")"
   current_class="$(yq e -r ".entries[$entry_index].current_storage_class // \"\"" "$CONTRACT")"
   target_class="$(yq e -r ".entries[$entry_index].target_storage_class // \"\"" "$CONTRACT")"
   desired_policy="$(yq e -r ".entries[$entry_index].desired_reclaim_policy // \"\"" "$CONTRACT")"
@@ -158,6 +149,11 @@ for ((entry_index = 0; entry_index < entry_count; entry_index++)); do
 
   [ -n "$source_rel" ] || { error "$CONTRACT: $id has no source.file"; continue; }
   [ -n "$value_path" ] || { error "$CONTRACT: $id has no source.value_path"; continue; }
+  [[ "$document_index" =~ ^[0-9]+$ ]] || {
+    error "$CONTRACT: $id source.document_index must be a non-negative integer"
+    continue
+  }
+  [ -n "$selector_path" ] || { error "$CONTRACT: $id has no source.selector_path"; continue; }
   [ -n "$current_class" ] || { error "$CONTRACT: $id has no current_storage_class"; continue; }
   [ -n "$target_class" ] || { error "$CONTRACT: $id has no target_storage_class"; continue; }
   [ -n "${class_policy[$current_class]:-}" ] || error "$CONTRACT: $id uses unknown current class '$current_class'"
@@ -180,37 +176,52 @@ for ((entry_index = 0; entry_index < entry_count; entry_index++)); do
 
   source_file="$REPO_ROOT/$source_rel"
   [ -f "$source_file" ] || { error "$CONTRACT: $id source does not exist: $source_rel"; continue; }
-  actual_values="$(read_source_value "$source_file" "$value_path")" || {
+  actual_locators="$(read_source_locator "$source_file" "$value_path")" || {
     error "$CONTRACT: $id could not evaluate $source_rel at $value_path"
     continue
   }
-  actual_count="$(printf '%s\n' "$actual_values" | awk 'NF' | wc -l | tr -d ' ')"
+  actual_count="$(printf '%s\n' "$actual_locators" | awk 'NF' | wc -l | tr -d ' ')"
   [ "$actual_count" -eq 1 ] || {
     error "$CONTRACT: $id selector matched $actual_count values in $source_rel"
     continue
   }
-  [ "$actual_values" = "$current_class" ] || \
-    error "$CONTRACT: $id expected $current_class in $source_rel, got '$actual_values'; update or retire the contract in the same review"
+  IFS=$'\t' read -r actual_document_index actual_selector_path actual_value <<<"$actual_locators"
+  [ "$actual_document_index" = "$document_index" ] || \
+    error "$CONTRACT: $id expected document $document_index in $source_rel, got $actual_document_index"
+  [ "$actual_selector_path" = "$selector_path" ] || \
+    error "$CONTRACT: $id expected path $selector_path in $source_rel, got '$actual_selector_path'"
+  [ "$actual_value" = "$current_class" ] || \
+    error "$CONTRACT: $id expected $current_class in $source_rel, got '$actual_value'; update or retire the contract in the same review"
 
   mirror_count="$(yq e -r ".entries[$entry_index].source.mirrors // [] | length" "$CONTRACT")"
   for ((mirror_index = 0; mirror_index < mirror_count; mirror_index++)); do
     mirror_rel="$(yq e -r ".entries[$entry_index].source.mirrors[$mirror_index]" "$CONTRACT")"
     mirror_file="$REPO_ROOT/$mirror_rel"
     [ -f "$mirror_file" ] || { error "$CONTRACT: $id mirror does not exist: $mirror_rel"; continue; }
-    mirror_values="$(read_source_value "$mirror_file" "$value_path")" || {
+    mirror_locators="$(read_source_locator "$mirror_file" "$value_path")" || {
       error "$CONTRACT: $id could not evaluate mirror $mirror_rel at $value_path"
       continue
     }
-    mirror_value_count="$(printf '%s\n' "$mirror_values" | awk 'NF' | wc -l | tr -d ' ')"
+    mirror_value_count="$(printf '%s\n' "$mirror_locators" | awk 'NF' | wc -l | tr -d ' ')"
     [ "$mirror_value_count" -eq 1 ] || {
       error "$CONTRACT: $id mirror selector matched $mirror_value_count values in $mirror_rel"
       continue
     }
-    [ "$mirror_values" = "$current_class" ] || \
-      error "$CONTRACT: $id mirror expected $current_class in $mirror_rel, got '$mirror_values'"
+    IFS=$'\t' read -r mirror_document_index mirror_selector_path mirror_value <<<"$mirror_locators"
+    [ "$mirror_document_index" = "$document_index" ] || \
+      error "$CONTRACT: $id mirror expected document $document_index in $mirror_rel, got $mirror_document_index"
+    [ "$mirror_selector_path" = "$selector_path" ] || \
+      error "$CONTRACT: $id mirror expected path $selector_path in $mirror_rel, got '$mirror_selector_path'"
+    [ "$mirror_value" = "$current_class" ] || \
+      error "$CONTRACT: $id mirror expected $current_class in $mirror_rel, got '$mirror_value'"
   done
 
-  increment_count declared "$source_rel|$current_class"
+  selector_fingerprint="$source_rel|$document_index|$selector_path|$current_class"
+  if [ -n "${declared_selectors[$selector_fingerprint]:-}" ]; then
+    error "$CONTRACT: $id duplicates exact selector owned by ${declared_selectors[$selector_fingerprint]}: $selector_fingerprint"
+  else
+    declared_selectors["$selector_fingerprint"]="$id"
+  fi
   checked_entries=$((checked_entries + 1))
 done
 
@@ -240,18 +251,26 @@ while IFS= read -r scope_root; do
   while IFS= read -r -d '' yaml_file; do
     relative_file="${yaml_file#"$REPO_ROOT"/}"
     path_is_excluded "$relative_file" && continue
-    while IFS=$'\t' read -r selector_key selector_value; do
-      [ -n "$selector_key" ] || continue
+    if ! yq e '.' "$yaml_file" >/dev/null 2>&1; then
+      error "$relative_file: yq could not parse YAML"
+      continue
+    fi
+    while IFS=$'\t' read -r discovered_document_index discovered_selector_path selector_value; do
+      [ -n "$discovered_selector_path" ] || continue
+      selector_key="${discovered_selector_path##*.}"
       selector_key_allowed "$selector_key" || continue
       case "$selector_value" in longhorn*) ;; *) continue ;; esac
-      increment_count discovered "$relative_file|$selector_value"
+      selector_fingerprint="$relative_file|$discovered_document_index|$discovered_selector_path|$selector_value"
+      if [ -n "${discovered_selectors[$selector_fingerprint]:-}" ]; then
+        error "$relative_file: duplicate discovered selector identity: $selector_fingerprint"
+      else
+        discovered_selectors["$selector_fingerprint"]=1
+      fi
     done < <(
       yq e -r '
-        .. | select(tag == "!!map") | to_entries[] |
-        select((.value | tag) == "!!str") |
-        select(.value | test("^longhorn")) |
-        [.key, .value] | @tsv
-      ' "$yaml_file" 2>/dev/null || true
+        .. | select(tag == "!!str" and test("^longhorn")) |
+        [documentIndex, (path | join(".")), .] | @tsv
+      ' "$yaml_file"
     )
 
     while IFS=$'\t' read -r implicit_kind implicit_name; do
@@ -273,20 +292,18 @@ while IFS= read -r scope_root; do
           .spec.templates.volumeClaimTemplates[]? |
           select((.spec | has("storageClassName")) == false) |
           ["ClickHouseInstallation", $owner + "/" + .name] | @tsv)
-      ' "$yaml_file" 2>/dev/null || true
+      ' "$yaml_file"
     )
-  done < <(find "$REPO_ROOT/$scope_root" -type f -name '*.yaml' -print0)
+  done < <(find "$REPO_ROOT/$scope_root" -type f \( -name '*.yaml' -o -name '*.yml' \) -print0)
 done < <(yq e -r '.scope.roots[]' "$CONTRACT" | strip_yq_stream_markers)
 
-for fingerprint in "${!declared_selector_counts[@]}"; do
-  declared_total="${declared_selector_counts[$fingerprint]}"
-  discovered_total="${discovered_selector_counts[$fingerprint]:-0}"
-  [ "$declared_total" -eq "$discovered_total" ] || \
-    error "selector inventory drift for $fingerprint: contract=$declared_total source=$discovered_total"
+for fingerprint in "${!declared_selectors[@]}"; do
+  [ -n "${discovered_selectors[$fingerprint]:-}" ] || \
+    error "contract selector not discovered at its exact identity: $fingerprint"
 done
 
-for fingerprint in "${!discovered_selector_counts[@]}"; do
-  [ -n "${declared_selector_counts[$fingerprint]:-}" ] || \
+for fingerprint in "${!discovered_selectors[@]}"; do
+  [ -n "${declared_selectors[$fingerprint]:-}" ] || \
     error "unclassified Longhorn selector outside the contract: $fingerprint"
 done
 

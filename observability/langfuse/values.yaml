@@ -53,7 +53,8 @@ langfuse:
         cpu: 50m
         memory: 256Mi
       limits:
-        # 1Gi -> 2Gi: chart 1.5.38 (app v3.174.1+) OOM'd at ~500MB heap
+        # 1Gi -> 2Gi: app v3.174.1+ (chart 1.5.38 now pins v3.205.1)
+        # OOM'd at ~500MB heap
         # under the 1Gi limit — new MCP-protocol features (prompts,
         # observations, annotationQueues, evals, etc., absent from
         # 1.5.31's startup log) raised baseline memory. Found + fixed
@@ -226,6 +227,13 @@ redis:
 # Langfuse ships traces' large payloads (LLM I/O text,
 # attachments) to S3 instead of bloating ClickHouse / Postgres.
 s3:
+  # The chart deploys a bundled MinIO dependency by default. Keep the current
+  # deployment explicitly represented until KST-03 proves whether its PVC has
+  # unique objects and either migrates or retires it. An implicit default class
+  # would bypass the retention contract.
+  deploy: true
+  persistence:
+    storageClass: longhorn-replica2
   # Event uploads (raw trace data before ClickHouse ingest).
   eventUpload:
     bucket: "langfuse-blobs"
@@ -233,11 +241,30 @@ s3:
     endpoint: "http://minio.minio-on-nas.svc.cluster.local:9000"
     forcePathStyle: true
     accessKeyId:
-      existingSecret: langfuse-app-secrets
-      key: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+      secretKeyRef:
+        name: langfuse-app-secrets
+        key: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
     secretAccessKey:
-      existingSecret: langfuse-app-secrets
-      key: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+      secretKeyRef:
+        name: langfuse-app-secrets
+        key: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+  # Batch exports use the same bucket-scoped MinIO service account. Declare
+  # this explicitly; chart defaults otherwise render the bundled-MinIO
+  # credentials rather than the external secret.
+  batchExport:
+    enabled: true
+    bucket: "langfuse-blobs"
+    region: "auto"
+    endpoint: "http://minio.minio-on-nas.svc.cluster.local:9000"
+    forcePathStyle: true
+    accessKeyId:
+      secretKeyRef:
+        name: langfuse-app-secrets
+        key: LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID
+    secretAccessKey:
+      secretKeyRef:
+        name: langfuse-app-secrets
+        key: LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY
   # Media uploads (attachment files).
   mediaUpload:
     bucket: "langfuse-blobs"
@@ -245,11 +272,13 @@ s3:
     endpoint: "http://minio.minio-on-nas.svc.cluster.local:9000"
     forcePathStyle: true
     accessKeyId:
-      existingSecret: langfuse-app-secrets
-      key: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+      secretKeyRef:
+        name: langfuse-app-secrets
+        key: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
     secretAccessKey:
-      existingSecret: langfuse-app-secrets
-      key: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+      secretKeyRef:
+        name: langfuse-app-secrets
+        key: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
 
 # Self-metrics — chart-default ServiceMonitor uses a different
 # label selector; we ship our own at servicemonitor.yaml.

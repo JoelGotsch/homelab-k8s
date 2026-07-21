@@ -106,6 +106,20 @@ yq e -i '.persistence.storageClass = "longhorn-replica3-retain"' \
 expect_fail "render-source mirror drift" \
   --root "$mirror_drift_root" --contract "$CONTRACT"
 
+duplicate_locator_root="$TEMP_ROOT/duplicate-locator"
+make_fixture "$duplicate_locator_root"
+duplicate_locator_contract="$TEMP_ROOT/duplicate-locator-contract.yaml"
+cp "$CONTRACT" "$duplicate_locator_contract"
+ENTRY_ID=grafana-data yq e -i '
+  (.entries[] | select(.id == strenv(ENTRY_ID)) | .source.value_path) =
+    ".prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName" |
+  (.entries[] | select(.id == strenv(ENTRY_ID)) | .source.document_index) = 0 |
+  (.entries[] | select(.id == strenv(ENTRY_ID)) | .source.selector_path) =
+    "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName"
+' "$duplicate_locator_contract"
+expect_fail "duplicate file/class locator cannot mask an omitted exact selector" \
+  --root "$duplicate_locator_root" --contract "$duplicate_locator_contract"
+
 migrated_root="$TEMP_ROOT/migrated"
 make_fixture "$migrated_root"
 migrated_contract="$TEMP_ROOT/migrated-contract.yaml"

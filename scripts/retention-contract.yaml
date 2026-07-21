@@ -13,7 +13,7 @@
 # claim/template merely to make this file green; KST-03 owns attended migration.
 version: 1
 owner_repository: homelab-k8s
-declared_count: 19
+declared_count: 22
 
 scope:
   roots:
@@ -23,6 +23,7 @@ scope:
     - components
   excluded_directory_names:
     - charts
+    - templates
     - testdata
   storage_selector_keys:
     - storageClass
@@ -46,6 +47,8 @@ entries:
     source:
       file: infrastructure/backup-cronjobs/pvc.yaml
       value_path: 'select(.kind == "PersistentVolumeClaim" and .metadata.name == "restic-staging") | .spec.storageClassName'
+      document_index: 0
+      selector_path: spec.storageClassName
     current_storage_class: longhorn-replica1
     target_storage_class: longhorn-replica1
     desired_reclaim_policy: Delete
@@ -66,6 +69,8 @@ entries:
     source:
       file: observability/crowdsec/cnpg-cluster.yaml
       value_path: 'select(.kind == "Cluster" and .metadata.name == "crowdsec-lapi") | .spec.storage.storageClass'
+      document_index: 0
+      selector_path: spec.storage.storageClass
     current_storage_class: longhorn-replica3
     target_storage_class: longhorn-replica3-retain
     desired_reclaim_policy: Retain
@@ -79,6 +84,29 @@ entries:
     required_restore_test: recover a disposable CNPG cluster from an off-volume base backup plus WAL
     reason: ADR 0036 requires CNPG primary storage to survive claim deletion
 
+  - id: crowdsec-lapi-data
+    workload: CrowdSec LAPI local data
+    namespace: observability-crowdsec
+    claim: PersistentVolumeClaim/crowdsec-db-pvc
+    source:
+      file: observability/crowdsec/values.yaml
+      value_path: '.lapi.persistentVolume.data.storageClassName'
+      document_index: 0
+      selector_path: lapi.persistentVolume.data.storageClassName
+    rendered_claim_id: crowdsec-db-pvc
+    current_storage_class: longhorn-replica2
+    target_storage_class: longhorn-replica2
+    desired_reclaim_policy: Delete
+    state: compliant
+    data_class: internal
+    data_value: registered bouncer API keys and recreatable LAPI-local data
+    backup_tier: none; bouncer registration is declaratively scripted and authoritative decisions live in Postgres
+    rpo: bouncer keys are rotated by re-registration after loss
+    rto: hours to recreate the claim and rerun bouncer registration
+    migration_owner: none
+    required_restore_test: recreate a disposable data claim and verify scripted bouncer registration
+    reason: local LAPI data is reconstructable and must not leave orphaned volumes
+
   - id: prometheus-tsdb
     workload: kube-prometheus-stack Prometheus
     namespace: monitoring
@@ -86,6 +114,8 @@ entries:
     source:
       file: observability/kube-prometheus-stack/values.yaml
       value_path: '.prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName'
+      document_index: 0
+      selector_path: prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName
       mirrors:
         - observability/kube-prometheus-stack/values.yaml.j2
     current_storage_class: longhorn-replica2
@@ -108,6 +138,8 @@ entries:
     source:
       file: observability/kube-prometheus-stack/values.yaml
       value_path: '.alertmanager.alertmanagerSpec.storage.volumeClaimTemplate.spec.storageClassName'
+      document_index: 0
+      selector_path: alertmanager.alertmanagerSpec.storage.volumeClaimTemplate.spec.storageClassName
       mirrors:
         - observability/kube-prometheus-stack/values.yaml.j2
     current_storage_class: longhorn-replica2
@@ -130,6 +162,8 @@ entries:
     source:
       file: observability/kube-prometheus-stack/alert-formatter.yaml
       value_path: 'select(.kind == "PersistentVolumeClaim" and .metadata.name == "alert-formatter-state") | .spec.storageClassName'
+      document_index: 1
+      selector_path: spec.storageClassName
     current_storage_class: longhorn-replica2-retain
     target_storage_class: longhorn-replica2-retain
     desired_reclaim_policy: Retain
@@ -150,6 +184,8 @@ entries:
     source:
       file: observability/kube-prometheus-stack/values.yaml
       value_path: '.grafana.persistence.storageClassName'
+      document_index: 0
+      selector_path: grafana.persistence.storageClassName
       mirrors:
         - observability/kube-prometheus-stack/values.yaml.j2
     current_storage_class: longhorn-replica2
@@ -172,6 +208,8 @@ entries:
     source:
       file: observability/langfuse/clickhouseinstallation.yaml
       value_path: 'select(.kind == "ClickHouseInstallation" and .metadata.name == "langfuse") | .spec.templates.volumeClaimTemplates[] | select(.name == "data-volume") | .spec.storageClassName'
+      document_index: 0
+      selector_path: spec.templates.volumeClaimTemplates.0.spec.storageClassName
     current_storage_class: longhorn-replica2
     target_storage_class: longhorn-replica2-retain
     desired_reclaim_policy: Retain
@@ -192,6 +230,8 @@ entries:
     source:
       file: observability/langfuse/clickhouseinstallation.yaml
       value_path: 'select(.kind == "ClickHouseInstallation" and .metadata.name == "langfuse") | .spec.templates.volumeClaimTemplates[] | select(.name == "log-volume") | .spec.storageClassName'
+      document_index: 0
+      selector_path: spec.templates.volumeClaimTemplates.1.spec.storageClassName
     current_storage_class: longhorn-replica2
     target_storage_class: longhorn-replica2
     desired_reclaim_policy: Delete
@@ -212,6 +252,8 @@ entries:
     source:
       file: observability/langfuse/cnpg-cluster.yaml
       value_path: 'select(.kind == "Cluster" and .metadata.name == "langfuse-pg") | .spec.storage.storageClass'
+      document_index: 0
+      selector_path: spec.storage.storageClass
     current_storage_class: longhorn-replica3
     target_storage_class: longhorn-replica3-retain
     desired_reclaim_policy: Retain
@@ -232,8 +274,11 @@ entries:
     source:
       file: observability/langfuse/values.yaml
       value_path: '.redis.primary.persistence.storageClass'
+      document_index: 0
+      selector_path: redis.primary.persistence.storageClass
       mirrors:
         - observability/langfuse/values.yaml.j2
+    rendered_claim_id: langfuse-redis-primary/valkey-data
     current_storage_class: longhorn-replica2
     target_storage_class: longhorn-replica2
     desired_reclaim_policy: Delete
@@ -247,6 +292,31 @@ entries:
     required_restore_test: recreate a disposable Valkey claim and verify Langfuse reconnects
     reason: Postgres and ClickHouse hold the durable state
 
+  - id: langfuse-s3
+    workload: Langfuse chart-managed MinIO compatibility deployment
+    namespace: langfuse
+    claim: PersistentVolumeClaim/langfuse-s3
+    source:
+      file: observability/langfuse/values.yaml
+      value_path: '.s3.persistence.storageClass'
+      document_index: 0
+      selector_path: s3.persistence.storageClass
+      mirrors:
+        - observability/langfuse/values.yaml.j2
+    rendered_claim_id: langfuse-s3
+    current_storage_class: longhorn-replica2
+    target_storage_class: longhorn-replica2-retain
+    desired_reclaim_policy: Retain
+    state: known-mismatch
+    data_class: personal
+    data_value: bundled MinIO data; expected unused because every Langfuse S3 endpoint targets minio-on-nas, but not yet proven empty
+    backup_tier: tier-1 Longhorn snapshots only; independent off-volume backup is not declared
+    rpo: 1 hour policy target
+    rto: 4 to 24 hours
+    migration_owner: KST-03 Langfuse S3 disposition and PVC migration
+    required_restore_test: compare bundled and external object inventories; restore the claim if any unique object exists
+    reason: the pinned chart renders this PVC; retain it conservatively until KST-03 proves it disposable or migrates unique data
+
   - id: loki-local
     workload: Loki single-binary local storage
     namespace: monitoring
@@ -254,6 +324,8 @@ entries:
     source:
       file: observability/loki/values.yaml
       value_path: '.singleBinary.persistence.storageClass'
+      document_index: 0
+      selector_path: singleBinary.persistence.storageClass
     current_storage_class: longhorn-replica2
     target_storage_class: longhorn-replica2
     desired_reclaim_policy: Delete
@@ -274,6 +346,8 @@ entries:
     source:
       file: observability/tempo/values.yaml
       value_path: '.persistence.storageClassName'
+      document_index: 0
+      selector_path: persistence.storageClassName
     current_storage_class: longhorn-replica2
     target_storage_class: longhorn-replica2
     desired_reclaim_policy: Delete
@@ -294,6 +368,8 @@ entries:
     source:
       file: platform/authentik/cnpg-cluster.yaml
       value_path: 'select(.kind == "Cluster" and .metadata.name == "authentik-pg") | .spec.storage.storageClass'
+      document_index: 0
+      selector_path: spec.storage.storageClass
     current_storage_class: longhorn-replica3-retain
     target_storage_class: longhorn-replica3-retain
     desired_reclaim_policy: Retain
@@ -314,6 +390,8 @@ entries:
     source:
       file: platform/forgejo/cnpg-cluster.yaml
       value_path: 'select(.kind == "Cluster" and .metadata.name == "forgejo-pg") | .spec.storage.storageClass'
+      document_index: 0
+      selector_path: spec.storage.storageClass
     current_storage_class: longhorn-replica3-retain
     target_storage_class: longhorn-replica3-retain
     desired_reclaim_policy: Retain
@@ -334,6 +412,8 @@ entries:
     source:
       file: platform/forgejo/values.yaml
       value_path: '.persistence.storageClass'
+      document_index: 0
+      selector_path: persistence.storageClass
       mirrors:
         - platform/forgejo/values.yaml.j2
     current_storage_class: longhorn-replica3
@@ -356,6 +436,8 @@ entries:
     source:
       file: platform/openbao/raft-snapshot-hourly.yaml
       value_path: 'select(.kind == "PersistentVolumeClaim" and .metadata.name == "openbao-raft-snapshots") | .spec.storageClassName'
+      document_index: 0
+      selector_path: spec.storageClassName
     current_storage_class: longhorn-replica2
     target_storage_class: longhorn-replica2-retain
     desired_reclaim_policy: Retain
@@ -376,6 +458,8 @@ entries:
     source:
       file: platform/openbao/values.yaml
       value_path: '.server.auditStorage.storageClass'
+      document_index: 0
+      selector_path: server.auditStorage.storageClass
     current_storage_class: longhorn-replica2
     target_storage_class: longhorn-replica2-retain
     desired_reclaim_policy: Retain
@@ -396,6 +480,8 @@ entries:
     source:
       file: platform/openbao/values.yaml
       value_path: '.server.dataStorage.storageClass'
+      document_index: 0
+      selector_path: server.dataStorage.storageClass
     current_storage_class: longhorn-replica2
     target_storage_class: longhorn-replica2-retain
     desired_reclaim_policy: Retain
@@ -416,6 +502,11 @@ entries:
     source:
       file: platform/woodpecker/values.yaml
       value_path: '.server.persistentVolume.storageClass'
+      document_index: 0
+      selector_path: server.persistentVolume.storageClass
+      mirrors:
+        - platform/woodpecker/values.yaml.j2
+    rendered_claim_id: woodpecker-server/data
     current_storage_class: longhorn-replica2
     target_storage_class: longhorn-replica2
     desired_reclaim_policy: Delete
@@ -428,3 +519,28 @@ entries:
     migration_owner: none
     required_restore_test: recreate a disposable claim and verify Woodpecker starts with an empty history
     reason: pipeline definitions remain in Git and running jobs are retryable
+
+  - id: woodpecker-agent-config
+    workload: Woodpecker agent configuration
+    namespace: woodpecker
+    claim: StatefulSet/woodpecker-agent agent-config
+    source:
+      file: platform/woodpecker/values.yaml
+      value_path: '.agent.persistence.storageClass'
+      document_index: 0
+      selector_path: agent.persistence.storageClass
+      mirrors:
+        - platform/woodpecker/values.yaml.j2
+    rendered_claim_id: woodpecker-agent/agent-config
+    current_storage_class: longhorn-replica2
+    target_storage_class: longhorn-replica2
+    desired_reclaim_policy: Delete
+    state: compliant
+    data_class: internal
+    data_value: agent-local configuration reconstructed from Git and projected secrets
+    backup_tier: none
+    rpo: no durable pipeline source-of-truth data is stored here
+    rto: hours to recreate the claim and restart the agent
+    migration_owner: none
+    required_restore_test: recreate a disposable agent claim and verify the agent reconnects to the server
+    reason: the agent configuration is reconstructable and must not leave orphaned volumes

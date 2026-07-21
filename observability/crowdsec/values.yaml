@@ -162,6 +162,12 @@ lapi:
   # the config PVC held was /etc/crowdsec_data/local_api_credentials.yaml,
   # which the chart regenerates on every pod start anyway.
   persistentVolume:
+    # The chart's data PVC (registered bouncer API keys) defaults to the
+    # cluster StorageClass. Make its disposable/rebuildable lifecycle explicit
+    # so it participates in the retention contract.
+    data:
+      enabled: true
+      storageClassName: longhorn-replica2
     config:
       enabled: false
 

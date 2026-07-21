@@ -138,6 +138,12 @@ server:
       drop: [ALL]
 
 agent:
+  # Agent-local configuration is reconstructable from Git and projected
+  # secrets. Keep persistence enabled but select the Delete-policy class
+  # explicitly; chart-default "" would bypass the retention inventory.
+  persistence:
+    enabled: true
+    storageClass: longhorn-replica2
   enabled: true
 
   image:

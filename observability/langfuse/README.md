@@ -51,10 +51,10 @@ to keep workloads backend-agnostic.
 |---|---|
 | `kustomization.yaml` | langfuse-k8s helm chart 1.6.0 (Renovate-pinned). |
 | `namespace.yaml` | `langfuse` ns; PSA baseline. |
-| `values.yaml` | Helm values: external ClickHouse (Altinity-managed), external Postgres (CNPG-managed), chart-managed Redis, MinIO blob storage. Telemetry to Langfuse Inc. disabled per principle #2. |
+| `values.yaml` | Helm values: external ClickHouse (Altinity-managed), external Postgres (CNPG-managed), chart-managed Redis, MinIO blob storage. Pinned chart 1.5.38 S3 credentials use `secretKeyRef.name`/`key` for event, batch-export, and media paths; no credential value is stored in Git. Telemetry to Langfuse Inc. disabled per principle #2. |
 | `clickhouseinstallation.yaml` | Altinity `ClickHouseInstallation` CR: single-replica + single-shard; 50 GB longhorn-replica2; user password from ESO Secret. |
 | `cnpg-cluster.yaml` | CNPG `Cluster` CR: 2 instances longhorn-replica3; 30d WAL retention to MinIO; same pattern as crowdsec-lapi. |
-| `externalsecret.yaml` | Three ESO ExternalSecrets: ClickHouse creds, Langfuse app secrets (NEXTAUTH_SECRET / SALT / ENCRYPTION_KEY / S3 creds), CNPG MinIO backup creds. |
+| `externalsecret.yaml` | ESO ExternalSecrets for ClickHouse, app secrets (NEXTAUTH_SECRET / SALT / ENCRYPTION_KEY plus all six event/batch/media S3 keys), Redis, OIDC, and CNPG MinIO backup credentials. |
 | `networkpolicy.yaml` | Two NetPols: app (web + worker) ingress allow-list + egress to dependencies; ClickHouse ingress allow-list. |
 | `servicemonitor.yaml` | Per-component metrics scrape (web `/api/public/metrics`, worker `/metrics`). |
 

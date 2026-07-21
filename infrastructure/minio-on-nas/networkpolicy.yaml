@@ -5,7 +5,8 @@
 # Consumers: CNPG (per-app cluster Postgres pods writing WAL
 # + base), Longhorn (backup target), the Restic CronJob (when
 # it lands under infrastructure/backup-cronjobs/), and Loki
-# (chunk storage backend per ADR 0021).
+# (chunk storage backend per ADR 0021), and Langfuse web/worker
+# (event, batch-export, and media objects).
 
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -44,6 +45,24 @@ spec:
             matchExpressions:
               - key: cnpg.io/cluster
                 operator: Exists
+      ports:
+        - port: 9000
+          protocol: TCP
+    # Langfuse object clients only. Keep the namespace and pod selector in
+    # the same peer so unrelated pods in `langfuse` cannot reach MinIO.
+    # The pinned chart labels web/worker pods with these component values;
+    # the render-projection gate verifies those generated labels.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: langfuse
+          podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                  - web
+                  - worker
       ports:
         - port: 9000
           protocol: TCP

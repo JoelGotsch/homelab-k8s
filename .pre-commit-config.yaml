@@ -226,3 +226,34 @@ repos:
         language: script
         pass_filenames: false
         files: '^scripts/(check-retention-contract\.sh|test-retention-contract\.sh|retention-contract\.yaml)$'
+
+      - id: check-retention-render-fixtures
+        name: pinned chart projection matches retention and secret-reference contracts
+        entry: scripts/check-retention-render-fixtures.sh
+        language: script
+        pass_filenames: false
+        files: '^(observability/(langfuse|crowdsec)|platform/woodpecker)/|^scripts/(check-retention-render-fixtures\.sh|retention-contract\.yaml|fixtures/retention-rendered-projection\.yaml)$'
+        # Offline by default. The reviewed package SHA-256 and layer input
+        # digest make the narrow projection hermetic; run the same script with
+        # --render after a chart bump to verify a fresh downloaded package.
+
+      - id: test-retention-render-fixtures
+        name: rendered claim and S3 secret-reference projection rejects mutations
+        entry: scripts/test-retention-render-fixtures.sh
+        language: script
+        pass_filenames: false
+        files: '^(observability/(langfuse|crowdsec)|platform/woodpecker)/|^scripts/(check-retention-render-fixtures\.sh|test-retention-render-fixtures\.sh|retention-contract\.yaml|fixtures/retention-rendered-projection\.yaml)$'
+
+      - id: check-langfuse-minio-ingress
+        name: MinIO admits only rendered Langfuse web and worker pods
+        entry: scripts/check-langfuse-minio-ingress.sh
+        language: script
+        pass_filenames: false
+        files: '^(infrastructure/minio-on-nas/networkpolicy\.yaml|scripts/(check-langfuse-minio-ingress\.sh|fixtures/retention-rendered-projection\.yaml))$'
+
+      - id: test-langfuse-minio-ingress
+        name: Langfuse MinIO ingress rejects namespace-wide and selector drift
+        entry: scripts/test-langfuse-minio-ingress.sh
+        language: script
+        pass_filenames: false
+        files: '^(infrastructure/minio-on-nas/networkpolicy\.yaml|scripts/(check-langfuse-minio-ingress\.sh|test-langfuse-minio-ingress\.sh|fixtures/retention-rendered-projection\.yaml))$'
