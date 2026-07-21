@@ -10,8 +10,8 @@ crdHook:
   enabled: false
 
 # The chart renders these empty scheduling values but the API server omits
-# them. Their exact empty state is paired with narrow Argo jsonPointers and a
-# pre-commit guard; configure placement and remove the ignores together.
+# them. Their exact empty state is paired with a Kustomize removal patch and a
+# pre-commit guard; configure placement and remove that patch together.
 imagePullSecrets: []
 nodeSelector: {}
 tolerations: []

@@ -53,25 +53,32 @@ clickhouse_kustomization="$repo_root/infrastructure/clickhouse-operator/kustomiz
   .includeCRDs' "$clickhouse_kustomization") == true ]] ||
   fail "ClickHouse chart CRDs must stay rendered under Argo ownership"
 [[ $(yq -o=json -I=0 '.imagePullSecrets' "$clickhouse_values") == '[]' ]] ||
-  fail "remove the paired imagePullSecrets Argo ignore before configuring it"
+  fail "remove the paired imagePullSecrets patch before configuring it"
 [[ $(yq -o=json -I=0 '.nodeSelector' "$clickhouse_values") == '{}' ]] ||
-  fail "remove the paired nodeSelector Argo ignore before configuring it"
+  fail "remove the paired nodeSelector patch before configuring it"
 [[ $(yq -o=json -I=0 '.tolerations' "$clickhouse_values") == '[]' ]] ||
-  fail "remove the paired tolerations Argo ignore before configuring it"
+  fail "remove the paired tolerations patch before configuring it"
 [[ $(yq -o=json -I=0 '.topologySpreadConstraints' "$clickhouse_values") == '[]' ]] ||
-  fail "remove the paired topologySpreadConstraints Argo ignore before configuring it"
+  fail "remove the paired topologySpreadConstraints patch before configuring it"
 
 required_ignores=(
   '.spec.rules[].verifyImages[].attestors[].entries[].keys.signatureAlgorithm'
-  '/spec/template/spec/imagePullSecrets'
-  '/spec/template/spec/nodeSelector'
-  '/spec/template/spec/tolerations'
-  '/spec/template/spec/topologySpreadConstraints'
   '/metadata/labels'
 )
 for expression in "${required_ignores[@]}"; do
   rg -Fq -- "$expression" "$applicationset" ||
     fail "infrastructure ApplicationSet lost narrow ignore: $expression"
+done
+
+required_clickhouse_removals=(
+  '/spec/template/spec/imagePullSecrets'
+  '/spec/template/spec/nodeSelector'
+  '/spec/template/spec/tolerations'
+  '/spec/template/spec/topologySpreadConstraints'
+)
+for pointer in "${required_clickhouse_removals[@]}"; do
+  rg -Fq -- "path: $pointer" "$clickhouse_kustomization" ||
+    fail "ClickHouse chart-default removal is missing: $pointer"
 done
 
 kyverno_policy_crds=(

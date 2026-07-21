@@ -29,3 +29,23 @@ helmCharts:
 resources:
   - namespace.yaml
   - networkpolicy.yaml
+
+# The chart emits four empty PodSpec fields which the API server omits. Remove
+# them from desired state instead of hiding their drift in Argo. The paired
+# guard requires the values to remain empty and makes a chart-shape change fail
+# at render time rather than creating a permanent self-heal loop.
+patches:
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: clickhouse-operator-altinity-clickhouse-operator
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/imagePullSecrets
+      - op: remove
+        path: /spec/template/spec/nodeSelector
+      - op: remove
+        path: /spec/template/spec/tolerations
+      - op: remove
+        path: /spec/template/spec/topologySpreadConstraints

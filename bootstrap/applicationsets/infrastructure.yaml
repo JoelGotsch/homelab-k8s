@@ -98,13 +98,6 @@ spec:
             - /metadata/labels/clickhouse.altinity.com~1chop
             - /metadata/labels/clickhouse.altinity.com~1chop-commit
             - /metadata/labels/clickhouse.altinity.com~1chop-date
-            # These four values are pinned empty and guarded in values.yaml;
-            # the API server omits them. If placement is ever configured,
-            # the guard requires removing these ignores in the same commit.
-            - /spec/template/spec/imagePullSecrets
-            - /spec/template/spec/nodeSelector
-            - /spec/template/spec/tolerations
-            - /spec/template/spec/topologySpreadConstraints
         # Longhorn CRD drift: chart ships `spec.preserveUnknownFields:
         # false` (v1beta1-era compat field). K8s v1.29+ strips it
         # on v1 CRDs (implied). Chart also ships caBundle: ""
