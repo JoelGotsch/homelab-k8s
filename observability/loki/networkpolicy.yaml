@@ -5,7 +5,10 @@
 # scrape via the chart-default-selector ServiceMonitor).
 #
 # Egress: kube-DNS + MinIO (chunk storage at
-# infrastructure/minio-on-nas/).
+# infrastructure/minio-on-nas/), plus a sibling
+# CiliumNetworkPolicy for kube-apiserver (bottom of file) —
+# the chart's loki-sc-rules sidecar list/watches loki_rule-
+# labeled ConfigMaps/Secrets through the API.
 
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -92,3 +95,33 @@ spec:
       ports:
         - port: 9000
           protocol: TCP
+---
+# kube-apiserver egress for the loki-sc-rules sidecar.
+#
+# The grafana/loki chart runs a k8s-sidecar container in loki-0
+# that list/watches loki_rule-labeled ConfigMaps/Secrets via the
+# API server. Plain NetworkPolicy can't match that non-pod
+# target, so — same pattern as prometheus-apiserver above it in
+# this namespace and the openbao-seal-watchdog egress fix
+# (commit 8494b91) — a sibling CNP grants the reserved
+# kube-apiserver entity, scoped to the loki pods only.
+#
+# Found 2026-07-21 (worker1 hot-pull follow-up): every sidecar
+# API call timed out against 10.96.0.1:443, so the container
+# retried ~14 min, exited 1, and restarted — 89 restarts in 22h
+# on loki-0 while Loki itself ran fine. This had been mislabeled
+# as "Loki instability."
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: loki-apiserver
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: loki
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: loki
+  egress:
+    - toEntities:
+        - kube-apiserver
