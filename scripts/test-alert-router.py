@@ -100,44 +100,6 @@ class AlertRouterTests(unittest.TestCase):
         self.addCleanup(error.close)
         return error
 
-    def rendered_compare_exception_names(self, template_patch: str) -> list[str]:
-        chart = Path(self.temp_dir.name) / "applicationset-template-patch"
-        templates = chart / "templates"
-        templates.mkdir(parents=True, exist_ok=True)
-        (chart / "Chart.yaml").write_text(
-            "apiVersion: v2\nname: applicationset-test\nversion: 0.0.0\n",
-            encoding="utf-8",
-        )
-        (templates / "transition.yaml").write_text(
-            "{{- with .Values }}\n" + template_patch + "{{- end }}\n",
-            encoding="utf-8",
-        )
-        names = sorted(
-            path.name
-            for path in (ROOT / "observability").iterdir()
-            if path.is_dir() and (path / "kustomization.yaml").is_file()
-        )
-        exceptions = []
-        for name in names:
-            result = subprocess.run(
-                [
-                    "helm",
-                    "template",
-                    "applicationset-test",
-                    str(chart),
-                    "--set-string",
-                    f"path.basename={name}",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            rendered = result.stdout
-            if "argocd.argoproj.io/compare-options: ServerSideDiff=false" in rendered:
-                exceptions.append(name)
-        return exceptions
-
     def test_policy_is_consumed_and_validated(self) -> None:
         _, controls = router._load_policy()
         self.assertEqual(controls.fallback_max_messages, 5)
@@ -185,7 +147,7 @@ class AlertRouterTests(unittest.TestCase):
             manifest,
         )
 
-    def test_final_render_deletes_defaulted_rolling_update(self) -> None:
+    def test_final_render_has_clean_recreate_strategy(self) -> None:
         rendered = subprocess.run(
             ["kustomize", "build", "--enable-helm", str(KUSTOMIZE_LAYER)],
             check=True,
@@ -210,39 +172,34 @@ class AlertRouterTests(unittest.TestCase):
         deployment = json.loads(deployment_json)
         self.assertEqual(
             deployment["spec"]["strategy"],
-            {"type": "Recreate", "rollingUpdate": None},
-            "final apply payload must explicitly delete the live/defaulted "
-            "rollingUpdate field",
+            {"type": "Recreate"},
+            "steady-state render must not retain transition-only strategy fields",
         )
-        annotations = deployment["metadata"]["annotations"]
-        self.assertEqual(
-            annotations["argocd.argoproj.io/sync-options"],
-            "ServerSideApply=false",
-            "this existing Deployment needs client-side three-way deletion "
-            "for its one-time strategy transition",
+        annotations = deployment["metadata"].get("annotations", {})
+        self.assertNotIn(
+            "argocd.argoproj.io/sync-options",
+            annotations,
+            "steady state must not retain the resource-level sync exception",
         )
 
-    def test_compare_exception_is_generated_for_only_this_application(self) -> None:
-        template_patch = subprocess.run(
-            ["yq", "-r", ".spec.templatePatch", str(OBSERVABILITY_APPLICATIONSET)],
+    def test_observability_apps_have_no_server_side_diff_exception(self) -> None:
+        applicationset = subprocess.run(
+            ["yq", "-o=json", "-I=0", ".", str(OBSERVABILITY_APPLICATIONSET)],
             check=True,
             capture_output=True,
             text=True,
             timeout=10,
         ).stdout
-        self.assertEqual(
-            self.rendered_compare_exception_names(template_patch),
-            ["kube-prometheus-stack"],
+        application_set = json.loads(applicationset)
+        self.assertNotIn(
+            "templatePatch",
+            application_set["spec"],
+            "observability apps must no longer receive a generated compare exception",
         )
-
-        broadened = template_patch.replace(
-            'if eq .path.basename "kube-prometheus-stack"',
-            'if ne .path.basename ""',
-        )
-        self.assertNotEqual(
-            self.rendered_compare_exception_names(broadened),
-            ["kube-prometheus-stack"],
-            "the scope regression must detect a compare exception on other apps",
+        self.assertNotIn(
+            "ServerSideDiff=false",
+            OBSERVABILITY_APPLICATIONSET.read_text(encoding="utf-8"),
+            "no generated observability Application may disable server-side diff",
         )
 
     def test_healthy_ntfy_never_calls_signal(self) -> None:

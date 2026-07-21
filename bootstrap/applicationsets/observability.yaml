@@ -62,16 +62,3 @@ spec:
           namespace: observability-tempo
           jsonPointers:
             - /spec/volumeClaimTemplates
-  # Temporary and deliberately scoped to one generated Application. The live
-  # alert-formatter Deployment has an API-defaulted rollingUpdate map that a
-  # server-side dry-run cannot delete in the same request that selects
-  # Recreate. Global server-side diff would therefore block comparison before
-  # the resource-level client-side sync exception can run. Remove this patch
-  # together with that exception immediately after the live Deployment has
-  # converged to Recreate with rollingUpdate absent and clean SSA/SSD passes.
-  templatePatch: |
-    {{- if eq .path.basename "kube-prometheus-stack" }}
-    metadata:
-      annotations:
-        argocd.argoproj.io/compare-options: ServerSideDiff=false
-    {{- end }}

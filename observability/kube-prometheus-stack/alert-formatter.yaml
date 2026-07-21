@@ -12,14 +12,6 @@ metadata:
   namespace: monitoring
   labels:
     app.kubernetes.io/name: alert-formatter
-  annotations:
-    # One-resource transition exception. The live API-defaulted rollingUpdate
-    # map cannot be cleared in the same request that selects Recreate through
-    # SSA, even with an explicit null deletion signal. Argo CD 3.4 supports
-    # overriding application-level SSA per resource, so use client-side apply
-    # for this Deployment's three-way merge. Keep rollingUpdate:null below;
-    # reassess/remove this exception only after live convergence is proven.
-    argocd.argoproj.io/sync-options: ServerSideApply=false
 spec:
   # First rollout stays at one replica per the minimal-blast-radius rule. Scale
   # only after an uncached-node image pull and a live fallback drill are proven.
@@ -29,13 +21,6 @@ spec:
   # multi-attach race. Alertmanager retains/retries during the short handoff.
   strategy:
     type: Recreate
-    # The live Deployment was created with the default RollingUpdate strategy,
-    # so the API stores a non-null rollingUpdate block. Server-side apply does
-    # not delete that unowned/defaulted field merely because desired YAML omits
-    # it; the resulting Recreate + rollingUpdate combination fails admission.
-    # Preserve this explicit null in the apply payload as the SSA deletion
-    # signal. The API response then contains Recreate with no rollingUpdate.
-    rollingUpdate: null
   selector:
     matchLabels:
       app.kubernetes.io/name: alert-formatter
