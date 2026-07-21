@@ -195,6 +195,21 @@ yq ea -e '
     .metadata.name == "openbao-raft-snapshot-daily") |
   [
     (.spec.egress | length == 3),
+    ([.spec.egress[].toPorts[]?.rules.dns[]?] | length == 1),
+    ([.spec.egress[] | select(
+      (.toEndpoints | length == 1) and
+      (.toEndpoints[0].matchLabels | length == 2) and
+      .toEndpoints[0].matchLabels."k8s:io.kubernetes.pod.namespace" == "kube-system" and
+      .toEndpoints[0].matchLabels."k8s:k8s-app" == "kube-dns" and
+      (.toPorts | length == 1) and
+      (.toPorts[0].ports | length == 2) and
+      ([.toPorts[0].ports[] | select(.port == "53" and .protocol == "UDP")] | length == 1) and
+      ([.toPorts[0].ports[] | select(.port == "53" and .protocol == "TCP")] | length == 1) and
+      (.toPorts[0].rules | length == 1) and
+      (.toPorts[0].rules.dns | length == 1) and
+      .toPorts[0].rules.dns[0].matchPattern == "*" and
+      (.toPorts[0].rules.dns[0] | length == 1)
+    )] | length == 1),
     ([.spec.egress[] | select(
       ([.toFQDNs[]? | select(.matchName == "u609156.your-storagebox.de")] | length == 1) and
       ([.toPorts[].ports[]? | select(.port == "23" and .protocol == "TCP")] | length == 1) and
@@ -203,16 +218,17 @@ yq ea -e '
     ([.spec.egress[].toEntities[]? | select(. == "world")] | length == 0)
   ] | all
 ' "$layer/snapshot-networkpolicy.yaml" >/dev/null \
-  || fail 'daily egress must target only the pinned Storage Box FQDN on TCP/23'
+  || fail 'daily egress needs exact kube-dns L7 observation and the pinned Storage Box FQDN on TCP/23'
 yq ea -e '
   select(.kind == "CiliumNetworkPolicy" and
     .metadata.name == "openbao-raft-snapshot-hourly") |
   [
     (.spec.egress | length == 2),
     ([.spec.egress[].toFQDNs[]?] | length == 0),
+    ([.spec.egress[].toPorts[]?.rules.dns[]?] | length == 0),
     ([.spec.egress[].toEntities[]? | select(. == "world")] | length == 0)
   ] | all
 ' "$layer/snapshot-networkpolicy.yaml" >/dev/null \
-  || fail 'hourly egress must remain DNS plus OpenBao only'
+  || fail 'hourly egress must remain L3/L4 DNS plus OpenBao only, without an unnecessary DNS proxy'
 
 printf '%s\n' 'OpenBao snapshot authentication and delivery contract: PASS'

@@ -61,6 +61,22 @@ yq -i '(select(.kind == "CiliumNetworkPolicy" and
   "$test_tmp/broad-egress/platform/openbao/snapshot-networkpolicy.yaml"
 expect_rejected broad-egress
 
+make_fixture missing-dns-observation
+yq -i 'del(select(.kind == "CiliumNetworkPolicy" and
+  .metadata.name == "openbao-raft-snapshot-daily") |
+  .spec.egress[] | select(.toEndpoints[0].matchLabels."k8s:k8s-app" == "kube-dns") |
+  .toPorts[0].rules)' \
+  "$test_tmp/missing-dns-observation/platform/openbao/snapshot-networkpolicy.yaml"
+expect_rejected missing-dns-observation
+
+make_fixture hourly-dns-observation
+yq -i 'select(.kind == "CiliumNetworkPolicy" and
+  .metadata.name == "openbao-raft-snapshot-hourly") |
+  (.spec.egress[] | select(.toEndpoints[0].matchLabels."k8s:k8s-app" == "kube-dns") |
+  .toPorts[0].rules.dns) = [{"matchPattern":"*"}]' \
+  "$test_tmp/hourly-dns-observation/platform/openbao/snapshot-networkpolicy.yaml"
+expect_rejected hourly-dns-observation
+
 make_fixture daily-private-mode
 yq -i '(select(.kind == "CronJob" and .metadata.name == "openbao-raft-snapshot") |
   .spec.jobTemplate.spec.template.spec.initContainers[0].env[] |
@@ -88,4 +104,4 @@ yq -i '(select(.kind == "ExternalSecret" and
   "$test_tmp/secret-routing/platform/openbao/raft-snapshot-cronjob.yaml"
 expect_rejected secret-routing
 
-printf '%s\n' 'PASS: identity, token isolation, artifact modes/groups, secret routing, and egress mutations are rejected.'
+printf '%s\n' 'PASS: identity, token isolation, artifact modes/groups, secret routing, DNS observation, and egress mutations are rejected.'

@@ -1,5 +1,7 @@
 # Snapshot pods have no ingress surface. Hourly can reach only DNS + OpenBao;
 # daily additionally reaches the exact versioned Storage Box FQDN on SSH/23.
+# The daily DNS rule is L7-proxied so Cilium can learn the IP behind toFQDNs;
+# hourly has no FQDN egress and therefore needs only L3/L4 DNS access.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -49,6 +51,9 @@ spec:
         - ports:
             - { port: "53", protocol: UDP }
             - { port: "53", protocol: TCP }
+          rules:
+            dns:
+              - matchPattern: "*"
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: openbao

@@ -19,7 +19,7 @@ Box.
 | `snapshot-token-rollback-bridge.yaml` | Temporary, unused rollback bridge retaining the already-issued static token while rollout evidence accrues. Remove only after the one-off, natural hourly/daily, remote-checksum, and restore gates pass; never issue a replacement. |
 | `raft-snapshot-cronjob.yaml`, `snapshot-upload.sh` | Daily 03:05 UTC snapshot, SHA-256 verification, atomic SCP publish, and remote checksum comparison on Hetzner Storage Box port 23. Snapshot and upload run in separate containers; only the verified snapshot and checksum cross their shared fsGroup at mode `0640`, while the uploader cannot read the OpenBao JWT/token or init-only scratch. |
 | `raft-snapshot-hourly.yaml` | Hourly snapshot to a local Longhorn PVC (`openbao-raft-snapshots`, 10Gi, replica2), 168 retain (= 7d), with an owner-only (`0600`) checksum sidecar per file. |
-| `snapshot-networkpolicy.yaml`, `snapshot-prometheusrule.yaml` | No-ingress and exact egress policy plus failed/stale snapshot alerts. Jobs and redacted termination evidence are retained for 24 hours. |
+| `snapshot-networkpolicy.yaml`, `snapshot-prometheusrule.yaml` | No-ingress and exact egress policy plus failed/stale snapshot alerts. The daily policy sends only kube-dns TCP/UDP 53 through Cilium's L7 DNS proxy so its Storage Box `toFQDNs` rule can learn the resolved IP; hourly has no FQDN rule and remains L3/L4-only. Jobs and redacted termination evidence are retained for 24 hours. |
 
 ## OpenBao paths to seed
 
@@ -91,6 +91,13 @@ The Restic CronJob in [infrastructure/backup-cronjobs/](../../infrastructure/bac
 also writes to Hetzner SB but at a different path
 (`/cluster-backups-tier-3/`); OpenBao snapshots live at
 `/openbao-snapshots/`. No collision.
+
+The daily Cilium policy allows all DNS *questions* only to the cluster's trusted
+`kube-dns` endpoints so Cilium's DNS proxy can observe replies and populate the
+`toFQDNs` identity for `u609156.your-storagebox.de`. This does not grant general
+external egress: the separate destination rule still permits only that exact FQDN
+on TCP/23. Do not add the L7 DNS rule to the hourly policy, which has no FQDN-based
+destination to populate.
 
 Quarterly restore drill per
 [`openbao/restore-drill.md`](../../../homelab-docs/03-runbooks/openbao/restore-drill.md)
