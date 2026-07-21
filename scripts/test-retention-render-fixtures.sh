@@ -64,6 +64,16 @@ set_fixture_layer_digest() {
   ' "$fixture_file"
 }
 
+literal_presence_projection_count="$(rg -F 'has("value")' "$CHECK" | wc -l | tr -d ' ')"
+[ "$literal_presence_projection_count" -eq 2 ] || {
+  printf 'FAIL: both rendered-secret scans must project only literal-presence booleans\n' >&2
+  exit 1
+}
+if rg -q '\[.*\.value[[:space:]]*//.*@tsv' "$CHECK"; then
+  printf 'FAIL: rendered-secret scans must never place a raw literal value in TSV diagnostics\n' >&2
+  exit 1
+fi
+
 baseline_root="$TEMP_ROOT/baseline"
 make_repo_fixture "$baseline_root"
 expect_pass "reviewed projection baseline" \
@@ -136,6 +146,10 @@ printf '%s\n' "$literal_output" | rg -q 'must be empty when secretKeyRef is decl
   printf 'FAIL: literal S3 credential mutation did not report the semantic violation\n' >&2
   exit 1
 }
+if printf '%s\n' "$literal_output" | rg -F -q 'PLAINTEXT_SENTINEL'; then
+  printf 'FAIL: literal S3 credential value leaked into checker diagnostics\n' >&2
+  exit 1
+fi
 
 fallback_literal_root="$TEMP_ROOT/fallback-literal-secret-value"
 make_repo_fixture "$fallback_literal_root"
@@ -165,6 +179,49 @@ yq e -i '
 set_fixture_layer_digest "$mirror_root" "$mirror_fixture" observability/langfuse
 expect_fail "authoritative values mirror secret refs cannot drift" \
   --root "$mirror_root" --fixture "$mirror_fixture" --contract "$CONTRACT"
+
+externalsecret_mirror_root="$TEMP_ROOT/externalsecret-mirror-drift"
+make_repo_fixture "$externalsecret_mirror_root"
+externalsecret_mirror_fixture="$TEMP_ROOT/externalsecret-mirror-drift.yaml"
+cp "$FIXTURE" "$externalsecret_mirror_fixture"
+S3_SECRET_KEY=LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY yq e -i '
+  (select(.kind == "ExternalSecret" and .spec.target.name == "langfuse-app-secrets") |
+    .spec.data) |= map(select(.secretKey != strenv(S3_SECRET_KEY)))
+' "$externalsecret_mirror_root/observability/langfuse/externalsecret.yaml.j2"
+set_fixture_layer_digest \
+  "$externalsecret_mirror_root" "$externalsecret_mirror_fixture" observability/langfuse
+if externalsecret_mirror_output="$($CHECK --root "$externalsecret_mirror_root" \
+  --fixture "$externalsecret_mirror_fixture" --contract "$CONTRACT" 2>&1)"; then
+  printf 'FAIL: authoritative ExternalSecret mirror omitted a referenced S3 key\n' >&2
+  exit 1
+fi
+printf '%s\n' "$externalsecret_mirror_output" | \
+  rg -q 'externalsecret.yaml.j2: missing projection for langfuse-app-secrets/LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY' || {
+    printf 'FAIL: ExternalSecret mirror mutation did not report the missing S3 projection\n' >&2
+    exit 1
+  }
+
+externalsecret_remote_ref_root="$TEMP_ROOT/externalsecret-remote-ref-drift"
+make_repo_fixture "$externalsecret_remote_ref_root"
+externalsecret_remote_ref_fixture="$TEMP_ROOT/externalsecret-remote-ref-drift.yaml"
+cp "$FIXTURE" "$externalsecret_remote_ref_fixture"
+S3_SECRET_KEY=LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID yq e -i '
+  (select(.kind == "ExternalSecret" and .spec.target.name == "langfuse-app-secrets") |
+    .spec.data[] | select(.secretKey == strenv(S3_SECRET_KEY)) |
+    .remoteRef.property) = "secret_access_key"
+' "$externalsecret_remote_ref_root/observability/langfuse/externalsecret.yaml.j2"
+set_fixture_layer_digest \
+  "$externalsecret_remote_ref_root" "$externalsecret_remote_ref_fixture" observability/langfuse
+if externalsecret_remote_ref_output="$($CHECK --root "$externalsecret_remote_ref_root" \
+  --fixture "$externalsecret_remote_ref_fixture" --contract "$CONTRACT" 2>&1)"; then
+  printf 'FAIL: authoritative ExternalSecret mirror changed a referenced S3 remoteRef property\n' >&2
+  exit 1
+fi
+printf '%s\n' "$externalsecret_remote_ref_output" | \
+  rg -q 'externalsecret.yaml.j2: remoteRef key/property mismatch for langfuse-app-secrets/LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID' || {
+    printf 'FAIL: ExternalSecret remoteRef mutation did not report the source projection drift\n' >&2
+    exit 1
+  }
 
 claim_fixture="$TEMP_ROOT/claim-class-drift.yaml"
 cp "$FIXTURE" "$claim_fixture"

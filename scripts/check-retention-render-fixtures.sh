@@ -130,6 +130,8 @@ fi
 problems=0
 checked_claims=0
 checked_secret_refs=0
+checked_externalsecret_mirrors=0
+checked_externalsecret_projections=0
 checked_pod_selectors=0
 checked_forbidden_literals=0
 declare -A fixture_claim_ids=()
@@ -181,11 +183,16 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
   package_digest="$(yq e -r ".layers[$layer_index].chart.package_sha256 // \"\"" "$FIXTURE")"
   declared_claim_count="$(yq e -r ".layers[$layer_index].declared_claim_count // \"\"" "$FIXTURE")"
   declared_secret_ref_count="$(yq e -r ".layers[$layer_index].declared_secret_reference_count // \"\"" "$FIXTURE")"
+  declared_externalsecret_mirror_count="$(yq e -r ".layers[$layer_index].declared_externalsecret_mirror_count // \"\"" "$FIXTURE")"
+  declared_externalsecret_projection_count="$(yq e -r ".layers[$layer_index].declared_externalsecret_projection_count // \"\"" "$FIXTURE")"
   declared_pod_selector_count="$(yq e -r ".layers[$layer_index].declared_pod_selector_count // \"\"" "$FIXTURE")"
   declared_forbidden_literal_count="$(yq e -r ".layers[$layer_index].declared_forbidden_literal_count // \"\"" "$FIXTURE")"
   secret_ref_pattern="$(yq e -r ".layers[$layer_index].secret_reference_env_pattern // \"\"" "$FIXTURE")"
   unset layer_fixture_secret_ids
   declare -A layer_fixture_secret_ids=()
+  unset layer_referenced_secret_projections layer_expected_secret_projections
+  declare -A layer_referenced_secret_projections=()
+  declare -A layer_expected_secret_projections=()
 
   [ -n "$layer_rel" ] || { error "$FIXTURE: layer $layer_index has no path"; continue; }
   [ -d "$REPO_ROOT/$layer_rel" ] || { error "$FIXTURE: layer does not exist: $layer_rel"; continue; }
@@ -198,6 +205,10 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
   [[ "$declared_claim_count" =~ ^[0-9]+$ ]] || error "$FIXTURE: $layer_rel has invalid declared_claim_count"
   [[ "$declared_secret_ref_count" =~ ^[0-9]+$ ]] || \
     error "$FIXTURE: $layer_rel has invalid declared_secret_reference_count"
+  [[ "$declared_externalsecret_mirror_count" =~ ^[0-9]+$ ]] || \
+    error "$FIXTURE: $layer_rel has invalid declared_externalsecret_mirror_count"
+  [[ "$declared_externalsecret_projection_count" =~ ^[0-9]+$ ]] || \
+    error "$FIXTURE: $layer_rel has invalid declared_externalsecret_projection_count"
   [[ "$declared_pod_selector_count" =~ ^[0-9]+$ ]] || \
     error "$FIXTURE: $layer_rel has invalid declared_pod_selector_count"
   [[ "$declared_forbidden_literal_count" =~ ^[0-9]+$ ]] || \
@@ -396,17 +407,16 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
     source_value_path="$(yq e -r "$ref_base.source_value_path // \"\"" "$FIXTURE")"
     source_name_path="$(yq e -r "$ref_base.source_name_path // \"\"" "$FIXTURE")"
     source_key_path="$(yq e -r "$ref_base.source_key_path // \"\"" "$FIXTURE")"
-    externalsecret_rel="$(yq e -r "$ref_base.externalsecret_file // \"\"" "$FIXTURE")"
     ref_id="$workload_kind/$workload_name/$container_name/$env_name"
 
     for required_value in "$workload_kind" "$workload_name" "$container_name" "$env_name" \
-      "$secret_name" "$secret_key" "$source_value_path" "$source_name_path" "$source_key_path" \
-      "$externalsecret_rel"; do
+      "$secret_name" "$secret_key" "$source_value_path" "$source_name_path" "$source_key_path"; do
       [ -n "$required_value" ] || error "$FIXTURE: incomplete secret reference at $layer_rel index $secret_index"
     done
     [ -z "${secret_ref_ids[$ref_id]:-}" ] || error "$FIXTURE: duplicate secret reference '$ref_id'"
     secret_ref_ids["$ref_id"]=1
     layer_fixture_secret_ids["$ref_id"]=1
+    layer_referenced_secret_projections["$secret_name"$'\t'"$secret_key"]=1
     [ "$secret_key" = "$env_name" ] || \
       error "$FIXTURE: $ref_id secret key '$secret_key' must equal its environment name"
 
@@ -434,32 +444,129 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
         error "$mirror_rel: $source_value_path must be empty when secretKeyRef is declared"
     done
 
-    externalsecret_file="$REPO_ROOT/$externalsecret_rel"
-    [ -f "$externalsecret_file" ] || { error "$FIXTURE: missing ExternalSecret source $externalsecret_rel"; continue; }
-    projected_keys="$(SECRET_NAME="$secret_name" SECRET_KEY="$secret_key" yq e -r \
-      'select(.kind == "ExternalSecret" and .spec.target.name == strenv(SECRET_NAME)) |
-       .spec.data[]? | select(.secretKey == strenv(SECRET_KEY)) | .secretKey' \
-      "$externalsecret_file" | strip_yq_stream_markers)"
-    projected_key_count="$(printf '%s\n' "$projected_keys" | awk 'NF' | wc -l | tr -d ' ')"
-    [ "$projected_key_count" -eq 1 ] || \
-      error "$externalsecret_rel: expected exactly one projection for $secret_name/$secret_key, found $projected_key_count"
-
     if [ -n "$rendered_file" ]; then
       rendered_refs="$(WORKLOAD_KIND="$workload_kind" WORKLOAD_NAME="$workload_name" \
         CONTAINER_NAME="$container_name" ENV_NAME="$env_name" yq e -r \
         'select(.kind == strenv(WORKLOAD_KIND) and .metadata.name == strenv(WORKLOAD_NAME)) |
          .spec.template.spec.containers[]? | select(.name == strenv(CONTAINER_NAME)) |
          .env[]? | select(.name == strenv(ENV_NAME)) |
-         [.valueFrom.secretKeyRef.name, .valueFrom.secretKeyRef.key, (.value // "")] | @tsv' \
+         [.valueFrom.secretKeyRef.name, .valueFrom.secretKeyRef.key, has("value")] | @tsv' \
         "$rendered_file" | strip_yq_stream_markers)"
       rendered_ref_count="$(printf '%s\n' "$rendered_refs" | awk 'NF' | wc -l | tr -d ' ')"
       [ "$rendered_ref_count" -eq 1 ] || \
         error "$layer_rel render: expected exactly one secret ref $ref_id, found $rendered_ref_count"
-      expected_ref="$secret_name"$'\t'"$secret_key"$'\t'
-      [ "$rendered_refs" = "$expected_ref" ] || \
-        error "$layer_rel render: $ref_id is '$rendered_refs', expected secretKeyRef $secret_name/$secret_key and no literal value"
+      if [ "$rendered_ref_count" -eq 1 ]; then
+        IFS=$'\t' read -r rendered_secret_name rendered_secret_key rendered_literal_present <<<"$rendered_refs"
+        [ "$rendered_secret_name" = "$secret_name" ] && [ "$rendered_secret_key" = "$secret_key" ] || \
+          error "$layer_rel render: $ref_id secretKeyRef name/key differs from the reviewed projection"
+        [ "$rendered_literal_present" = false ] || \
+          error "$layer_rel render: $ref_id contains a literal credential value [redacted]"
+      fi
     fi
     checked_secret_refs=$((checked_secret_refs + 1))
+  done
+
+  externalsecret_projection_count="$(yq e -r ".layers[$layer_index].externalsecret_projections // [] | length" "$FIXTURE")"
+  [ "$externalsecret_projection_count" = "$declared_externalsecret_projection_count" ] || \
+    error "$FIXTURE: $layer_rel declares $declared_externalsecret_projection_count ExternalSecret projections but contains $externalsecret_projection_count"
+  if [ "$secret_ref_count" -gt 0 ]; then
+    [ "$externalsecret_projection_count" -gt 0 ] || \
+      error "$FIXTURE: $layer_rel secret refs require explicit ExternalSecret source projections"
+  else
+    [ "$externalsecret_projection_count" -eq 0 ] || \
+      error "$FIXTURE: $layer_rel has ExternalSecret projections but no secret references"
+  fi
+  for ((projection_index = 0; projection_index < externalsecret_projection_count; projection_index++)); do
+    projection_base=".layers[$layer_index].externalsecret_projections[$projection_index]"
+    projected_secret_name="$(yq e -r "$projection_base.secret_name // \"\"" "$FIXTURE")"
+    projected_secret_key="$(yq e -r "$projection_base.secret_key // \"\"" "$FIXTURE")"
+    projected_remote_key="$(yq e -r "$projection_base.remote_ref_key // \"\"" "$FIXTURE")"
+    projected_remote_property="$(yq e -r "$projection_base.remote_ref_property // \"\"" "$FIXTURE")"
+    for required_value in "$projected_secret_name" "$projected_secret_key" \
+      "$projected_remote_key" "$projected_remote_property"; do
+      [ -n "$required_value" ] || \
+        error "$FIXTURE: incomplete ExternalSecret projection at $layer_rel index $projection_index"
+    done
+    projection_id="$projected_secret_name"$'\t'"$projected_secret_key"
+    [ -z "${layer_expected_secret_projections[$projection_id]:-}" ] || \
+      error "$FIXTURE: duplicate ExternalSecret projection for $projected_secret_name/$projected_secret_key"
+    layer_expected_secret_projections["$projection_id"]="$projected_remote_key"$'\t'"$projected_remote_property"
+    checked_externalsecret_projections=$((checked_externalsecret_projections + 1))
+  done
+  for projection_id in "${!layer_referenced_secret_projections[@]}"; do
+    if [ -z "${layer_expected_secret_projections[$projection_id]:-}" ]; then
+      IFS=$'\t' read -r projected_secret_name projected_secret_key <<<"$projection_id"
+      error "$FIXTURE: referenced Secret key $projected_secret_name/$projected_secret_key lacks an ExternalSecret source projection"
+    fi
+  done
+  for projection_id in "${!layer_expected_secret_projections[@]}"; do
+    if [ -z "${layer_referenced_secret_projections[$projection_id]:-}" ]; then
+      IFS=$'\t' read -r projected_secret_name projected_secret_key <<<"$projection_id"
+      error "$FIXTURE: unreferenced ExternalSecret source projection for $projected_secret_name/$projected_secret_key"
+    fi
+  done
+
+  externalsecret_mirror_count="$(yq e -r ".layers[$layer_index].externalsecret_mirrors // [] | length" "$FIXTURE")"
+  [ "$externalsecret_mirror_count" = "$declared_externalsecret_mirror_count" ] || \
+    error "$FIXTURE: $layer_rel declares $declared_externalsecret_mirror_count ExternalSecret mirrors but contains $externalsecret_mirror_count"
+  if [ "$secret_ref_count" -gt 0 ]; then
+    [ "$externalsecret_mirror_count" -gt 0 ] || \
+      error "$FIXTURE: $layer_rel secret refs require at least one ExternalSecret mirror"
+  else
+    [ "$externalsecret_mirror_count" -eq 0 ] || \
+      error "$FIXTURE: $layer_rel has ExternalSecret mirrors but no secret references"
+  fi
+  unset layer_externalsecret_mirrors
+  declare -A layer_externalsecret_mirrors=()
+  for ((mirror_index = 0; mirror_index < externalsecret_mirror_count; mirror_index++)); do
+    externalsecret_rel="$(yq e -r ".layers[$layer_index].externalsecret_mirrors[$mirror_index] // \"\"" "$FIXTURE")"
+    [ -n "$externalsecret_rel" ] || { error "$FIXTURE: $layer_rel has an empty ExternalSecret mirror path"; continue; }
+    case "$externalsecret_rel" in
+      "$layer_rel"/*) ;;
+      *) error "$FIXTURE: ExternalSecret mirror $externalsecret_rel must be inside $layer_rel" ;;
+    esac
+    [ -z "${layer_externalsecret_mirrors[$externalsecret_rel]:-}" ] || \
+      error "$FIXTURE: $layer_rel duplicates ExternalSecret mirror '$externalsecret_rel'"
+    layer_externalsecret_mirrors["$externalsecret_rel"]=1
+    externalsecret_file="$REPO_ROOT/$externalsecret_rel"
+    [ -f "$externalsecret_file" ] || { error "$FIXTURE: missing ExternalSecret mirror $externalsecret_rel"; continue; }
+
+    unset actual_secret_projections
+    declare -A actual_secret_projections=()
+    while IFS=$'\t' read -r projected_secret_name projected_secret_key \
+      projected_remote_key projected_remote_property; do
+      [ -n "$projected_secret_name" ] && [ -n "$projected_secret_key" ] || continue
+      projection_id="$projected_secret_name"$'\t'"$projected_secret_key"
+      [ -z "${actual_secret_projections[$projection_id]:-}" ] || \
+        error "$externalsecret_rel: duplicate projection for $projected_secret_name/$projected_secret_key"
+      actual_secret_projections["$projection_id"]="$projected_remote_key"$'\t'"$projected_remote_property"
+    done < <(
+      # `$target` and `$key` are yq variables.
+      # shellcheck disable=SC2016
+      SECRET_REF_PATTERN="$secret_ref_pattern" yq e -r '
+        select(.kind == "ExternalSecret") | .spec.target.name as $target |
+        .spec.data[]? | (.secretKey // "") as $key |
+        select($key | test(strenv(SECRET_REF_PATTERN))) |
+        [$target, $key, (.remoteRef.key // ""), (.remoteRef.property // "")] | @tsv
+      ' "$externalsecret_file" | strip_yq_stream_markers
+    )
+    for projection_id in "${!layer_expected_secret_projections[@]}"; do
+      if [ -z "${actual_secret_projections[$projection_id]:-}" ]; then
+        IFS=$'\t' read -r projected_secret_name projected_secret_key <<<"$projection_id"
+        error "$externalsecret_rel: missing projection for $projected_secret_name/$projected_secret_key"
+      elif [ "${actual_secret_projections[$projection_id]}" != \
+        "${layer_expected_secret_projections[$projection_id]}" ]; then
+        IFS=$'\t' read -r projected_secret_name projected_secret_key <<<"$projection_id"
+        error "$externalsecret_rel: remoteRef key/property mismatch for $projected_secret_name/$projected_secret_key"
+      fi
+    done
+    for projection_id in "${!actual_secret_projections[@]}"; do
+      if [ -z "${layer_expected_secret_projections[$projection_id]:-}" ]; then
+        IFS=$'\t' read -r projected_secret_name projected_secret_key <<<"$projection_id"
+        error "$externalsecret_rel: unreferenced projection for $projected_secret_name/$projected_secret_key"
+      fi
+    done
+    checked_externalsecret_mirrors=$((checked_externalsecret_mirrors + 1))
   done
 
   if [ -n "$rendered_file" ]; then
@@ -470,12 +577,14 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
     unset actual_layer_secret_ids
     declare -A actual_layer_secret_ids=()
     if [ -n "$secret_ref_pattern" ]; then
-      while IFS=$'\t' read -r rendered_ref_id rendered_secret_name rendered_secret_key rendered_literal; do
+      while IFS=$'\t' read -r rendered_ref_id rendered_secret_name rendered_secret_key \
+        rendered_literal_present; do
         [ -n "$rendered_ref_id" ] || continue
         [ -z "${actual_layer_secret_ids[$rendered_ref_id]:-}" ] || \
           error "$layer_rel render: duplicate generated secret reference '$rendered_ref_id'"
         actual_layer_secret_ids["$rendered_ref_id"]=1
-        [ -n "$rendered_secret_name" ] && [ -n "$rendered_secret_key" ] && [ -z "$rendered_literal" ] || \
+        [ -n "$rendered_secret_name" ] && [ -n "$rendered_secret_key" ] && \
+          [ "$rendered_literal_present" = false ] || \
           error "$layer_rel render: $rendered_ref_id must use secretKeyRef name/key and no literal value"
       done < <(
         # `$kind`, `$workload`, and `$container` are yq variables.
@@ -485,7 +594,7 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
           .spec.template.spec.containers[]? | .name as $container | .env[]? |
           select(.name | test(strenv(SECRET_REF_PATTERN))) |
           [$kind + "/" + $workload + "/" + $container + "/" + .name,
-           (.valueFrom.secretKeyRef.name // ""), (.valueFrom.secretKeyRef.key // ""), (.value // "")] | @tsv
+           (.valueFrom.secretKeyRef.name // ""), (.valueFrom.secretKeyRef.key // ""), has("value")] | @tsv
         ' "$rendered_file" | strip_yq_stream_markers
       )
       for rendered_ref_id in "${!layer_fixture_secret_ids[@]}"; do
@@ -514,5 +623,6 @@ fi
 
 mode="offline"
 [ "$RENDER" = true ] && mode="verified-render"
-printf 'PASS: %s retention projection covers %d chart claims, %d secret references, %d pod selectors, and %d forbidden literal paths.\n' \
-  "$mode" "$checked_claims" "$checked_secret_refs" "$checked_pod_selectors" "$checked_forbidden_literals"
+printf 'PASS: %s retention projection covers %d chart claims, %d secret references, %d ExternalSecret source projections across %d mirrors, %d pod selectors, and %d forbidden literal paths.\n' \
+  "$mode" "$checked_claims" "$checked_secret_refs" "$checked_externalsecret_projections" \
+  "$checked_externalsecret_mirrors" "$checked_pod_selectors" "$checked_forbidden_literals"

@@ -59,12 +59,44 @@ allow_all_peer_count="$(yq ea -r '
     .metadata.name == "minio-allow") |
   [.spec.ingress[]? | .from[]? |
    select((.ipBlock == null) and
-          (((.namespaceSelector // {}) | length) == 0) and
-          (((.podSelector // {}) | length) == 0))] | length
+          (((.namespaceSelector.matchLabels // {}) | length) == 0) and
+          (((.namespaceSelector.matchExpressions // []) | length) == 0) and
+          (((.podSelector.matchLabels // {}) | length) == 0) and
+          (((.podSelector.matchExpressions // []) | length) == 0))] | length
 ' "$policy_file" | strip_yq_stream_markers)"
 [ "$allow_all_peer_count" -eq 0 ] || {
   printf 'ERROR: %s contains %s ingress peer(s) that select every namespace and pod\n' \
     "$POLICY_REL" "$allow_all_peer_count" >&2
+  exit 1
+}
+
+# LabelSelector maps with empty nested matchLabels and matchExpressions are
+# semantically empty even though their top-level YAML maps have keys. Also
+# reject a second peer that selects the Langfuse namespace by an equivalent
+# immutable-name matchExpression while leaving its pod selector unrestricted.
+langfuse_namespace_wide_peer_count="$(yq ea -r '
+  select(.kind == "NetworkPolicy" and .metadata.namespace == "minio-on-nas" and
+    .metadata.name == "minio-allow") |
+  [.spec.ingress[]? | .from[]? |
+   select((.ipBlock == null) and
+          (((.podSelector.matchLabels // {}) | length) == 0) and
+          (((.podSelector.matchExpressions // []) | length) == 0)) |
+   select(
+     (.namespaceSelector.matchLabels."kubernetes.io/metadata.name" == "langfuse") or
+     (([.namespaceSelector.matchExpressions[]? |
+        select(.key == "kubernetes.io/metadata.name") |
+        select(
+          (.operator == "Exists") or
+          ((.operator == "In") and
+           (([.values[]? | select(. == "langfuse")] | length) > 0)) or
+          ((.operator == "NotIn") and
+           (([.values[]? | select(. == "langfuse")] | length) == 0))
+        )] | length) > 0)
+   )] | length
+' "$policy_file" | strip_yq_stream_markers)"
+[ "$langfuse_namespace_wide_peer_count" -eq 0 ] || {
+  printf 'ERROR: %s contains %s ingress peer(s) that admit every pod in the Langfuse namespace\n' \
+    "$POLICY_REL" "$langfuse_namespace_wide_peer_count" >&2
   exit 1
 }
 

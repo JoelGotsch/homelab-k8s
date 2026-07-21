@@ -83,6 +83,65 @@ yq e -i '
 expect_fail "empty namespace selector without a restrictive pod selector is rejected" \
   --root "$global_peer_root" --fixture "$FIXTURE"
 
+nested_empty_global_root="$TEMP_ROOT/nested-empty-global-peer"
+make_policy_fixture "$nested_empty_global_root"
+yq e -i '
+  (select(.kind == "NetworkPolicy" and .metadata.name == "minio-allow") |
+   .spec.ingress) += [{"from": [{
+       "namespaceSelector": {"matchExpressions": []},
+       "podSelector": {"matchLabels": {}}
+     }], "ports": [{"port": 9000, "protocol": "TCP"}]}]
+' "$nested_empty_global_root/$POLICY_REL"
+expect_fail "nested empty label selectors are rejected as an allow-all peer" \
+  --root "$nested_empty_global_root" --fixture "$FIXTURE"
+
+langfuse_expression_wide_root="$TEMP_ROOT/langfuse-expression-wide"
+make_policy_fixture "$langfuse_expression_wide_root"
+yq e -i '
+  (select(.kind == "NetworkPolicy" and .metadata.name == "minio-allow") |
+   .spec.ingress) += [{"from": [{
+       "namespaceSelector": {"matchExpressions": [{
+         "key": "kubernetes.io/metadata.name",
+         "operator": "In",
+         "values": ["langfuse"]
+       }]},
+       "podSelector": {"matchLabels": {}}
+     }], "ports": [{"port": 9000, "protocol": "TCP"}]}]
+' "$langfuse_expression_wide_root/$POLICY_REL"
+expect_fail "equivalent Langfuse namespace expression cannot admit every pod" \
+  --root "$langfuse_expression_wide_root" --fixture "$FIXTURE"
+
+restricted_namespace_root="$TEMP_ROOT/restricted-namespace-empty-pod"
+make_policy_fixture "$restricted_namespace_root"
+yq e -i '
+  (select(.kind == "NetworkPolicy" and .metadata.name == "minio-allow") |
+   .spec.ingress) += [{"from": [{
+       "namespaceSelector": {"matchExpressions": [{
+         "key": "kubernetes.io/metadata.name",
+         "operator": "In",
+         "values": ["backup-cronjobs"]
+       }]},
+       "podSelector": {"matchLabels": {}}
+     }], "ports": [{"port": 9000, "protocol": "TCP"}]}]
+' "$restricted_namespace_root/$POLICY_REL"
+expect_pass "a non-Langfuse namespace expression remains a valid bounded peer" \
+  --root "$restricted_namespace_root" --fixture "$FIXTURE"
+
+restricted_pod_root="$TEMP_ROOT/restricted-pod-empty-namespace"
+make_policy_fixture "$restricted_pod_root"
+yq e -i '
+  (select(.kind == "NetworkPolicy" and .metadata.name == "minio-allow") |
+   .spec.ingress) += [{"from": [{
+       "namespaceSelector": {"matchLabels": {}},
+       "podSelector": {"matchExpressions": [{
+         "key": "cnpg.io/cluster",
+         "operator": "Exists"
+       }]}
+     }], "ports": [{"port": 9000, "protocol": "TCP"}]}]
+' "$restricted_pod_root/$POLICY_REL"
+expect_pass "an empty namespace selector with a restrictive pod expression remains bounded" \
+  --root "$restricted_pod_root" --fixture "$FIXTURE"
+
 ipblock_root="$TEMP_ROOT/explicit-ipblock"
 make_policy_fixture "$ipblock_root"
 yq e -i '
