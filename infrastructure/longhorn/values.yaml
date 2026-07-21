@@ -20,6 +20,19 @@ defaultSettings:
   # default engine image lands). Live upgrade of attached healthy v1
   # volumes is non-disruptive.
   concurrentAutomaticEngineUpgradePerNodeLimit: 3
+  # 2026-07-21 worker1 hot-pull test: with the upstream default
+  # (do-nothing), Kubernetes never force-deletes pods on an
+  # unreachable node — StatefulSet pods (openbao-2, loki-0,
+  # prometheus, *-pg-2, …) are never recreated and Deployment
+  # replacements hang in ContainerCreating on Multi-Attach until
+  # an operator applies the out-of-service taint. Longhorn only
+  # acts here after its own node controller confirms the node
+  # down AND the pod already has a deletionTimestamp, so this is
+  # the guarded automated equivalent of the manual taint flow.
+  # Drain-path safety is separately guarded by
+  # nodeDrainPolicy=block-if-contains-last-replica (live default
+  # we rely on; not overridden here).
+  nodeDownPodDeletionPolicy: delete-both-statefulset-and-deployment-pod
 
 # Backup target: MinIO-on-NAS `longhorn-backups` bucket per
 # ADR 0016 D4 + ADR 0006 (warm tier). Restic CronJob at
