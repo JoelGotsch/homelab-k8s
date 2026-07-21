@@ -82,6 +82,33 @@ for tuple in \
     || fail "$cron lacks the bounded projected JWT"
 done
 
+# Daily is the only cross-container path: the producer and uploader have distinct
+# UIDs but the same narrowly scoped group/fsGroup. Hourly remains owner-only.
+yq ea -e '
+  select(.kind == "CronJob" and .metadata.name == "openbao-raft-snapshot") |
+  [
+    (.spec.jobTemplate.spec.template.spec.securityContext.runAsUser == 1000),
+    (.spec.jobTemplate.spec.template.spec.securityContext.runAsGroup == 1000),
+    (.spec.jobTemplate.spec.template.spec.securityContext.fsGroup == 1000),
+    (.spec.jobTemplate.spec.template.spec.initContainers[0].securityContext.runAsUser == 100),
+    (.spec.jobTemplate.spec.template.spec.initContainers[0].securityContext.runAsGroup == 1000),
+    ([.spec.jobTemplate.spec.template.spec.initContainers[0].env[] |
+      select(.name == "SNAPSHOT_PUBLISH_MODE" and .value == "0640")] | length == 1)
+  ] | all
+' "$daily" >/dev/null \
+  || fail 'daily snapshot artifacts require UID 100 -> UID 1000 through group/fsGroup 1000 at mode 0640'
+yq ea -e '
+  select(.kind == "CronJob" and .metadata.name == "openbao-raft-snapshot-hourly") |
+  [
+    (.spec.jobTemplate.spec.template.spec.securityContext.runAsUser == 100),
+    (.spec.jobTemplate.spec.template.spec.securityContext.runAsGroup == 1000),
+    (.spec.jobTemplate.spec.template.spec.securityContext.fsGroup == 1000),
+    ([.spec.jobTemplate.spec.template.spec.containers[0].env[] |
+      select(.name == "SNAPSHOT_PUBLISH_MODE" and .value == "0600")] | length == 1)
+  ] | all
+' "$hourly" >/dev/null \
+  || fail 'hourly snapshot and checksum must remain owner-only at mode 0600'
+
 # shellcheck disable=SC2016 # this is a yq expression, not shell interpolation
 yq ea -e '
   select(.kind == "CronJob" and .metadata.name == "openbao-raft-snapshot") |
@@ -124,6 +151,11 @@ rg -q 'auth/kubernetes/login' "$layer/snapshot-auth.sh" \
   || fail 'snapshot script no longer logs in through Kubernetes auth'
 rg -q 'role=openbao-raft-snapshot' "$layer/snapshot-auth.sh" \
   || fail 'snapshot script uses the wrong OpenBao role'
+rg -Fq '0600|0640) ;;' "$layer/snapshot-auth.sh" \
+  || fail 'snapshot script must reject publish modes outside 0600/0640'
+rg -Fq 'chmod "$publish_mode" "$output" "${output}.sha256"' \
+  "$layer/snapshot-auth.sh" \
+  || fail 'only the verified final snapshot and checksum may receive the publish mode'
 server_image="$(yq -r '.server.image.registry + "/" + .server.image.repository + ":" + .server.image.tag' \
   "$layer/values.yaml")"
 snapshot_images="$(yq ea -r -N '

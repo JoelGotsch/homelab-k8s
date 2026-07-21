@@ -17,8 +17,8 @@ Box.
 | `httproute.yaml` | Internal HTTPRoute (Tailscale-only — operator reaches the UI / API via tailnet). |
 | `snapshot-serviceaccount.yaml`, `snapshot-auth.sh` | Dedicated, no-automount workload identity. Each Job exchanges a 15-minute, `audience=openbao` projected JWT for a fixed-TTL batch token carrying only the `snapshot` policy. |
 | `snapshot-token-rollback-bridge.yaml` | Temporary, unused rollback bridge retaining the already-issued static token while rollout evidence accrues. Remove only after the one-off, natural hourly/daily, remote-checksum, and restore gates pass; never issue a replacement. |
-| `raft-snapshot-cronjob.yaml`, `snapshot-upload.sh` | Daily 03:05 UTC snapshot, SHA-256 verification, atomic SCP publish, and remote checksum comparison on Hetzner Storage Box port 23. Snapshot and upload run in separate containers; the uploader cannot read the OpenBao JWT/token. |
-| `raft-snapshot-hourly.yaml` | Hourly snapshot to a local Longhorn PVC (`openbao-raft-snapshots`, 10Gi, replica2), 168 retain (= 7d), with a checksum sidecar per file. |
+| `raft-snapshot-cronjob.yaml`, `snapshot-upload.sh` | Daily 03:05 UTC snapshot, SHA-256 verification, atomic SCP publish, and remote checksum comparison on Hetzner Storage Box port 23. Snapshot and upload run in separate containers; only the verified snapshot and checksum cross their shared fsGroup at mode `0640`, while the uploader cannot read the OpenBao JWT/token or init-only scratch. |
+| `raft-snapshot-hourly.yaml` | Hourly snapshot to a local Longhorn PVC (`openbao-raft-snapshots`, 10Gi, replica2), 168 retain (= 7d), with an owner-only (`0600`) checksum sidecar per file. |
 | `snapshot-networkpolicy.yaml`, `snapshot-prometheusrule.yaml` | No-ingress and exact egress policy plus failed/stale snapshot alerts. Jobs and redacted termination evidence are retained for 24 hours. |
 
 ## OpenBao paths to seed
@@ -75,6 +75,12 @@ Two-tier shape per ADR 0018 D5 + backup-and-dr.md §"OpenBao":
 - **Tier-3 (daily, remote)** — `raft-snapshot-cronjob.yaml`
   scps a fresh snapshot to Hetzner Storage Box. Recovery floor
   for cluster-loss / DR scenarios.
+
+`snapshot-auth.sh` keeps its token, partial output, and all scratch owner-only under
+`umask 077`. After local SHA-256 verification, the daily init container publishes
+only the final snapshot and sidecar as `0640`; producer UID 100 and uploader UID
+1000 share group/fsGroup 1000. The hourly single-container path explicitly keeps
+its final files at `0600`.
 
 Tier-2 (friend's NAS) intentionally does **not** receive
 OpenBao snapshots — the seal already makes them opaque-and-

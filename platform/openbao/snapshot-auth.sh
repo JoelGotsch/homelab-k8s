@@ -7,7 +7,12 @@ umask 077
 
 jwt_file="${OPENBAO_JWT_FILE:-/var/run/secrets/openbao-auth/token}"
 output="${SNAPSHOT_OUTPUT:?SNAPSHOT_OUTPUT must name the final .snap file}"
+publish_mode="${SNAPSHOT_PUBLISH_MODE:-0600}"
 termination_log="${TERMINATION_LOG:-/dev/termination-log}"
+case "$publish_mode" in
+  0600|0640) ;;
+  *) printf 'SNAPSHOT_PUBLISH_MODE must be 0600 or 0640\n' >&2; exit 1 ;;
+esac
 token_file="$(mktemp /tmp/openbao-token.XXXXXX)"
 partial="${output}.partial"
 stage=login
@@ -52,6 +57,11 @@ output_name="$(basename "$output")"
   sha256sum "$output_name" >"${output_name}.sha256"
   sha256sum -c "${output_name}.sha256" >/dev/null
 )
+# The token and partial snapshot stay owner-only under umask 077. Only verified
+# final artifacts are published, and only the daily two-container workload opts
+# into group readability for its shared fsGroup.
+stage=publish
+chmod "$publish_mode" "$output" "${output}.sha256"
 size="$(stat -c %s "$output")"
 digest="$(cut -d ' ' -f 1 "${output}.sha256")"
 

@@ -58,6 +58,10 @@ spec:
                   value: https://openbao.openbao.svc:8200
                 - name: BAO_CACERT
                   value: /vault/userconfig/openbao-tls/ca.crt
+                # The hourly workload has no second container; keep its retained
+                # local snapshot and checksum owner-only.
+                - name: SNAPSHOT_PUBLISH_MODE
+                  value: "0600"
               command:
                 - /bin/sh
                 - -c

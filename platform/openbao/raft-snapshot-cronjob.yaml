@@ -61,6 +61,11 @@ spec:
                   value: https://openbao.openbao.svc:8200
                 - name: BAO_CACERT
                   value: /vault/userconfig/openbao-tls/ca.crt
+                # UID 100 produces the verified files; UID 1000 uploads them.
+                # Both containers use group/fsGroup 1000, while token scratch
+                # stays in the init-only /tmp at mode 0600.
+                - name: SNAPSHOT_PUBLISH_MODE
+                  value: "0640"
               command:
                 - /bin/sh
                 - -c

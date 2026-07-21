@@ -61,6 +61,26 @@ yq -i '(select(.kind == "CiliumNetworkPolicy" and
   "$test_tmp/broad-egress/platform/openbao/snapshot-networkpolicy.yaml"
 expect_rejected broad-egress
 
+make_fixture daily-private-mode
+yq -i '(select(.kind == "CronJob" and .metadata.name == "openbao-raft-snapshot") |
+  .spec.jobTemplate.spec.template.spec.initContainers[0].env[] |
+  select(.name == "SNAPSHOT_PUBLISH_MODE") | .value) = "0600"' \
+  "$test_tmp/daily-private-mode/platform/openbao/raft-snapshot-cronjob.yaml"
+expect_rejected daily-private-mode
+
+make_fixture hourly-shared-mode
+yq -i '(select(.kind == "CronJob" and .metadata.name == "openbao-raft-snapshot-hourly") |
+  .spec.jobTemplate.spec.template.spec.containers[0].env[] |
+  select(.name == "SNAPSHOT_PUBLISH_MODE") | .value) = "0640"' \
+  "$test_tmp/hourly-shared-mode/platform/openbao/raft-snapshot-hourly.yaml"
+expect_rejected hourly-shared-mode
+
+make_fixture wrong-shared-group
+yq -i '(select(.kind == "CronJob" and .metadata.name == "openbao-raft-snapshot") |
+  .spec.jobTemplate.spec.template.spec.initContainers[0].securityContext.runAsGroup) = 2000' \
+  "$test_tmp/wrong-shared-group/platform/openbao/raft-snapshot-cronjob.yaml"
+expect_rejected wrong-shared-group
+
 make_fixture secret-routing
 yq -i '(select(.kind == "ExternalSecret" and
   .metadata.name == "hetzner-sb-creds") | .spec.data) +=
@@ -68,4 +88,4 @@ yq -i '(select(.kind == "ExternalSecret" and
   "$test_tmp/secret-routing/platform/openbao/raft-snapshot-cronjob.yaml"
 expect_rejected secret-routing
 
-printf '%s\n' 'PASS: static token, wrong audience, token sharing, secret routing, and broad egress are rejected.'
+printf '%s\n' 'PASS: identity, token isolation, artifact modes/groups, secret routing, and egress mutations are rejected.'
