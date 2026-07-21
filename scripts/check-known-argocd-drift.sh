@@ -52,18 +52,43 @@ clickhouse_kustomization="$repo_root/infrastructure/clickhouse-operator/kustomiz
 [[ $(yq '.helmCharts[] | select(.name == "altinity-clickhouse-operator") |
   .includeCRDs' "$clickhouse_kustomization") == true ]] ||
   fail "ClickHouse chart CRDs must stay rendered under Argo ownership"
+[[ $(yq -o=json -I=0 '.imagePullSecrets' "$clickhouse_values") == '[]' ]] ||
+  fail "remove the paired imagePullSecrets Argo ignore before configuring it"
+[[ $(yq -o=json -I=0 '.nodeSelector' "$clickhouse_values") == '{}' ]] ||
+  fail "remove the paired nodeSelector Argo ignore before configuring it"
+[[ $(yq -o=json -I=0 '.tolerations' "$clickhouse_values") == '[]' ]] ||
+  fail "remove the paired tolerations Argo ignore before configuring it"
+[[ $(yq -o=json -I=0 '.topologySpreadConstraints' "$clickhouse_values") == '[]' ]] ||
+  fail "remove the paired topologySpreadConstraints Argo ignore before configuring it"
 
 required_ignores=(
   '.spec.rules[].verifyImages[].attestors[].entries[].keys.signatureAlgorithm'
-  '.spec.template.spec.imagePullSecrets | select(length == 0)'
-  '.spec.template.spec.nodeSelector | select(length == 0)'
-  '.spec.template.spec.tolerations | select(length == 0)'
-  '.spec.template.spec.topologySpreadConstraints | select(length == 0)'
-  '.spec.conversion | select(.strategy == "None")'
+  '/spec/template/spec/imagePullSecrets'
+  '/spec/template/spec/nodeSelector'
+  '/spec/template/spec/tolerations'
+  '/spec/template/spec/topologySpreadConstraints'
 )
 for expression in "${required_ignores[@]}"; do
   rg -Fq -- "$expression" "$applicationset" ||
     fail "infrastructure ApplicationSet lost narrow ignore: $expression"
+done
+
+kyverno_policy_crds=(
+  deletingpolicies.policies.kyverno.io
+  generatingpolicies.policies.kyverno.io
+  imagevalidatingpolicies.policies.kyverno.io
+  mutatingpolicies.policies.kyverno.io
+  namespaceddeletingpolicies.policies.kyverno.io
+  namespacedgeneratingpolicies.policies.kyverno.io
+  namespacedimagevalidatingpolicies.policies.kyverno.io
+  namespacedmutatingpolicies.policies.kyverno.io
+  namespacedvalidatingpolicies.policies.kyverno.io
+  policyexceptions.policies.kyverno.io
+  validatingpolicies.policies.kyverno.io
+)
+for crd in "${kyverno_policy_crds[@]}"; do
+  rg -Fq -- "name: $crd" "$applicationset" ||
+    fail "missing exact conversion-default ignore for $crd"
 done
 
 echo "PASS: known Kyverno/ClickHouse API defaults are explicit or narrowly ignored"

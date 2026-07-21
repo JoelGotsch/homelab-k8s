@@ -9,6 +9,14 @@
 crdHook:
   enabled: false
 
+# The chart renders these empty scheduling values but the API server omits
+# them. Their exact empty state is paired with narrow Argo jsonPointers and a
+# pre-commit guard; configure placement and remove the ignores together.
+imagePullSecrets: []
+nodeSelector: {}
+tolerations: []
+topologySpreadConstraints: []
+
 # Operator runs cluster-wide (watches ClickHouseInstallation
 # CRs in any namespace). Same pattern as CNPG.
 operator:
