@@ -89,7 +89,7 @@ repos:
         entry: python3 scripts/test-alert-router.py
         language: system
         pass_filenames: false
-        files: '(observability/kube-prometheus-stack/(alert_router\.py|alert-formatter\.yaml|alertmanager-config\.yaml|notification-channel-policy\.json)|scripts/test-alert-router\.py)$'
+        files: '(bootstrap/applicationsets/observability\.yaml|observability/kube-prometheus-stack/(alert_router\.py|alert-formatter\.yaml|alertmanager-config\.yaml|notification-channel-policy\.json)|scripts/test-alert-router\.py)$'
 
       - id: check-broken-links
         name: relative markdown links + #anchor fragments resolve (cross-repo aware)

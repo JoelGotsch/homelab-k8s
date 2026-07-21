@@ -21,10 +21,11 @@ discovery via this layer's `serviceMonitorSelector` /
 
 | File | Purpose |
 |---|---|
-| `kustomization.yaml` | Pins kube-prometheus-stack chart 65.5.1. |
+| `kustomization.yaml` | Pins kube-prometheus-stack chart 87.16.1. |
 | `namespace.yaml` | `monitoring` ns (shared with falco-stack); PSA `privileged`. |
 | `values.yaml` | Prometheus 30d retention on Longhorn-encrypted PVC; Alertmanager + Grafana persistence; chart-default ServiceMonitor / Rule selectors; node-exporter + kube-state-metrics enabled; OIDC commented-with-TODO until Authentik lands. |
 | `alertmanager-config.yaml` | AlertmanagerConfig CRD — all operational routes target the ntfy-primary adapter; no direct Signal receiver. |
+| `alert-formatter.yaml` | Single-replica ntfy-primary adapter, one-way Signal fallback, and a retained 256 MiB Longhorn PVC for the SQLite delivery ledger. |
 | `externalsecret.yaml` | Grafana admin user + password from `kv/grafana/admin`. |
 | `httproute.yaml` | Three HTTPRoutes: `grafana.lab.<HOMELAB-DOMAIN>`, `alertmanager.lab.<HOMELAB-DOMAIN>`, `prometheus.lab.<HOMELAB-DOMAIN>`. All Tailscale-fronted phase 1; Grafana intentionally NOT Cloudflare-Tunnel-served per ADR 0024 (dashboards surface internal-class data). |
 | `networkpolicy.yaml` | Prometheus/Alertmanager/Grafana policy; Alertmanager egress is limited to alert-formatter. |
@@ -34,9 +35,66 @@ discovery via this layer's `serviceMonitorSelector` /
 [`notification-channel-policy.json`](notification-channel-policy.json) is
 mounted beside the adapter and validated at startup. `alert_router.py` tries
 ntfy first and calls approval-channel's one-way alert endpoint only after that
-publish fails. If both fail it returns 502 for Alertmanager retry. Unit tests
-prove healthy ntfy makes zero Signal calls. The static route guard rejects a
-direct Alertmanager Signal receiver or custom relay reappearing.
+publish fails. A SQLite ledger records the ntfy attempt/outcome independently
+from fallback state before responding to Alertmanager. Exact retries are
+deduplicated for five minutes. A timeout or interrupted attempt is persisted as
+`delivery_unknown` and is never retried blindly; an explicit HTTP rejection may
+be retried. When the Signal rate limit is full and neither channel has
+acknowledged the alert, the adapter returns 503 so Alertmanager retains it; the
+ledger is not mistaken for an asynchronous delivery queue. The machine policy
+limits Signal fallback to five attempts per 15 minutes and closes an outage
+after three consecutive ntfy acknowledgements, then sends one recovery summary.
+Unit tests prove healthy ntfy makes zero Signal calls. The static route guard
+rejects a direct Alertmanager Signal receiver or custom relay reappearing.
+
+The ledger stores only delivery hashes, normalized evidence, timestamps, and
+outcomes—not alert bodies or credentials. Liveness is `/healthz`; `/readyz`
+also verifies that the policy is valid and the ledger is writable. The
+Deployment uses `Recreate` because the PVC is RWO and the process is a single
+SQLite writer; Alertmanager retains notifications during that short handoff.
+The claim uses `longhorn-replica2-retain` and `Prune=confirm`: a Git rollback
+cannot silently discard unresolved delivery evidence. No independent backup is
+claimed; the exact RPO/RTO and disposable rebind test are declared in
+[`scripts/retention-contract.yaml`](../../scripts/retention-contract.yaml).
+An ambiguous primary outcome is eligible for normal retention cleanup only
+after Signal acknowledged the fallback; unresolved Signal ambiguity remains
+pinned until operator reconciliation.
+
+### Ambiguous-delivery reconciliation
+
+An ntfy timeout still permits the typed Signal backup. A Signal timeout is more
+dangerous: Signal may have accepted the message even though its acknowledgement
+was lost. The router returns 503 and pins that exact delivery in
+`delivery_unknown` instead of sending a possible duplicate. Inspect only
+non-sensitive ledger metadata in the running pod:
+
+```sh
+kubectl -n monitoring exec deploy/alert-formatter -- \
+  python /app/alert_router.py list-unknown
+```
+
+After independently checking the downstream server path, resolve exactly one
+channel outcome. `acknowledged` makes the retained Alertmanager retry a no-op;
+`failed` permits a new fallback attempt:
+
+```sh
+kubectl -n monitoring exec deploy/alert-formatter -- \
+  python /app/alert_router.py resolve-unknown \
+  <DELIVERY_KEY> fallback acknowledged
+```
+
+These commands are deliberately manual: a guessed reconciliation would merely
+hide the same ambiguity the ledger exists to expose. They do not access or
+modify approval state.
+
+If `list-unknown` reports a `recovery_summary` rather than a delivery, reconcile
+that one Signal outcome by episode ID after checking the Signal adapter logs:
+
+```sh
+kubectl -n monitoring exec deploy/alert-formatter -- \
+  python /app/alert_router.py resolve-recovery-summary \
+  <EPISODE_ID> acknowledged
+```
 
 ## OpenBao paths to seed
 
@@ -107,7 +165,7 @@ keeps working throughout.
 | Pre-existing ServiceMonitors + PrometheusRules (4 layers) | Auto-discovered by the chart's selector match; scrape + rule-eval start within ~30s |
 | AlertmanagerConfig in this layer | Picked up by Alertmanager via `alertmanagerConfigSelector` |
 | **(later) Loki layer** | Grafana data source for log dashboards; Falcosidekick + Alertmanager log-shipping outputs enable; uncomment NetworkPolicy egress rule |
-| Notification adapter | Two replicas format to ntfy; a failed publish opens one typed Signal fallback without approval-state access. |
+| Notification adapter | One PVC-backed replica formats to ntfy; a failed publish opens a deduplicated, rate-limited, typed Signal fallback without approval-state access. |
 | **(later) Authentik OIDC** | Grafana `auth.generic_oauth` block enables; admin password becomes break-glass-only |
 
 ## Caveats
@@ -139,9 +197,11 @@ keeps working throughout.
    chart values). If the chart's default ever changes
    shape, our override might leak the chart-default
    behavior; verify at chart-bump time.
-5. **Fallback is stateless in this first slice.** Alertmanager grouping/repeat
-   intervals bound traffic, but persistent hysteresis, ambiguity reconciliation,
-   and a transactional outbox remain WEB-01 hardening.
+5. **Server acknowledgement is not phone receipt.** The durable ledger proves
+   the in-cluster ntfy/Signal server paths only. Periodic attended phone
+   canaries remain required by ADR 0040. ntfy v2.11 has no client-supplied
+   idempotency key, so timeout ambiguity is recorded and reconciled rather than
+   silently treated as exact-once delivery.
 6. **Grafana OIDC commented-with-TODO until Authentik
    lands.** First-install operator logs in with the
    ESO-projected admin password directly. When Authentik

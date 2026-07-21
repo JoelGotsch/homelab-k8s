@@ -1,8 +1,9 @@
 # alert-formatter is the single operational-alert delivery owner.
 # Alertmanager posts one grouped webhook here. The mounted alert_router.py
-# formats and publishes to ntfy; only a synchronous ntfy error opens the
-# one-way Signal fallback through approval-channel. If both fail, the router
-# returns 502 and Alertmanager retains/retries the notification.
+# records and publishes to ntfy; only a synchronous ntfy error opens the
+# one-way Signal fallback through approval-channel. Explicit downstream
+# rejection returns 502 for Alertmanager retry. Ambiguous outcomes return 503
+# and remain pinned in the ledger until operator reconciliation.
 
 apiVersion: apps/v1
 kind: Deployment
@@ -11,10 +12,30 @@ metadata:
   namespace: monitoring
   labels:
     app.kubernetes.io/name: alert-formatter
+  annotations:
+    # One-resource transition exception. The live API-defaulted rollingUpdate
+    # map cannot be cleared in the same request that selects Recreate through
+    # SSA, even with an explicit null deletion signal. Argo CD 3.4 supports
+    # overriding application-level SSA per resource, so use client-side apply
+    # for this Deployment's three-way merge. Keep rollingUpdate:null below;
+    # reassess/remove this exception only after live convergence is proven.
+    argocd.argoproj.io/sync-options: ServerSideApply=false
 spec:
   # First rollout stays at one replica per the minimal-blast-radius rule. Scale
   # only after an uncached-node image pull and a live fallback drill are proven.
   replicas: 1
+  # The SQLite delivery ledger is single-writer state on an RWO PVC. Recreate
+  # prevents a rolling update from starting two writers or hitting a Longhorn
+  # multi-attach race. Alertmanager retains/retries during the short handoff.
+  strategy:
+    type: Recreate
+    # The live Deployment was created with the default RollingUpdate strategy,
+    # so the API stores a non-null rollingUpdate block. Server-side apply does
+    # not delete that unowned/defaulted field merely because desired YAML omits
+    # it; the resulting Recreate + rollingUpdate combination fails admission.
+    # Preserve this explicit null in the apply payload as the SSA deletion
+    # signal. The API response then contains Recreate with no rollingUpdate.
+    rollingUpdate: null
   selector:
     matchLabels:
       app.kubernetes.io/name: alert-formatter
@@ -23,6 +44,10 @@ spec:
       labels:
         app.kubernetes.io/name: alert-formatter
     spec:
+      # The router does not call the Kubernetes API. Do not mount an
+      # unnecessary default-ServiceAccount bearer token into a process that
+      # legitimately holds both notification-channel credentials.
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -58,10 +83,14 @@ spec:
                   key: approval-channel
             - name: NOTIFICATION_CHANNEL_POLICY_PATH
               value: /app/notification-channel-policy.json
+            - name: ALERT_ROUTER_STATE_PATH
+              value: /var/lib/alert-router/delivery-ledger.sqlite3
           volumeMounts:
             - name: script
               mountPath: /app
               readOnly: true
+            - name: state
+              mountPath: /var/lib/alert-router
           livenessProbe:
             httpGet:
               path: /healthz
@@ -69,11 +98,11 @@ spec:
             initialDelaySeconds: 3
             periodSeconds: 30
           readinessProbe:
-            # Readiness validates that the router process and policy loaded.
+            # Readiness validates the policy and writable delivery ledger.
             # It deliberately does not require ntfy: ntfy failure is the state
             # in which this pod must remain ready to provide Signal fallback.
             httpGet:
-              path: /healthz
+              path: /readyz
               port: http
             initialDelaySeconds: 2
             periodSeconds: 10
@@ -92,6 +121,32 @@ spec:
         - name: script
           configMap:
             name: alert-formatter-script
+        - name: state
+          persistentVolumeClaim:
+            claimName: alert-formatter-state
+---
+# Durable attempt/outcome and outage-episode ledger. It contains hashes,
+# timestamps and normalized outcomes, never alert bodies or credentials.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: alert-formatter-state
+  namespace: monitoring
+  annotations:
+    # Bind durable state before Recreate stops the existing stateless pod.
+    argocd.argoproj.io/sync-wave: "-1"
+    # A Git rollback must not silently erase unresolved delivery evidence.
+    # Require an attended prune decision even though the backing PV is Retain.
+    argocd.argoproj.io/sync-options: Prune=confirm
+    retention.homelab.internal/reason: >-
+      Alert delivery attempt and ambiguity ledger; loss can cause a blind
+      duplicate or suppress the only known Signal fallback outcome.
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: longhorn-replica2-retain
+  resources:
+    requests:
+      storage: 256Mi
 ---
 apiVersion: v1
 kind: Service
@@ -145,6 +200,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: ntfy
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ntfy
       ports:
         - port: 80
           protocol: TCP

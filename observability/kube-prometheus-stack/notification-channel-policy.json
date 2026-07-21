@@ -6,7 +6,19 @@
       "primary": "ntfy",
       "signal": "conditional-fallback-only",
       "fallbackEvidence": "synchronous-ntfy-publish-error",
-      "approvalStateAccess": "forbidden"
+      "approvalStateAccess": "forbidden",
+      "deliveryControl": {
+        "dedupWindowSeconds": 300,
+        "ledgerRetentionSeconds": 2592000,
+        "fallbackRateLimit": {
+          "maxMessages": 5,
+          "windowSeconds": 900
+        },
+        "recovery": {
+          "consecutivePrimarySuccesses": 3,
+          "minimumSeconds": 0
+        }
+      }
     },
     "approvalItem": {
       "primary": "signal",

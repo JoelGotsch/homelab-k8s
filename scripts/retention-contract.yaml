@@ -13,7 +13,7 @@
 # claim/template merely to make this file green; KST-03 owns attended migration.
 version: 1
 owner_repository: homelab-k8s
-declared_count: 18
+declared_count: 19
 
 scope:
   roots:
@@ -122,6 +122,26 @@ entries:
     migration_owner: none
     required_restore_test: recreate a disposable claim and prove routing configuration reloads
     reason: operational history is useful but not a source of truth
+
+  - id: alert-formatter-delivery-ledger
+    workload: kube-prometheus-stack alert formatter
+    namespace: monitoring
+    claim: PersistentVolumeClaim/alert-formatter-state
+    source:
+      file: observability/kube-prometheus-stack/alert-formatter.yaml
+      value_path: 'select(.kind == "PersistentVolumeClaim" and .metadata.name == "alert-formatter-state") | .spec.storageClassName'
+    current_storage_class: longhorn-replica2-retain
+    target_storage_class: longhorn-replica2-retain
+    desired_reclaim_policy: Retain
+    state: compliant
+    data_class: internal
+    data_value: delivery hashes, channel outcomes, and unresolved ambiguity state used to prevent blind duplicate sends
+    backup_tier: no independent backup; the retained two-replica Longhorn volume is the sole durable copy
+    rpo: latest FULL-synchronous SQLite commit while the Longhorn volume survives; no RPO is claimed for total volume loss
+    rto: minutes for normal pod reattachment; attended PV/PVC recovery after an approved claim prune
+    migration_owner: none
+    required_restore_test: rebind a disposable retained PV containing an unknown attempt and prove list-unknown plus SQLite integrity succeed
+    reason: unresolved downstream outcomes are safety state and must survive pod replacement, Git rollback, and accidental claim deletion
 
   - id: grafana-data
     workload: kube-prometheus-stack Grafana
