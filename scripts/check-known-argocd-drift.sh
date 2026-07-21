@@ -22,6 +22,10 @@ command -v rg >/dev/null || fail "rg is required"
 if rg -q 'resource\.compareOptions|serverSideDiff:' "$argocd_cm"; then
   fail "argocd-cm contains the obsolete/non-functional server-side diff shape"
 fi
+if rg -q 'resource\.customizations\.ignoreDifferences\.kyverno\.io_ClusterPolicy' \
+  "$argocd_cm"; then
+  fail "top-level Kyverno policy behavior must not be hidden globally"
+fi
 
 while IFS= read -r policy; do
   if yq '[.. | select(tag == "!!map" and has("apiCall")) | .apiCall |
@@ -70,6 +74,8 @@ clickhouse_kustomization="$repo_root/infrastructure/clickhouse-operator/kustomiz
   fail "remove the paired topologySpreadConstraints patch before configuring it"
 
 required_ignores=(
+  '.spec.rules[].skipBackgroundRequests'
+  '.spec.rules[].validate.allowExistingViolations'
   '.spec.rules[].verifyImages[].attestors[].entries[].keys.signatureAlgorithm'
   '/metadata/labels'
 )
@@ -77,6 +83,11 @@ for expression in "${required_ignores[@]}"; do
   rg -Fq -- "$expression" "$applicationset" ||
     fail "infrastructure ApplicationSet lost narrow ignore: $expression"
 done
+
+if rg -n '(^|[[:space:]])(skipBackgroundRequests|allowExistingViolations):[[:space:]]+false' \
+  "$policy_dir"; then
+  fail "an explicit false value is hidden by infra-kyverno ignoreDifferences"
+fi
 
 required_clickhouse_removals=(
   '/spec/template/spec/imagePullSecrets'

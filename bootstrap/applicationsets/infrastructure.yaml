@@ -68,17 +68,15 @@ spec:
       # into every object — they'd otherwise keep every infra-*
       # app permanently OutOfSync and hide real drift (rule 7).
       ignoreDifferences:
-        # Kyverno's ClusterPolicy webhook defaults
-        # `spec.admission: true` and per-rule
-        # `skipBackgroundRequests` on any rule that uses
-        # context.apiCall / generate / verifyImages. Verified
-        # 2026-07-11 on 6 ClusterPolicies.
+        # Kyverno's webhook writes per-rule compatibility/default fields.
+        # Keep these scoped to infra-kyverno rather than hiding top-level
+        # policy behavior globally in argocd-cm. The regression hook rejects
+        # an explicit false value while either field remains ignored.
         - group: kyverno.io
           kind: ClusterPolicy
-          jsonPointers:
-            - /spec/admission
           jqPathExpressions:
             - '.spec.rules[].skipBackgroundRequests'
+            - '.spec.rules[].validate.allowExistingViolations'
             # Kyverno 3.8.2 also writes the deprecated copy of its
             # default `sha256` value below `keys`. The supported sibling
             # field is declared explicitly in the policy source; ignore
