@@ -67,6 +67,7 @@ required_ignores=(
   '/spec/template/spec/nodeSelector'
   '/spec/template/spec/tolerations'
   '/spec/template/spec/topologySpreadConstraints'
+  '/metadata/labels'
 )
 for expression in "${required_ignores[@]}"; do
   rg -Fq -- "$expression" "$applicationset" ||
