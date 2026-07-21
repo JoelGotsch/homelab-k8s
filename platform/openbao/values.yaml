@@ -37,6 +37,14 @@ injector:
 # them — source verification 2026-06-25). Only the env-var pattern
 # above + empty HCL stanza work in combination.
 server:
+  # ADR 0018 D11 (amendment 2026-06-24): Parallel pod management
+  # so raft quorum can re-establish as soon as any two pods are
+  # unsealed, regardless of ordinal-N-1 readiness (the default
+  # OrderedReady amplified the 2026-06-22 single-pod failure into
+  # a 26h outage). Chart 0.28.4 exposes this exact value at
+  # server.podManagementPolicy, so no Kustomize StatefulSet patch
+  # is needed.
+  podManagementPolicy: Parallel
   # Digest-pinned image (2026-07-20). The chart otherwise renders a
   # bare `quay.io/openbao/openbao:<appVersion>` TAG. During the 2.5.5
   # rollout, worker3's Spegel P2P mesh had lost connectivity after
@@ -57,14 +65,12 @@ server:
     \    - labelSelector:\n        matchLabels:\n          app.kubernetes.io/name:\
     \ openbao\n          app.kubernetes.io/instance: openbao\n          component:\
     \ server\n      topologyKey: kubernetes.io/hostname\n"
-  # 2026-07-09 ADR 0036: OpenBao's Raft data + audit log volumes
-  # move to the -retain family. The Raft dir is the source of
-  # truth for every homelab secret; a stray PVC delete on a
-  # single replica means a re-join dance, on all replicas means
-  # restoring from an offline snapshot (multi-hour RTO). Default
-  # longhorn-replica2 is now reclaim=Delete; retain is mandatory.
-  # retention.homelab.internal/reason (data): "OpenBao Raft data — source of truth for every homelab secret."
-  # retention.homelab.internal/reason (audit): "OpenBao audit log — tamper-evidence trail for the secret store."
+  # The immutable live claim templates still name longhorn-replica2
+  # (StorageClass reclaim=Delete), while every current OpenBao PV was
+  # separately verified with reclaimPolicy=Retain. Do not delete or
+  # recreate these claims. P0-08/KST owns a reviewed migration to
+  # longhorn-replica2-retain; the bootstrap and Argo values remain
+  # byte-identical until that migration can change both safely.
   auditStorage:
     accessMode: ReadWriteOnce
     enabled: true
