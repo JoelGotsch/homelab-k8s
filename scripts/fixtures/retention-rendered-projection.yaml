@@ -22,6 +22,11 @@ layers:
     declared_claim_count: 2
     declared_secret_reference_count: 12
     declared_pod_selector_count: 2
+    declared_forbidden_literal_count: 3
+    forbidden_literal_paths:
+      - .s3.accessKeyId.value
+      - .s3.secretAccessKey.value
+      - .s3.auth.rootPassword
     secret_reference_env_pattern: ^LANGFUSE_S3_(EVENT_UPLOAD|BATCH_EXPORT|MEDIA_UPLOAD)_(ACCESS_KEY_ID|SECRET_ACCESS_KEY)$
     pod_selectors:
       - workload_kind: Deployment
@@ -54,6 +59,7 @@ layers:
         env_name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
         secret_name: langfuse-app-secrets
         secret_key: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+        source_value_path: .s3.eventUpload.accessKeyId.value
         source_name_path: .s3.eventUpload.accessKeyId.secretKeyRef.name
         source_key_path: .s3.eventUpload.accessKeyId.secretKeyRef.key
         externalsecret_file: observability/langfuse/externalsecret.yaml
@@ -63,6 +69,7 @@ layers:
         env_name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
         secret_name: langfuse-app-secrets
         secret_key: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+        source_value_path: .s3.eventUpload.secretAccessKey.value
         source_name_path: .s3.eventUpload.secretAccessKey.secretKeyRef.name
         source_key_path: .s3.eventUpload.secretAccessKey.secretKeyRef.key
         externalsecret_file: observability/langfuse/externalsecret.yaml
@@ -72,6 +79,7 @@ layers:
         env_name: LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID
         secret_name: langfuse-app-secrets
         secret_key: LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID
+        source_value_path: .s3.batchExport.accessKeyId.value
         source_name_path: .s3.batchExport.accessKeyId.secretKeyRef.name
         source_key_path: .s3.batchExport.accessKeyId.secretKeyRef.key
         externalsecret_file: observability/langfuse/externalsecret.yaml
@@ -81,6 +89,7 @@ layers:
         env_name: LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY
         secret_name: langfuse-app-secrets
         secret_key: LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY
+        source_value_path: .s3.batchExport.secretAccessKey.value
         source_name_path: .s3.batchExport.secretAccessKey.secretKeyRef.name
         source_key_path: .s3.batchExport.secretAccessKey.secretKeyRef.key
         externalsecret_file: observability/langfuse/externalsecret.yaml
@@ -90,6 +99,7 @@ layers:
         env_name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
         secret_name: langfuse-app-secrets
         secret_key: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+        source_value_path: .s3.mediaUpload.accessKeyId.value
         source_name_path: .s3.mediaUpload.accessKeyId.secretKeyRef.name
         source_key_path: .s3.mediaUpload.accessKeyId.secretKeyRef.key
         externalsecret_file: observability/langfuse/externalsecret.yaml
@@ -99,6 +109,7 @@ layers:
         env_name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
         secret_name: langfuse-app-secrets
         secret_key: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+        source_value_path: .s3.mediaUpload.secretAccessKey.value
         source_name_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.name
         source_key_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.key
         externalsecret_file: observability/langfuse/externalsecret.yaml
@@ -108,6 +119,7 @@ layers:
         env_name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
         secret_name: langfuse-app-secrets
         secret_key: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+        source_value_path: .s3.eventUpload.accessKeyId.value
         source_name_path: .s3.eventUpload.accessKeyId.secretKeyRef.name
         source_key_path: .s3.eventUpload.accessKeyId.secretKeyRef.key
         externalsecret_file: observability/langfuse/externalsecret.yaml
@@ -117,6 +129,7 @@ layers:
         env_name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
         secret_name: langfuse-app-secrets
         secret_key: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+        source_value_path: .s3.eventUpload.secretAccessKey.value
         source_name_path: .s3.eventUpload.secretAccessKey.secretKeyRef.name
         source_key_path: .s3.eventUpload.secretAccessKey.secretKeyRef.key
         externalsecret_file: observability/langfuse/externalsecret.yaml
@@ -126,6 +139,7 @@ layers:
         env_name: LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID
         secret_name: langfuse-app-secrets
         secret_key: LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID
+        source_value_path: .s3.batchExport.accessKeyId.value
         source_name_path: .s3.batchExport.accessKeyId.secretKeyRef.name
         source_key_path: .s3.batchExport.accessKeyId.secretKeyRef.key
         externalsecret_file: observability/langfuse/externalsecret.yaml
@@ -135,6 +149,7 @@ layers:
         env_name: LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY
         secret_name: langfuse-app-secrets
         secret_key: LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY
+        source_value_path: .s3.batchExport.secretAccessKey.value
         source_name_path: .s3.batchExport.secretAccessKey.secretKeyRef.name
         source_key_path: .s3.batchExport.secretAccessKey.secretKeyRef.key
         externalsecret_file: observability/langfuse/externalsecret.yaml
@@ -144,6 +159,7 @@ layers:
         env_name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
         secret_name: langfuse-app-secrets
         secret_key: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+        source_value_path: .s3.mediaUpload.accessKeyId.value
         source_name_path: .s3.mediaUpload.accessKeyId.secretKeyRef.name
         source_key_path: .s3.mediaUpload.accessKeyId.secretKeyRef.key
         externalsecret_file: observability/langfuse/externalsecret.yaml
@@ -153,6 +169,7 @@ layers:
         env_name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
         secret_name: langfuse-app-secrets
         secret_key: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+        source_value_path: .s3.mediaUpload.secretAccessKey.value
         source_name_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.name
         source_key_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.key
         externalsecret_file: observability/langfuse/externalsecret.yaml
@@ -168,6 +185,8 @@ layers:
     declared_claim_count: 1
     declared_secret_reference_count: 0
     declared_pod_selector_count: 0
+    declared_forbidden_literal_count: 0
+    forbidden_literal_paths: []
     pod_selectors: []
     claims:
       - contract_id: crowdsec-lapi-data
@@ -180,7 +199,7 @@ layers:
     secret_references: []
 
   - path: platform/woodpecker
-    input_digest_sha256: f01b9bcfa7d59d84120ec2fd3d0763309a06385e1cda0290f5863cea271a3da6
+    input_digest_sha256: bd747072e60e6e405f4ecc5018941d1cb0b0d4aa050ff657bd7f411f727e25d7
     chart:
       name: woodpecker
       repository: https://woodpecker-ci.org/
@@ -192,6 +211,8 @@ layers:
     declared_claim_count: 2
     declared_secret_reference_count: 0
     declared_pod_selector_count: 0
+    declared_forbidden_literal_count: 0
+    forbidden_literal_paths: []
     pod_selectors: []
     claims:
       - contract_id: woodpecker-agent-config

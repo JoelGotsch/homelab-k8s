@@ -34,7 +34,7 @@ An entry records the source selector, current and target class, desired reclaim 
 migration owner, and required restore test. The check rejects:
 
 - an unclassified new Longhorn selector;
-- source or generated `.j2` mirror drift;
+- source or generated `.j2` mirror drift, including J2-only Longhorn selectors;
 - an inaccurate StorageClass reclaim-policy catalog;
 - duplicate/incomplete entries;
 - a target class that does not implement the declared lifecycle; and
@@ -52,8 +52,9 @@ two component labels used by the MinIO ingress policy.
 The pre-commit path is deliberately offline. It verifies the chart
 name/repository/version, reviewed chart-package SHA-256, a deterministic digest
 of every render-affecting file in each layer, exact claim/contract linkage,
-ExternalSecret key projection, and absence of literal S3 credentials in the
-declared values paths. If any input changes, the old projection fails closed.
+ExternalSecret key projection, and absence of literal S3 credentials in both
+the per-mode and top-level fallback/MinIO-root values paths. If any input
+changes, the old projection fails closed.
 
 After changing a pinned chart or render input, run the networked verification:
 
@@ -63,8 +64,11 @@ scripts/check-retention-render-fixtures.sh --render
 
 That command downloads each exact version, rejects a package whose SHA-256 no
 longer matches the reviewed archive, renders from the verified local package,
-and compares all generated Longhorn claims, S3 `secretKeyRef` pairs, and pod
-labels against the projection. It does not call Kubernetes. Review the render
+rejects every generated PVC or StatefulSet claim template whose
+`storageClassName` is absent or empty, and compares all generated Longhorn
+claims, S3 `secretKeyRef` pairs, and pod labels against the projection. An
+explicit non-Longhorn class remains outside this Longhorn contract. The command
+does not call Kubernetes. Review the render
 before updating the package hash, layer digest, or projection; those fields are
 evidence, not cache values to refresh blindly.
 

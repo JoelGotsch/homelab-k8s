@@ -54,6 +54,31 @@ policy_count="$(yq e -r '
   exit 1
 }
 
+allow_all_peer_count="$(yq ea -r '
+  select(.kind == "NetworkPolicy" and .metadata.namespace == "minio-on-nas" and
+    .metadata.name == "minio-allow") |
+  [.spec.ingress[]? | .from[]? |
+   select((.ipBlock == null) and
+          (((.namespaceSelector // {}) | length) == 0) and
+          (((.podSelector // {}) | length) == 0))] | length
+' "$policy_file" | strip_yq_stream_markers)"
+[ "$allow_all_peer_count" -eq 0 ] || {
+  printf 'ERROR: %s contains %s ingress peer(s) that select every namespace and pod\n' \
+    "$POLICY_REL" "$allow_all_peer_count" >&2
+  exit 1
+}
+
+allow_all_rule_count="$(yq ea -r '
+  select(.kind == "NetworkPolicy" and .metadata.namespace == "minio-on-nas" and
+    .metadata.name == "minio-allow") |
+  [.spec.ingress[]? | select(((.from // []) | length) == 0)] | length
+' "$policy_file" | strip_yq_stream_markers)"
+[ "$allow_all_rule_count" -eq 0 ] || {
+  printf 'ERROR: %s contains %s ingress rule(s) with no source constraint\n' \
+    "$POLICY_REL" "$allow_all_rule_count" >&2
+  exit 1
+}
+
 langfuse_rules="$(yq e -r '
   select(.kind == "NetworkPolicy" and .metadata.namespace == "minio-on-nas" and
     .metadata.name == "minio-allow") |

@@ -61,8 +61,7 @@ restoring from tier-2/3.
 | `values.yaml` | Standalone mode, existing PVC, existing root secret, canonical buckets, no console exposure. |
 | `pv.yaml` | Static PV bound to `/volume1/cluster-backups/minio` on the NAS via NFS CSI; PVC `minio-data` claims it. |
 | `externalsecret.yaml` | Root credentials from OpenBao at `kv/data/minio-on-nas/root-creds`. |
-| `networkpolicy.yaml` | Default deny plus named consumers. Langfuse access is one combined namespace+pod peer limited to chart-rendered web/worker component labels on TCP/9000; structural and mutation guards prevent namespace-wide broadening. |
-| `networkpolicy.yaml` | Default-deny + allow from CNPG / Longhorn / Loki / Restic CronJob namespaces; egress to NAS NFS only. |
+| `networkpolicy.yaml` | Default-deny; ingress admits labelled CNPG pods and named Longhorn, backup, Loki, monitoring, Tempo, and Langfuse consumers on TCP/9000. Langfuse is one combined namespace+pod peer limited to chart-rendered web/worker labels, with structural and mutation guards against broadening. Egress is limited to DNS and NAS NFS. |
 
 ## Bootstrap
 

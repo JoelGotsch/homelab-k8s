@@ -232,7 +232,7 @@ repos:
         entry: scripts/check-retention-render-fixtures.sh
         language: script
         pass_filenames: false
-        files: '^(observability/(langfuse|crowdsec)|platform/woodpecker)/|^scripts/(check-retention-render-fixtures\.sh|retention-contract\.yaml|fixtures/retention-rendered-projection\.yaml)$'
+        files: '^(observability/(langfuse|crowdsec)|platform/woodpecker)/|^scripts/(check-rendered-retention-claims\.sh|check-retention-render-fixtures\.sh|retention-contract\.yaml|fixtures/retention-rendered-(projection|claim-test)\.yaml)$'
         # Offline by default. The reviewed package SHA-256 and layer input
         # digest make the narrow projection hermetic; run the same script with
         # --render after a chart bump to verify a fresh downloaded package.
@@ -242,7 +242,7 @@ repos:
         entry: scripts/test-retention-render-fixtures.sh
         language: script
         pass_filenames: false
-        files: '^(observability/(langfuse|crowdsec)|platform/woodpecker)/|^scripts/(check-retention-render-fixtures\.sh|test-retention-render-fixtures\.sh|retention-contract\.yaml|fixtures/retention-rendered-projection\.yaml)$'
+        files: '^(observability/(langfuse|crowdsec)|platform/woodpecker)/|^scripts/(check-rendered-retention-claims\.sh|check-retention-render-fixtures\.sh|test-retention-render-fixtures\.sh|retention-contract\.yaml|fixtures/retention-rendered-(projection|claim-test)\.yaml)$'
 
       - id: check-langfuse-minio-ingress
         name: MinIO admits only rendered Langfuse web and worker pods

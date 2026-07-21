@@ -41,7 +41,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-for required_tool in yq find sort awk; do
+for required_tool in yq find sort awk rg; do
   command -v "$required_tool" >/dev/null 2>&1 || {
     printf 'ERROR: %s is required\n' "$required_tool" >&2
     exit 2
@@ -214,6 +214,12 @@ for ((entry_index = 0; entry_index < entry_count; entry_index++)); do
       error "$CONTRACT: $id mirror expected path $selector_path in $mirror_rel, got '$mirror_selector_path'"
     [ "$mirror_value" = "$current_class" ] || \
       error "$CONTRACT: $id mirror expected $current_class in $mirror_rel, got '$mirror_value'"
+    mirror_fingerprint="$mirror_rel|$document_index|$selector_path|$current_class"
+    if [ -n "${declared_selectors[$mirror_fingerprint]:-}" ]; then
+      error "$CONTRACT: $id mirror duplicates exact selector owned by ${declared_selectors[$mirror_fingerprint]}: $mirror_fingerprint"
+    else
+      declared_selectors["$mirror_fingerprint"]="$id mirror"
+    fi
   done
 
   selector_fingerprint="$source_rel|$document_index|$selector_path|$current_class"
@@ -251,6 +257,14 @@ while IFS= read -r scope_root; do
   while IFS= read -r -d '' yaml_file; do
     relative_file="${yaml_file#"$REPO_ROOT"/}"
     path_is_excluded "$relative_file" && continue
+    case "$relative_file" in
+      *.j2)
+        # A Jinja file without a literal Longhorn class cannot contribute an
+        # explicit selector. This also avoids parsing unrelated templates whose
+        # Jinja expressions intentionally are not YAML before rendering.
+        rg -q 'longhorn' "$yaml_file" || continue
+        ;;
+    esac
     if ! yq e '.' "$yaml_file" >/dev/null 2>&1; then
       error "$relative_file: yq could not parse YAML"
       continue
@@ -294,7 +308,10 @@ while IFS= read -r scope_root; do
           ["ClickHouseInstallation", $owner + "/" + .name] | @tsv)
       ' "$yaml_file"
     )
-  done < <(find "$REPO_ROOT/$scope_root" -type f \( -name '*.yaml' -o -name '*.yml' \) -print0)
+  done < <(
+    find "$REPO_ROOT/$scope_root" -type f \
+      \( -name '*.yaml' -o -name '*.yml' -o -name '*.yaml.j2' -o -name '*.yml.j2' \) -print0
+  )
 done < <(yq e -r '.scope.roots[]' "$CONTRACT" | strip_yq_stream_markers)
 
 for fingerprint in "${!declared_selectors[@]}"; do

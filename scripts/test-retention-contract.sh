@@ -72,6 +72,14 @@ cp "$expanded_root/infrastructure/backup-cronjobs/pvc.yaml" \
 expect_fail "new Longhorn selector without classification" \
   --root "$expanded_root" --contract "$CONTRACT"
 
+j2_expanded_root="$TEMP_ROOT/j2-expanded"
+make_fixture "$j2_expanded_root"
+mkdir -p "$j2_expanded_root/platform/unclassified"
+cp "$j2_expanded_root/infrastructure/backup-cronjobs/pvc.yaml" \
+  "$j2_expanded_root/platform/unclassified/pvc.yaml.j2"
+expect_fail "new J2-only Longhorn selector without classification" \
+  --root "$j2_expanded_root" --contract "$CONTRACT"
+
 implicit_root="$TEMP_ROOT/implicit-default"
 make_fixture "$implicit_root"
 mkdir -p "$implicit_root/platform/implicit"

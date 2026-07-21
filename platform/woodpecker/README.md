@@ -23,7 +23,7 @@ Per ADR 0023 D5 + D6 + D8 + D9.
 | File | Purpose |
 |---|---|
 | `namespace.yaml` | `woodpecker` (control plane) + `ci-woodpecker` (step Pods); both PSA restricted. |
-| `kustomization.yaml` | Helm chart 3.4.0; resources below. |
+| `kustomization.yaml` | Helm chart 3.6.5; resources below. |
 | `values.yaml` | Server + agent config. SQLite DB on Longhorn; Forgejo OAuth integration; Kubernetes backend (step Pods spawn in `ci-woodpecker`). |
 | `rbac.yaml` | Cross-ns Role + RoleBinding so the agent's SA can manage step Pods in `ci-woodpecker`. Step-Pod SA has no kube-API access. |
 | `quota.yaml` | ResourceQuota + LimitRange on `ci-woodpecker` (per ADR 0023 D5). |
@@ -125,11 +125,13 @@ steps:
 
 1. **SQLite DB on Longhorn** — Woodpecker's job state DB is
    not CNPG-backed; it's per-pod SQLite on a Longhorn PVC.
-   Resilience via Longhorn snapshot + Restic tier-3.
-   Pipeline-execution state is recoverable but not
-   high-frequency-backed up; a few hours of pipeline history
-   loss is acceptable on a worst-case restore. If churn
-   grows, switch to CNPG via `WOODPECKER_DATABASE_DRIVER=postgres`.
+   ADR 0036 requires the small build-history volume to use a
+   Retain-policy class. Source still selects `longhorn-replica2`
+   until the attended KST-03 claim migration; the retention
+   contract records this as a known mismatch. Tier-1 Longhorn
+   snapshots exist, but no independent tier-3 membership is
+   currently declared. If churn grows, switch to CNPG via
+   `WOODPECKER_DATABASE_DRIVER=postgres`.
 
 2. **Single agent replica + 4 concurrent workflows.** At
    homelab scale this caps total parallel step Pods at ~8

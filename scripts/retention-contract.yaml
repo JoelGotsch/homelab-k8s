@@ -216,7 +216,7 @@ entries:
     state: known-mismatch
     data_class: personal
     data_value: Langfuse trace history; possible but expensive to regenerate from telemetry
-    backup_tier: tier-1 Longhorn snapshots only; independent off-volume backup is not declared
+    backup_tier: declared selective Longhorn raw-volume backup to NAS MinIO longhorn-backups, then tier-3 Restic; live membership observed; crash-consistent, not app-consistent; restore evidence pending
     rpo: 1 hour policy target
     rto: 4 to 24 hours
     migration_owner: KST-03 Langfuse ClickHouse migration
@@ -310,7 +310,7 @@ entries:
     state: known-mismatch
     data_class: personal
     data_value: bundled MinIO data; expected unused because every Langfuse S3 endpoint targets minio-on-nas, but not yet proven empty
-    backup_tier: tier-1 Longhorn snapshots only; independent off-volume backup is not declared
+    backup_tier: declared selective Longhorn backup to NAS MinIO longhorn-backups, then tier-3 Restic; live membership observed; restore evidence pending
     rpo: 1 hour policy target
     rto: 4 to 24 hours
     migration_owner: KST-03 Langfuse S3 disposition and PVC migration
@@ -508,17 +508,17 @@ entries:
         - platform/woodpecker/values.yaml.j2
     rendered_claim_id: woodpecker-server/data
     current_storage_class: longhorn-replica2
-    target_storage_class: longhorn-replica2
-    desired_reclaim_policy: Delete
-    state: compliant
+    target_storage_class: longhorn-replica2-retain
+    desired_reclaim_policy: Retain
+    state: known-mismatch
     data_class: internal
     data_value: CI pipeline history and jobs in flight
     backup_tier: tier-1 Longhorn snapshots only; no declared tier-3 membership
-    rpo: hours of pipeline history loss accepted
+    rpo: 4 hours policy target
     rto: 24 hours
-    migration_owner: none
-    required_restore_test: recreate a disposable claim and verify Woodpecker starts with an empty history
-    reason: pipeline definitions remain in Git and running jobs are retryable
+    migration_owner: KST-03 Woodpecker server PVC migration
+    required_restore_test: restore the SQLite claim to a disposable Woodpecker server and verify retained build history
+    reason: ADR 0036 requires the small build-history volume to survive accidental claim deletion
 
   - id: woodpecker-agent-config
     workload: Woodpecker agent configuration

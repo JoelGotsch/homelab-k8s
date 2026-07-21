@@ -59,9 +59,10 @@ server:
     # plugins can read host files + escape the step pod sandbox).
     WOODPECKER_PLUGINS_PRIVILEGED: "woodpeckerci/plugin-docker-buildx"
     # Database: SQLite on Longhorn for the server's job state.
-    # Forgejo's CNPG handles the source-of-truth metadata;
-    # Woodpecker's DB is just pipeline-execution state — recovery
-    # via Longhorn snapshot + Restic tier-3 is sufficient.
+    # ADR 0036 requires this small build-history volume to use a
+    # Retain-policy class. It remains on the current Delete-policy class until
+    # the attended KST-03 claim migration; do not change an immutable
+    # StatefulSet claim template as an unattended source-only edit.
     WOODPECKER_DATABASE_DRIVER: "sqlite3"
     WOODPECKER_DATABASE_DATASOURCE: "/var/lib/woodpecker/woodpecker.db"
 

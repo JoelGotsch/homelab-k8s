@@ -49,7 +49,7 @@ to keep workloads backend-agnostic.
 
 | File | Purpose |
 |---|---|
-| `kustomization.yaml` | langfuse-k8s helm chart 1.6.0 (Renovate-pinned). |
+| `kustomization.yaml` | langfuse-k8s Helm chart 1.5.38 (Renovate-pinned). |
 | `namespace.yaml` | `langfuse` ns; PSA baseline. |
 | `values.yaml` | Helm values: external ClickHouse (Altinity-managed), external Postgres (CNPG-managed), chart-managed Redis, MinIO blob storage. Pinned chart 1.5.38 S3 credentials use `secretKeyRef.name`/`key` for event, batch-export, and media paths; no credential value is stored in Git. Telemetry to Langfuse Inc. disabled per principle #2. |
 | `clickhouseinstallation.yaml` | Altinity `ClickHouseInstallation` CR: single-replica + single-shard; 50 GB longhorn-replica2; user password from ESO Secret. |
@@ -221,7 +221,7 @@ now populated; ESO will keep them in sync.
 
 ## Caveats
 
-1. **Langfuse v3 → v4 migration** — chart 1.6.0 ships
+1. **Langfuse v3 → v4 migration** — pinned chart 1.5.38 ships
    Langfuse v3 by default. v4 (the OTel-native SDK
    release) requires explicit chart values; check chart
    release notes at upgrade time.

@@ -73,6 +73,26 @@ yq e -i '
 expect_fail "namespace and pod selectors cannot be split into OR peers" \
   --root "$split_peer_root" --fixture "$FIXTURE"
 
+global_peer_root="$TEMP_ROOT/global-peer"
+make_policy_fixture "$global_peer_root"
+yq e -i '
+  (select(.kind == "NetworkPolicy" and .metadata.name == "minio-allow") |
+   .spec.ingress) += [{"from": [{"namespaceSelector": {}}],
+     "ports": [{"port": 9000, "protocol": "TCP"}]}]
+' "$global_peer_root/$POLICY_REL"
+expect_fail "empty namespace selector without a restrictive pod selector is rejected" \
+  --root "$global_peer_root" --fixture "$FIXTURE"
+
+ipblock_root="$TEMP_ROOT/explicit-ipblock"
+make_policy_fixture "$ipblock_root"
+yq e -i '
+  (select(.kind == "NetworkPolicy" and .metadata.name == "minio-allow") |
+   .spec.ingress) += [{"from": [{"ipBlock": {"cidr": "192.0.2.1/32"}}],
+     "ports": [{"port": 9000, "protocol": "TCP"}]}]
+' "$ipblock_root/$POLICY_REL"
+expect_pass "an explicit ipBlock is not misclassified as an allow-all peer" \
+  --root "$ipblock_root" --fixture "$FIXTURE"
+
 component_root="$TEMP_ROOT/extra-component"
 make_policy_fixture "$component_root"
 yq e -i '

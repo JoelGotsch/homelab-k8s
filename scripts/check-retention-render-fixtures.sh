@@ -14,6 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 FIXTURE="$SCRIPT_DIR/fixtures/retention-rendered-projection.yaml"
 CONTRACT="$SCRIPT_DIR/retention-contract.yaml"
+RENDERED_CLAIM_CHECK="$SCRIPT_DIR/check-rendered-retention-claims.sh"
 RENDER=false
 PRINT_LAYER_DIGEST=""
 
@@ -120,12 +121,17 @@ if [ "$RENDER" = true ]; then
       exit 2
     }
   done
+  [ -x "$RENDERED_CLAIM_CHECK" ] || {
+    printf 'ERROR: rendered claim checker is not executable: %s\n' "$RENDERED_CLAIM_CHECK" >&2
+    exit 2
+  }
 fi
 
 problems=0
 checked_claims=0
 checked_secret_refs=0
 checked_pod_selectors=0
+checked_forbidden_literals=0
 declare -A fixture_claim_ids=()
 declare -A secret_ref_ids=()
 declare -A pod_selector_ids=()
@@ -176,9 +182,9 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
   declared_claim_count="$(yq e -r ".layers[$layer_index].declared_claim_count // \"\"" "$FIXTURE")"
   declared_secret_ref_count="$(yq e -r ".layers[$layer_index].declared_secret_reference_count // \"\"" "$FIXTURE")"
   declared_pod_selector_count="$(yq e -r ".layers[$layer_index].declared_pod_selector_count // \"\"" "$FIXTURE")"
+  declared_forbidden_literal_count="$(yq e -r ".layers[$layer_index].declared_forbidden_literal_count // \"\"" "$FIXTURE")"
   secret_ref_pattern="$(yq e -r ".layers[$layer_index].secret_reference_env_pattern // \"\"" "$FIXTURE")"
-  unset layer_fixture_claim_ids layer_fixture_secret_ids
-  declare -A layer_fixture_claim_ids=()
+  unset layer_fixture_secret_ids
   declare -A layer_fixture_secret_ids=()
 
   [ -n "$layer_rel" ] || { error "$FIXTURE: layer $layer_index has no path"; continue; }
@@ -194,6 +200,8 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
     error "$FIXTURE: $layer_rel has invalid declared_secret_reference_count"
   [[ "$declared_pod_selector_count" =~ ^[0-9]+$ ]] || \
     error "$FIXTURE: $layer_rel has invalid declared_pod_selector_count"
+  [[ "$declared_forbidden_literal_count" =~ ^[0-9]+$ ]] || \
+    error "$FIXTURE: $layer_rel has invalid declared_forbidden_literal_count"
 
   actual_digest="$(layer_digest "$layer_rel")"
   [ "$actual_digest" = "$expected_digest" ] || \
@@ -221,6 +229,29 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
     mirror_rel="$(yq e -r ".layers[$layer_index].chart.values_mirrors[$mirror_index]" "$FIXTURE")"
     [ -f "$REPO_ROOT/$layer_rel/$mirror_rel" ] || \
       error "$FIXTURE: missing values mirror $layer_rel/$mirror_rel"
+  done
+
+  forbidden_literal_count="$(yq e -r ".layers[$layer_index].forbidden_literal_paths // [] | length" "$FIXTURE")"
+  [ "$forbidden_literal_count" = "$declared_forbidden_literal_count" ] || \
+    error "$FIXTURE: $layer_rel declares $declared_forbidden_literal_count forbidden literal paths but contains $forbidden_literal_count"
+  unset layer_forbidden_literal_paths
+  declare -A layer_forbidden_literal_paths=()
+  for ((literal_index = 0; literal_index < forbidden_literal_count; literal_index++)); do
+    literal_path="$(yq e -r ".layers[$layer_index].forbidden_literal_paths[$literal_index] // \"\"" "$FIXTURE")"
+    [ -n "$literal_path" ] || { error "$FIXTURE: $layer_rel has an empty forbidden literal path"; continue; }
+    [ -z "${layer_forbidden_literal_paths[$literal_path]:-}" ] || \
+      error "$FIXTURE: $layer_rel duplicates forbidden literal path '$literal_path'"
+    layer_forbidden_literal_paths["$literal_path"]=1
+    literal_value="$(yq e -r "$literal_path // \"\"" "$values_file" | strip_yq_stream_markers)"
+    [ -z "$literal_value" ] || error "$values_file_rel: $literal_path must be empty; credentials belong in a Secret"
+    for ((mirror_index = 0; mirror_index < values_mirror_count; mirror_index++)); do
+      mirror_rel="$(yq e -r ".layers[$layer_index].chart.values_mirrors[$mirror_index]" "$FIXTURE")"
+      mirror_file="$REPO_ROOT/$layer_rel/$mirror_rel"
+      mirror_literal_value="$(yq e -r "$literal_path // \"\"" "$mirror_file" | strip_yq_stream_markers)"
+      [ -z "$mirror_literal_value" ] || \
+        error "$mirror_rel: $literal_path must be empty; credentials belong in a Secret"
+    done
+    checked_forbidden_literals=$((checked_forbidden_literals + 1))
   done
 
   rendered_file=""
@@ -301,8 +332,6 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
     [ -n "$claim_id" ] || { error "$FIXTURE: $contract_id has no rendered_claim_id"; continue; }
     [ -z "${fixture_claim_ids[$claim_id]:-}" ] || error "$FIXTURE: duplicate rendered claim id '$claim_id'"
     fixture_claim_ids["$claim_id"]="$contract_id"
-    layer_fixture_claim_ids["$claim_id"]="$contract_id"
-
     contract_rows="$(CONTRACT_ID="$contract_id" yq e -r \
       '.entries[] | select(.id == strenv(CONTRACT_ID)) | [.rendered_claim_id, .current_storage_class] | @tsv' \
       "$CONTRACT" | strip_yq_stream_markers)"
@@ -364,13 +393,15 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
     env_name="$(yq e -r "$ref_base.env_name // \"\"" "$FIXTURE")"
     secret_name="$(yq e -r "$ref_base.secret_name // \"\"" "$FIXTURE")"
     secret_key="$(yq e -r "$ref_base.secret_key // \"\"" "$FIXTURE")"
+    source_value_path="$(yq e -r "$ref_base.source_value_path // \"\"" "$FIXTURE")"
     source_name_path="$(yq e -r "$ref_base.source_name_path // \"\"" "$FIXTURE")"
     source_key_path="$(yq e -r "$ref_base.source_key_path // \"\"" "$FIXTURE")"
     externalsecret_rel="$(yq e -r "$ref_base.externalsecret_file // \"\"" "$FIXTURE")"
     ref_id="$workload_kind/$workload_name/$container_name/$env_name"
 
     for required_value in "$workload_kind" "$workload_name" "$container_name" "$env_name" \
-      "$secret_name" "$secret_key" "$source_name_path" "$source_key_path" "$externalsecret_rel"; do
+      "$secret_name" "$secret_key" "$source_value_path" "$source_name_path" "$source_key_path" \
+      "$externalsecret_rel"; do
       [ -n "$required_value" ] || error "$FIXTURE: incomplete secret reference at $layer_rel index $secret_index"
     done
     [ -z "${secret_ref_ids[$ref_id]:-}" ] || error "$FIXTURE: duplicate secret reference '$ref_id'"
@@ -381,20 +412,26 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
 
     actual_source_name="$(yq e -r "$source_name_path // \"\"" "$values_file" | strip_yq_stream_markers)"
     actual_source_key="$(yq e -r "$source_key_path // \"\"" "$values_file" | strip_yq_stream_markers)"
+    actual_source_value="$(yq e -r "$source_value_path // \"\"" "$values_file" | strip_yq_stream_markers)"
     [ "$actual_source_name" = "$secret_name" ] || \
       error "$values_file_rel: $source_name_path is '$actual_source_name', expected '$secret_name'"
     [ "$actual_source_key" = "$secret_key" ] || \
       error "$values_file_rel: $source_key_path is '$actual_source_key', expected '$secret_key'"
+    [ -z "$actual_source_value" ] || \
+      error "$values_file_rel: $source_value_path must be empty when secretKeyRef is declared"
     for ((mirror_index = 0; mirror_index < values_mirror_count; mirror_index++)); do
       mirror_rel="$(yq e -r ".layers[$layer_index].chart.values_mirrors[$mirror_index]" "$FIXTURE")"
       mirror_file="$REPO_ROOT/$layer_rel/$mirror_rel"
       [ -f "$mirror_file" ] || { error "$FIXTURE: missing values mirror $layer_rel/$mirror_rel"; continue; }
       mirror_source_name="$(yq e -r "$source_name_path // \"\"" "$mirror_file" | strip_yq_stream_markers)"
       mirror_source_key="$(yq e -r "$source_key_path // \"\"" "$mirror_file" | strip_yq_stream_markers)"
+      mirror_source_value="$(yq e -r "$source_value_path // \"\"" "$mirror_file" | strip_yq_stream_markers)"
       [ "$mirror_source_name" = "$secret_name" ] || \
         error "$mirror_rel: $source_name_path is '$mirror_source_name', expected '$secret_name'"
       [ "$mirror_source_key" = "$secret_key" ] || \
         error "$mirror_rel: $source_key_path is '$mirror_source_key', expected '$secret_key'"
+      [ -z "$mirror_source_value" ] || \
+        error "$mirror_rel: $source_value_path must be empty when secretKeyRef is declared"
     done
 
     externalsecret_file="$REPO_ROOT/$externalsecret_rel"
@@ -426,36 +463,12 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
   done
 
   if [ -n "$rendered_file" ]; then
-    unset actual_layer_claim_ids actual_layer_secret_ids
-    declare -A actual_layer_claim_ids=()
+    if ! "$RENDERED_CLAIM_CHECK" --rendered "$rendered_file" --layer "$layer_rel" \
+      --fixture "$FIXTURE" --quiet; then
+      error "$layer_rel render: generated claim inventory failed"
+    fi
+    unset actual_layer_secret_ids
     declare -A actual_layer_secret_ids=()
-    while IFS=$'\t' read -r rendered_claim_id rendered_storage_class; do
-      [ -n "$rendered_claim_id" ] || continue
-      [ -z "${actual_layer_claim_ids[$rendered_claim_id]:-}" ] || \
-        error "$layer_rel render: duplicate generated claim identity '$rendered_claim_id'"
-      actual_layer_claim_ids["$rendered_claim_id"]="$rendered_storage_class"
-    done < <(
-      # `$owner` is a yq variable, not a shell interpolation.
-      # shellcheck disable=SC2016
-      yq e -r '
-        (select(.kind == "PersistentVolumeClaim" and
-          ((.spec.storageClassName // "") | test("^longhorn"))) |
-          [.metadata.name, .spec.storageClassName] | @tsv),
-        (select(.kind == "StatefulSet") | .metadata.name as $owner |
-          .spec.volumeClaimTemplates[]? |
-          select(((.spec.storageClassName // "") | test("^longhorn"))) |
-          [$owner + "/" + .metadata.name, .spec.storageClassName] | @tsv)
-      ' "$rendered_file" | strip_yq_stream_markers
-    )
-    for rendered_claim_id in "${!layer_fixture_claim_ids[@]}"; do
-      [ -n "${actual_layer_claim_ids[$rendered_claim_id]:-}" ] || \
-        error "$layer_rel render: projected claim '$rendered_claim_id' was not generated"
-    done
-    for rendered_claim_id in "${!actual_layer_claim_ids[@]}"; do
-      [ -n "${layer_fixture_claim_ids[$rendered_claim_id]:-}" ] || \
-        error "$layer_rel render: generated Longhorn claim '$rendered_claim_id' is absent from the projection"
-    done
-
     if [ -n "$secret_ref_pattern" ]; then
       while IFS=$'\t' read -r rendered_ref_id rendered_secret_name rendered_secret_key rendered_literal; do
         [ -n "$rendered_ref_id" ] || continue
@@ -501,5 +514,5 @@ fi
 
 mode="offline"
 [ "$RENDER" = true ] && mode="verified-render"
-printf 'PASS: %s retention projection covers %d chart claims, %d secret references, and %d pod selectors.\n' \
-  "$mode" "$checked_claims" "$checked_secret_refs" "$checked_pod_selectors"
+printf 'PASS: %s retention projection covers %d chart claims, %d secret references, %d pod selectors, and %d forbidden literal paths.\n' \
+  "$mode" "$checked_claims" "$checked_secret_refs" "$checked_pod_selectors" "$checked_forbidden_literals"

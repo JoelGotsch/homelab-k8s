@@ -6,10 +6,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CHECK="$SCRIPT_DIR/check-retention-render-fixtures.sh"
+CLAIM_CHECK="$SCRIPT_DIR/check-rendered-retention-claims.sh"
 FIXTURE="$SCRIPT_DIR/fixtures/retention-rendered-projection.yaml"
+RENDERED_CLAIM_FIXTURE="$SCRIPT_DIR/fixtures/retention-rendered-claim-test.yaml"
 CONTRACT="$SCRIPT_DIR/retention-contract.yaml"
 
-for required_tool in yq mktemp cp mkdir rm; do
+for required_tool in yq mktemp cp mkdir rm rg; do
   command -v "$required_tool" >/dev/null 2>&1 || {
     printf 'ERROR: %s is required\n' "$required_tool" >&2
     exit 2
@@ -67,6 +69,45 @@ make_repo_fixture "$baseline_root"
 expect_pass "reviewed projection baseline" \
   --root "$baseline_root" --fixture "$FIXTURE" --contract "$CONTRACT"
 
+if ! "$CLAIM_CHECK" --rendered "$RENDERED_CLAIM_FIXTURE" \
+  --layer observability/langfuse --fixture "$FIXTURE" >/dev/null; then
+  printf 'FAIL: expected rendered claim extractor baseline to pass\n' >&2
+  exit 1
+fi
+
+missing_class_render="$TEMP_ROOT/missing-rendered-class.yaml"
+cp "$RENDERED_CLAIM_FIXTURE" "$missing_class_render"
+yq e -i '
+  (select(.kind == "PersistentVolumeClaim" and .metadata.name == "langfuse-s3") | .spec) |=
+    del(.storageClassName)
+' "$missing_class_render"
+if missing_output="$($CLAIM_CHECK --rendered "$missing_class_render" \
+  --layer observability/langfuse --fixture "$FIXTURE" 2>&1)"; then
+  printf 'FAIL: rendered PVC with missing class passed\n' >&2
+  exit 1
+fi
+printf '%s\n' "$missing_output" | rg -q 'implicit default' || {
+  printf 'FAIL: missing rendered PVC class did not report implicit default\n' >&2
+  exit 1
+}
+
+empty_class_render="$TEMP_ROOT/empty-rendered-class.yaml"
+cp "$RENDERED_CLAIM_FIXTURE" "$empty_class_render"
+yq e -i '
+  (select(.kind == "StatefulSet" and .metadata.name == "langfuse-redis-primary") |
+   .spec.volumeClaimTemplates[] | select(.metadata.name == "valkey-data") |
+   .spec.storageClassName) = ""
+' "$empty_class_render"
+if empty_output="$($CLAIM_CHECK --rendered "$empty_class_render" \
+  --layer observability/langfuse --fixture "$FIXTURE" 2>&1)"; then
+  printf 'FAIL: rendered StatefulSet claim template with empty class passed\n' >&2
+  exit 1
+fi
+printf '%s\n' "$empty_output" | rg -q 'implicit default' || {
+  printf 'FAIL: empty rendered claim-template class did not report implicit default\n' >&2
+  exit 1
+}
+
 secret_root="$TEMP_ROOT/secret-key-drift"
 make_repo_fixture "$secret_root"
 secret_fixture="$TEMP_ROOT/secret-key-drift.yaml"
@@ -77,6 +118,42 @@ yq e -i '
 set_fixture_layer_digest "$secret_root" "$secret_fixture" observability/langfuse
 expect_fail "S3 key drift fails even after refreshing the layer digest" \
   --root "$secret_root" --fixture "$secret_fixture" --contract "$CONTRACT"
+
+literal_root="$TEMP_ROOT/literal-secret-value"
+make_repo_fixture "$literal_root"
+literal_fixture="$TEMP_ROOT/literal-secret-value.yaml"
+cp "$FIXTURE" "$literal_fixture"
+yq e -i '
+  .s3.eventUpload.accessKeyId.value = "PLAINTEXT_SENTINEL"
+' "$literal_root/observability/langfuse/values.yaml"
+set_fixture_layer_digest "$literal_root" "$literal_fixture" observability/langfuse
+if literal_output="$($CHECK --root "$literal_root" --fixture "$literal_fixture" \
+  --contract "$CONTRACT" 2>&1)"; then
+  printf 'FAIL: non-empty S3 credential value passed after refreshing the layer digest\n' >&2
+  exit 1
+fi
+printf '%s\n' "$literal_output" | rg -q 'must be empty when secretKeyRef is declared' || {
+  printf 'FAIL: literal S3 credential mutation did not report the semantic violation\n' >&2
+  exit 1
+}
+
+fallback_literal_root="$TEMP_ROOT/fallback-literal-secret-value"
+make_repo_fixture "$fallback_literal_root"
+fallback_literal_fixture="$TEMP_ROOT/fallback-literal-secret-value.yaml"
+cp "$FIXTURE" "$fallback_literal_fixture"
+yq e -i '
+  .s3.accessKeyId.value = "PLAINTEXT_FALLBACK_SENTINEL"
+' "$fallback_literal_root/observability/langfuse/values.yaml"
+set_fixture_layer_digest "$fallback_literal_root" "$fallback_literal_fixture" observability/langfuse
+if fallback_output="$($CHECK --root "$fallback_literal_root" --fixture "$fallback_literal_fixture" \
+  --contract "$CONTRACT" 2>&1)"; then
+  printf 'FAIL: non-empty S3 fallback credential passed after refreshing the layer digest\n' >&2
+  exit 1
+fi
+printf '%s\n' "$fallback_output" | rg -q 'credentials belong in a Secret' || {
+  printf 'FAIL: literal S3 fallback mutation did not report the semantic violation\n' >&2
+  exit 1
+}
 
 mirror_root="$TEMP_ROOT/secret-mirror-drift"
 make_repo_fixture "$mirror_root"
