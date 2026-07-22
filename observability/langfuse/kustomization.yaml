@@ -33,6 +33,7 @@ helmCharts:
 resources:
   - namespace.yaml
   - cnpg-cluster.yaml
+  - scheduled-backup.yaml
   - clickhouseinstallation.yaml
   - externalsecret.yaml
   - networkpolicy.yaml

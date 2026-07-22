@@ -30,6 +30,7 @@ helmCharts:
 resources:
   - namespace.yaml
   - cnpg-cluster.yaml
+  - scheduled-backup.yaml
   - cnpg-s3-externalsecret.yaml
   - externalsecret.yaml
   - allowlist-configmap.yaml

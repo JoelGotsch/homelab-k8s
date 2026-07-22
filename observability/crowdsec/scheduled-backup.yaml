@@ -1,0 +1,22 @@
+# Nightly CNPG base backup for crowdsec-lapi. Until 2026-07-22 the
+# only base backups were operator-triggered one-shots (2026-07-17),
+# so the barman recoverability point aged indefinitely while WAL
+# archiving kept shipping. A ScheduledBackup makes the base+WAL
+# lane (the load-bearing DB backup per the backup-strategy TODO
+# section) self-refreshing; the Cluster's retentionPolicy prunes
+# old bases.
+#
+# schedule is the CNPG 6-field cron (seconds first, UTC — see
+# ScheduledBackup CRD docs), staggered per cluster so nightly
+# bases don't hit MinIO-on-NAS at once.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: crowdsec-lapi-daily
+  namespace: observability-crowdsec
+spec:
+  schedule: "0 30 1 * * *"
+  backupOwnerReference: self
+  immediate: true
+  cluster:
+    name: crowdsec-lapi

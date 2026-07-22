@@ -27,6 +27,7 @@ helmCharts:
 resources:
   - namespace.yaml
   - cnpg-cluster.yaml
+  - scheduled-backup.yaml
   - pvc.yaml
   - externalsecret.yaml
   - httproute.yaml

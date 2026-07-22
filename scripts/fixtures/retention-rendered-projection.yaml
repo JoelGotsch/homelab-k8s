@@ -17,7 +17,7 @@ cluster_defaults:
     chart_default_enabled: false
 layers:
   - path: observability/langfuse
-    input_digest_sha256: d4a09ce1da87a033513b16b81def5989db4c6f3943304b67a1cb368dc707be37
+    input_digest_sha256: 29940a90f532950927f93e580b5e963b24ed62c63476f56d0cf566f171a29555
     chart:
       name: langfuse
       repository: https://langfuse.github.io/langfuse-k8s
@@ -202,7 +202,7 @@ layers:
         source_name_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.name
         source_key_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.key
   - path: observability/crowdsec
-    input_digest_sha256: a444575aa8e75c11a981c87023fa395da1c2144f9fd0adaaf0f38588905786e6
+    input_digest_sha256: eee0b2dba7cf10a1ebd1a8fa063cc44b0741853f967a714376e7681c162b2be2
     chart:
       name: crowdsec
       repository: https://crowdsecurity.github.io/helm-charts
