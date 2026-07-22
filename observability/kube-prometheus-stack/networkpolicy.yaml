@@ -99,6 +99,13 @@ spec:
           protocol: TCP
         - port: 9105
           protocol: TCP
+        - port: 9500   # longhorn-manager metrics (ServiceMonitor
+          protocol: TCP   # scrape enabled for real 2026-07-22 via the
+                          # release-label fix; port was never in this
+                          # allowlist because the scrape had never
+                          # actually run — 4th recurrence of the
+                          # new-scrape-port trap this comment warns
+                          # about)
         - port: 9093   # Alertmanager API (Prometheus → AM alert
           protocol: TCP   # delivery). Added 2026-06-24 after AM STS
                           # came up (task #54); previously absent.
