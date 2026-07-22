@@ -63,6 +63,17 @@ persistence:
 metrics:
   serviceMonitor:
     enabled: true
+    # REQUIRED for the scrape to actually happen: the
+    # kube-prometheus-stack Prometheus selects ServiceMonitors
+    # by `release: kube-prometheus-stack` (serviceMonitorSelector,
+    # verified against the live Prometheus CR 2026-07-22). The
+    # chart-rendered ServiceMonitor carries only chart-default
+    # labels, so despite `enabled: true` Longhorn-native metrics
+    # were never scraped and every `METRIC SOURCE: longhorn` rule
+    # in observability/kube-prometheus-stack/rules-longhorn.yaml
+    # was silently dead (empty vector, no error).
+    additionalLabels:
+      release: kube-prometheus-stack
 
 # Resource limits — Longhorn is per-node DaemonSet.
 # CSI sidecars: chart 1.7.2 does NOT expose per-container

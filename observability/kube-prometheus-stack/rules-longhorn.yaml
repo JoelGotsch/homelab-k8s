@@ -370,3 +370,71 @@ spec:
               `infrastructure/longhorn/recurring-jobs.yaml` and
               lower `retain:` — the trade-off is RPO vs disk.
             runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/observability/alert-routing.md"
+
+        # ===== LonghornBackupStuckPending (warning) =====
+        # METRIC SOURCE: longhorn (requires the ServiceMonitor
+        # release-label fix in infrastructure/longhorn/values.yaml,
+        # same commit series).
+        #
+        # Closes the missing-signal gap from the 2026-07-16 OOM
+        # incident: 1542 orphaned `Pending` Backup CRs re-reconciled
+        # every cycle OOMed longhorn-manager at any memory limit,
+        # and the FIRST dedicated signal was the manager crash-loop
+        # (rule 35: alert on the actual failure, not its downstream
+        # symptom). Healthy backups leave New/Pending within
+        # minutes; a sustained pile of them means orphaned CRs are
+        # accumulating again.
+        #
+        # `longhorn_backup_state` verified against the live 1.11.3
+        # manager endpoint + longhorn.io/docs/1.11.3/monitoring/
+        # metrics/: 0=New 1=Pending 2=InProgress 3=Completed
+        # 4=Error 5=Unknown; labels backup/volume/recurring_job.
+        # Baseline at rule-authoring time: 96 Backup CRs, all
+        # state 3 (Completed).
+        #
+        # `<= 1` covers New+Pending. Threshold 5 ≈ the whole
+        # opt-in `backup` group backing up at once; sustaining
+        # that for 2h is never normal (InProgress uploads of
+        # large volumes are state 2 and deliberately excluded).
+        # No age label exists on the metric — `for: 2h` is the
+        # age proxy.
+        - alert: LonghornBackupStuckPending
+          expr: |
+            count(longhorn_backup_state <= 1) > 5
+          for: 2h
+          labels:
+            severity: warning
+            component: longhorn
+            # Escalate if unseen: left alone this mode ends in
+            # manager OOM crash-loop (the 2026-07-16 chain).
+            escalate_after: "1h"
+          annotations:
+            summary: "{{ $value }} Longhorn Backup CRs stuck in New/Pending for >=2h (orphan pileup signature)"
+            description: |
+              {{ $value }} Longhorn Backup CRs have sat in state
+              New/Pending for over 2 hours. This is the signature
+              of the 2026-07-16 incident: Backup CRs orphaned by
+              volume deletion pile up, the BackupController
+              re-reconciles all of them every cycle, and
+              longhorn-manager eventually OOMs regardless of its
+              memory limit.
+
+              Triage:
+
+                kubectl -n longhorn-system get backups.longhorn.io \
+                  -o custom-columns=NAME:.metadata.name,STATE:.status.state,VOL:.spec.volumeName,AGE:.metadata.creationTimestamp \
+                  | grep -Ev 'Completed'
+
+              Pending CRs whose volume no longer exists are safe
+              to delete (nothing was uploaded to the target); the
+              2026-07-16 cleanup also had to strip stuck
+              `longhorn.io` finalizers. Error-state CRs
+              (`longhorn_backup_state == 4`) mean the upload
+              itself failed — check the backup target (MinIO on
+              NAS) before deleting anything.
+
+              Prevention context: backups are opt-in via the
+              `backup` group label managed by
+              `homelab-k8s/scripts/label-backup-volumes.sh`;
+              ephemeral/CI volumes must never join it.
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/observability/alert-routing.md"
