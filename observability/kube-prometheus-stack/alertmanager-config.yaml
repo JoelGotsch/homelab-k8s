@@ -154,6 +154,30 @@ spec:
         groupInterval: 30m
         repeatInterval: 12h
 
+      # ===== Node-down page (2026-07-22) =====
+      # KubeNodeNotReady / KubeNodeUnreachable ship from
+      # kube-prometheus-stack at severity: warning (both with
+      # `for: 15m`), so they landed in the Tier 2 attention
+      # topic — during the 2026-07-18 worker1 hard-down nobody
+      # was paged. A node that has been gone ≥15m is
+      # operator-eyes-now regardless of its severity label:
+      # route by alertname to the urgent topic. Signal stays
+      # conditional — the alert-formatter only invokes the
+      # Signal fallback when the ntfy publish itself fails,
+      # which matches "Signal is not the normal critical tier".
+      # groupBy alertname → one page per outage class;
+      # KubeNodeNotReady already inhibits KubeNodeUnreachable
+      # (see inhibitRules) so a dead node yields a single page.
+      - matchers:
+          - name: alertname
+            matchType: "=~"
+            value: "KubeNodeNotReady|KubeNodeUnreachable"
+        receiver: ntfy-critical
+        groupBy: [alertname]
+        groupWait: 30s
+        groupInterval: 5m
+        repeatInterval: 6h
+
       # ===== Deception (ADR 0039) =====
       # Honey-asset hits keep zero-latency grouping and use the urgent ntfy
       # topic. Signal is selected inside alert-formatter only if ntfy fails.
