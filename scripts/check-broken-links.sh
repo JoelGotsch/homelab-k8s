@@ -58,6 +58,18 @@
 #   SKIP_ANCHOR_CHECK=1 scripts/check-broken-links.sh
 # (escape hatch if a slug edge-case surfaces; please file an
 # issue rather than leaving SKIP_ANCHOR_CHECK on permanently.)
+#
+# Portability: must run under macOS /bin/bash 3.2 AND BSD
+# userland. Until 2026-07-22 this script used `declare -A`
+# (bash-4-only) — under bash 3.2 it died at that line with only
+# `declare: -A: invalid option` and exit 2, which is how the
+# "hook silently exits non-zero from `git commit`, diagnostic
+# only visible via direct `pre-commit run`" friction happened
+# (the direct run resolved a newer bash on PATH; the commit
+# driver's environment resolved /bin/bash). Same class: BSD
+# `realpath` has no `-m`, which silently disabled the WARN
+# downgrade for outside-workspace targets. Keep this script free
+# of bashisms newer than 3.2 and GNU-only userland flags.
 
 set -eu
 
@@ -85,9 +97,14 @@ md_files=$(find . -type f -name '*.md' \
     -not -path '*/charts/*')
 
 # Slug cache: avoid re-extracting headings from the same target
-# file when many links point to it. Implemented as a Bash 4
-# associative array; keyed by absolute path.
-declare -A SLUG_CACHE
+# file when many links point to it. A temp-dir file cache (one
+# file per target, keyed by sha1 of the absolute path) rather
+# than a bash associative array: bash 3.2 compatible, AND it
+# actually persists across source files — the per-file link loop
+# below runs in a pipeline subshell, so an in-memory cache was
+# lost after every source file anyway.
+SLUG_CACHE_DIR="$(mktemp -d)"
+trap 'rm -rf "$SLUG_CACHE_DIR"' EXIT
 
 # Extract GitHub-flavored kebab-case heading slugs from a file.
 # Output: one slug per line, in document order, with dedup
@@ -127,11 +144,37 @@ extract_slugs() {
 
 # Cached wrapper.
 slugs_for() {
-    local key="$1"
-    if [ -z "${SLUG_CACHE[$key]+isset}" ]; then
-        SLUG_CACHE[$key]="$(extract_slugs "$key")"
+    local key="$1" cache_file
+    cache_file="$SLUG_CACHE_DIR/$(printf '%s' "$key" | shasum | cut -c1-40)"
+    if [ ! -f "$cache_file" ]; then
+        extract_slugs "$key" > "$cache_file"
     fi
-    printf '%s\n' "${SLUG_CACHE[$key]}"
+    cat "$cache_file"
+}
+
+# Portable equivalent of GNU `realpath -m` for the missing-target
+# classification below: lexically resolve `.` / `..` segments
+# without requiring the path to exist (BSD realpath has no -m and
+# fails on missing paths, which used to silently disable the WARN
+# downgrade on macOS). Input is a path relative to $PWD or
+# absolute; output is absolute and dot-free.
+normalize_path() {
+    local p="$1"
+    case "$p" in
+        /*) ;;
+        *)  p="$PWD/$p" ;;
+    esac
+    printf '%s' "$p" | awk -F/ '{
+        n = 0
+        for (i = 1; i <= NF; i++) {
+            if ($i == "" || $i == ".") continue
+            if ($i == "..") { if (n > 0) n--; continue }
+            parts[++n] = $i
+        }
+        out = ""
+        for (i = 1; i <= n; i++) out = out "/" parts[i]
+        print (out == "" ? "/" : out)
+    }'
 }
 
 skip_anchor_check="${SKIP_ANCHOR_CHECK:-}"
@@ -152,15 +195,19 @@ out=$(
         | grep -oE '\]\([^)]+\)' \
         | sed -E 's/^\]\(//; s/\)$//' \
         | while IFS= read -r link; do
-            # Skip absolute URLs.
+            # Skip absolute URLs. NOTE: every case pattern inside
+            # the surrounding $( ) substitution carries the
+            # optional leading `(` — bash 3.2's parser treats an
+            # unbalanced `)` in a case pattern as the end of the
+            # substitution and dies with a spurious syntax error.
             case "$link" in
-                http://*|https://*|mailto:*|ftp://*) continue ;;
+                (http://*|https://*|mailto:*|ftp://*) continue ;;
             esac
 
             target="${link%%#*}"
             anchor=""
             case "$link" in
-                *'#'*) anchor="${link#*#}" ;;
+                (*'#'*) anchor="${link#*#}" ;;
             esac
 
             # Pure in-page anchor (no path) — link is `#foo`;
@@ -181,11 +228,11 @@ out=$(
             if [ ! -e "$check_path" ] && [ ! -e "$check_path/" ]; then
                 classify="fail"
                 if [ -n "$manifest_repos" ]; then
-                    abs_missing=$(realpath -m "$full_path" 2>/dev/null || echo "")
+                    abs_missing=$(normalize_path "$full_path")
                     case "$abs_missing" in
-                        "$REPO_ROOT"/*)
+                        ("$REPO_ROOT"/*)
                             classify="fail" ;;
-                        "$WORKSPACE_ROOT"/*)
+                        ("$WORKSPACE_ROOT"/*)
                             rel="${abs_missing#"$WORKSPACE_ROOT"/}"
                             first="${rel%%/*}"
                             if printf '%s\n' "$manifest_repos" | grep -Fxq "$first"; then
@@ -212,7 +259,7 @@ out=$(
 
             # Skip GitHub source-line anchors.
             case "$anchor" in
-                L[0-9]*) continue ;;
+                (L[0-9]*) continue ;;
             esac
 
             # Resolve to absolute path so the slug cache
@@ -226,8 +273,8 @@ out=$(
             # other file types (yaml, sh, …) don't have
             # heading slugs.
             case "$target_abs" in
-                *.md) ;;
-                *) continue ;;
+                (*.md) ;;
+                (*) continue ;;
             esac
 
             slugs=$(slugs_for "$target_abs")

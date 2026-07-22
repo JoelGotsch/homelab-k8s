@@ -32,6 +32,12 @@ spec:
           - {name: ntfy-e2ee-relay,     repo: ntfy-e2ee-relay, path: k8s, autoSync: "true"}
           - {name: paperless,           repo: paperless, path: k8s, autoSync: "true"}
           - {name: personal-agent,      repo: homelab-k8s, path: apps/personal-agent,      autoSync: "true"}
+          # roborock enters gated (autoSync "false"): its resources are live but
+          # owned by a standalone `roborock` Application (applied 2026-07-20 from
+          # the app repo's argocd/application.yaml). Adoption order: generate
+          # app-roborock without sync -> non-cascade-delete the standalone
+          # Application -> flip autoSync to "true" so app-roborock adopts.
+          - {name: roborock,            repo: roborock, path: k8s, autoSync: "false"}
           - {name: signal-bridge,       repo: signal-bridge, path: k8s, autoSync: "true"}
           - {name: vaultwarden,         repo: vaultwarden, path: k8s, autoSync: "true"}
           - {name: website,             repo: homelab-k8s, path: apps/website,             autoSync: "true"}
