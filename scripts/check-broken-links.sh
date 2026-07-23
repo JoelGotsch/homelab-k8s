@@ -235,7 +235,7 @@ out=$(
                         ("$WORKSPACE_ROOT"/*)
                             rel="${abs_missing#"$WORKSPACE_ROOT"/}"
                             first="${rel%%/*}"
-                            if printf '%s\n' "$manifest_repos" | grep -Fxq "$first"; then
+                            if printf '%s\n' "$manifest_repos" | grep -Fxq -- "$first"; then
                                 classify="fail"
                             else
                                 classify="warn"
@@ -278,7 +278,7 @@ out=$(
             esac
 
             slugs=$(slugs_for "$target_abs")
-            if ! printf '%s\n' "$slugs" | grep -Fxq "$anchor"; then
+            if ! printf '%s\n' "$slugs" | grep -Fxq -- "$anchor"; then
                 echo "FAIL: $md → $link (anchor '#$anchor' not in target's headings)"
             fi
         done
