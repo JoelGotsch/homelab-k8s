@@ -1,0 +1,328 @@
+# CNPG standby reconciler — heals CloudNativePG replicas that hang after
+# an unclean node loss.
+#
+# WHY THIS EXISTS (ADR 0041). When a CNPG standby is stopped uncleanly (its
+# node is hot-pulled) and then rejoins or is re-cloned, it can hang forever at
+#   FATAL: the database system is not yet accepting connections
+#   DETAIL: Consistent recovery state has not been yet reached.
+# because its control file demands WAL a few bytes past the last page boundary
+# it streamed, and a fully idle primary emits no new WAL (PostgreSQL skips idle
+# checkpoints; archive_timeout only fires on activity). The cluster then sits at
+# readyInstances < instances indefinitely and the CNPG operator does not
+# self-heal it — immich-pg sat hours on 2026-07-21; immich-pg-1 and
+# vaultwarden-pg-1 both hung 12+ min on the 2026-07-23 worker2 rejoin. See the
+# open upstream issues this tracks:
+#   https://github.com/cloudnative-pg/cloudnative-pg/issues/10419
+#   https://github.com/cloudnative-pg/cloudnative-pg/issues/9974
+#   https://github.com/cloudnative-pg/cloudnative-pg/issues/3365
+#
+# REMEDIATION CHOICE — re-clone, not checkpoint. The operator's cheap manual
+# fast-path (homelab-infra/scripts/reconcile-cnpg-standbys.sh) issues one
+# CHECKPOINT on the primary via in-pod peer auth; that clears the common
+# idle-WAL variant in seconds but needs DB-superuser-equivalent `pods/exec`.
+# For a STANDING, unattended, cluster-wide controller we deliberately use the
+# CNPG-native re-clone instead (CNPG's own troubleshooting guidance for a
+# replica that won't become ready): delete the stuck instance's PVC + pod and
+# let the operator rebuild it from the primary via pg_basebackup — which
+# snapshots at the primary's current LSN and so sidesteps the idle-WAL wait
+# entirely, and also fixes the other stuck variants (walreceiver wedged, WAL
+# recycled) that a checkpoint cannot. This needs only Kubernetes delete on
+# PVCs/pods — NO database credentials, NO exec into the secret-tier databases —
+# which is why it is safe(r) to run as a standing component. The trade-off is
+# that re-clone is heavier (a full base backup + a transient redundancy dip)
+# than a checkpoint, so the manual script remains the operator's first move on
+# a planned rejoin; this controller is the unattended safety net.
+#
+# SAFETY (a cluster-wide auto-delete of PVCs is powerful — guards are the
+# contract). The script acts ONLY when ALL of these hold, and does at most
+# MAX_ACTIONS_PER_RUN deletes per run, one per cluster:
+#   * cluster has spec.instances >= 2 (never touch a single-instance cluster)
+#   * cluster has a current primary AND that primary pod is Ready
+#     (a healthy clone source must exist — otherwise we do nothing)
+#   * the target is a NON-primary instance pod that has been not-Ready for
+#     longer than GRACE_MINUTES (default 30 — comfortably past any legitimate
+#     rejoin/clone time, so we never interrupt a healthy in-progress clone)
+#   * the cluster has not been re-cloned within COOLDOWN_MINUTES (default 45),
+#     tracked in a runtime-created ConfigMap so a slow clone can't loop
+# MODE defaults to `observe` (log-only). It must be flipped to `enforce` to
+# actually delete anything — validate the log lines over one real node-loss
+# event first, then set MODE=enforce in the config ConfigMap. See the README.
+#
+# September 2026: re-check the upstream issues; if the operator learns to
+# auto-heal this, adopt its logic and delete this component (TODO.md).
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cnpg-standby-reconciler
+  labels:
+    app.kubernetes.io/name: cnpg-standby-reconciler
+    # PSA: unprivileged (nobody, no caps, read-only root). `restricted`.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    # ADR 0036 D4 — infrastructure-tier reconciler CronJob; `internal`.
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cnpg-standby-reconciler
+  namespace: cnpg-standby-reconciler
+  labels:
+    app.kubernetes.io/name: cnpg-standby-reconciler
+---
+# RBAC — the minimum for detect-and-re-clone. Cluster-scoped because CNPG
+# clusters live across many namespaces (immich, vaultwarden, authentik, …).
+#   clusters.postgresql.cnpg.io  get,list  — read topology + readiness
+#   pods                          get,list  — find the primary + stuck replica
+#   pods                          delete    — remove the stuck instance pod
+#   persistentvolumeclaims        get,list  — resolve the instance's PVC(s)
+#   persistentvolumeclaims        delete    — the re-clone trigger
+# NO exec, NO database secret access — the whole point of the re-clone design.
+# The delete verbs are the security cost; they are gated behind MODE=enforce
+# plus the in-script guards above, and blast-radius-capped by MAX_ACTIONS_PER_RUN.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cnpg-standby-reconciler
+  labels:
+    app.kubernetes.io/name: cnpg-standby-reconciler
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cnpg-standby-reconciler
+  labels:
+    app.kubernetes.io/name: cnpg-standby-reconciler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cnpg-standby-reconciler
+subjects:
+  - kind: ServiceAccount
+    name: cnpg-standby-reconciler
+    namespace: cnpg-standby-reconciler
+---
+# Namespaced Role for the runtime cooldown-state ConfigMap. The state CM is
+# NOT shipped in git and NOT Argo-managed (the CronJob create-or-patches it),
+# so Argo self-heal never reverts the cooldown timestamps.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnpg-standby-reconciler-state
+  namespace: cnpg-standby-reconciler
+  labels:
+    app.kubernetes.io/name: cnpg-standby-reconciler
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnpg-standby-reconciler-state
+  namespace: cnpg-standby-reconciler
+  labels:
+    app.kubernetes.io/name: cnpg-standby-reconciler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnpg-standby-reconciler-state
+subjects:
+  - kind: ServiceAccount
+    name: cnpg-standby-reconciler
+    namespace: cnpg-standby-reconciler
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cnpg-standby-reconciler-config
+  namespace: cnpg-standby-reconciler
+  labels:
+    app.kubernetes.io/name: cnpg-standby-reconciler
+data:
+  # observe = log-only (WOULD re-clone …). enforce = actually delete PVC+pod.
+  # Ship as observe; flip to enforce after validating detection on a real event.
+  MODE: "observe"
+  # A non-primary instance must be not-Ready THIS long before we re-clone it.
+  # 30 min is well past any legitimate rejoin/base-backup, so a healthy clone
+  # in progress is never interrupted.
+  GRACE_MINUTES: "30"
+  # Per-cluster hold after a re-clone, so a slow rebuild cannot loop.
+  COOLDOWN_MINUTES: "45"
+  # Global blast-radius cap: at most this many re-clones per run (one/cluster).
+  MAX_ACTIONS_PER_RUN: "2"
+  STATE_NAMESPACE: "cnpg-standby-reconciler"
+  STATE_CONFIGMAP: "cnpg-standby-reconciler-state"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cnpg-standby-reconciler
+  namespace: cnpg-standby-reconciler
+  labels:
+    app.kubernetes.io/name: cnpg-standby-reconciler
+spec:
+  # Every 5 min. The condition is "stuck for many minutes-to-hours", so a
+  # 5-min poll is well inside tolerance and keeps apiserver list traffic low.
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 120
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 120
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: cnpg-standby-reconciler
+        spec:
+          restartPolicy: Never
+          serviceAccountName: cnpg-standby-reconciler
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: reconciler
+              # alpine/k8s ships kubectl + jq (jq does the ISO8601 age math via
+              # fromdateiso8601, so no shell date-parsing). Same image as the
+              # longhorn-va-janitor CronJob.
+              image: docker.io/alpine/k8s:1.30.5@sha256:0d03af14f8539df28e51e8afc12ee6d78891c630b88226243307f08a6fab3538
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - configMapRef:
+                    name: cnpg-standby-reconciler-config
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 64Mi
+                limits:
+                  memory: 192Mi
+              command: [/bin/sh, -c]
+              args:
+                - |
+                  set -eu
+                  ts() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+                  log() { echo "$(ts) $*"; }
+
+                  MODE="${MODE:-observe}"
+                  GRACE_MINUTES="${GRACE_MINUTES:-30}"
+                  COOLDOWN_MINUTES="${COOLDOWN_MINUTES:-45}"
+                  MAX_ACTIONS="${MAX_ACTIONS_PER_RUN:-2}"
+                  STATE_NS="${STATE_NAMESPACE:-cnpg-standby-reconciler}"
+                  STATE_CM="${STATE_CONFIGMAP:-cnpg-standby-reconciler-state}"
+
+                  log "start mode=$MODE grace=${GRACE_MINUTES}m cooldown=${COOLDOWN_MINUTES}m max_actions=$MAX_ACTIONS"
+
+                  now_epoch=$(date -u +%s)
+                  grace_s=$((GRACE_MINUTES * 60))
+                  cooldown_s=$((COOLDOWN_MINUTES * 60))
+
+                  # runtime cooldown state (not Argo-managed): name->epoch string.
+                  # printf (not echo) everywhere JSON flows through a var: the
+                  # cluster JSON's last-applied-configuration annotation carries
+                  # backslash escapes that echo would turn into raw control chars.
+                  state=$(kubectl -n "$STATE_NS" get configmap "$STATE_CM" -o json 2>/dev/null | jq -c '.data // {}' 2>/dev/null || true)
+                  [ -n "$state" ] || state='{}'
+
+                  clusters=$(kubectl get clusters.postgresql.cnpg.io -A -o json)
+                  degraded=$(printf %s "$clusters" | jq '[.items[] | select((.status.readyInstances//0) < (.spec.instances//0))] | length')
+                  log "CNPG clusters with readyInstances < instances: $degraded"
+
+                  actions=0
+                  tab=$(printf '\t')
+                  while IFS="$tab" read -r ns name instances ready primary; do
+                    [ -z "${ns:-}" ] && continue
+                    [ "$instances" -lt 2 ] && continue
+                    [ "$ready" -ge "$instances" ] && continue
+                    if [ -z "$primary" ] || [ "$primary" = "null" ]; then
+                      log "SKIP $ns/$name: no current primary (unsafe to re-clone)"; continue
+                    fi
+
+                    primary_ready=$(kubectl -n "$ns" get pod "$primary" -o jsonpath='{range .status.conditions[?(@.type=="Ready")]}{.status}{end}' 2>/dev/null || echo "")
+                    if [ "$primary_ready" != "True" ]; then
+                      log "SKIP $ns/$name: primary $primary not Ready (no healthy clone source)"; continue
+                    fi
+
+                    key=$(printf '%s_%s' "$ns" "$name" | tr -c 'A-Za-z0-9_.-' '_')
+                    last=$(printf %s "$state" | jq -r --arg k "$key" '.[$k] // "0"')
+                    case "$last" in ''|*[!0-9]*) last=0 ;; esac
+                    if [ "$last" -ne 0 ] && [ $((now_epoch - last)) -lt "$cooldown_s" ]; then
+                      log "HOLD $ns/$name: re-cloned $(((now_epoch - last) / 60))m ago (< ${COOLDOWN_MINUTES}m cooldown)"; continue
+                    fi
+
+                    stuck=$(kubectl -n "$ns" get pods -l "cnpg.io/cluster=$name,cnpg.io/podRole=instance" -o json \
+                      | jq -r --arg primary "$primary" --argjson grace "$grace_s" '
+                          .items[]
+                          | select(.metadata.name != $primary)
+                          | ([.status.conditions[]? | select(.type=="Ready")][0]) as $r
+                          | select(($r.status // "False") != "True")
+                          | (($r.lastTransitionTime // .status.startTime // .metadata.creationTimestamp) | fromdateiso8601) as $since
+                          | (now - $since) as $age
+                          | select($age >= $grace)
+                          | [.metadata.name, ($age | floor)] | @tsv' 2>/dev/null | head -n1)
+
+                    if [ -z "$stuck" ]; then
+                      log "WAIT $ns/$name: $ready/$instances ready; no non-primary replica stuck > ${GRACE_MINUTES}m"; continue
+                    fi
+                    stuck_pod=$(printf '%s' "$stuck" | cut -f1)
+                    stuck_age_m=$(( $(printf '%s' "$stuck" | cut -f2) / 60 ))
+                    log "STUCK $ns/$name: replica $stuck_pod not-Ready ${stuck_age_m}m (primary $primary healthy)"
+
+                    if [ "$actions" -ge "$MAX_ACTIONS" ]; then
+                      log "DEFER $ns/$name: MAX_ACTIONS_PER_RUN=$MAX_ACTIONS reached this run; next run"; continue
+                    fi
+
+                    if [ "$MODE" != "enforce" ]; then
+                      log "OBSERVE $ns/$name: WOULD re-clone $stuck_pod (delete PVC[s] + pod; CNPG rebuilds from $primary)"
+                      continue
+                    fi
+
+                    log "ACT $ns/$name: re-cloning $stuck_pod (delete PVC[s] + pod; CNPG base-backup from $primary)"
+                    if kubectl -n "$ns" delete pvc -l "cnpg.io/instanceName=$stuck_pod" --wait=false \
+                       && kubectl -n "$ns" delete pod "$stuck_pod" --wait=false --ignore-not-found; then
+                      state=$(printf %s "$state" | jq -c --arg k "$key" --arg t "$now_epoch" '.[$k]=$t')
+                      actions=$((actions + 1))
+                      log "DONE $ns/$name: re-clone triggered for $stuck_pod ($actions/$MAX_ACTIONS this run)"
+                    else
+                      log "ERROR $ns/$name: delete failed for $stuck_pod"
+                    fi
+                  done <<CLUSTERS
+                  $(printf %s "$clusters" | jq -r '.items[] | [.metadata.namespace, .metadata.name, (.spec.instances // 0), (.status.readyInstances // 0), (.status.currentPrimary // "")] | @tsv')
+                  CLUSTERS
+
+                  if [ "$MODE" = "enforce" ] && [ "$actions" -gt 0 ]; then
+                    kubectl -n "$STATE_NS" get configmap "$STATE_CM" >/dev/null 2>&1 || kubectl -n "$STATE_NS" create configmap "$STATE_CM" >/dev/null 2>&1 || true
+                    patch=$(printf %s "$state" | jq -c '{data: .}')
+                    if kubectl -n "$STATE_NS" patch configmap "$STATE_CM" --type merge -p "$patch" >/dev/null 2>&1; then
+                      log "cooldown state persisted"
+                    else
+                      log "WARN: could not persist cooldown state to $STATE_NS/$STATE_CM"
+                    fi
+                  fi
+
+                  log "done actions=$actions"

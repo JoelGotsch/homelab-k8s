@@ -1,0 +1,21 @@
+# CNPG standby reconciler (ADR 0041).
+#
+# Heals CloudNativePG replicas that hang at "consistent recovery state has not
+# been yet reached" after an unclean node loss, by re-cloning the stuck
+# instance (delete PVC + pod → CNPG rebuilds from the primary). Single manifest
+# holds: Namespace, ServiceAccount, ClusterRole + binding, namespaced Role +
+# binding (cooldown-state ConfigMap), config ConfigMap, CronJob. See the long
+# header in that file for the safety-guard contract and the re-clone-vs-
+# checkpoint rationale.
+#
+# Ships in MODE=observe (log-only); flip to enforce after validating detection
+# on a real node-loss event — see README.md.
+#
+# Argo CD picks this up via the infrastructure ApplicationSet
+# (bootstrap/applicationsets/infrastructure.yaml, path: infrastructure/*).
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - cnpg-standby-reconciler.yaml
