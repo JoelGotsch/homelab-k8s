@@ -35,6 +35,7 @@ resources:
   - openbao-seal-rules.yaml
   - rules-longhorn.yaml
   - node-thermal-rules.yaml  # 2026-07-18 worker1 incident — CPU temp watch
+  - argocd-reconciliation-rules.yaml  # 2026-07-22 LimitRange freeze — alert on stuck Argo sync/health
 
 configMapGenerator:
   - name: alert-formatter-script

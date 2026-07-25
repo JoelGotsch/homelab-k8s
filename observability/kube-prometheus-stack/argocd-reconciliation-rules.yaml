@@ -1,0 +1,144 @@
+# PrometheusRules for Argo CD reconciliation-state observability.
+#
+# Why this exists:
+# The 2026-07-22 LimitRange incident (see homelab-docs
+# 99-journal/2026-07-22-limitrange-froze-app-reconciliation.md)
+# left immich / nextcloud / paperless frozen OUT of reconciliation
+# for up to 9 days with workload health still green. Nothing paged:
+# every alert on this cluster watches *workload* health (pods,
+# CNPG, Longhorn, node temps, OpenBao seal) — none watched Argo's
+# own reconciliation state. An Application can sit `OutOfSync` or
+# `Unknown` (ComparisonError) indefinitely while its already-running
+# pods stay Healthy, so the health-based alerts never fire.
+#
+# These rules close that gap by alerting on Argo's *own* view of
+# each Application: sync_status and health_status, surfaced by the
+# `argocd_app_info` metric.
+#
+# Metric source — argocd_app_info (app-controller /metrics :8082):
+# Scraped via observability/prometheus/argocd-servicemonitors.yaml
+# (ServiceMonitor `argocd-application-controller` → Service
+# `argocd-metrics` port `metrics`). Verified live 2026-07-25:
+#   - Service argocd-metrics has label
+#     app.kubernetes.io/name=argocd-metrics, port name `metrics`
+#     :8082, a ready endpoint, and the ServiceMonitor selects it.
+#   - Argo CD v3.4.5. `argocd_app_info` is an info-gauge (value 1
+#     per Application) carrying labels: name, namespace, project,
+#     sync_status, health_status, operation, autosync_enabled,
+#     repo, dest_server, dest_namespace.
+#
+# The same metric already feeds the cluster-overview dashboard
+# panels (observability/grafana-dashboards/cluster-overview.yaml:
+# `sum(argocd_app_info{sync_status!="Synced"})` and
+# `{health_status="Degraded"}`), so the label vocabulary below is
+# the exact one this cluster emits.
+#
+# sync_status values Argo emits: Synced | OutOfSync | Unknown.
+# A ComparisonError (the failure mode in the LimitRange incident,
+# where Argo could not render/compare the desired state) surfaces
+# as sync_status="Unknown" — so `sync_status!="Synced"` catches
+# both OutOfSync AND comparison failures.
+#
+# health_status values: Healthy | Progressing | Degraded |
+# Suspended | Missing | Unknown. `Suspended` is an intentional
+# operator state (paused rollout / suspended CronJob) and is
+# excluded from the unhealthy alert to avoid false pages.
+#
+# `for: 2h`: normal auto-sync reconciles resolve OutOfSync in
+# seconds-to-minutes; a rollout Progresses for a few minutes. 2h
+# is well clear of steady-state churn while still catching a
+# genuinely frozen Application long before the multi-day drift the
+# incident produced.
+#
+# Routing: `release: kube-prometheus-stack` matches the Prometheus
+# CR ruleSelector (same pattern as openbao-seal-rules.yaml); alerts
+# inherit the default Alertmanager route → ntfy-e2ee-relay.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: argocd-reconciliation-state
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: argocd-reconciliation-state
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: argocd-reconciliation-state
+      interval: 1m
+      rules:
+        # ===== ArgoAppOutOfSync (warning) =====
+        # An Application has reported a sync_status other than
+        # "Synced" (i.e. OutOfSync or Unknown/ComparisonError) for
+        # >= 2h. This is the exact signal that was missing during
+        # the 2026-07-22 LimitRange freeze: the apps were OutOfSync
+        # (Argo could not converge live state to the committed
+        # desired state) while their pods stayed Healthy.
+        - alert: ArgoAppOutOfSync
+          expr: |
+            argocd_app_info{sync_status!="Synced"} == 1
+          for: 2h
+          labels:
+            severity: warning
+            component: argocd
+          annotations:
+            summary: "Argo Application {{ $labels.name }} not Synced ({{ $labels.sync_status }}) for 2h"
+            description: |
+              Argo CD Application `{{ $labels.name }}` (project
+              {{ $labels.project }}, dest ns
+              {{ $labels.dest_namespace }}) has been in
+              sync_status=`{{ $labels.sync_status }}` for >= 2
+              hours. It is not converging on the committed desired
+              state.
+
+              sync_status=Unknown means Argo could not compare
+              desired vs live (a ComparisonError — e.g. a rejected
+              admission webhook, a LimitRange/ResourceQuota that
+              blocks the render, an invalid manifest). This is the
+              2026-07-22 LimitRange failure mode: workload health
+              can stay green while reconciliation is frozen.
+
+              Triage (read-only):
+                argocd app get {{ $labels.name }}
+                kubectl -n argocd get application {{ $labels.name }} -o jsonpath='{.status.conditions}'
+                kubectl -n argocd get application {{ $labels.name }} -o jsonpath='{.status.operationState.message}'
+                kubectl -n argocd describe application {{ $labels.name }} | sed -n '/Conditions/,/Events/p'
+
+              A ComparisonError condition points at the rejected
+              resource; a persistent OutOfSync with no error usually
+              means an auto-sync is disabled/blocked or a resource
+              is being reverted.
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/99-journal/2026-07-22-limitrange-froze-app-reconciliation.md"
+
+        # ===== ArgoAppUnhealthy (warning) =====
+        # An Application's aggregate health has been something other
+        # than Healthy (and not the intentional Suspended state) for
+        # >= 2h — Degraded, Missing, Unknown, or stuck Progressing.
+        # Complements ArgoAppOutOfSync: an app can be Synced but
+        # Degraded (live objects unhealthy) or Progressing-stuck.
+        - alert: ArgoAppUnhealthy
+          expr: |
+            argocd_app_info{health_status!~"Healthy|Suspended"} == 1
+          for: 2h
+          labels:
+            severity: warning
+            component: argocd
+          annotations:
+            summary: "Argo Application {{ $labels.name }} unhealthy ({{ $labels.health_status }}) for 2h"
+            description: |
+              Argo CD Application `{{ $labels.name }}` (project
+              {{ $labels.project }}, dest ns
+              {{ $labels.dest_namespace }}) has reported
+              health_status=`{{ $labels.health_status }}` for >= 2
+              hours. Degraded/Missing/Unknown indicate the managed
+              resources are unhealthy; a Progressing state stuck for
+              2h is a rollout that never completed.
+
+              (Suspended is an intentional operator state and is
+              deliberately excluded from this alert.)
+
+              Triage (read-only):
+                argocd app get {{ $labels.name }}
+                kubectl -n argocd get application {{ $labels.name }} -o jsonpath='{.status.health}'
+                kubectl -n {{ $labels.dest_namespace }} get pods
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/99-journal/2026-07-22-limitrange-froze-app-reconciliation.md"
