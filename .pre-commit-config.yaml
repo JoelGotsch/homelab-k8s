@@ -210,6 +210,23 @@ repos:
         # is NOT enforced at admission by Kyverno, so this shift-left guard
         # keeps a new namespace from shipping without a classification.
 
+      - id: check-helm-values-keys
+        name: every values.yaml key is recognized by its Helm chart (baseline via .helmcheckignore)
+        entry: scripts/check-helm-values-keys.sh
+        language: script
+        files: '(values\.yaml|kustomization\.yaml|\.helmcheckignore)$'
+        # v2 (TODO refinement): pre-commit mode passes the changed file(s); the
+        # script walks up to the owning kustomize layer, diffs its values.yaml
+        # keys against the (vendored, offline) chart, and suppresses keys
+        # acknowledged in that layer's .helmcheckignore baseline — so only NEW
+        # unknown keys block. Enforcement is OPT-IN per layer: a layer blocks
+        # only once it carries a .helmcheckignore (currently apps/vaultwarden +
+        # observability/langfuse); layers not yet triaged warn but don't block,
+        # so this hook is wired repo-wide without reding CI on the pre-existing
+        # v1 flags most helm layers still have. Soft-skips if no PyYAML-capable
+        # python3 or (non-vendored chart) the repo is unreachable: an env/network
+        # blip must never wedge a commit. Bypass: SKIP_HELM_VALUES_KEYS_CHECK=1.
+
       - id: check-retention-contract
         name: cluster-owned Longhorn selectors match the finite lifecycle contract
         entry: scripts/check-retention-contract.sh

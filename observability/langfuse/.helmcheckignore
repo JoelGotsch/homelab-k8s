@@ -1,0 +1,31 @@
+# .helmcheckignore — check-helm-values-keys.sh baseline for observability/langfuse
+# (langfuse/langfuse chart, pinned in kustomization.yaml).
+#
+# One key path per line; `#` comments and blanks ignored. An entry `a.b`
+# acknowledges `a.b` and every key nested under it (`a.b.*`). Suppressed keys
+# no longer flag, so future commits surface only NEW unknown keys.
+#
+# Classification method: `grep -rn '.Values.<key>' observability/langfuse/charts/*/`.
+# Chart reads it → back-compat-OK. Chart never reads it → genuine wrong-key (DROPPED).
+
+# ── Back-compat-OK ──────────────────────────────────────────────────────────
+# The chart's templates DO consume these (list-item subpaths / empty-dict
+# `resources` toYaml); they render correctly. Safe to suppress.
+langfuse.web.pod.additionalEnv       # chart: `range .Values.langfuse.web.pod.additionalEnv`
+langfuse.web.pod.additionalEnvFrom   # chart consumes additionalEnvFrom list
+langfuse.web.resources               # chart: `toYaml .Values.langfuse.web.resources`
+langfuse.worker.pod.additionalEnv    # chart consumes worker additionalEnv list
+langfuse.worker.resources            # chart: `toYaml .Values.langfuse.worker.resources`
+s3.persistence                       # `.Values.s3` is consumed (bundled MinIO subchart)
+
+# ── KNOWN WRONG-KEYS — value is DROPPED at render (NOT back-compat-OK) ───────
+# Acknowledged here ONLY so the hook stays green and flags NEW drift. These are
+# TRACKED BUGS: fix the key in values.yaml, then DELETE the line. Right-hand
+# side = the key the chart actually reads. (securityContext/containerSecurityContext
+# are the existing TODO "langfuse containerSecurityContext / securityContext
+# chart-key fix" item; the other three were confirmed dropped during this audit.)
+containerSecurityContext   # chart: `langfuse.securityContext` (container-level, NESTED under langfuse:)
+securityContext            # chart: `langfuse.podSecurityContext` (pod-level, NESTED under langfuse:)
+langfuse.telemetry         # chart: `langfuse.features.telemetryEnabled` — telemetry NOT disabled today
+redis.primary              # langfuse `redis:` has no `primary`; bitnami-style persistence/resources are DROPPED
+serviceMonitor             # not in chart; no ServiceMonitor is created from these keys

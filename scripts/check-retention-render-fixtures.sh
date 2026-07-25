@@ -99,7 +99,9 @@ layer_digest() {
   }
   while IFS= read -r input_file; do
     case "$input_file" in
-      */README.md|*/charts/*|*/testdata/*) continue ;;
+      # .helmcheckignore is a check-helm-values-keys.sh lint baseline, NOT a
+      # Helm render input — it must not perturb the render-input digest.
+      */README.md|*/charts/*|*/testdata/*|*/.helmcheckignore) continue ;;
     esac
     relative_input="${input_file#"$REPO_ROOT"/}"
     printf '%s  %s\n' "$(sha256_file "$input_file")" "$relative_input"

@@ -6,18 +6,34 @@
 # 2026-05-31 vaultwarden + langfuse bring-up (see
 # homelab-docs/99-journal/2026-05-31-langfuse-and-vaultwarden-bringup-saga.md).
 #
-# v1 limitation — back-compat shims look like wrong-keys:
-#   `helm show values` returns only the chart's DOCUMENTED defaults. Many
-#   charts (e.g. guerzon/vaultwarden, langfuse/langfuse) silently accept
-#   additional keys via `dig`/`default` helpers — they read those keys at
-#   render time but don't surface them in the values defaults. Those keys
-#   currently get flagged here even though the workload renders fine. So
-#   for v1 this script is RUN MANUALLY (`scripts/check-helm-values-keys.sh`)
-#   rather than wired into .pre-commit-config.yaml. Triage each flagged key
-#   against the rendered output (`kustomize build --enable-helm <layer> |
-#   grep -A2 <expected env>`) — real wrong-keys produce missing env, back-
-#   compat shims render correctly. Refinement (per-layer .helmcheckignore
-#   baseline file) is queued separately in the TODO.
+# v2 — per-layer `.helmcheckignore` baseline (why some keys are "known"):
+#   `helm show values` returns only the chart's DOCUMENTED defaults. A key WE
+#   set can be absent from that tree for two DIFFERENT reasons:
+#     (a) BACK-COMPAT-OK: the chart's templates DO read the key (via a `with`/
+#         `range`/`toYaml` over a list or empty-dict default, e.g. langfuse
+#         `langfuse.web.pod.additionalEnv[]` or vaultwarden `resources: {}`),
+#         so it renders fine — it just isn't surfaced as a default. FALSE
+#         POSITIVE.
+#     (b) GENUINE WRONG-KEY: the chart doesn't read it at all (typo, renamed
+#         key, or a bitnami-style subkey the chart's wrapper never forwards,
+#         e.g. langfuse `redis.primary.persistence.size`). Value is DROPPED at
+#         render and the workload behaves as if unconfigured. TRUE POSITIVE.
+#   To let the operator ACKNOWLEDGE the current known set so future commits
+#   flag only NEW unknowns, each layer may carry a `.helmcheckignore` baseline
+#   next to its `values.yaml`: one key path per line, `#` comments and blank
+#   lines allowed. A line `a.b.c` acknowledges `a.b.c` AND every key nested
+#   under it (`a.b.c.*`) — so one line covers a list-item's subpaths. Keep the
+#   file split into a "back-compat-OK" section and a "KNOWN WRONG-KEY — tracked
+#   bug, fix & remove" section so a suppression is never mistaken for approval.
+#   Triage a NEW flag against the chart templates (`grep -rn '.Values.<key>'
+#   <layer>/charts/*/`): referenced → back-compat-OK; absent → real wrong-key.
+#
+# Offline: this hook prefers the LOCAL vendored chart that kustomize expands
+#   under `<layer>/charts/<name>-<version>/` (present because these layers
+#   commit their charts), so it runs with NO network. It falls back to
+#   `helm show values <repo>/<name> --version` only when no vendored copy
+#   exists, and soft-fails (warn, don't block) if that fetch can't reach the
+#   repo — a pre-commit hook must never wedge on a network blip.
 #
 # For every kustomization.yaml under the layer roots (infrastructure/,
 # platform/, observability/, apps/) that declares a helmCharts: block,
@@ -35,10 +51,19 @@
 # sub-chart, `helm show values` includes the sub-chart's values too, so
 # their paths are in the comparison set.
 #
+# Enforcement is OPT-IN per layer (v2). A layer BLOCKS on unknown keys only
+# once it carries a `.helmcheckignore` (the operator has triaged it). Layers
+# without one WARN but do not block — so this hook can be wired repo-wide
+# without reding CI on the pre-existing v1 flags that most helm layers still
+# have. To gate a layer: run `--layer <dir>`, triage each flag against the
+# chart templates, and record it in that layer's `.helmcheckignore`.
+#
 # Exit codes:
-#   0 = all layers' values keys are recognized by their chart.
-#   1 = at least one unknown key found (block commit / deploy).
-#   2 = invocation / dependency error (helm not found, chart unreachable).
+#   0 = every BASELINED layer is clean (unbaselined layers may have warned).
+#   1 = a baselined layer has an unknown key beyond its .helmcheckignore
+#       (NEW drift → block commit / deploy).
+#   2 = invocation / dependency error (helm not found). Missing PyYAML or an
+#       unreachable non-vendored chart repo soft-skip (exit 0), never block.
 #
 # Usage:
 #   scripts/check-helm-values-keys.sh                # check all layers
@@ -89,14 +114,29 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-for tool in helm python3; do
-  command -v "$tool" >/dev/null 2>&1 || {
-    err "$tool not on PATH"; exit 2
-  }
+command -v helm >/dev/null 2>&1 || { err "helm not on PATH"; exit 2; }
+
+# Pick a python3 that actually has PyYAML — the operator's default python3 may
+# be a brew build without it while /usr/bin/python3 has it. If NONE has yaml,
+# soft-skip (exit 0): a missing lib is an environment issue, not a values bug,
+# and a pre-commit hook must never wedge a commit on it.
+PYTHON=""
+for py in python3 /usr/bin/python3 /usr/local/bin/python3 python; do
+  if command -v "$py" >/dev/null 2>&1 && "$py" -c "import yaml" >/dev/null 2>&1; then
+    PYTHON="$py"; break
+  fi
 done
+if [ -z "$PYTHON" ]; then
+  echo "check-helm-values-keys: no python3 with PyYAML found — SKIPPING (install" \
+       "pyyaml to enable this check; env issue, not a values bug)." >&2
+  exit 0
+fi
 
 # Decide which layers to check.
-declare -a layers
+# NB: `layers=()` not `declare -a layers` — a declared-but-unassigned array
+# still trips `set -u` on `${#layers[@]}` in bash 5.x; an empty assignment
+# initializes it safely.
+layers=()
 if [ -n "$layer_arg" ]; then
   layers=("$layer_arg")
 elif [ "${#positional[@]}" -gt 0 ]; then
@@ -104,7 +144,7 @@ elif [ "${#positional[@]}" -gt 0 ]; then
   declare -A seen
   for f in "${positional[@]}"; do
     case "$f" in
-      *.yaml)
+      *.yaml|*.helmcheckignore)
         d="$(dirname "$f")"
         # Walk up until a kustomization.yaml exists.
         while [ "$d" != "/" ] && [ "$d" != "." ] && [ ! -f "$d/kustomization.yaml" ]; do
@@ -138,7 +178,7 @@ mkdir -p /tmp/helmkeys-cache
 # in pure bash + yq + jq combos).
 check_layer() {
   local layer="$1"
-  STRICT="$strict" REPO_ROOT="$REPO_ROOT" python3 - <<'PYEOF' "$layer"
+  STRICT="$strict" REPO_ROOT="$REPO_ROOT" "$PYTHON" - <<'PYEOF' "$layer"
 import os, re, subprocess, sys, urllib.parse
 from pathlib import Path
 
@@ -183,10 +223,34 @@ def all_paths(node, prefix=""):
                 out |= all_paths(item, prefix)
     return out
 
+def local_chart_dir(name, ver):
+    """kustomize expands a committed helmChart under
+    <layer>/charts/<name>-<ver>/. `helm show values` wants the dir holding
+    Chart.yaml, which is either that dir or a <name>/ subdir inside it.
+    Returns the path if a vendored copy exists, else None (→ remote fetch)."""
+    base = layer / "charts" / f"{name}-{ver}"
+    for cand in (base / name, base):
+        if (cand / "Chart.yaml").is_file():
+            return cand
+    return None
+
 def cache_chart_values(repo, name, ver):
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_",
                   f"{urllib.parse.urlparse(repo).netloc}_{name}_{ver}")
     cache = Path(f"/tmp/helmkeys-cache/{safe}.yaml")
+    local = local_chart_dir(name, ver)
+    if local is not None:
+        # Offline path: read the vendored chart directly. No cache, no network.
+        try:
+            r = subprocess.run(
+                ["helm", "show", "values", str(local)],
+                check=False, capture_output=True, text=True, timeout=60,
+            )
+            if r.returncode != 0:
+                return None, r.stderr.strip() or "helm show values (local chart) failed"
+            return yaml.safe_load(r.stdout) or {}, None
+        except subprocess.TimeoutExpired:
+            return None, "helm show values (local chart) timed out"
     if not cache.exists():
         try:
             r = subprocess.run(
@@ -275,12 +339,59 @@ for c in charts:
     our_paths   = all_paths(ours)
     unknown = sorted(p for p in our_paths if p not in chart_paths)
 
-    if unknown:
-        print(f"  ✗ {vfp}: keys NOT in chart {name}@{ver}:")
+    # Per-layer baseline: acknowledged keys (and their nested descendants) are
+    # suppressed so only NEW unknowns flag. `#` comments + blank lines ignored.
+    baseline_file = layer / ".helmcheckignore"
+    baseline = []
+    if baseline_file.exists():
+        for raw in baseline_file.read_text().splitlines():
+            entry = raw.split("#", 1)[0].strip()
+            if entry:
+                baseline.append(entry)
+
+    def acknowledged(path):
+        # An entry `a.b` covers `a.b` exactly and any descendant `a.b.*`.
+        return any(path == e or path.startswith(e + ".") for e in baseline)
+
+    suppressed = [p for p in unknown if acknowledged(p)]
+    unknown = [p for p in unknown if not acknowledged(p)]
+
+    # Flag stale baseline entries (acknowledge nothing currently flagged) so the
+    # file stays honest as the chart/values evolve. Non-fatal — just a nudge.
+    if baseline:
+        matched = {e for p in suppressed for e in baseline
+                   if p == e or p.startswith(e + ".")}
+        stale = [e for e in baseline if e not in matched]
+        if stale:
+            print(f"  · {baseline_file}: {len(stale)} stale baseline entry(ies) "
+                  f"(no longer flagged — safe to delete): {', '.join(stale)}",
+                  file=sys.stderr)
+    if suppressed:
+        print(f"  · {vfp}: {len(suppressed)} key(s) suppressed by "
+              f".helmcheckignore baseline.")
+
+    if unknown and baseline_file.exists():
+        # Layer is OPTED INTO enforcement (it has a baseline): any key beyond
+        # the baseline is NEW drift → block.
+        print(f"  ✗ {vfp}: keys NOT in chart {name}@{ver} (and not in "
+              f".helmcheckignore):")
         for p in unknown:
             print(f"      - {p}")
-        print(f"    (Run `helm show values {repo}/{name} --version {ver}` to see the chart's full key tree.)")
+        print(f"    Triage: `grep -rn '.Values.{unknown[0]}' {layer}/charts/*/` "
+              f"— chart reads it → add to {baseline_file} (back-compat-OK "
+              f"section); it doesn't → real dropped wrong-key, fix values.yaml.")
         problems += 1
+    elif unknown:
+        # No baseline yet → enforcement is OPT-IN. Warn, don't block: wiring
+        # this hook repo-wide must not red CI on the pre-existing v1 flags that
+        # exist across most helm layers (list-item subpaths, empty-dict/toYaml
+        # passthrough configs, plus some genuine wrong-keys). A layer becomes
+        # gated once the operator triages it into a .helmcheckignore. Run
+        # `--layer <dir>` to see the keys.
+        print(f"  · {vfp}: {len(unknown)} unrecognized key(s), no "
+              f".helmcheckignore — NOT enforced. Triage with "
+              f"`scripts/check-helm-values-keys.sh --layer {layer}` and add a "
+              f"baseline to gate this layer.", file=sys.stderr)
     elif strict:
         # Optional: warn on overrides that match the chart default exactly.
         # (Not implemented in v1 — placeholder for --strict mode.)
