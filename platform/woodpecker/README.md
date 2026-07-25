@@ -27,7 +27,7 @@ Per ADR 0023 D5 + D6 + D8 + D9.
 | `values.yaml` | Server + agent config. SQLite DB on Longhorn; Forgejo OAuth integration; Kubernetes backend (step Pods spawn in `ci-woodpecker`). |
 | `rbac.yaml` | Cross-ns Role + RoleBinding so the agent's SA can manage step Pods in `ci-woodpecker`. Step-Pod SA has no kube-API access. |
 | `quota.yaml` | ResourceQuota + LimitRange on `ci-woodpecker` (per ADR 0023 D5). |
-| `externalsecret.yaml` | `kv/woodpecker/agent-secret` (server↔agent shared) + `kv/woodpecker/oauth` (Forgejo OAuth client). |
+| `externalsecret.yaml` | `kv/woodpecker/oauth` (Forgejo OAuth client) + `kv/woodpecker/agent-token` (per-agent registration token, seeded post-bring-up via the Woodpecker UI). |
 | `httproute.yaml` | Cilium HTTPRoute for `woodpecker.lab.<HOMELAB-DOMAIN>`; Tailscale-only. |
 | `networkpolicy.yaml` | Server, agent, and ci-woodpecker default-deny + curated egress (FQDN-aware CCNP for upstream registries). |
 | `servicemonitor.yaml` | Prometheus scrape of server `/metrics`. |
@@ -38,16 +38,11 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 
 | Path | Field(s) | Source |
 |---|---|---|
-| `kv/data/woodpecker/agent-secret` | `token` | Random — both server and agent read this; agent presents it on connection. Rotate via re-seed + helm rollout. |
 | `kv/data/woodpecker/oauth` | `client_id`, `client_secret` | From Forgejo — operator creates the OAuth2 application in Forgejo (Settings → Applications → OAuth2 Applications → Create), then copies values. |
 
 **First-install seed:**
 
 ```sh
-# Agent shared secret — random.
-homelab-infra/scripts/seed-random-secret.sh \
-    kv/woodpecker/agent-secret token
-
 # OAuth client — provisioned via API helper (creates the
 # Forgejo OAuth2 app + seeds OpenBao in one shot). Operator
 # must have $FORGEJO_TOKEN set (admin PAT from Forgejo's
@@ -72,7 +67,7 @@ homelab-infra/scripts/provision-forgejo-oauth-app.sh \
 | Bring-up step | What lands |
 |---|---|
 | Argo sync `platform/forgejo/` | Forgejo up; operator creates OAuth2 app. |
-| Operator seeds `kv/woodpecker/{agent-secret,oauth}` | ESO can populate Secrets. |
+| Operator seeds `kv/woodpecker/oauth` | ESO can populate the OAuth Secret. |
 | Argo sync this layer | Server + agent Deployments Ready; HTTPRoute reconciled; first pipeline can run on next webhook. |
 | Operator pushes a `.woodpecker.yml` to a Forgejo repo + a commit | First pipeline triggers via webhook → agent spawns step Pods in `ci-woodpecker`. |
 
