@@ -1,0 +1,108 @@
+# Declarative bootstrap of the `langfuse` ClickHouse database.
+#
+# Langfuse's web + worker run ClickHouse schema migrations at
+# startup, but neither they nor the Altinity operator CREATE the
+# target database — Langfuse expects `clickhouse.database`
+# (values.yaml → "langfuse") to already exist. Until now that
+# `CREATE DATABASE IF NOT EXISTS langfuse` was an unscripted manual
+# clickhouse-client step at bring-up; if skipped, migrations fail and
+# web/worker crash-loop.
+#
+# The Altinity ClickHouseInstallation CRD at the pinned operator
+# version (altinity/clickhouse-operator:0.26.3) exposes NO native
+# "create database" field — `spec.configuration.files` only writes
+# into /etc/clickhouse-server/{config,conf,users}.d, not an init-SQL
+# hook. So this is a one-shot Job instead of a CHI-native declaration.
+#
+# Idempotent (`CREATE DATABASE IF NOT EXISTS`) and safe to re-run on
+# every Argo sync. Modelled on observability/crowdsec/bouncer-register-job.yaml:
+# a plain resource (not an Argo hook, which deadlocked there) applied
+# in the regular Sync wave, self-gating on a wait-loop so a slow
+# ClickHouse only delays this Job's own success, never the rest of the
+# sync. NetworkPolicy: the langfuse-clickhouse ingress allow-list
+# (networkpolicy.yaml) admits this Job's pod via the
+# `app.kubernetes.io/component: clickhouse-init` label.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: langfuse-clickhouse-createdb
+  namespace: langfuse
+  labels:
+    app.kubernetes.io/name: langfuse
+    app.kubernetes.io/component: clickhouse-init
+  annotations:
+    # Replace the running Job on every reconcile so a spec change
+    # (image, script) is not blocked by Kubernetes' Job-spec
+    # immutability — Argo deletes + recreates instead of failing.
+    argocd.argoproj.io/sync-options: Replace=true,Force=true
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: langfuse
+        app.kubernetes.io/component: clickhouse-init
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        # clickhouse image's `clickhouse` user (uid/gid 101), matching
+        # the ClickHouseInstallation pod securityContext.
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: createdb
+          # Reuse the exact image pinned by the ClickHouseInstallation
+          # CR (clickhouseinstallation.yaml) so the bundled
+          # clickhouse-client is version-matched to the server.
+          # OPERATOR PINS via Renovate — keep in lockstep with the CHI image.
+          image: clickhouse/clickhouse-server:24.8.4.13
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          env:
+            # Plaintext ClickHouse password for the `langfuse` user.
+            # Same ESO-managed Secret the ClickHouseInstallation and
+            # Langfuse helm values consume; never logged by this Job.
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-clickhouse-creds
+                  key: password
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -eu
+              CH_HOST="clickhouse-langfuse.langfuse.svc.cluster.local"
+              CH_PORT=9000
+
+              echo "Waiting up to 5m for ClickHouse at ${CH_HOST}:${CH_PORT} to accept authenticated queries..."
+              attempt=0
+              until clickhouse-client --host "${CH_HOST}" --port "${CH_PORT}" \
+                      --user langfuse --password "${CLICKHOUSE_PASSWORD}" \
+                      --query "SELECT 1" >/dev/null 2>&1; do
+                  attempt=$((attempt + 1))
+                  if [ "${attempt}" -ge 60 ]; then
+                      echo "ERROR: ClickHouse at ${CH_HOST}:${CH_PORT} did not accept queries within 5m." >&2
+                      echo "       Check chi-langfuse pod readiness and the langfuse-clickhouse NetworkPolicy." >&2
+                      exit 1
+                  fi
+                  sleep 5
+              done
+
+              echo "ClickHouse reachable. Ensuring database 'langfuse' exists (idempotent)..."
+              clickhouse-client --host "${CH_HOST}" --port "${CH_PORT}" \
+                  --user langfuse --password "${CLICKHOUSE_PASSWORD}" \
+                  --query "CREATE DATABASE IF NOT EXISTS langfuse"
+              echo "OK: database 'langfuse' present."

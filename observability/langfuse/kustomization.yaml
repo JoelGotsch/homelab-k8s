@@ -35,6 +35,7 @@ resources:
   - cnpg-cluster.yaml
   - scheduled-backup.yaml
   - clickhouseinstallation.yaml
+  - clickhouse-createdb-job.yaml
   - externalsecret.yaml
   - networkpolicy.yaml
   - httproute.yaml

@@ -137,6 +137,18 @@ spec:
           protocol: TCP
         - port: 9000
           protocol: TCP
+    # One-shot CREATE DATABASE bootstrap Job
+    # (clickhouse-createdb-job.yaml) — ensures the `langfuse`
+    # database exists before web/worker run schema migrations.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: clickhouse-init
+      ports:
+        - port: 8123
+          protocol: TCP
+        - port: 9000
+          protocol: TCP
     # Altinity operator + metrics-exporter for management +
     # metrics scrape.
     - from:
