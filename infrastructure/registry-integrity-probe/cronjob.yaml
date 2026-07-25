@@ -1,0 +1,112 @@
+# Daily `crane validate` sweep over the first-party OCI images.
+#
+# One container per image. `crane validate --remote <ref>` fetches the
+# manifest AND every layer/config blob and verifies each against its
+# digest — so a lost or corrupted blob (the recurring Forgejo Packages
+# failure) makes that container exit non-zero. We deliberately do NOT
+# pass `--fast` (which skips downloading layers); downloading the blobs
+# IS the integrity test.
+#
+# All containers run in parallel; the pod (and thus the Job) succeeds
+# only if EVERY validation exits 0. Any failure → the Job fails →
+# kube_job_status_failed fires the PrometheusRule in this layer.
+#
+# Reaching the registry (ADR 0038): a pod hostAlias maps
+# registry.homelab.internal -> 10.10.30.52 (the registry-direct LB),
+# the in-pod equivalent of the documented
+# `curl --resolve registry.homelab.internal:443:10.10.30.52` test.
+# This bypasses both unbound (works pre- and post-DNS-cutover) and the
+# Cilium Gateway 403 trap. registry-direct rewrites the OCI auth realm
+# so token + manifest + blobs all stay on this one host, and its cert
+# (CN registry.homelab.internal, homelab-internal CA) verifies against
+# the trust-manager bundle mounted at /etc/ssl/certs.
+#
+# Auth: DOCKER_CONFIG points crane at the dockerconfigjson from the
+# ExternalSecret (kv/shared/forgejo-packages/ci).
+#
+# ADDING AN IMAGE: append another container block with the same mounts
+# and a `validate --remote <ref>` args list. The image refs mirror the
+# first-party deployments (apps/*/deployment.yaml, platform/pr-agent).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: registry-blob-validate
+  namespace: registry-integrity-probe
+  labels:
+    app.kubernetes.io/name: registry-blob-validate
+spec:
+  schedule: "23 4 * * *"          # daily, offset from other cron layers
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: registry-blob-validate
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          hostAliases:
+            - ip: "10.10.30.52"          # registry-direct LB (ADR 0038)
+              hostnames:
+                - registry.homelab.internal
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532              # crane image's `nonroot` uid
+            runAsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: validate-ntfy-e2ee-relay
+              # gcr.io/go-containerregistry/crane:latest (non-debug,
+              # distroless nonroot). Digest-pinned; Renovate owns bumps.
+              image: gcr.io/go-containerregistry/crane@sha256:3a62904867999848c5b16bb9b1eb8b2a7bbaa6061203a90037c91bf33b6b567e
+              args: ["validate", "--remote", "registry.homelab.internal/ci-packages/ntfy-e2ee-relay:0.1.1"]
+              env: &craneEnv
+                - name: DOCKER_CONFIG
+                  value: /docker
+                - name: SSL_CERT_FILE
+                  value: /etc/ssl/certs/ca-certificates.crt
+              securityContext: &craneSec
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources: &craneRes
+                requests: {cpu: 25m, memory: 64Mi}
+                limits: {cpu: 200m, memory: 256Mi}
+              volumeMounts: &craneMounts
+                - {name: docker-config, mountPath: /docker, readOnly: true}
+                - {name: ca-certs, mountPath: /etc/ssl/certs, readOnly: true}
+                - {name: tmp, mountPath: /tmp}
+            - name: validate-approval-channel
+              image: gcr.io/go-containerregistry/crane@sha256:3a62904867999848c5b16bb9b1eb8b2a7bbaa6061203a90037c91bf33b6b567e
+              args: ["validate", "--remote", "registry.homelab.internal/ci-packages/approval-channel:v0.1.1"]
+              env: *craneEnv
+              securityContext: *craneSec
+              resources: *craneRes
+              volumeMounts: *craneMounts
+            - name: validate-pr-agent
+              image: gcr.io/go-containerregistry/crane@sha256:3a62904867999848c5b16bb9b1eb8b2a7bbaa6061203a90037c91bf33b6b567e
+              args: ["validate", "--remote", "registry.homelab.internal/ci-packages/pr-agent:gitea_app-0.34"]
+              env: *craneEnv
+              securityContext: *craneSec
+              resources: *craneRes
+              volumeMounts: *craneMounts
+          volumes:
+            - name: docker-config
+              secret:
+                secretName: registry-homelab-internal-pull
+                items:
+                  - key: .dockerconfigjson
+                    path: config.json
+            - name: ca-certs
+              configMap:
+                name: homelab-trust-bundle
+            - name: tmp
+              emptyDir: {}

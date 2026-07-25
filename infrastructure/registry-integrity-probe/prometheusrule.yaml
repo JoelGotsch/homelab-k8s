@@ -1,0 +1,86 @@
+# Surface a failed registry-blob-validate run.
+#
+# The CronJob's job is to fail loudly when a first-party image can no
+# longer be pulled+digested end-to-end (blob loss). These rules turn
+# that failure into an alert instead of a Job quietly sitting in
+# failedJobsHistoryLimit.
+#
+# Modeled on infrastructure/backup-cronjobs/prometheusrule.yaml.
+# `release: kube-prometheus-stack` matches the Prometheus ruleSelector;
+# alerts route to the default Alertmanager path (ntfy-e2ee-relay).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: registry-integrity-probe
+  namespace: registry-integrity-probe
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: registry-integrity-probe.job-failed
+      interval: 1m
+      rules:
+        - alert: RegistryBlobValidateFailed
+          # kube_job_status_failed (kube-state-metrics) is > 0 once a
+          # Job exhausts backoffLimit. A failed validate = a manifest
+          # or blob for a first-party image could not be pulled/digested
+          # — the recurring Forgejo Packages blob-loss signature.
+          expr: |
+            kube_job_status_failed{namespace="registry-integrity-probe"} > 0
+          for: 5m
+          labels:
+            severity: warning
+            component: registry-integrity-probe
+          annotations:
+            summary: "Registry blob validation failed ({{ $labels.job_name }})"
+            description: |
+              `crane validate` failed for at least one first-party
+              image in registry.homelab.internal. A layer/config blob
+              is likely missing or corrupt in Forgejo Packages (the
+              recurring blob-loss failure), OR registry-direct / the
+              registry backend is unreachable.
+
+              Triage:
+                kubectl -n registry-integrity-probe get jobs --sort-by=.status.startTime | tail -5
+                kubectl -n registry-integrity-probe logs job/{{ $labels.job_name }} --all-containers
+              The failing container name (validate-<image>) identifies
+              which image is affected. Recovery: re-push the image from
+              CI (Woodpecker) so the missing blobs are restored.
+            runbook_url: https://github.com/JoelGotsch/homelab-k8s/blob/main/infrastructure/registry-integrity-probe/README.md
+
+    - name: registry-integrity-probe.staleness
+      interval: 1m
+      rules:
+        # Quiet-failure path: a suspended/deleted CronJob or one that
+        # has never succeeded emits no kube_job_status_failed series, so
+        # the alert above cannot fire. Three clauses mirror the
+        # backup-cronjobs staleness guard: last success older than 2
+        # days; CronJob older than 2 days with no success series yet;
+        # CronJob object absent entirely.
+        - alert: RegistryBlobValidateStale
+          expr: |
+            (
+              time() - kube_cronjob_status_last_successful_time{namespace="registry-integrity-probe",cronjob="registry-blob-validate"}
+              > 86400 * 2
+            )
+            or
+            (
+              (time() - kube_cronjob_created{namespace="registry-integrity-probe",cronjob="registry-blob-validate"} > 86400 * 2)
+              unless kube_cronjob_status_last_successful_time{namespace="registry-integrity-probe",cronjob="registry-blob-validate"}
+            )
+            or
+            absent(kube_cronjob_created{namespace="registry-integrity-probe",cronjob="registry-blob-validate"})
+          for: 1h
+          labels:
+            severity: warning
+            component: registry-integrity-probe
+          annotations:
+            summary: "Registry blob validation has not succeeded in 2 days"
+            description: |
+              No successful registry-blob-validate run for 2+ days (or
+              the CronJob was suspended / deleted / has never
+              succeeded). The integrity probe is not running — blob loss
+              would go undetected.
+              Inspect:
+                kubectl -n registry-integrity-probe get cronjob,jobs
+            runbook_url: https://github.com/JoelGotsch/homelab-k8s/blob/main/infrastructure/registry-integrity-probe/README.md

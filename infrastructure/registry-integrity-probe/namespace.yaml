@@ -1,0 +1,31 @@
+# registry-integrity-probe — a scheduled `crane validate` sweep over
+# the first-party OCI images in the Forgejo Packages registry.
+#
+# WHY: Forgejo Packages blob loss has recurred (ntfy-e2ee-relay 0.1.0,
+# 2026-06-27 family — see platform/forgejo/README.md + the journal).
+# A manifest can stay listed while a referenced layer blob is gone;
+# nothing notices until a fresh node tries to pull and fails. This
+# probe pulls + digests every first-party image on a schedule so blob
+# loss surfaces as a failed Job (→ PrometheusRule) instead of a silent
+# landmine that detonates on the next cold pull.
+#
+# Egress is default-denied by the ADR 0036 Kyverno baseline; the
+# companion CiliumNetworkPolicy re-opens exactly kube-dns + the
+# registry-direct proxy (ADR 0038). ADR 0036 LimitRange/ResourceQuota
+# are generated into this ns by Kyverno.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: registry-integrity-probe
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    # ADR 0036 D4 — infrastructure-tier, classified `internal`
+    # (validates internal-registry metadata only; no personal/secret
+    # payload). Enforced by scripts/check-data-class.sh.
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal
+    # Opt into the trust-manager `homelab-trust-bundle` Bundle so the
+    # homelab-internal CA (registry-direct's cert issuer) lands as a
+    # ConfigMap here — mounted into the crane pods as /etc/ssl/certs.
+    homelab.lab/inject-ca: "true"

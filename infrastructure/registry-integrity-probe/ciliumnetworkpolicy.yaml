@@ -1,0 +1,49 @@
+# Re-open the egress this layer needs on top of the ADR 0036 Kyverno
+# default-deny NetworkPolicy generated into every new namespace.
+#
+# Cilium unions all policies selecting an endpoint: the Kyverno
+# default-deny makes the pods deny-by-default, and these named allows
+# add back exactly two destinations.
+#
+# The registry-direct rule mirrors the Kyverno signature-verification
+# egress (infrastructure/kyverno/networkpolicy.yaml): the OCI path is
+# the dedicated registry-direct proxy pod on :8443 (ADR 0038), NOT the
+# Cilium Gateway — in-cluster clients hitting registry.homelab.internal
+# through the gateway are 403'd (they are not the reserved `ingress`
+# entity). The crane pods reach 10.10.30.52:443 via a hostAlias;
+# socket-LB DNATs that to the registry-direct pod:8443 before egress
+# policy is evaluated, so the destination that must be allowed is the
+# backend endpoint on :8443.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: registry-integrity-probe-egress
+  namespace: registry-integrity-probe
+spec:
+  endpointSelector: {}
+  egress:
+    # kube-dns for name resolution (the registry host itself is a
+    # hostAlias, but keep DNS open for token/keychain lookups).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # registry-direct proxy (ADR 0038) — the OCI manifest/blob/token
+    # surface for registry.homelab.internal.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: forgejo
+            app.kubernetes.io/name: registry-direct
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP

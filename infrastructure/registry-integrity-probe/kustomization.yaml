@@ -1,0 +1,12 @@
+# registry-integrity-probe — scheduled crane-validate of first-party
+# OCI images. Auto-discovered as an Argo Application by the
+# infrastructure ApplicationSet (directory generator infrastructure/*).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - externalsecret.yaml
+  - ciliumnetworkpolicy.yaml
+  - cronjob.yaml
+  - prometheusrule.yaml
