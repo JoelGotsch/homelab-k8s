@@ -77,20 +77,56 @@ considered:
 
 ## Retention policy
 
-Tier-3 retains 365d + monthly-forever for `personal+` per
-[backup-and-dr.md](../../../homelab-docs/01-architecture/backup-and-dr.md).
-Restic `forget --prune` translation:
+One repo, class-tagged (operator 2026-07-16). Every snapshot carries its
+data-class tag; retention is applied **per class** by a scripted
+`restic forget --tag <lane>,<class> --group-by tags` loop in each CronJob.
+`--group-by tags` buckets by the full tag-set, so each class (and, in the
+NAS lane, each `share:<name>`) gets its own independent GFS group and can
+never over-prune another class's snapshots. Per-class GFS (from
+[backup-and-dr.md](../../../homelab-docs/01-architecture/backup-and-dr.md)
+and the TODO backup-strategy section):
+
+| Class | keep-daily | keep-weekly | keep-monthly | keep-yearly | Applied in |
+|---|---|---|---|---|---|
+| `secret` | 14 | 8 | 12 | 3 | cluster lane (`cronjob.yaml`, whole `/staging`, conservative) |
+| `personal` | 7 | 5 | 12 | 1 | NAS lane |
+| `internal` | 7 | 4 | 6 | — | NAS lane |
+| `internal-media` | — | 6 | 3 | — | NAS lane (rule kept; jellyfin-media deferred, matches 0 snapshots today) |
+
+`--keep-tag preserve` on every class: snapshots tagged `preserve` are never
+pruned. Manual `preserve`-tagging covers anything to pin past its GFS window.
+Workflow: `restic tag --add preserve <snapshot-id>`.
+
+The cluster lane's `/staging` tree mixes classes within each snapshot
+(cnpg/<app> spans secret/personal/internal; longhorn-backups are hash-named
+PVCs), so it is conservatively tagged and retained as the MOST-retained class
+(`secret`) rather than split — the lane is tiny and dedup'd, so the extra
+depth is nearly free and nothing is under-retained. Revisit at the Sept
+backup review (TODO backup-strategy item E) if the footprint justifies a split.
+
+### Retention gate (`RESTIC_FORGET_APPLY`)
+
+`forget` is **never hand-run** and by **default runs in `--dry-run` mode**:
+each nightly CronJob PRINTS the diff — which snapshots retention *would*
+remove — and removes nothing (and skips `prune`). This is the shared-repo
+mis-filter mitigation from the TODO backup-strategy trade-off: a wrong class
+filter shows up as a printed diff, not as silently-lost snapshots.
+
+A real, data-removing `forget` + `prune` runs **only** when
+`RESTIC_FORGET_APPLY=1` is set on the CronJob's container env. Enable it
+per-lane after reviewing one nightly dry-run diff:
 
 ```
---keep-daily 30      # last 30 days
---keep-weekly 12     # 12 weeks of weeklies
---keep-monthly 120   # 10 years of monthlies (de-facto "forever")
---keep-yearly 10     # 10 years of yearlies
---keep-tag preserve  # snapshots tagged 'preserve' never get pruned
+# review: kubectl -n backup-cronjobs logs job/<last-run> | sed -n '/=== restic forget/,/=== restic snapshots/p'
+# then, once the diff looks right, add to the restic container's env in the
+# CronJob manifest and commit (GitOps — do not kubectl set env):
+#   - name: RESTIC_FORGET_APPLY
+#     value: "1"
 ```
 
-Manual `preserve`-tagging covers anything we want pinned past
-10 years. Workflow: `restic tag --add preserve <snapshot-id>`.
+**Until `RESTIC_FORGET_APPLY=1` is set, neither lane prunes and the repo
+grows unbounded.** The lanes are small (cluster ~120 MiB; NAS bounded), so
+there is time to review, but this env must eventually be flipped.
 
 ## Layout
 

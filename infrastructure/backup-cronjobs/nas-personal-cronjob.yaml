@@ -102,13 +102,23 @@ spec:
                   restic $RESTIC_OPTS unlock
 
                   # Back up each share as its own snapshot (per-share restore
-                  # granularity), tagged nas-personal + its data-class. A share
-                  # whose PVC is empty/unmounted is skipped, not fatal.
+                  # granularity), tagged nas-personal + its data-class + a
+                  # per-share `share:<name>` tag. A share whose PVC is
+                  # empty/unmounted is skipped, not fatal.
+                  #
+                  # The `share:<name>` tag is what keeps per-share restore
+                  # granularity under the class-scoped `forget --group-by tags`
+                  # below: group-by tags buckets by the FULL tag-set, so without
+                  # a per-share distinguisher every share of one class would
+                  # collapse into a single GFS group and keep-daily would drop
+                  # all-but-one share per day. With `share:<name>` each share is
+                  # its own tag-set → its own independent GFS group.
                   backup_share() {  # $1=path  $2=class
                     if [ ! -d "$1" ]; then echo "SKIP $1 (not mounted)"; return 0; fi
-                    echo "=== restic backup $1  [class=$2] ==="
+                    share="$(basename "$1")"
+                    echo "=== restic backup $1  [class=$2 share=$share] ==="
                     restic $RESTIC_OPTS backup "$1" \
-                      --tag nas-personal --tag "$2" --tag automated \
+                      --tag nas-personal --tag "$2" --tag "share:$share" --tag automated \
                       --host nas-personal
                   }
                   backup_share /nas/personal-photos     personal
@@ -122,26 +132,71 @@ spec:
                   # (verification 2026-07-16 found it's 7.8 TB, too big for the
                   # tier-3 Hetzner repo). Its mount/PVC were removed. See TODO.
 
-                  # Per-class GFS retention, scoped to THIS lane via the AND-tag
-                  # `nas-personal,<class>` so it never prunes the cluster lane.
-                  # --group-by paths keeps each share's history independent.
-                  # forget (no --prune) marks; a single prune reclaims after.
-                  echo "=== restic forget (per class, nas-personal lane) ==="
-                  restic $RESTIC_OPTS forget --tag nas-personal,personal --group-by paths \
-                    --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --keep-yearly 1 --keep-tag preserve
-                  restic $RESTIC_OPTS forget --tag nas-personal,internal --group-by paths \
-                    --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --keep-tag preserve
-                  restic $RESTIC_OPTS forget --tag nas-personal,internal-media --group-by paths \
-                    --keep-daily 2 --keep-weekly 6 --keep-monthly 3 --keep-tag preserve
+                  # ---- Retention: per-class GFS with a DRY-RUN diff gate ----
+                  # LOAD-BEARING backup path. In the one-repo class-tagged design
+                  # (operator 2026-07-16) `forget` is NEVER hand-run: it runs ONLY
+                  # here, ONLY --group-by tags, and BY DEFAULT only in --dry-run
+                  # mode — it PRINTS which snapshots retention would remove and
+                  # removes NOTHING. A real, data-removing forget+prune runs only
+                  # when the operator sets RESTIC_FORGET_APPLY=1 on this CronJob's
+                  # env AFTER reviewing a dry-run diff. This is the shared-repo
+                  # mis-filter mitigation from the TODO backup-strategy trade-off:
+                  # a wrong class filter surfaces as a printed diff, never as
+                  # silently-lost snapshots in another class.
+                  #
+                  # NOTE (operator): until RESTIC_FORGET_APPLY=1 is set, this lane
+                  # NEVER prunes and the repo grows unbounded. Review one nightly
+                  # dry-run diff, then flip the env. See README §"Retention gate".
+                  FORGET_MODE="--dry-run"
+                  if [ "${RESTIC_FORGET_APPLY:-0}" = "1" ]; then
+                    FORGET_MODE=""
+                    echo "=== RESTIC_FORGET_APPLY=1 — retention will REMOVE snapshots ==="
+                  else
+                    echo "=== dry-run gate ACTIVE (RESTIC_FORGET_APPLY unset): forget prints the diff, removes nothing ==="
+                  fi
 
-                  echo "=== restic prune ==="
-                  # restic 0.17 refuses prune with a backend connection limit
-                  # of one ("prune requires a backend connection limit of at
-                  # least two") — found 2026-07-17, first run where forget had
-                  # snapshots to remove. Use 2 (restic's minimum) for prune
-                  # only; backup keeps sftp.connections=1 where the Hetzner
-                  # concurrent-SFTP corruption was actually observed.
-                  restic -o sftp.connections=2 prune
+                  # forget_class <and-tag-selector> <keep-flags…>
+                  # The selector is a comma AND-list `nas-personal,<class>` that
+                  # scopes forget to exactly this lane+class, so it can never
+                  # touch the cluster lane's `tier-3` snapshots. --group-by tags
+                  # + the per-share `share:<name>` tag makes each share its own
+                  # independent GFS group (see backup_share). sftp.connections=2
+                  # (NOT $RESTIC_OPTS): restic 0.17 refuses forget/prune with a
+                  # connection limit of one; 2 is restic's minimum. backup keeps
+                  # sftp.connections=1 where Hetzner concurrent-SFTP corruption
+                  # was observed.
+                  forget_class() {
+                    sel="$1"; shift
+                    echo "--- forget --tag ${sel} --group-by tags ${FORGET_MODE:-(APPLY)} ---"
+                    restic -o sftp.connections=2 forget \
+                      --tag "$sel" \
+                      --group-by tags \
+                      --keep-tag preserve \
+                      $FORGET_MODE \
+                      "$@"
+                  }
+
+                  echo "=== restic forget (per class, nas-personal lane) ==="
+                  # Per-class GFS from the TODO backup-strategy section (decided
+                  # 2026-07-16): personal 7/5/12/1, internal 7/4/6, media
+                  # weekly6/monthly3. internal-media currently matches zero
+                  # snapshots (jellyfin-media deferred to the Sept review) — the
+                  # rule is kept so the class is retention-covered when re-added.
+                  forget_class "nas-personal,personal" \
+                    --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --keep-yearly 1
+                  forget_class "nas-personal,internal" \
+                    --keep-daily 7 --keep-weekly 4 --keep-monthly 6
+                  forget_class "nas-personal,internal-media" \
+                    --keep-weekly 6 --keep-monthly 3
+
+                  # Single prune reclaims blocks unreferenced by any surviving
+                  # snapshot — apply mode only (a dry-run forget removed nothing).
+                  if [ "${RESTIC_FORGET_APPLY:-0}" = "1" ]; then
+                    echo "=== restic prune (apply mode) ==="
+                    restic -o sftp.connections=2 prune
+                  else
+                    echo "=== prune SKIPPED (dry-run gate active) ==="
+                  fi
 
                   echo "=== restic snapshots (nas-personal lane) ==="
                   restic $RESTIC_OPTS snapshots --tag nas-personal --compact | tail -20

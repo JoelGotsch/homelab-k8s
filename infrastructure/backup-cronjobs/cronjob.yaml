@@ -260,60 +260,91 @@ spec:
                   # snapshot in its own group and kept it as "most recent
                   # daily" FOREVER: GFS retention was a silent no-op for this
                   # lane (found 2026-07-17).
+                  #
+                  # --tag secret: the DATA CLASS carried on every snapshot (one-
+                  # repo class-tagged design, operator 2026-07-16). This lane
+                  # backs up /staging, which mixes classes WITHIN each snapshot
+                  # (cnpg/<app> spans secret/personal/internal; longhorn-backups
+                  # are hash-named PVCs) and cannot be cleanly split without a
+                  # class map maintained in this shell. So we conservatively
+                  # class it `secret` — the MOST-retained class — meaning nothing
+                  # in the cluster lane is ever under-retained. The lane is tiny
+                  # (~120 MiB + a few small volumes) and dedup'd, so the extra
+                  # retention depth costs almost nothing. The NAS-personal lane,
+                  # whose shares ARE cleanly class-separated, tags true per-class.
+                  # Revisit at the Sept backup review (TODO backup-strategy, item
+                  # E) if the cluster-lane footprint ever justifies the split.
                   restic $RESTIC_OPTS backup /staging \
                     --tag "tier-3" \
+                    --tag "secret" \
                     --tag "automated" \
                     --host "k8s-restic-tier-3"
 
-                  echo "=== restic forget --prune (cluster lane only) ==="
-                  # --tag tier-3 SCOPES this forget to the cluster lane. The
-                  # repo is now shared with the NAS-personal job (Workstream C,
-                  # one-repo class-tagged design), whose snapshots carry
-                  # `nas-personal` (not `tier-3`). Without this filter, forget
-                  # groups by host+paths across the WHOLE repo and would prune
-                  # the NAS lane with this policy, fighting that job's per-class
-                  # retention. `--prune` is still repo-global (safe: it only
-                  # drops data unreferenced by ANY surviving snapshot).
-                  # BOUNDED GFS for the whole cluster lane (Workstream E,
-                  # 2026-07-16). Was 30/12/120/10 — the keep-monthly 120 kept
-                  # 10 YEARS of monthly whole-/staging snapshots ("monthly
-                  # forever"). Replaced with the `secret`-class GFS (14/8/12/3)
-                  # applied to the ENTIRE lane.
+                  # ---- Retention: per-class GFS with a DRY-RUN diff gate ----
+                  # LOAD-BEARING backup path. In the one-repo class-tagged design
+                  # (operator 2026-07-16) `forget` is NEVER hand-run: it runs ONLY
+                  # here, ONLY --group-by tags, and BY DEFAULT only in --dry-run
+                  # mode — the CronJob PRINTS which snapshots retention would
+                  # remove and removes NOTHING. A real, data-removing forget+prune
+                  # runs only when the operator sets RESTIC_FORGET_APPLY=1 on this
+                  # CronJob's env AFTER reviewing a dry-run diff. This is the
+                  # shared-repo mis-filter mitigation from the TODO backup-strategy
+                  # trade-off note: a wrong class filter surfaces as a printed diff,
+                  # not as silently-lost snapshots in another class.
                   #
-                  # Why one policy, not true per-class: the /staging tree mixes
-                  # classes WITHIN each daily snapshot (cnpg/<app> spans
-                  # secret/personal/internal; longhorn-backups are hash-named
-                  # PVCs). Per-class would require splitting the backup into
-                  # per-app/per-volume calls with a class map maintained in this
-                  # shell — fragile, and duplicating the data-class labels +
-                  # label-backup-volumes.sh. The lane is tiny (~120 MiB + 8
-                  # small volumes) and dedup'd, so retention DEPTH has
-                  # negligible space cost; using the MOST-conservative class
-                  # (secret) means nothing here is under-retained. The
-                  # NAS-personal lane, whose shares ARE cleanly class-separated,
-                  # keeps true per-class GFS. Revisit at the Sept backup review
-                  # if the cluster-lane footprint ever justifies the split.
-                  # --group-by paths: ignore host when grouping, so the legacy
-                  # k8s-<pod-name> snapshots land in the same GFS group as new
-                  # k8s-restic-tier-3 ones and retention finally applies to
-                  # them (everything in this lane shares the /staging path).
-                  #
-                  # sftp.connections=2 (NOT $RESTIC_OPTS): restic 0.17 refuses
-                  # the prune phase with a connection limit of one ("prune
-                  # requires a backend connection limit of at least two").
-                  # This lane never tripped it only because the old per-pod
-                  # --host made forget a no-op, so prune was always skipped.
-                  # 2 is restic's minimum; backup keeps sftp.connections=1
-                  # where the Hetzner concurrent-SFTP corruption was observed.
-                  restic -o sftp.connections=2 forget \
-                    --prune \
-                    --tag tier-3 \
-                    --group-by paths \
+                  # NOTE (operator): until RESTIC_FORGET_APPLY=1 is set, this lane
+                  # NEVER prunes and the repo grows unbounded. Review one nightly
+                  # dry-run diff, then flip the env. See README §"Retention gate".
+                  FORGET_MODE="--dry-run"
+                  if [ "${RESTIC_FORGET_APPLY:-0}" = "1" ]; then
+                    FORGET_MODE=""
+                    echo "=== RESTIC_FORGET_APPLY=1 — retention will REMOVE snapshots ==="
+                  else
+                    echo "=== dry-run gate ACTIVE (RESTIC_FORGET_APPLY unset): forget prints the diff, removes nothing ==="
+                  fi
+
+                  # forget_class <and-tag-selector> <keep-flags…>
+                  # The selector is a comma AND-list that scopes forget to exactly
+                  # one lane (+class), so it can never touch another class's
+                  # snapshots. --group-by tags puts each distinct tag-set in its
+                  # own GFS group. sftp.connections=2 (NOT $RESTIC_OPTS): restic
+                  # 0.17 refuses forget/prune with a connection limit of one
+                  # ("requires a backend connection limit of at least two"); 2 is
+                  # restic's minimum. backup keeps sftp.connections=1 where the
+                  # Hetzner concurrent-SFTP corruption was observed.
+                  forget_class() {
+                    sel="$1"; shift
+                    echo "--- forget --tag ${sel} --group-by tags ${FORGET_MODE:-(APPLY)} ---"
+                    restic -o sftp.connections=2 forget \
+                      --tag "$sel" \
+                      --group-by tags \
+                      --keep-tag preserve \
+                      $FORGET_MODE \
+                      "$@"
+                  }
+
+                  echo "=== restic forget (cluster lane, secret-class GFS) ==="
+                  # Scoped by the LANE tag `tier-3` (not `tier-3,secret`) so this
+                  # also sweeps any pre-class-tagging legacy snapshots that carry
+                  # `tier-3` without `secret`; --group-by tags gives legacy and
+                  # new snapshots their own bounded GFS groups. This lane is
+                  # single-class by conservative design (see the backup --tag
+                  # secret comment above), so the per-class loop is one iteration.
+                  # GFS 14/8/12/3 = the `secret` class (TODO backup-strategy).
+                  forget_class "tier-3" \
                     --keep-daily 14 \
                     --keep-weekly 8 \
                     --keep-monthly 12 \
-                    --keep-yearly 3 \
-                    --keep-tag preserve
+                    --keep-yearly 3
+
+                  # Single prune reclaims blocks unreferenced by any surviving
+                  # snapshot — apply mode only (a dry-run forget removed nothing).
+                  if [ "${RESTIC_FORGET_APPLY:-0}" = "1" ]; then
+                    echo "=== restic prune (apply mode) ==="
+                    restic -o sftp.connections=2 prune
+                  else
+                    echo "=== prune SKIPPED (dry-run gate active) ==="
+                  fi
 
                   echo "=== restic snapshots (last 5) ==="
                   restic $RESTIC_OPTS snapshots --compact | tail -10
