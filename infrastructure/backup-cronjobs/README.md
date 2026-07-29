@@ -13,7 +13,7 @@ and
 
 | CronJob | Source | Target tier | Encryption | Schedule | Status |
 |---|---|---|---|---|---|
-| `restic-minio-to-hetzner` | MinIO buckets `homelab-backups-cluster` + `longhorn-backups` | tier-3 — Hetzner Storage Box | Restic client-side (operator's password) | 02:00 UTC daily | scaffolded 2026-04-29 |
+| `restic-minio-to-hetzner` | MinIO buckets `homelab-backups-cluster` + `longhorn-backups` | tier-3 — Hetzner Storage Box | Restic client-side (operator's password) | 02:15 UTC daily | scaffolded 2026-04-29 |
 | `restic-nas-personal-to-hetzner` | NAS shares `personal-photos` + `personal-files` + `family-shared` + `personal-documents` + `internal-archive` + `forgejo-lfs` via read-only mounts, tagged `nas-personal` + per class + `share:<name>` | tier-3 — Hetzner Storage Box (same repo, class-tagged) | Restic client-side (same repo password) | 04:30 UTC daily | live 2026-07-16 |
 | `restic-minio-to-friends-nas` | _same_ | tier-2 — friend's NAS | _same_ | _TBD_ | **not scaffolded** — depends on friend's-NAS hardware ship; sibling CronJob with the same shape pointing at a different Restic repo |
 
@@ -137,7 +137,7 @@ there is time to review, but this env must eventually be flipped.
 | `namespace.yaml` | `backup-cronjobs` namespace, restricted PSA. |
 | `pvc.yaml` | Staging PVC (50Gi starter, longhorn-replica1, online-resizable). |
 | `externalsecret.yaml` | Restic password + Hetzner SB SSH creds + MinIO read-only S3 creds, all from OpenBao. |
-| `cronjob.yaml` | Daily 02:00 UTC. Init container mirrors MinIO; main container runs Restic backup + forget --prune. |
+| `cronjob.yaml` | Daily 02:15 UTC. Init container mirrors MinIO; main container runs Restic backup + forget --prune. |
 | `networkpolicy.yaml` | Default-deny + egress to MinIO (in-cluster) + WAN ports 22/23 (Hetzner SFTP) + kube-DNS. |
 
 ## Bring-up
@@ -153,7 +153,7 @@ of the Step 13 wave.
 | [Step 9 — Cluster bring-up](../../../homelab-docs/04-guides/cold-start.md) | NFS CSI, Longhorn, ESO, OpenBao, Argo CD ready |
 | [infrastructure/minio-on-nas/](../minio-on-nas/) sync wave | MinIO Healthy; the source buckets exist |
 | [Step 13c — Seed ExternalSecret OpenBao paths](../../../homelab-docs/04-guides/cold-start.md) | `prod/restic/cluster-tier-3/password`, `prod/backup/hetzner-storage-box`, `prod/backup/minio-reader/s3-creds` populated |
-| Argo sync | This layer reconciles; first scheduled run is at 02:00 UTC after sync completes |
+| Argo sync | This layer reconciles; first scheduled run is at 02:15 UTC after sync completes |
 
 ## OpenBao paths to seed
 
@@ -324,7 +324,7 @@ Trigger an off-schedule cronjob run + watch logs:
 
 ```sh
 # Manually create a Job from the CronJob template (so we
-# don't wait for 02:00 UTC):
+# don't wait for 02:15 UTC):
 kubectl -n backup-cronjobs create job --from=cronjob/restic-minio-to-hetzner \
   test-pin-$(date +%s)
 
