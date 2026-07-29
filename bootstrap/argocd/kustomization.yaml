@@ -50,6 +50,9 @@ resources:
   # Prefix credential for app-owned repositories below the current
   # forgejo-admin owner. This reuses the same read-only svc-argocd token.
   - externalsecret-repo-creds-forgejo-owner.yaml
+  # `homelab` org prefix — coexists with the above during the user→org
+  # migration (see the file header). Remove the forgejo-admin one when empty.
+  - externalsecret-repo-creds-homelab.yaml
 
 patches:
   - path: patches/argocd-cmd-params.yaml
@@ -116,6 +119,9 @@ replacements:
         fieldPaths: [spec.target.template.data.url]
         options: { delimiter: '/', index: 2 }
       - select: { kind: ExternalSecret, name: argocd-repo-creds-forgejo-org }
+        fieldPaths: [spec.target.template.data.url]
+        options: { delimiter: '/', index: 2 }
+      - select: { kind: ExternalSecret, name: argocd-repo-creds-homelab }
         fieldPaths: [spec.target.template.data.url]
         options: { delimiter: '/', index: 2 }
   # argocd-cm public URL: https://argocd.FQDN_SUFFIX -> argocd.<fqdn_suffix>.
