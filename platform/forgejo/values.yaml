@@ -139,6 +139,28 @@ gitea:
     email: "${GITEA_ADMIN_EMAIL}"
     username: forgejo-admin
 
+  # Authentik OIDC auth source — DECLARATIVE (2026-07-29; before
+  # this the login_source table sat empty for 2 months because the
+  # intended "operator configures via admin UI" step never happened).
+  # The chart's init script runs `forgejo admin auth add-oauth/
+  # update-oauth` from this list on every pod start → self-heals
+  # from git. The name `authentik` is LOAD-BEARING: the Authentik
+  # provider blueprint pins the redirect URI to
+  # /user/oauth2/authentik/callback
+  # (platform/authentik/blueprints/forgejo.yaml).
+  # existingSecret must carry chart-contract field names key/secret
+  # (projected from kv/forgejo/oidc by the ES alongside the original
+  # client_id/client_secret names).
+  # BREAK-GLASS: local forgejo-admin password login stays enabled
+  # deliberately — Authentik-down is cluster-degraded, exactly when
+  # the forge must remain reachable; SSH-key git access never
+  # touches OIDC.
+  oauth:
+    - name: 'authentik'
+      provider: 'openidConnect'
+      existingSecret: forgejo-oidc
+      autoDiscoverUrl: https://auth.lab.vyramo.com/application/o/forgejo/.well-known/openid-configuration
+
   # External Postgres via CNPG — no bundled chart deps to
   # disable (chart v17.x dropped the postgresql/redis subcharts
   # entirely; see the note above `service:`). Connection details
@@ -199,12 +221,9 @@ gitea:
       REQUIRE_SIGNIN_VIEW: "true"
       ENABLE_NOTIFY_MAIL: "false"
 
-    # OIDC via Authentik per identity.md.
-    # Forgejo discovers OAuth2 clients from the database;
-    # operator configures via the admin UI on first login,
-    # or via CLI: `forgejo admin auth add-oauth ...`.
-    # The client_id + client_secret live at kv/forgejo/oidc
-    # (ESO-projected).
+    # OIDC via Authentik per identity.md — wired declaratively via
+    # `gitea.oauth` above (2026-07-29); see that block for the
+    # redirect-URI/name contract and the break-glass note.
 
     # Push-to-create: `git push <remote> <branch>` auto-creates
     # the repo if it doesn't exist (under the pusher's user or
