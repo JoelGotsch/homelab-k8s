@@ -351,6 +351,19 @@ spec:
         - ports:
             - port: "8443"
               protocol: TCP
+    # registry-integrity-probe — daily `crane validate` blob-integrity
+    # CronJob (infrastructure/registry-integrity-probe). Its egress CNP
+    # was in place but this ingress side was missing at first deploy:
+    # smoke-test connects timed out (i/o timeout to 10.10.30.52:443)
+    # until this rule landed — the "missing one direction silently
+    # hangs" netpol class, found 2026-07-29.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: registry-integrity-probe
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:
