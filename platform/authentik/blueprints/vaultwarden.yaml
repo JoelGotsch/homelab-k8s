@@ -2,17 +2,27 @@
 # (The other blueprints in this dir ARE rendered; this one deliberately isn't.)
 #
 # WHY vaultwarden is special: its OAuth2Provider + Application are UI-managed,
-# and the LIVE provider uses sub_mode=user_email with NO property mappings/
-# scopes (verified 2026-07-17). The shared OIDC template hardcodes
-# sub_mode=hashed_user_id + scopes [openid,email,profile], so templating
-# vaultwarden through it would OVERWRITE those on the live provider — a change
-# to the `sub` claim that breaks SSO for the PASSWORD MANAGER. So we do NOT
-# recreate its provider/app here.
+# and the LIVE provider uses sub_mode=user_email. The shared OIDC template
+# hardcodes sub_mode=hashed_user_id, so templating vaultwarden through it
+# would OVERWRITE that on the live provider — a change to the `sub` claim
+# that breaks SSO for the PASSWORD MANAGER. So we do NOT recreate its
+# provider/app here.
 #
 # What this DOES: GitOps-track the access-control binding (the actual gap — it
 # was UI-only, so a blueprint rebuild would silently reopen vaultwarden to any
 # authenticated user). It binds the existing application (via !Find) to the
 # `operator` group, matching the live binding → adopted, not duplicated.
+#
+# 2026-07-29: also owns the provider's property_mappings (a targeted
+# partial-attrs update; sub_mode/client_id untouched). Authentik ≥2026.x's
+# default OpenID 'email' scope mapping hardcodes `email_verified: False`,
+# and vaultwarden 1.36 HARD-blocks SSO login on an explicit false ("You need
+# to verify your email with your provider") — no vaultwarden config can
+# bypass Some(false), only the missing-claim case (see
+# SSO_ALLOW_UNKNOWN_EMAIL_VERIFICATION in the vaultwarden repo). Since every
+# Authentik account here is operator-created (closed registration), the
+# custom mapping below asserts email_verified true for this provider only —
+# the shared default mapping stays untouched for other apps.
 #
 # FULL provider templating is a separate operator-attended task (see TODO
 # "vaultwarden Authentik provider not templated"): extend _blueprint.yaml.j2
@@ -36,3 +46,33 @@ entries:
       order: 10
       enabled: true
       negate: false
+
+  # Custom email scope mapping asserting email_verified — replaces the
+  # authentik default (which hardcodes False since 2026.x) on the
+  # vaultwarden provider. Accounts are operator-created only, so their
+  # emails are trusted by construction.
+  - model: authentik_providers_oauth2.scopemapping
+    id: vaultwarden-email-verified
+    identifiers:
+      name: "homelab OAuth Mapping: OpenID 'email' (trusted-verified)"
+    attrs:
+      scope_name: email
+      description: "Email address, asserted verified (operator-created accounts only)"
+      expression: |
+        return {
+            "email": request.user.email,
+            "email_verified": True,
+        }
+
+  # Targeted partial update of the UI-managed provider: ONLY
+  # property_mappings. sub_mode (user_email), client_id/secret and
+  # redirect_uris deliberately NOT listed — blueprints update just the
+  # attrs given, and those stay UI-owned.
+  - model: authentik_providers_oauth2.oauth2provider
+    identifiers:
+      name: vaultwarden
+    attrs:
+      property_mappings:
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
+        - !KeyOf vaultwarden-email-verified
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, profile]]
