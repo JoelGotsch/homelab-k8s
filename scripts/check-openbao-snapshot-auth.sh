@@ -19,32 +19,17 @@ if rg -n 'bao kv put kv/prod/backup/hetzner-storage-box' "$layer/README.md"; the
   fail 'destructive full replacement of the shared Storage Box KV object is forbidden'
 fi
 
-# During the evidence window, the old credential may exist only as an unused,
-# explicitly named rollback bridge. Any workload or documentation reference to
-# its concrete Secret/KV identifiers is a regression.
-if rg -n 'openbao-snapshot-token|prod/openbao/snapshot-token' "$layer" \
-    -g '!snapshot-token-rollback-bridge.yaml'; then
-  fail 'static snapshot-token identifiers are forbidden outside the rollback bridge'
+# The static-token rollback bridge was RETIRED 2026-07-29 after the restore
+# rehearsal passed (roll-out-snapshot-workload-auth.md Steps 5+6). Any
+# reappearance of the bridge file, or of the static token's concrete
+# Secret/KV identifiers anywhere in this layer, is a regression toward a
+# forbidden long-lived credential — do not mint another bridge; rollback
+# is repairing Kubernetes auth.
+[ ! -e "$rollback_bridge" ] \
+  || fail 'retired snapshot-token rollback bridge must not reappear'
+if rg -n 'openbao-snapshot-token|prod/openbao/snapshot-token' "$layer"; then
+  fail 'static snapshot-token identifiers are forbidden (bridge retired 2026-07-29)'
 fi
-
-yq ea -e '
-  [select(.kind == "ExternalSecret" and
-    .metadata.name == "openbao-snapshot-token" and
-    .metadata.namespace == "openbao" and
-    .metadata.annotations."migration.homelab.internal/remove-after" ==
-      "OBA-02 restore rehearsal" and
-    .spec.secretStoreRef.kind == "ClusterSecretStore" and
-    .spec.secretStoreRef.name == "openbao" and
-    .spec.target.name == "openbao-snapshot-token" and
-    (.spec.data | length == 1) and
-    .spec.data[0].secretKey == "token" and
-    .spec.data[0].remoteRef.key == "prod/openbao/snapshot-token" and
-    .spec.data[0].remoteRef.property == "token")] | length == 1
-' "$rollback_bridge" >/dev/null \
-  || fail 'rollback bridge must retain exactly the existing static token'
-
-rg -q 'snapshot-token-rollback-bridge.yaml' "$layer/kustomization.yaml" \
-  || fail 'rollback bridge would be pruned before rollout evidence passes'
 
 yq -e '
   .kind == "ServiceAccount" and

@@ -21,9 +21,6 @@ helmCharts:
     includeCRDs: true
 resources:
   - snapshot-serviceaccount.yaml
-  # Transitional rollback bridge only. Snapshot workloads do not reference it;
-  # remove it after the one-off, natural schedules, checksum, and restore gates.
-  - snapshot-token-rollback-bridge.yaml
   - raft-snapshot-cronjob.yaml
   - raft-snapshot-hourly.yaml
   - snapshot-uploader-config.yaml
