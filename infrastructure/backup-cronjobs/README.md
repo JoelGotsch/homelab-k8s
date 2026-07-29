@@ -14,6 +14,7 @@ and
 | CronJob | Source | Target tier | Encryption | Schedule | Status |
 |---|---|---|---|---|---|
 | `restic-minio-to-hetzner` | MinIO buckets `homelab-backups-cluster` + `longhorn-backups` | tier-3 — Hetzner Storage Box | Restic client-side (operator's password) | 02:00 UTC daily | scaffolded 2026-04-29 |
+| `restic-nas-personal-to-hetzner` | NAS shares `personal-photos` + `personal-files` + `family-shared` + `personal-documents` + `internal-archive` + `forgejo-lfs` via read-only mounts, tagged `nas-personal` + per class + `share:<name>` | tier-3 — Hetzner Storage Box (same repo, class-tagged) | Restic client-side (same repo password) | 04:30 UTC daily | live 2026-07-16 |
 | `restic-minio-to-friends-nas` | _same_ | tier-2 — friend's NAS | _same_ | _TBD_ | **not scaffolded** — depends on friend's-NAS hardware ship; sibling CronJob with the same shape pointing at a different Restic repo |
 
 `loki-chunks` is intentionally *not* mirrored — Loki retention
