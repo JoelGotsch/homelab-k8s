@@ -30,6 +30,30 @@ metadata:
     app.kubernetes.io/part-of: langfuse
 spec:
   configuration:
+    # Cap ClickHouse's self-telemetry (2026-07-30). With zero Langfuse
+    # traces yet, 100% of the volume's data was CH's own system logs —
+    # asynchronous_metric_log alone held 3.78 BILLION rows (it samples
+    # every metric every second, unbounded by default), and their
+    # constant part-merges were the ~2 GiB/day block churn behind the
+    # backup-store growth that broke the tier-3 staging PVC. Disable
+    # the samplers outright; keep query/text/error logs 7 days for
+    # debugging (Altinity KB: keep query_log, it's the useful one).
+    # NB: existing system.*_log tables are not auto-dropped on config
+    # change — operator drops them once after rollout.
+    files:
+      config.d/system-logs-retention.xml: |
+        <clickhouse>
+          <asynchronous_metric_log remove="1"/>
+          <metric_log remove="1"/>
+          <trace_log remove="1"/>
+          <processors_profile_log remove="1"/>
+          <query_thread_log remove="1"/>
+          <query_views_log remove="1"/>
+          <query_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></query_log>
+          <text_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></text_log>
+          <error_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></error_log>
+          <part_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></part_log>
+        </clickhouse>
     users:
       # User-password reference via the ESO-managed Secret.
       # Operator template-substitutes ${...} from the secret
