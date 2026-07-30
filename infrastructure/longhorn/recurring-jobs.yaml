@@ -199,3 +199,36 @@ spec:
   concurrency: 2
   labels:
     homelab-purpose: tier1-to-nas-minio
+---
+# ─── weekly filesystem trim, all default-group volumes ─────
+#
+# Reclaims dead blocks: filesystems delete data but never
+# discard the blocks, so Longhorn keeps treating them as used
+# — they inflate snapshot deltas AND every NAS/Hetzner backup
+# forever. Found 2026-07-30: the Langfuse ClickHouse volume
+# carried ~21 GiB of dead blocks vs 3.2 GiB of live filesystem
+# data (system-log churn), making its daily backup 24 GiB.
+# The `discard` mount-option alternative is explicitly
+# discouraged by Longhorn docs (frequent snapshot removal
+# interrupts backup creation) — a scheduled trim is the
+# supported mechanism. Trim frees blocks in the volume head +
+# snapshots already marked removed; blocks captured in live
+# snapshots free up as those rotate out (≤6h for the default
+# group), so the effect lands within hours of each run.
+#
+# Sunday 05:35 — keeps the :35 stagger slot, after the 03:35
+# backup run so trims never race backup creation.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: filesystem-trim-weekly
+  namespace: longhorn-system
+spec:
+  name: filesystem-trim-weekly
+  cron: "35 5 * * 0"
+  task: filesystem-trim
+  groups: [default]
+  retain: 0
+  concurrency: 2
+  labels:
+    homelab-class: hygiene
