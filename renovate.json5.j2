@@ -8,12 +8,12 @@
   // ADR 0019 + ADR 0023 + update-policy.md).
   //
   // Status: live against in-cluster Renovate on Forgejo
-  // (platform/renovate/). Repos live under the forgejo-admin
-  // user namespace, not a Forgejo organization — the `local>`
-  // form below resolves the same way regardless.
+  // (platform/renovate/). Repos live in the `homelab` Forgejo
+  // organization (user→org migration 2026-07-30) — the `local>`
+  // form below resolves the same way for users and orgs.
 
   extends: [
-    "local>forgejo-admin/homelab-infra//renovate-presets/default.json5",
+    "local>homelab/homelab-infra//renovate-presets/default.json5",
   ],
 
   // Per-repo packageRules — additive to the central preset.

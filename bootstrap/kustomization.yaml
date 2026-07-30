@@ -35,7 +35,7 @@ components:
 
 replacements:
   # ApplicationSets: both the git generator and the app template source.
-  # Placeholder form in the files: https://FORGEJO_FQDN/forgejo-admin/homelab-k8s
+  # Placeholder form in the files: https://FORGEJO_FQDN/homelab/homelab-k8s
   # -> delimiter '/' index 2 is the host token.
   - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_fqdn }
     targets:

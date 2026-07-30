@@ -127,9 +127,11 @@ kubectl exec -n forgejo deploy/forgejo -c forgejo -- \
     sh -c 'read T; bao kv put kv/argocd/forgejo-repo-cred username=svc-argocd token="$T"'
 ```
 
-The `svc-argocd` bot must exist and be a read-only collaborator on
-`forgejo-admin/homelab-k8s` (created 2026-07-11; recreate at cold
-start via `forgejo admin user create` + the collaborators API).
+The `svc-argocd` bot must exist with read access to
+`homelab/homelab-k8s` — member of the org's `homelab-operators`
+read team since the 2026-07-30 user→org migration
+(`migrate-repos-to-forgejo-org.sh` ensures it); recreate at cold
+start via `forgejo admin user create` + that script.
 
 ## Related
 

@@ -3,10 +3,12 @@
 # central preset at homelab-infra/renovate-presets/default.json5
 # and run on top of this global config.
 #
-# Status: activated. forgejo-admin is a Forgejo user namespace,
-# not an organization (no orgs exist on this instance) — the
-# bot is granted access via per-repo collaborator, not org
-# team membership; see grant-forgejo-bot-repo-access.sh.
+# Status: activated. Repos live in the `homelab` Forgejo
+# organization (user→org migration 2026-07-30) — the bot has
+# write access via the org `bots-write` team; see
+# migrate-repos-to-forgejo-org.sh. (Pre-migration per-repo
+# collaborator grants travelled with the repos and are now
+# redundant.)
 
 apiVersion: v1
 kind: ConfigMap
@@ -28,12 +30,11 @@ data:
       gitAuthor: 'Renovate Bot <renovate-bot@invalid.local>',
       // Username MUST match the bot user created in Forgejo.
       username: 'renovate-bot',
-      // Discover every repo the bot has visibility to under the
-      // forgejo-admin user namespace (no Forgejo org exists on
-      // this instance — autodiscoverFilter still prefix-matches
-      // a user namespace the same way it would an org).
+      // Discover every repo the bot has visibility to under
+      // the `homelab` organization (all component repos since
+      // the 2026-07-30 user→org migration).
       autodiscover: true,
-      autodiscoverFilter: ['forgejo-admin/*'],
+      autodiscoverFilter: ['homelab/*'],
       // Don't error out on repos without a renovate.json5 —
       // log + skip. Lets new repos land before their config.
       onboarding: false,

@@ -27,7 +27,7 @@ expose; operator interaction is via PR comments).
 PR-Agent's `gitea_app` Docker target is upstream-defined but
 not published as a tagged image. The build runs inside Woodpecker
 via the dedicated wrapper repo
-[`forgejo-admin/pr-agent-build`](https://forgejo.lab.vyramo.com/forgejo-admin/pr-agent-build)
+[`homelab/pr-agent-build`](https://forgejo.lab.vyramo.com/homelab/pr-agent-build)
 — see that repo's README for the wrapper-pattern rationale and the
 manual bump procedure. Replaces the operator-on-Tier-A
 `docker build && docker push` recipe that previously lived here
@@ -35,7 +35,7 @@ manual bump procedure. Replaces the operator-on-Tier-A
 
 Quick bump flow:
 
-1. Renovate opens a PR against `forgejo-admin/pr-agent-build`
+1. Renovate opens a PR against `homelab/pr-agent-build`
    bumping `.upstream-tag`.
 2. Merge to `main`.
 3. Tag the wrapper repo with the matching plain version (e.g.

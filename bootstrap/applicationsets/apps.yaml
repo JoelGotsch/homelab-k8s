@@ -20,32 +20,32 @@ spec:
   generators:
     - list:
         elements:
-          # `owner` = Forgejo owner of `repo`. Flip to `homelab` as each repo
-          # transfers user→org (2026-07-28 migration). Skeletons still point at
-          # the central homelab-k8s repo (owner stays forgejo-admin until that
-          # repo itself transfers). roborock: transferred + adopted first.
-          - {name: approval-channel,    owner: forgejo-admin, repo: approval-channel, path: k8s, autoSync: "true"}
-          - {name: frigate,             owner: forgejo-admin, repo: homelab-k8s, path: apps/frigate,             autoSync: "true"}
-          - {name: immich,              owner: forgejo-admin, repo: immich, path: k8s, autoSync: "true"}
-          - {name: immich-public-proxy, owner: forgejo-admin, repo: immich-public-proxy, path: k8s, autoSync: "true"}
-          - {name: jellyfin,            owner: forgejo-admin, repo: jellyfin, path: k8s, autoSync: "true"}
-          - {name: knowledge-graph,     owner: forgejo-admin, repo: homelab-k8s, path: apps/knowledge-graph,     autoSync: "true"}
+          # `owner` = Forgejo owner of `repo`. All entries flipped to the
+          # `homelab` org 2026-07-30 (user→org migration; roborock piloted
+          # 2026-07-28). Skeleton entries still point at the central
+          # homelab-k8s repo, which now also lives in the org.
+          - {name: approval-channel,    owner: homelab,       repo: approval-channel, path: k8s, autoSync: "true"}
+          - {name: frigate,             owner: homelab,       repo: homelab-k8s, path: apps/frigate,             autoSync: "true"}
+          - {name: immich,              owner: homelab,       repo: immich, path: k8s, autoSync: "true"}
+          - {name: immich-public-proxy, owner: homelab,       repo: immich-public-proxy, path: k8s, autoSync: "true"}
+          - {name: jellyfin,            owner: homelab,       repo: jellyfin, path: k8s, autoSync: "true"}
+          - {name: knowledge-graph,     owner: homelab,       repo: homelab-k8s, path: apps/knowledge-graph,     autoSync: "true"}
           # librechat: autoSync OFF until OpenBao seeds exist (README
           # §"OpenBao paths to seed" + cold-start 13c row) — flip to "true"
           # as first-install step 3. Added 2026-07-30.
-          - {name: librechat,           owner: forgejo-admin, repo: librechat, path: k8s, autoSync: "false"}
-          - {name: llm-gateway,         owner: forgejo-admin, repo: llm-gateway, path: k8s, autoSync: "true"}
-          - {name: nextcloud,           owner: forgejo-admin, repo: nextcloud, path: k8s, autoSync: "true"}
-          - {name: ntfy,                owner: forgejo-admin, repo: ntfy, path: k8s, autoSync: "true"}
-          - {name: ntfy-e2ee-relay,     owner: forgejo-admin, repo: ntfy-e2ee-relay, path: k8s, autoSync: "true"}
-          - {name: paperless,           owner: forgejo-admin, repo: paperless, path: k8s, autoSync: "true"}
-          - {name: personal-agent,      owner: forgejo-admin, repo: homelab-k8s, path: apps/personal-agent,      autoSync: "true"}
+          - {name: librechat,           owner: homelab,       repo: librechat, path: k8s, autoSync: "false"}
+          - {name: llm-gateway,         owner: homelab,       repo: llm-gateway, path: k8s, autoSync: "true"}
+          - {name: nextcloud,           owner: homelab,       repo: nextcloud, path: k8s, autoSync: "true"}
+          - {name: ntfy,                owner: homelab,       repo: ntfy, path: k8s, autoSync: "true"}
+          - {name: ntfy-e2ee-relay,     owner: homelab,       repo: ntfy-e2ee-relay, path: k8s, autoSync: "true"}
+          - {name: paperless,           owner: homelab,       repo: paperless, path: k8s, autoSync: "true"}
+          - {name: personal-agent,      owner: homelab,       repo: homelab-k8s, path: apps/personal-agent,      autoSync: "true"}
           - {name: roborock,            owner: homelab,       repo: roborock, path: k8s, autoSync: "true"}
-          - {name: signal-bridge,       owner: forgejo-admin, repo: signal-bridge, path: k8s, autoSync: "true"}
-          - {name: vaultwarden,         owner: forgejo-admin, repo: vaultwarden, path: k8s, autoSync: "true"}
-          - {name: website,             owner: forgejo-admin, repo: homelab-k8s, path: apps/website,             autoSync: "true"}
-          - {name: whatsapp-bridge,     owner: forgejo-admin, repo: homelab-k8s, path: apps/whatsapp-bridge,     autoSync: "true"}
-          - {name: windmill,            owner: forgejo-admin, repo: homelab-k8s, path: apps/windmill,            autoSync: "true"}
+          - {name: signal-bridge,       owner: homelab,       repo: signal-bridge, path: k8s, autoSync: "true"}
+          - {name: vaultwarden,         owner: homelab,       repo: vaultwarden, path: k8s, autoSync: "true"}
+          - {name: website,             owner: homelab,       repo: homelab-k8s, path: apps/website,             autoSync: "true"}
+          - {name: whatsapp-bridge,     owner: homelab,       repo: homelab-k8s, path: apps/whatsapp-bridge,     autoSync: "true"}
+          - {name: windmill,            owner: homelab,       repo: homelab-k8s, path: apps/windmill,            autoSync: "true"}
   template:
     metadata:
       name: 'app-{{.name}}'

@@ -1,7 +1,7 @@
 # platform/renovate
 
 Self-hosted Renovate runner. Scans every repo under the
-`forgejo-admin` namespace weekly, opens dependency-update PRs
+`homelab` organization weekly, opens dependency-update PRs
 against each, and emits a per-repo Dependency Dashboard issue.
 
 Per [ADR 0023](../../../homelab-docs/02-decisions/0023-forgejo-and-woodpecker-ci.md)
@@ -35,11 +35,13 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 
 ## Post-Forgejo activation (one-time)
 
-Activated 2026-07-16. `forgejo-admin` turned out to be a plain
-Forgejo **user** namespace, not an Organization (confirmed via
-direct DB query — no `type=1` rows in `"user"` at all), so the
-org-team-membership step below doesn't apply on this instance;
-access is granted per-repo instead (step 2).
+Activated 2026-07-16. At activation time `forgejo-admin` was a
+plain Forgejo **user** namespace (no Organization existed), so
+access was granted per-repo (step 2). Since the 2026-07-30
+user→org migration all repos live in the `homelab` organization
+and the bot's access comes from the org `bots-write` team
+(`migrate-repos-to-forgejo-org.sh` ensures it); step 2 is only
+historical context.
 
 ### 1. Bot account + PAT + OpenBao seed (scripted)
 
@@ -77,11 +79,11 @@ FORGEJO_URL=https://forgejo.lab.vyramo.com \
 FORGEJO_TOKEN="$(bao kv get -field=admin_pat kv/forgejo/admin)" \
 homelab-infra/scripts/grant-forgejo-bot-repo-access.sh \
     --bot-username renovate-bot \
-    --owner forgejo-admin \
+    --owner homelab \
     --permission write
 ```
 
-Enumerates every repo under the `forgejo-admin` namespace live
+Enumerates every repo under the given owner namespace live
 via the API (not a static list — new repos are picked up
 automatically on re-run) and grants `renovate-bot` write
 collaborator access. Idempotent; safe to re-run after adding
@@ -131,13 +133,14 @@ updated in each scanned repo.
    — a compromised PAT yields what `renovate-bot` itself can
    touch (repos it's been added to as a collaborator only).
 
-2. **No Forgejo Organization exists on this instance** (all
-   repos live under the `forgejo-admin` user namespace) and no
+2. **Access comes from the `homelab` org's `bots-write` team**
+   (includes_all_repositories — new org repos are covered
+   automatically) since the 2026-07-30 user→org migration. No
    "GitHub App"-style installation model exists in Forgejo
-   either way. The bot is a regular user granted **per-repo
-   collaborator access** (step 2 above). New repos need a
-   re-run of `grant-forgejo-bot-repo-access.sh` — it's
-   idempotent and picks up new repos automatically, but isn't
+   either way; the bot is a regular user. Pre-migration it was
+   a per-repo collaborator via
+   `grant-forgejo-bot-repo-access.sh` — that script remains
+   useful for one-off grants outside the org, but isn't
    triggered automatically on repo creation. If the operator
    later creates a real Forgejo Organization, this step could
    move to org-team membership instead (`provision-forgejo-bot-pat.sh`
