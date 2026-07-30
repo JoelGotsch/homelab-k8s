@@ -42,12 +42,12 @@
 #   imageReferences uses glob-syntax. The two patterns cover:
 #     - registry.homelab.internal/* — the ADR 0019 D1-option-b
 #       CNAME alias used by the CI pipeline today.
-#     - forgejo.lab.vyramo.com/forgejo-admin/* — the apex
+#     - forgejo.lab.vyramo.com/homelab/* — the apex
 #       endpoint, for any manifest that bypasses the alias
 #       (e.g. operator-pinned full path in a values.yaml).
-#   Other first-party Forgejo orgs would need additional
-#   entries; today only `forgejo-admin` hosts first-party
-#   image repositories.
+#       `homelab` is the org namespace since the 2026-07-30
+#       phase-2 package migration; the forgejo-admin pattern
+#       stays during the transition for historical manifests.
 #
 # THIRD-PARTY EXCEPTION LIST
 #
@@ -148,7 +148,7 @@ metadata:
     policies.kyverno.io/subject: Pod
     policies.kyverno.io/description: |
       Every first-party container image (registry.homelab.internal/*
-      and forgejo.lab.vyramo.com/forgejo-admin/*) MUST be cosign-
+      and forgejo.lab.vyramo.com/{homelab,forgejo-admin}/*) MUST be cosign-
       signed by the homelab's signing key. The signature is
       produced by the cosign-sign step in each first-party
       .woodpecker.yml (template:
@@ -199,6 +199,7 @@ spec:
       verifyImages:
         - imageReferences:
             - "registry.homelab.internal/*"
+            - "forgejo.lab.vyramo.com/homelab/*"
             - "forgejo.lab.vyramo.com/forgejo-admin/*"
           # Wrapped-upstream images are DESIGN-EXCLUDED from signing:
           # "cosign keypair signs first-party code, not third-party clones"
