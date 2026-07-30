@@ -12,6 +12,14 @@
 # alert in cronjob.yaml fires if `mc mirror` cannot complete
 # within the timeout — surface for size review.
 #
+# 50Gi→80Gi 2026-07-30: ENOSPC broke the tier-3 lane. The
+# backup-group store's steady state is base (~30Gi, dominated
+# by Langfuse ClickHouse's ~24Gi volume) + 14-day retention ×
+# ~2Gi/day block churn (ClickHouse part merges rewrite blocks
+# daily even when logical growth is small) ≈ 55-60Gi. 80Gi
+# gives mirror headroom; the >80% PrometheusRule stays the
+# early-warning signal (it is %-based, no threshold edit).
+#
 # Storage class: longhorn-replica1 — this PVC's contents are
 # disposable (re-derivable from MinIO). Replica1 keeps cluster
 # storage usage tight.
@@ -25,4 +33,4 @@ spec:
   storageClassName: longhorn-replica1
   resources:
     requests:
-      storage: 50Gi
+      storage: 80Gi
