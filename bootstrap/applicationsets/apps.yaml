@@ -30,6 +30,10 @@ spec:
           - {name: immich-public-proxy, owner: forgejo-admin, repo: immich-public-proxy, path: k8s, autoSync: "true"}
           - {name: jellyfin,            owner: forgejo-admin, repo: jellyfin, path: k8s, autoSync: "true"}
           - {name: knowledge-graph,     owner: forgejo-admin, repo: homelab-k8s, path: apps/knowledge-graph,     autoSync: "true"}
+          # librechat: autoSync OFF until OpenBao seeds exist (README
+          # §"OpenBao paths to seed" + cold-start 13c row) — flip to "true"
+          # as first-install step 3. Added 2026-07-30.
+          - {name: librechat,           owner: forgejo-admin, repo: librechat, path: k8s, autoSync: "false"}
           - {name: llm-gateway,         owner: forgejo-admin, repo: llm-gateway, path: k8s, autoSync: "true"}
           - {name: nextcloud,           owner: forgejo-admin, repo: nextcloud, path: k8s, autoSync: "true"}
           - {name: ntfy,                owner: forgejo-admin, repo: ntfy, path: k8s, autoSync: "true"}

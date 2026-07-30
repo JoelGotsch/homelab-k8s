@@ -59,9 +59,13 @@ configMapGenerator:
       - blueprints/immich.yaml
       - blueprints/paperless.yaml
       - blueprints/argocd.yaml
-      # STATIC (not rendered from _blueprint.yaml.j2) — access binding only;
-      # vaultwarden's provider/app are UI-managed (see the file's header).
+      # STATIC (not rendered from _blueprint.yaml.j2) — access binding +
+      # email scope mapping; vaultwarden's provider/app are UI-managed
+      # (see the file's header).
       - blueprints/vaultwarden.yaml
+      # STATIC — full provider/app for the new LibreChat app (2026-07-30);
+      # goes into the j2 loop when the render-template reconcile lands.
+      - blueprints/librechat.yaml
     options:
       # Kustomize hash suffix would force ConfigMap rename on
       # every blueprint edit + force chart re-render. Disable
