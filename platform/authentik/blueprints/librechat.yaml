@@ -26,6 +26,15 @@ entries:
       client_type: confidential
       client_id: !Env AUTHENTIK_BOOTSTRAP_LIBRECHAT_CLIENT_ID
       client_secret: !Env AUTHENTIK_BOOTSTRAP_LIBRECHAT_CLIENT_SECRET
+      # REQUIRED since authentik 2026.5: OAuth2Provider.grant_types is an
+      # explicit allowlist DEFAULTING TO EMPTY for newly created providers
+      # (ArrayField default=list; authorize.py rejects with "Invalid
+      # grant_type for provider" otherwise — hit at LibreChat first login,
+      # 2026-07-30). Pre-2026.5 providers were migrated with grants enabled,
+      # which is why the older app blueprints don't carry this field.
+      grant_types:
+        - authorization_code
+        - refresh_token
       redirect_uris:
         - matching_mode: strict
           url: "https://librechat.lab.vyramo.com/oauth/openid/callback"
