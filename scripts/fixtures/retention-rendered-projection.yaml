@@ -17,7 +17,7 @@ cluster_defaults:
     chart_default_enabled: false
 layers:
   - path: observability/langfuse
-    input_digest_sha256: 8536c2ac5156c6fcaa00a6ec3131fe44e3abd1b0a0f25793433b7ba84e1b373a
+    input_digest_sha256: 8945f35e5663557423ed9599fb5256131b464db79721b90ece6c65668bfb0606
     chart:
       name: langfuse
       repository: https://langfuse.github.io/langfuse-k8s

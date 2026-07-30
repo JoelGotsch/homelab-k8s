@@ -36,8 +36,14 @@ spec:
     # every metric every second, unbounded by default), and their
     # constant part-merges were the ~2 GiB/day block churn behind the
     # backup-store growth that broke the tier-3 staging PVC. Disable
-    # the samplers outright; keep query/text/error logs 7 days for
-    # debugging (Altinity KB: keep query_log, it's the useful one).
+    # the samplers + text_log (a table copy of the server log that
+    # already goes to the log volume) outright; keep query_log /
+    # error_log / part_log at defaults — they are KiB-scale here and
+    # query_log is the one worth having for debugging (Altinity KB).
+    # A first attempt added <ttl> elements to the kept tables; CH 24.8
+    # refuses ttl when the effective config specifies an engine for the
+    # table ("TTL parameters should be specified directly inside
+    # 'engine'") and crash-loops — defaults are fine at this scale.
     # NB: existing system.*_log tables are not auto-dropped on config
     # change — operator drops them once after rollout.
     files:
@@ -49,10 +55,7 @@ spec:
           <processors_profile_log remove="1"/>
           <query_thread_log remove="1"/>
           <query_views_log remove="1"/>
-          <query_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></query_log>
-          <text_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></text_log>
-          <error_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></error_log>
-          <part_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></part_log>
+          <text_log remove="1"/>
         </clickhouse>
     users:
       # User-password reference via the ESO-managed Secret.
