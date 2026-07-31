@@ -1,0 +1,33 @@
+# The namespace carries the first-party label, so Kyverno's generated
+# default-deny NetworkPolicy applies — and this app shipped with NO allow
+# rules, so every kubectl call hung at the 120s deadline from the moment
+# default-deny landed (2026-07-23; lastSuccessfulTime froze the same hour —
+# found 2026-07-31, the "missing one side hangs silently" netpol class
+# again). The reconciler needs exactly one flow: its in-cluster kubectl
+# lists CNPG clusters/pods and deletes stuck instance pods + PVCs — all
+# via the API server. In-cluster kubectl dials KUBERNETES_SERVICE_HOST
+# (an IP), so no DNS egress is needed. Cilium socket-LB translates the
+# kubernetes.default ClusterIP :443 to a control-plane endpoint on 6443
+# before policy evaluation, so permit both ports to the reserved
+# kube-apiserver entity (same shape as reboot-cascade-janitor).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cnpg-standby-reconciler-apiserver-egress
+  namespace: cnpg-standby-reconciler
+  labels:
+    app.kubernetes.io/name: cnpg-standby-reconciler
+    app.kubernetes.io/component: egress-policy
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: cnpg-standby-reconciler
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP

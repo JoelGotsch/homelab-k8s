@@ -19,3 +19,4 @@ kind: Kustomization
 
 resources:
   - cnpg-standby-reconciler.yaml
+  - ciliumnetworkpolicy-egress.yaml
