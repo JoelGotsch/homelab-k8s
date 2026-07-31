@@ -48,6 +48,12 @@ entries:
       redirect_uris:
         - matching_mode: strict
           url: "https://immich.lab.vyramo.com/auth/login"
+        # Immich MOBILE app OAuth callback (custom scheme; the app opens
+        # the system browser and returns via this deep link). Without it
+        # phone logins die at Authentik with a redirect_uri mismatch —
+        # added 2026-07-31 for the Samsung backup phone.
+        - matching_mode: strict
+          url: "app.immich:///oauth-callback"
       signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
       sub_mode: hashed_user_id
       include_claims_in_id_token: true
