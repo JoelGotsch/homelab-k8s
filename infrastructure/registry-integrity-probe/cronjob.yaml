@@ -25,7 +25,11 @@
 # ExternalSecret (kv/shared/forgejo-packages/ci).
 #
 # ADDING AN IMAGE: append another container block with the same mounts
-# and a `validate --remote <ref>` args list. The image refs mirror the
+# and a `validate --remote <ref>` args list. Coverage rule since
+# 2026-08-01: EVERY deployed first-party ref (homelab/* since the org
+# migration + the ci-packages wrapped-upstream set) — manifest loss is a
+# recurring Forgejo-Packages family (relay 0.1.0 June, pr-agent July)
+# and the probe is the ≤24h detection layer. The image refs mirror the
 # first-party deployments (apps/*/deployment.yaml, platform/pr-agent).
 apiVersion: batch/v1
 kind: CronJob
@@ -66,7 +70,7 @@ spec:
               # gcr.io/go-containerregistry/crane:latest (non-debug,
               # distroless nonroot). Digest-pinned; Renovate owns bumps.
               image: gcr.io/go-containerregistry/crane@sha256:3a62904867999848c5b16bb9b1eb8b2a7bbaa6061203a90037c91bf33b6b567e
-              args: ["validate", "--remote", "registry.homelab.internal/ci-packages/ntfy-e2ee-relay:0.1.1"]
+              args: ["validate", "--remote", "registry.homelab.internal/homelab/ntfy-e2ee-relay:0.1.1"]
               env: &craneEnv
                 - name: DOCKER_CONFIG
                   value: /docker
@@ -86,7 +90,7 @@ spec:
                 - {name: tmp, mountPath: /tmp}
             - name: validate-approval-channel
               image: gcr.io/go-containerregistry/crane@sha256:3a62904867999848c5b16bb9b1eb8b2a7bbaa6061203a90037c91bf33b6b567e
-              args: ["validate", "--remote", "registry.homelab.internal/ci-packages/approval-channel:v0.1.1"]
+              args: ["validate", "--remote", "registry.homelab.internal/homelab/approval-channel:v0.1.1"]
               env: *craneEnv
               securityContext: *craneSec
               resources: *craneRes
@@ -94,6 +98,27 @@ spec:
             - name: validate-pr-agent
               image: gcr.io/go-containerregistry/crane@sha256:3a62904867999848c5b16bb9b1eb8b2a7bbaa6061203a90037c91bf33b6b567e
               args: ["validate", "--remote", "registry.homelab.internal/ci-packages/pr-agent:gitea_app-0.34"]
+              env: *craneEnv
+              securityContext: *craneSec
+              resources: *craneRes
+              volumeMounts: *craneMounts
+            - name: validate-llm-gateway
+              image: gcr.io/go-containerregistry/crane@sha256:3a62904867999848c5b16bb9b1eb8b2a7bbaa6061203a90037c91bf33b6b567e
+              args: ["validate", "--remote", "registry.homelab.internal/homelab/llm-gateway:v0.0.13"]
+              env: *craneEnv
+              securityContext: *craneSec
+              resources: *craneRes
+              volumeMounts: *craneMounts
+            - name: validate-mc
+              image: gcr.io/go-containerregistry/crane@sha256:3a62904867999848c5b16bb9b1eb8b2a7bbaa6061203a90037c91bf33b6b567e
+              args: ["validate", "--remote", "registry.homelab.internal/ci-packages/mc:RELEASE.2025-04-08T15-39-49Z"]
+              env: *craneEnv
+              securityContext: *craneSec
+              resources: *craneRes
+              volumeMounts: *craneMounts
+            - name: validate-minio
+              image: gcr.io/go-containerregistry/crane@sha256:3a62904867999848c5b16bb9b1eb8b2a7bbaa6061203a90037c91bf33b6b567e
+              args: ["validate", "--remote", "registry.homelab.internal/ci-packages/minio:RELEASE.2024-12-18T13-15-44Z"]
               env: *craneEnv
               securityContext: *craneSec
               resources: *craneRes
