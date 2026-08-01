@@ -82,6 +82,19 @@ spec:
             value: Watchdog
         receiver: 'null'
 
+      # ===== Tier 3 silent — quota overcommit is the design (ADR 0042) =====
+      # Per-namespace ResourceQuotas deliberately oversubscribe the
+      # cluster (guardrails, not capacity promises), so
+      # KubeMemoryQuotaOvercommit describes intended state.
+      # KubeCPUQuotaOvercommit should stop firing entirely now that
+      # limits.cpu is untracked (only ci-woodpecker keeps it, below
+      # threshold) — null-routed defensively for the transition.
+      - matchers:
+          - name: alertname
+            matchType: "=~"
+            value: "KubeMemoryQuotaOvercommit|KubeCPUQuotaOvercommit"
+        receiver: 'null'
+
       # ===== Trivy CVE alerts — daily digest (alert fatigue) =====
       # Per subagent audit 2026-07-12: 114 Trivy* alerts fire
       # concurrently (one per image scanned). Grouped alone by
