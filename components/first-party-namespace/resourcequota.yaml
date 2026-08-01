@@ -31,9 +31,13 @@ spec:
     # first-party namespaces intentionally exceeds cluster
     # capacity: the quota is the per-app runaway guard, not the
     # cluster-wide admission gate.
+    # NO limits.cpu here since ADR 0042: quota-tracking limits.cpu makes
+    # Kubernetes REJECT any pod without an explicit CPU limit ("failed
+    # quota: must specify limits.cpu") — discovered live 2026-08-01 the
+    # moment the LimitRange stopped injecting one. CPU governance is
+    # requests-based; limits.memory stays (non-compressible).
     requests.cpu: "8"
     requests.memory: "16Gi"
-    limits.cpu: "16"
     limits.memory: "32Gi"
 
     # ---- Storage ----
