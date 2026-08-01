@@ -183,9 +183,13 @@ spec:
               resources:
                 requests:
                   cpu: 100m
-                  memory: 128Mi
+                  memory: 256Mi
                 limits:
-                  memory: 512Mi
+                  # 512Mi OOMKilled the first attempt of the 2026-08-01
+                  # full re-mirror (mc buffers the ~45 GiB bucket listing);
+                  # the retry passed on a warm cache. 1Gi gives the listing
+                  # real headroom — this container runs once nightly.
+                  memory: 1Gi
           containers:
             - name: restic
               # NOTE: restic/restic is pulled from Docker Hub (not
