@@ -113,6 +113,27 @@ data:
   resource.customizations.ignoreDifferences.gateway.networking.k8s.io_Gateway: |
     jqPathExpressions:
       - '.spec.listeners[].tls.certificateRefs[].group'
+  resource.customizations.health.gateway.networking.k8s.io_Gateway: |
+    -- Argo 3.4.x built-in Gateway health waits for a condition Cilium
+    -- never sets, leaving the Gateway (and its Application) eternally
+    -- Progressing while Accepted+Programmed were True and all listeners
+    -- resolved (infra-ingress, stuck since 2026-07-24; fixed 2026-08-01).
+    local hs = {}
+    hs.status = "Progressing"
+    hs.message = "Waiting for Gateway Accepted + Programmed conditions"
+    if obj.status ~= nil and obj.status.conditions ~= nil then
+      local accepted = false
+      local programmed = false
+      for _, c in ipairs(obj.status.conditions) do
+        if c.type == "Accepted" and c.status == "True" then accepted = true end
+        if c.type == "Programmed" and c.status == "True" then programmed = true end
+      end
+      if accepted and programmed then
+        hs.status = "Healthy"
+        hs.message = "Gateway Accepted + Programmed"
+      end
+    end
+    return hs
   resource.customizations.ignoreDifferences.external-secrets.io_ExternalSecret: |
     jqPathExpressions:
       - '.spec.data[].remoteRef.conversionStrategy'

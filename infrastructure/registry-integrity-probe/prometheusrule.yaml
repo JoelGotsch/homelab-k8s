@@ -60,12 +60,12 @@ spec:
         - alert: RegistryBlobValidateStale
           expr: |
             (
-              time() - kube_cronjob_status_last_successful_time{namespace="registry-integrity-probe",cronjob="registry-blob-validate"}
+              time() - max by (cronjob) (kube_cronjob_status_last_successful_time{namespace="registry-integrity-probe",cronjob="registry-blob-validate"})
               > 86400 * 2
             )
             or
             (
-              (time() - kube_cronjob_created{namespace="registry-integrity-probe",cronjob="registry-blob-validate"} > 86400 * 2)
+              (time() - max by (cronjob) (kube_cronjob_created{namespace="registry-integrity-probe",cronjob="registry-blob-validate"}) > 86400 * 2)
               unless kube_cronjob_status_last_successful_time{namespace="registry-integrity-probe",cronjob="registry-blob-validate"}
             )
             or
