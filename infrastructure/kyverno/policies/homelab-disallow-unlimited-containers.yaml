@@ -64,38 +64,27 @@ spec:
             value: ""
       validate:
         allowExistingViolations: true
-        # Foreach can't hold a `message:` (Kyverno v3 rejects the
-        # field at that path) but the outer message can't
-        # reference `element.*` either. Compromise: the outer
-        # message names the workload; the operator has to open the
-        # workload to find which specific container is missing the
-        # request/limit. Trade-off documented in ADR 0036 D5.
-        message: |
-          Workload `{{ request.object.metadata.namespace }}/{{ request.object.metadata.name }}`
-          has a container without memory requests+limits. Every
-          container (regular, init, ephemeral) must set both under
-          `resources.{requests,limits}.memory` — see the per-ns
-          default LimitRange for starting values. Waive with
-            bypass.homelab.internal/homelab-disallow-unlimited-containers: "<reason>"
-        foreach:
-          - list: "request.object.spec.containers || `[]`"
-            pattern:
-              resources:
-                requests:
-                  memory: "?*"
-                limits:
-                  memory: "?*"
-          - list: "request.object.spec.initContainers || `[]`"
-            pattern:
-              resources:
-                requests:
-                  memory: "?*"
-                limits:
-                  memory: "?*"
-          - list: "request.object.spec.ephemeralContainers || `[]`"
-            pattern:
-              resources:
-                requests:
-                  memory: "?*"
-                limits:
-                  memory: "?*"
+        # CEL form (ADR 0042 D5): the earlier foreach+pattern emitted
+        # "variables substitution error … resource value '<nil>' does not
+        # match '?*'" for containers with NO resources block at all —
+        # garbage in every report. CEL evaluates presence explicitly and
+        # the message stays clean for exactly that case.
+        cel:
+          expressions:
+            - expression: >-
+                object.spec.containers.all(c,
+                  has(c.resources) && has(c.resources.requests) && 'memory' in c.resources.requests
+                  && has(c.resources.limits) && 'memory' in c.resources.limits)
+                && (!has(object.spec.initContainers) || object.spec.initContainers.all(c,
+                  has(c.resources) && has(c.resources.requests) && 'memory' in c.resources.requests
+                  && has(c.resources.limits) && 'memory' in c.resources.limits))
+                && (!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.all(c,
+                  has(c.resources) && has(c.resources.requests) && 'memory' in c.resources.requests
+                  && has(c.resources.limits) && 'memory' in c.resources.limits))
+              message: >-
+                A container in this workload is missing memory requests+limits.
+                Every container (regular, init, ephemeral) must set both under
+                resources.{requests,limits}.memory — see the per-ns default
+                LimitRange for starting values. Waive with the
+                bypass.homelab.internal/homelab-disallow-unlimited-containers
+                annotation.

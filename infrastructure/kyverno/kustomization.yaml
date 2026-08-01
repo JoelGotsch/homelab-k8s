@@ -52,7 +52,6 @@ resources:
   - policies/homelab-require-namespace-default-deny-netpol.yaml
   - policies/homelab-disallow-open-egress-cnp.yaml
   - policies/homelab-disallow-unlimited-containers.yaml
-  - policies/homelab-warn-unlimited-cpu.yaml
   - policies/homelab-disallow-retain-reclaim-without-annotation.yaml
   - policies/homelab-disallow-inline-secrets.yaml
   # Generators (paired with the require-* validators above):

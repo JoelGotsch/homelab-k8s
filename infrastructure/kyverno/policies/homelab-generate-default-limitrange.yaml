@@ -20,7 +20,7 @@
 #            operator-managed shape gets restored).
 #
 #            Defaults come from ADR 0036:
-#              default:        cpu 500m, memory 512Mi
+#              default:        memory 512Mi (no CPU limit — ADR 0042)
 #              defaultRequest: cpu 50m,  memory 128Mi
 #            Namespaces that need different defaults should ship their
 #            own LimitRange named anything OTHER than `default-limits`;
@@ -124,7 +124,6 @@ spec:
             limits:
               - type: Container
                 default:
-                  cpu: 500m
                   memory: 512Mi
                 defaultRequest:
                   cpu: 50m

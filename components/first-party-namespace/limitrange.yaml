@@ -29,10 +29,10 @@ spec:
   limits:
     - type: Container
       default:
-        # Modest ceiling; workloads with real needs override
-        # explicitly in their PodSpec (Kyverno then verifies
-        # the override was intentional).
-        cpu: 500m
+        # Memory ceiling only. NO default CPU limit since ADR 0042:
+        # the injected 500m CFS quota throttled latency-sensitive
+        # workloads (authentik-worker, redis) that never asked for a
+        # cap — CPU limits are per-workload opt-in now.
         memory: 512Mi
       defaultRequest:
         # Small request floor: apps still need to *declare* what
