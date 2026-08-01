@@ -141,3 +141,25 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    # DNS-01 propagation self-check: cert-manager queries the zone's
+    # AUTHORITATIVE nameservers directly on :53 before telling ACME to
+    # validate. The netpol hardening left only the 443 API paths, so the
+    # first post-hardening renewal (homelab-wildcard-tls, 2026-07-24)
+    # wedged at "Waiting for DNS-01 challenge propagation: dial tcp
+    # <cloudflare-ns>:53: i/o timeout" for 8 days — found 2026-08-01 with
+    # ~3 weeks left on the serving cert. Authoritative NS IPs rotate
+    # across Cloudflare's anycast set, so allow world:53 (RFC1918
+    # excluded); the FQDN allowlist above still gates the control-plane
+    # calls.
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except:
+            - 10.0.0.0/8
+            - 172.16.0.0/12
+            - 192.168.0.0/16
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
