@@ -98,9 +98,17 @@ spec:
         # here, because we don't ship a standard maintenance label
         # across the fleet yet. A planned reboot is a 2-click AM
         # silence rather than a code change.
+        # macOS caveat (2026-08-02): darwin node_exporter derives boot
+        # time as now-minus-uptime, so the value jitters at millisecond
+        # scale between scrapes — `changes()` fired spurious "rebooted"
+        # warnings for the Mac Studio (10.10.50.10:9100) while every
+        # Linux node reports a stable integer from procfs. Require a
+        # real forward jump instead: an actual reboot moves boot time
+        # by the whole prior uptime, so >60s is unambiguous and the
+        # sub-second jitter is ignored.
         - alert: NodeRebootedUnexpected
           expr: |
-            changes(node_boot_time_seconds[10m]) > 0
+            (node_boot_time_seconds - (node_boot_time_seconds offset 10m)) > 60
           for: 0m
           labels:
             severity: warning
