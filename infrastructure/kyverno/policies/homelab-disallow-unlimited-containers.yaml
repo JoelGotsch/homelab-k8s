@@ -64,27 +64,43 @@ spec:
             value: ""
       validate:
         allowExistingViolations: true
-        # CEL form (ADR 0042 D5): the earlier foreach+pattern emitted
-        # "variables substitution error … resource value '<nil>' does not
-        # match '?*'" for containers with NO resources block at all —
-        # garbage in every report. CEL evaluates presence explicitly and
-        # the message stays clean for exactly that case.
-        cel:
-          expressions:
-            - expression: >-
-                object.spec.containers.all(c,
-                  has(c.resources) && has(c.resources.requests) && 'memory' in c.resources.requests
-                  && has(c.resources.limits) && 'memory' in c.resources.limits)
-                && (!has(object.spec.initContainers) || object.spec.initContainers.all(c,
-                  has(c.resources) && has(c.resources.requests) && 'memory' in c.resources.requests
-                  && has(c.resources.limits) && 'memory' in c.resources.limits))
-                && (!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.all(c,
-                  has(c.resources) && has(c.resources.requests) && 'memory' in c.resources.requests
-                  && has(c.resources.limits) && 'memory' in c.resources.limits))
-              message: >-
-                A container in this workload is missing memory requests+limits.
-                Every container (regular, init, ephemeral) must set both under
-                resources.{requests,limits}.memory — see the per-ns default
-                LimitRange for starting values. Waive with the
-                bypass.homelab.internal/homelab-disallow-unlimited-containers
-                annotation.
+        # Foreach+pattern form. A CEL rewrite was attempted 2026-08-01 to
+        # clean up the "variables substitution error … '<nil>'" report
+        # message this form emits for containers with NO resources block —
+        # but Kyverno 1.18's typed CEL compiler rejects has() on the
+        # ResourceRequirements map fields ("undefined field 'requests'"),
+        # so the expressions never evaluated and the policy was silently
+        # inert. Reverted 2026-08-02: the '<nil>' message is cosmetic, a
+        # non-evaluating policy is not. Revisit on a Kyverno major bump.
+        # Foreach can't hold a `message:` (Kyverno v3 rejects the
+        # field at that path) and the outer message can't reference
+        # `element.*`; the outer message names the workload.
+        message: |
+          Workload `{{ request.object.metadata.namespace }}/{{ request.object.metadata.name }}`
+          has a container without memory requests+limits. Every
+          container (regular, init, ephemeral) must set both under
+          `resources.{requests,limits}.memory` — see the per-ns
+          default LimitRange for starting values. Waive with
+            bypass.homelab.internal/homelab-disallow-unlimited-containers: "<reason>"
+        foreach:
+          - list: "request.object.spec.containers || `[]`"
+            pattern:
+              resources:
+                requests:
+                  memory: "?*"
+                limits:
+                  memory: "?*"
+          - list: "request.object.spec.initContainers || `[]`"
+            pattern:
+              resources:
+                requests:
+                  memory: "?*"
+                limits:
+                  memory: "?*"
+          - list: "request.object.spec.ephemeralContainers || `[]`"
+            pattern:
+              resources:
+                requests:
+                  memory: "?*"
+                limits:
+                  memory: "?*"
