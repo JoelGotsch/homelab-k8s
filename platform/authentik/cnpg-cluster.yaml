@@ -51,26 +51,26 @@ spec:
   monitoring:
     enablePodMonitor: true
 
+  # Explicit resources (ADR 0042). Without this block the namespace
+  # LimitRange injected cpu:500m — and a CPU limit on a latency-critical
+  # identity DB is exactly the throttling hazard ADR 0042 forbids: under
+  # authentik's ~29-query-per-flow load postgres hit the 500m CFS quota
+  # and throttled 66%, so each cached query's psycopg wait ballooned to
+  # ~89ms and a single login step took ~2.6s (→ "Authenticating..." for
+  # minutes). Requests for scheduling, memory limited (non-compressible),
+  # NO cpu limit. 2026-08-04.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 768Mi
+    limits:
+      memory: 2Gi
+
   postgresql:
     parameters:
       max_connections: "200"
-      shared_buffers: "128MB"
-      # synchronous_commit=off — root-cause fix for 3-second logins
-      # (2026-08-04). Authentik's DB-backed cache/session/reputation
-      # layer (Redis was removed upstream in 2026.x) issues ~29 write
-      # COMMITs per flow-executor request; each COMMIT fsynced WAL to
-      # the 3-way-replicated longhorn-replica3 volume at ~89ms, so a
-      # single flow step took ~2.6s and a full login ran into minutes
-      # (profiled: psycopg connection.wait = 2.57s of 2.69s). off makes
-      # commits async (walwriter flushes every ~200ms); the only
-      # tradeoff is a <200ms window of cache/session writes lost on a
-      # hard primary crash — fully reconstructable state for an IdP,
-      # never identity data (which is committed by explicit admin
-      # actions, and CNPG streaming replication + barman are unchanged).
-      # Alternative considered: a dedicated walStorage volume on
-      # replica1 — heavier, deferred. Scoped to authentik; other CNPG
-      # clusters don't have this per-request write amplification.
-      synchronous_commit: "off"
+      # 256MB shared_buffers within the 2Gi limit (was 128MB).
+      shared_buffers: "256MB"
 
   bootstrap:
     initdb:
