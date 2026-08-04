@@ -39,7 +39,10 @@ spec:
           - {name: ntfy-e2ee-relay,     owner: homelab,       repo: ntfy-e2ee-relay, path: k8s, autoSync: "true"}
           - {name: paperless,           owner: homelab,       repo: paperless, path: k8s, autoSync: "true"}
           - {name: personal-agent,      owner: homelab,       repo: homelab-k8s, path: apps/personal-agent,      autoSync: "true"}
-          - {name: roborock,            owner: homelab,       repo: roborock, path: k8s, autoSync: "true"}
+          # roborock removed 2026-08-04: the vacuum server now runs LOCALLY on a
+          # GL-MT6000 (Flint 2) at the remote site (Docker). The homelab servers
+          # VLAN is hardened against the raw-L4 external access it needed, so the
+          # in-cluster deployment was abandoned. See homelab/roborock repo README.
           - {name: signal-bridge,       owner: homelab,       repo: signal-bridge, path: k8s, autoSync: "true"}
           - {name: vaultwarden,         owner: homelab,       repo: vaultwarden, path: k8s, autoSync: "true"}
           - {name: website,             owner: homelab,       repo: homelab-k8s, path: apps/website,             autoSync: "true"}
