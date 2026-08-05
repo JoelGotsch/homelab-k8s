@@ -135,6 +135,13 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
+          # L7 DNS interception so Cilium learns the FQDN→IP mapping
+          # for the toFQDNs SMTP rule below (added 2026-08-05). Without
+          # this, the resolved IP carries no FQDN identity and the
+          # toFQDNs egress never matches — SMTP connect times out.
+          rules:
+            dns:
+              - matchPattern: "*"
     - toEndpoints:
         - matchLabels:
             cnpg.io/cluster: authentik-pg
@@ -170,6 +177,17 @@ spec:
             - port: "443"
               protocol: TCP
             - port: "80"
+              protocol: TCP
+    # Central outbound SMTP (kv/shared/smtp) — the worker runs the
+    # dramatiq send_mail task for invite / password-reset / share
+    # notification emails. Proton submission is STARTTLS on :587
+    # (plain TCP that upgrades in-band, so one TCP port). Requires
+    # the DNS-interception rule above. Added 2026-08-05.
+    - toFQDNs:
+        - matchName: "smtp.protonmail.ch"
+      toPorts:
+        - ports:
+            - port: "587"
               protocol: TCP
 ---
 # CNPG DB-pod lockdown (netpol-audit.md MEDIUM-2). DRAFT — do NOT merge-and-
