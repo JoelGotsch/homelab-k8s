@@ -75,6 +75,16 @@ spec:
             - port: "9000"
               protocol: TCP
   egress:
+    # model-manager: EMBEDDED-OUTPOST proxy upstream (first proxy-
+    # provider app, 2026-08-05) — the outpost inside authentik-server
+    # reverse-proxies models.<domain> to the app Service.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: model-manager
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
     # kube-DNS.
     - toEndpoints:
         - matchLabels:

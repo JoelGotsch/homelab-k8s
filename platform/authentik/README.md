@@ -43,6 +43,7 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 | `kv/data/authentik/secret-key` | `value` | Random ≥50 bytes base64 — Django SECRET_KEY for session/CSRF signing. Rotation forces all sessions to re-authenticate. |
 | `kv/data/authentik/postgres` | `password` | CNPG-issued; operator copies from the auto-created `authentik-pg-app` Secret. |
 | `kv/data/authentik/admin` | `bootstrap_password`, `bootstrap_token`, `bootstrap_email` | Bootstrap admin credentials. Used by `/if/flow/initial-setup/` on first boot to create the `akadmin` superuser. After that flow, these are no longer used by Authentik (they're only re-applied on a re-bootstrap). |
+| `kv/shared/smtp` | `host`, `port`, `username`, `from`, `password` | Central homelab outbound SMTP (Proton submission) — shared by every mail-sending app. Seed with `homelab-infra/scripts/seed-smtp.sh`. Projected here as `AUTHENTIK_EMAIL__*` env via the `authentik-smtp` ExternalSecret. |
 | `kv/data/cnpg/authentik/s3-creds` | `access_key_id`, `secret_access_key` | MinIO svc-account scoped to `homelab-backups-cluster/cnpg/authentik/`. Standard CNPG-app pattern. |
 | `kv/data/<app>/oidc` | `client_id`, `client_secret` | One path per blueprint under `blueprints/`. AUTO-seeded by `homelab-infra/scripts/seed-openbao-paths.sh`. Authentik provider is created by the declarative blueprint reading these via `!Env`; the consumer-side ExternalSecret in the app's ns reads the same path. Currently: `grafana/oidc`. |
 

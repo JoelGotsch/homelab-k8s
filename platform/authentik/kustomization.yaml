@@ -23,6 +23,7 @@ resources:
   - scheduled-backup.yaml
   - externalsecret.yaml
   - httproute.yaml
+  - httproute-model-manager.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml
 
@@ -38,6 +39,9 @@ replacements:
   - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
     targets:
       - select: { kind: HTTPRoute, name: authentik }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }
+      - select: { kind: HTTPRoute, name: authentik-model-manager-proxy }
         fieldPaths: [spec.hostnames.0]
         options: { delimiter: '.', index: 1 }
 
@@ -66,6 +70,9 @@ configMapGenerator:
       # STATIC — full provider/app for the new LibreChat app (2026-07-30);
       # goes into the j2 loop when the render-template reconcile lands.
       - blueprints/librechat.yaml
+      # STATIC — model-manager PROXY provider + embedded-outpost
+      # assignment (first proxy-outpost app, 2026-08-05).
+      - blueprints/model-manager.yaml
     options:
       # Kustomize hash suffix would force ConfigMap rename on
       # every blueprint edit + force chart re-render. Disable

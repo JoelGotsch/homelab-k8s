@@ -1,0 +1,54 @@
+# STATIC blueprint — model-manager PROXY provider (first proxy-outpost
+# app in this cluster, 2026-08-05). Unlike the OIDC apps, the app
+# itself (stock nginx) cannot speak OIDC — Authentik's EMBEDDED outpost
+# authenticates models.<domain> and reverse-proxies to the app Service.
+# No client secret env needed: proxy providers mint their own tokens.
+version: 1
+metadata:
+  name: model-manager-proxy
+  labels:
+    blueprints.goauthentik.io/instantiate: "true"
+entries:
+  - model: authentik_providers_proxy.proxyprovider
+    id: model-manager-provider
+    identifiers:
+      name: model-manager
+    attrs:
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      mode: proxy
+      external_host: "https://models.lab.vyramo.com"
+      internal_host: "http://model-manager.model-manager.svc.cluster.local:80"
+      internal_host_ssl_validation: false
+
+  - model: authentik_core.application
+    id: model-manager-app
+    identifiers:
+      slug: model-manager
+    attrs:
+      name: Model Manager
+      provider: !KeyOf model-manager-provider
+      meta_launch_url: "https://models.lab.vyramo.com/"
+      meta_description: "Mac Studio local models — search + pull"
+      group: "AI"
+      policy_engine_mode: any
+
+  # Operator-only.
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf model-manager-app
+      group: !Find [authentik_core.group, [name, operator]]
+    attrs:
+      order: 10
+      enabled: true
+      negate: false
+
+  # Assign the provider to the EMBEDDED outpost (it serves proxy apps
+  # from inside authentik-server). Partial-attrs update; today this is
+  # the only proxy provider, so the list assignment is safe.
+  - model: authentik_outposts.outpost
+    identifiers:
+      managed: goauthentik.io/outposts/embedded
+    attrs:
+      providers:
+        - !KeyOf model-manager-provider

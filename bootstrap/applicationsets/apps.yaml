@@ -34,6 +34,9 @@ spec:
           # autoSync live. homelab/librechat pushed with full history.
           - {name: librechat,           owner: homelab,       repo: librechat, path: k8s, autoSync: "true"}
           - {name: llm-gateway,         owner: homelab,       repo: llm-gateway, path: k8s, autoSync: "true"}
+          # model-manager: thin nginx UI (no secrets/image/CI) — auth via
+          # the Authentik proxy outpost. Added 2026-08-05.
+          - {name: model-manager,       owner: homelab,       repo: model-manager, path: k8s, autoSync: "true"}
           - {name: nextcloud,           owner: homelab,       repo: nextcloud, path: k8s, autoSync: "true"}
           - {name: ntfy,                owner: homelab,       repo: ntfy, path: k8s, autoSync: "true"}
           - {name: ntfy-e2ee-relay,     owner: homelab,       repo: ntfy-e2ee-relay, path: k8s, autoSync: "true"}
