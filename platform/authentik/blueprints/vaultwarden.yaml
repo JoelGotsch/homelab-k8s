@@ -11,7 +11,10 @@
 # What this DOES: GitOps-track the access-control binding (the actual gap — it
 # was UI-only, so a blueprint rebuild would silently reopen vaultwarden to any
 # authenticated user). It binds the existing application (via !Find) to the
-# `operator` group, matching the live binding → adopted, not duplicated.
+# `operator` group AND (2026-08-06) the `family-members` group, so invited
+# family users can SSO into Vaultwarden — adopted, not duplicated. Vaultwarden
+# accounts are still created on first SSO login; the email_verified assertion
+# below applies to them too.
 #
 # 2026-07-29: also owns the provider's property_mappings (a targeted
 # partial-attrs update; sub_mode/client_id untouched). Authentik ≥2026.x's
@@ -44,6 +47,14 @@ entries:
       group: !Find [authentik_core.group, [name, operator]]
     attrs:
       order: 10
+      enabled: true
+      negate: false
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !Find [authentik_core.application, [slug, vaultwarden]]
+      group: !Find [authentik_core.group, [name, family-members]]
+    attrs:
+      order: 20
       enabled: true
       negate: false
 
