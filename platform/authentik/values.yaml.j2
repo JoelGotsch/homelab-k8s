@@ -36,6 +36,14 @@ global:
     # JSON logging for Loki ingestion per ADR 0021.
     - name: AUTHENTIK_LOG_FORMAT
       value: json
+    # SMTP: host/port/username/password/from come from the
+    # authentik-smtp ExternalSecret (kv/shared/smtp) via envFrom
+    # below. These two are non-secret statics: Proton :587 is
+    # STARTTLS. Added 2026-08-05 for invite/reset emails.
+    - name: AUTHENTIK_EMAIL__USE_TLS
+      value: "true"
+    - name: AUTHENTIK_EMAIL__TIMEOUT
+      value: "30"
 
   # Project all operator-managed creds into env vars.
   # ESO writes Secret keys named after the env var; chart's
@@ -49,6 +57,10 @@ global:
         name: authentik-postgres-creds
     - secretRef:
         name: authentik-bootstrap
+    # Central SMTP (kv/shared/smtp) — AUTHENTIK_EMAIL__{HOST,PORT,
+    # USERNAME,PASSWORD,FROM}. USE_TLS/TIMEOUT are in global.env above.
+    - secretRef:
+        name: authentik-smtp
     # OIDC client credentials per app — read by !Env tags in
     # blueprints under blueprints/. One key pair per app
     # (AUTHENTIK_BOOTSTRAP_<APP>_CLIENT_{ID,SECRET}).
