@@ -32,22 +32,56 @@ node:
       enabled: true
       additionalLabels:
         release: kube-prometheus-stack
+  # PER-CONTAINER resources (chart 0.4.x uses node.resources.<container>,
+  # NOT a flat requests/limits — the old flat block was silently ignored,
+  # leaving the rclone mounter on the chart-default 300Mi). The rclone
+  # container holds every FUSE mount's VFS dir cache; a Nextcloud
+  # files:scan over a 253k-file tree OOMKilled it at 300Mi → dead mount →
+  # nextcloud CrashLoop (2026-08-05). 1Gi gives large recursive scans
+  # headroom. No CPU limit (ADR 0042: FUSE mount latency-critical).
   resources:
-    requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      memory: 512Mi
+    rclone:
+      requests:
+        cpu: 50m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+    livenessProbe:
+      requests:
+        cpu: 10m
+        memory: 20Mi
+      limits:
+        memory: 100Mi
+    nodeDriverRegistrar:
+      requests:
+        cpu: 10m
+        memory: 20Mi
+      limits:
+        memory: 100Mi
 
 # Controller — single Deployment, leader-elects.
 controller:
   replicas: 1
+  # Same per-container shape as node (chart 0.4.x schema).
   resources:
-    requests:
-      cpu: 20m
-      memory: 64Mi
-    limits:
-      memory: 256Mi
+    rclone:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        memory: 400Mi
+    csiProvisioner:
+      requests:
+        cpu: 10m
+        memory: 20Mi
+      limits:
+        memory: 200Mi
+    livenessProbe:
+      requests:
+        cpu: 10m
+        memory: 20Mi
+      limits:
+        memory: 100Mi
 
 # rclone-side default flags. Each StorageClass can override
 # via parameters.mountOptions; defaults set sensible behaviour
