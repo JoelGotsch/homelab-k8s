@@ -1,0 +1,42 @@
+# Egress/ingress for the operator + its dynamically-created subnet-router
+# pods (ADR 0044). Deliberately PERMISSIVE for this special namespace:
+# the connector pods are created by the operator (labels we don't own)
+# and must reach arbitrary DERP relays + WireGuard peers (world) AND
+# forward tailnet traffic to the whole servers VLAN + cluster services
+# (cluster/host/remote-node). Scoped to the namespace, not the fleet.
+#
+# Only egress + ingress lists are set (no policyTypes gap): return
+# traffic for tailscaled's outbound flows is allowed by Cilium conntrack.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tailscale-operator
+  namespace: tailscale
+spec:
+  # All pods in the namespace (operator + connector proxies).
+  endpointSelector: {}
+  egress:
+    # Tailnet: DERP (TCP/UDP 443), STUN (UDP 3478), WireGuard (UDP 41641),
+    # plus subnet forwarding to the servers VLAN / cluster services and
+    # the Kubernetes API (operator reconcile).
+    - toEntities:
+        - world
+        - cluster
+        - host
+        - remote-node
+        - kube-apiserver
+    # Cluster DNS.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - { port: "53", protocol: UDP }
+            - { port: "53", protocol: TCP }
+  ingress:
+    # kubelet health/readiness probes arrive as node identities; return
+    # traffic for tailscaled's own outbound flows is conntrack-allowed.
+    - fromEntities:
+        - host
+        - remote-node

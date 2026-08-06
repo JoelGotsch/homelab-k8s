@@ -1,0 +1,21 @@
+# tailscale-operator — in-cluster Tailscale subnet router (ADR 0044).
+# The operator reconciles the Connector (connector.yaml) into a
+# tailscaled subnet-router pod advertising 10.10.30.0/24, displacing
+# Flint3's overloaded tailscaled as the primary (Flint3 stays fallback).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+helmCharts:
+  - name: tailscale-operator
+    repo: https://pkgs.tailscale.com/helmcharts
+    version: "1.98.9"  # OPERATOR PINS via Renovate (appVersion v1.98.9)
+    releaseName: tailscale-operator
+    namespace: tailscale
+    valuesFile: values.yaml
+    includeCRDs: true
+
+resources:
+  - namespace.yaml
+  - externalsecret.yaml
+  - connector.yaml
+  - ciliumnetworkpolicy.yaml

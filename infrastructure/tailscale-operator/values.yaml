@@ -1,0 +1,20 @@
+# Tailscale Kubernetes operator (ADR 0044) — subnet-router role only.
+#
+# `oauth` is intentionally UNSET: with no oauth values the operator reads
+# the pre-existing `operator-oauth` Secret (client_id/client_secret),
+# which the ESO projects from OpenBao. Setting oauth here would make the
+# chart template its own operator-oauth Secret and collide with the ESO.
+installCRDs: true
+
+operatorConfig:
+  logging: info
+  # Tag applied to the devices the operator registers (the subnet-router
+  # Connector). Must match the OAuth client's tag and the ACL
+  # autoApprovers entry for 10.10.30.0/24.
+  defaultTags:
+    - "tag:k8s-router"
+
+# We use the operator ONLY for subnet routing — do NOT expose the
+# Kubernetes API server over the tailnet.
+apiServerProxyConfig:
+  mode: "false"

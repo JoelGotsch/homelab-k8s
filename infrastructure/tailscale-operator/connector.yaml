@@ -1,0 +1,22 @@
+# Subnet router advertising the servers VLAN into the tailnet (ADR 0044).
+# This is the in-cluster PRIMARY that displaces Flint3's overloaded
+# tailscaled for bulk tailnet<->cluster traffic; Flint3 stays a fallback
+# advertiser of the same route.
+#
+# Applied after the operator + CRDs (sync-wave); the operator reconciles
+# it into a tailscaled subnet-router pod in the `tailscale` namespace.
+# The advertised route self-approves via the ACL autoApprovers entry for
+# tag:k8s-router (else approve once in the admin console).
+apiVersion: tailscale.com/v1alpha1
+kind: Connector
+metadata:
+  name: homelab-subnet-router
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  hostname: homelab-cluster-router
+  tags:
+    - "tag:k8s-router"
+  subnetRouter:
+    advertiseRoutes:
+      - "10.10.30.0/24"
