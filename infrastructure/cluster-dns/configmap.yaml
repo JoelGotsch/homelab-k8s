@@ -1,19 +1,17 @@
-# CoreDNS Corefile — the in-cluster split-horizon authority for the
-# internal zone (ADR 0044). Ports Flint3's Unbound
-# (openwrt-config/templates/unbound.conf.j2): a wildcard `redirect`
-# to the gateway VIP plus per-host overrides for router/switch/nodes.
+# CoreDNS config for the in-cluster split-horizon authority (ADR 0044).
+# Ports Flint3's Unbound: a wildcard to the gateway VIP plus per-host
+# overrides for router/switch/nodes.
 #
-# The zone name carries NO domain literal — CoreDNS substitutes
-# `{$FQDN_SUFFIX}` from the container env at load time, and that env is
-# filled by the kustomize `replacement` from components/site-config
-# (see kustomization.yaml). `{{ .Name }}` is CoreDNS's OWN Go template
-# (the `template` plugin), not Jinja — this file is plain YAML, so the
-# two never collide.
+# Implemented as an authoritative ZONE FILE (the `file` plugin), NOT
+# hosts+template: CoreDNS runs the `template` plugin BEFORE `hosts` in
+# its fixed plugin chain, so a wildcard `template` would shadow every
+# specific host. A zone file gets proper RFC 4592 wildcard precedence —
+# an explicit record (cp1) always wins over `*` — for free.
 #
-# Authoritative-only for now (phase 2): queries outside the zone are
-# REFUSED. If the tailnet GLOBAL resolver is later moved in-cluster
-# (ADR 0044 D4), add a `.:53 { forward . <upstream> ; cache }` block
-# and the matching egress allow.
+# No domain literal is committed: the server-block zone is CoreDNS's
+# `{$FQDN_SUFFIX}` env substitution (filled by the site-config
+# replacement in kustomization.yaml), and the zone file uses only
+# RELATIVE names, so its $ORIGIN is that same substituted zone.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -23,30 +21,28 @@ data:
     {$FQDN_SUFFIX}:53 {
         errors
         log
+        reload
         health   :8080
         ready    :8181
         prometheus :9153
-        # Per-host overrides (more specific than the wildcard below).
-        hosts {
-            10.10.10.1  flint3.{$FQDN_SUFFIX}
-            10.10.10.2  crs312.{$FQDN_SUFFIX}
-            10.10.30.10 cluster.{$FQDN_SUFFIX}
-            10.10.30.11 cp1.{$FQDN_SUFFIX}
-            10.10.30.12 cp2.{$FQDN_SUFFIX}
-            10.10.30.13 cp3.{$FQDN_SUFFIX}
-            10.10.30.21 worker1.{$FQDN_SUFFIX}
-            10.10.30.22 worker2.{$FQDN_SUFFIX}
-            10.10.30.23 worker3.{$FQDN_SUFFIX}
-            ttl 60
-            fallthrough
-        }
-        # Wildcard redirect: every other name in the zone -> gateway VIP
-        # (matches Unbound's `local-zone redirect` -> 10.10.30.50).
-        template IN A {$FQDN_SUFFIX} {
-            answer "{{ .Name }} 60 IN A 10.10.30.50"
-        }
-        # AAAA in-zone -> NODATA (no v6 gateway), avoids SERVFAIL.
-        template IN AAAA {$FQDN_SUFFIX} {
-            rcode NOERROR
-        }
+        file /etc/coredns/db.zone
     }
+  # Relative-name zone (origin = the server-block zone = {$FQDN_SUFFIX}).
+  # `*` = Unbound's redirect wildcard -> gateway VIP; explicit records
+  # (more specific) win per RFC 4592.
+  db.zone: |
+    $TTL 60
+    @   IN SOA ns hostmaster ( 1 7200 3600 1209600 60 )
+    @   IN NS  ns
+    ns      IN A 10.10.30.50
+    @       IN A 10.10.30.50
+    *       IN A 10.10.30.50
+    cluster IN A 10.10.30.10
+    cp1     IN A 10.10.30.11
+    cp2     IN A 10.10.30.12
+    cp3     IN A 10.10.30.13
+    worker1 IN A 10.10.30.21
+    worker2 IN A 10.10.30.22
+    worker3 IN A 10.10.30.23
+    flint3  IN A 10.10.10.1
+    crs312  IN A 10.10.10.2
