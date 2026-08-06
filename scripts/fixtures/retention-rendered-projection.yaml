@@ -231,7 +231,7 @@ layers:
         storage_class_mode: explicit
     secret_references: []
   - path: platform/woodpecker
-    input_digest_sha256: 4cb3802d377a853cc266154753f49750d395b0b51601da943fffd2ae2724043a
+    input_digest_sha256: 1b6a4c9af2e131d9fb68db76086d1f835bfa616375037571df960e33919327d7
     chart:
       name: woodpecker
       repository: https://woodpecker-ci.org/
