@@ -130,12 +130,20 @@ server:
   # through global.envFrom above (applied to both server +
   # worker, which is correct: worker needs DB creds too).
 
+  # Bumped 2026-08-06: the model-manager PROXY provider now runs in the
+  # EMBEDDED outpost inside this server pod (blueprints/model-manager.yaml),
+  # adding steady internal-API + reverse-proxy load. At 200m CPU / 1Gi the
+  # server starved — gunicorn health/ready spiked past the 3s probe timeout
+  # (5s+ observed), liveness killed it (exit 0, not OOM), and it crashlooped
+  # (127 restarts / 11h), leaving authentik-server with zero ready endpoints
+  # so models.<domain> hung on "Server is starting up". No CPU limit on
+  # purpose — CFS throttling is what we are avoiding (same as authentik-pg).
   resources:
     requests:
-      cpu: 200m
-      memory: 512Mi
+      cpu: 500m
+      memory: 768Mi
     limits:
-      memory: 1Gi
+      memory: 2Gi
 
   podSecurityContext:
     runAsNonRoot: true
