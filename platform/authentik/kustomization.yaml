@@ -73,6 +73,10 @@ configMapGenerator:
       # STATIC — model-manager PROXY provider + embedded-outpost
       # assignment (first proxy-outpost app, 2026-08-05).
       - blueprints/model-manager.yaml
+      # Recovery / set-password flow (email link) — hand-written, instantiates
+      # authentik's bundled recovery example + points the brand's flow_recovery
+      # at it. Enables invite-onboarding + self-service password reset (2026-08-06).
+      - blueprints/homelab-recovery-flow.yaml
     options:
       # Kustomize hash suffix would force ConfigMap rename on
       # every blueprint edit + force chart re-render. Disable
