@@ -19,9 +19,24 @@ spec:
     matchLabels:
       app.kubernetes.io/name: cluster-dns
   ingress:
+    # External LB path (LAN clients, and tailnet clients via the Flint3
+    # fallback route): externalTrafficPolicy=Cluster SNATs to the L2
+    # announcer node, so traffic arrives as a node identity.
     - fromEntities:
         - remote-node
         - host
+      toPorts:
+        - ports:
+            - { port: "53", protocol: UDP }
+            - { port: "53", protocol: TCP }
+    # In-cluster subnet router (ADR 0044): the tailscale Connector forwards
+    # tailnet DNS to 10.10.30.53 from INSIDE the cluster, so Cilium
+    # socket-LB routes it pod->backend directly and it arrives with the
+    # connector's pod identity (NOT remote-node). Without this the tailnet
+    # DNS path times out while the LAN path works.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tailscale
       toPorts:
         - ports:
             - { port: "53", protocol: UDP }
