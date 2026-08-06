@@ -1,0 +1,52 @@
+# CoreDNS Corefile — the in-cluster split-horizon authority for the
+# internal zone (ADR 0044). Ports Flint3's Unbound
+# (openwrt-config/templates/unbound.conf.j2): a wildcard `redirect`
+# to the gateway VIP plus per-host overrides for router/switch/nodes.
+#
+# The zone name carries NO domain literal — CoreDNS substitutes
+# `{$FQDN_SUFFIX}` from the container env at load time, and that env is
+# filled by the kustomize `replacement` from components/site-config
+# (see kustomization.yaml). `{{ .Name }}` is CoreDNS's OWN Go template
+# (the `template` plugin), not Jinja — this file is plain YAML, so the
+# two never collide.
+#
+# Authoritative-only for now (phase 2): queries outside the zone are
+# REFUSED. If the tailnet GLOBAL resolver is later moved in-cluster
+# (ADR 0044 D4), add a `.:53 { forward . <upstream> ; cache }` block
+# and the matching egress allow.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-dns-corefile
+data:
+  Corefile: |
+    {$FQDN_SUFFIX}:53 {
+        errors
+        log
+        health   :8080
+        ready    :8181
+        prometheus :9153
+        # Per-host overrides (more specific than the wildcard below).
+        hosts {
+            10.10.10.1  flint3.{$FQDN_SUFFIX}
+            10.10.10.2  crs312.{$FQDN_SUFFIX}
+            10.10.30.10 cluster.{$FQDN_SUFFIX}
+            10.10.30.11 cp1.{$FQDN_SUFFIX}
+            10.10.30.12 cp2.{$FQDN_SUFFIX}
+            10.10.30.13 cp3.{$FQDN_SUFFIX}
+            10.10.30.21 worker1.{$FQDN_SUFFIX}
+            10.10.30.22 worker2.{$FQDN_SUFFIX}
+            10.10.30.23 worker3.{$FQDN_SUFFIX}
+            ttl 60
+            fallthrough
+        }
+        # Wildcard redirect: every other name in the zone -> gateway VIP
+        # (matches Unbound's `local-zone redirect` -> 10.10.30.50).
+        template IN A {$FQDN_SUFFIX} {
+            answer "{{ .Name }} 60 IN A 10.10.30.50"
+        }
+        # AAAA in-zone -> NODATA (no v6 gateway), avoids SERVFAIL.
+        template IN AAAA {$FQDN_SUFFIX} {
+            rcode NOERROR
+        }
+    }

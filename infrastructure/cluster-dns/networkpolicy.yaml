@@ -1,0 +1,32 @@
+# Default-deny both directions for the resolver pods (ADR 0036).
+# Ingress on :53 is granted by the companion CiliumNetworkPolicy
+# (ciliumnetworkpolicy.yaml) because LoadBalancer traffic arrives
+# SNAT'd as a node identity (`remote-node`/`host`), which a standard
+# NetworkPolicy cannot express.
+#
+# Egress: authoritative-only CoreDNS needs no upstream; kube-dns is
+# allowed solely so the pod can resolve should any plugin need it. If
+# the global resolver is later moved here (ADR 0044 D4), add the
+# upstream DoT egress alongside a `.:53 forward` block in the Corefile.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cluster-dns-default-deny
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cluster-dns
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }

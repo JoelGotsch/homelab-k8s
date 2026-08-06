@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cluster-dns
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    # ADR 0036 D4 — infrastructure-tier; classified `internal`.
+    # (Kyverno generates the LimitRange + ResourceQuota from these labels.)
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal

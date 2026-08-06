@@ -1,0 +1,28 @@
+# Ingress allow for the LoadBalancer DNS path (ADR 0044).
+#
+# The Service (10.10.30.53) uses the default externalTrafficPolicy:
+# Cluster, so the elected L2-announcer node DNATs to the pod and SNATs
+# the client IP to a node IP. From the pod's view the source identity is
+# therefore `remote-node` (announcer on another node) or `host` (same
+# node as the pod) — never the real tailnet/LAN client. A standard
+# NetworkPolicy can't select node identities, hence this CCNP. Same
+# class of gotcha as forgejo-ssh (platform/forgejo/networkpolicy.yaml).
+#
+# Only `ingress:` is listed, so this policy does NOT add an egress
+# default-deny on top of the K8s NP's (feedback_cilium_ccnp_default_deny).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cluster-dns-lb-ingress
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: cluster-dns
+  ingress:
+    - fromEntities:
+        - remote-node
+        - host
+      toPorts:
+        - ports:
+            - { port: "53", protocol: UDP }
+            - { port: "53", protocol: TCP }

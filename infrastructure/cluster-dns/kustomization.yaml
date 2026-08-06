@@ -1,0 +1,33 @@
+# cluster-dns — in-cluster split-horizon resolver for the internal zone
+# (ADR 0044). A second CoreDNS instance (NOT kube-system/coredns),
+# authoritative for `<fqdn_suffix>`, exposed on LoadBalancer 10.10.30.53
+# and reachable via the Tailscale subnet route. Demotes Flint3's Unbound
+# to a fallback resolver.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: cluster-dns
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - networkpolicy.yaml
+  - ciliumnetworkpolicy.yaml
+
+# Build-only ConfigMap that carries the site's fqdn_suffix for the
+# replacement below (no domain literal committed anywhere).
+components:
+  - ../../components/site-config
+
+# Fill the CoreDNS `FQDN_SUFFIX` env from the single site-config source:
+# ConfigMap/site-config.data.fqdn_suffix -> the container env whose
+# `{$FQDN_SUFFIX}` the Corefile expands. Whole-value replacement (no
+# delimiter) -> the `<fqdn_suffix>` value.
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: Deployment, name: cluster-dns }
+        fieldPaths:
+          - spec.template.spec.containers.[name=coredns].env.[name=FQDN_SUFFIX].value
