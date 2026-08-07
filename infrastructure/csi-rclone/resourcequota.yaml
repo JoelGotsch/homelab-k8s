@@ -1,0 +1,15 @@
+# Explicit ResourceQuota for csi-rclone, replacing the Kyverno-generated
+# 16Gi default (bypassed via the namespace annotation). Sized for the
+# node DaemonSet's write-burst memory: 6 nodes × (rclone 3Gi + sidecars
+# 200Mi) ≈ 19.2Gi, plus the controller pod ≈ 0.7Gi. 24Gi gives headroom.
+# The 3Gi mounter limit itself is justified in values.yaml (a ~1GB
+# registry image push OOM-killed the FUSE mount at 1Gi, 2026-08-07).
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: csi-rclone-quota
+  namespace: csi-rclone
+spec:
+  hard:
+    requests.memory: 8Gi
+    limits.memory: 24Gi

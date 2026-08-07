@@ -26,6 +26,7 @@ helmCharts:
 
 resources:
   - namespace.yaml
+  - resourcequota.yaml
   - externalsecret.yaml
   - storageclasses.yaml
   - networkpolicy.yaml
