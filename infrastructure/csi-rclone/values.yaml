@@ -45,16 +45,7 @@ node:
         cpu: 50m
         memory: 256Mi
       limits:
-        # 2026-08-07: raised 1Gi→2Gi. The 1Gi bump (from 300Mi) after the
-        # 2026-08-05 nextcloud files:scan OOM was not enough: the mounter
-        # OOMKilled again on worker2 during the immich bulk-import backfill
-        # (the immich-originals mount ran vfs-cache-mode=off → buffered large
-        # writes in RAM), which left nextcloud's personal-files mount stale →
-        # subPath prep failed → nextcloud CrashLoop 23h → "maintenance mode".
-        # This container holds EVERY crypt mount's VFS cache on the node;
-        # 2Gi covers a heavy consumer (immich migration) sharing a node with
-        # nextcloud/others. See task #12 for the vfs-cache-mode root fix.
-        memory: 2Gi
+        memory: 1Gi
     livenessProbe:
       requests:
         cpu: 10m
