@@ -92,18 +92,15 @@ controller:
       limits:
         memory: 100Mi
 
-# rclone-side default flags. Each StorageClass can override
-# via parameters.mountOptions; defaults set sensible behaviour
-# for the cold-originals workload.
-rclone:
-  # Default mount options applied when a StorageClass doesn't
-  # override. Tuned for cold-originals access (full-screen
-  # views + ML-index sequential scans) per ADR 0030 §D4.
-  defaultMountOptions:
-    - "--vfs-cache-mode=full"
-    - "--vfs-cache-max-size=5G"
-    - "--vfs-cache-max-age=1h"
-    - "--vfs-read-ahead=128M"
-    - "--buffer-size=32M"
-    - "--dir-cache-time=1h"
-    - "--allow-other"
+# NOTE (2026-08-07): a `rclone.defaultMountOptions` block used to live
+# here (--vfs-cache-mode=full etc.). It was DEAD CONFIG — the chart's
+# node plugin does not apply it: the driver reads mount flags ONLY from
+# each volume's mount options (PV.spec.mountOptions, populated from the
+# StorageClass `mountOptions:` field) merged with SC `parameters`, per
+# `pkg/rclone/nodeserver.go` (GetMountFlags → extractVFSOptions).
+# `kustomize build --enable-helm` confirmed the block rendered to nothing,
+# so every crypt mount ran vfs-cache-mode=OFF, which broke Immich's
+# storage-template copyFile (EBADF) and RAM-buffered writes into a mounter
+# OOM (2026-08-07 journal). vfs-cache-mode now lives on the per-share
+# StorageClass mountOptions in storageclasses.yaml — that is the ONLY
+# lever the driver honours. Do not re-add a defaultMountOptions block.

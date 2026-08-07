@@ -21,10 +21,22 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-personal-photos
+# 2026-08-07: vfs-cache-mode=full is LOAD-BEARING for Immich. Without a
+# write cache rclone can't seek on writes, so Node's fs.copyFile (the
+# storage-template hot→cold move) fails EBADF and strands originals on the
+# hot tier; cache-off also RAM-buffers writes and OOMs the mounter. Format
+# is `key=value` (no leading --) — the driver's only mount-flag lever
+# (values.yaml defaultMountOptions is dead config; see there). The live
+# immich-originals PV was patched with these same options; this SC makes
+# future re-provisions correct (SC mountOptions are immutable → this file
+# change requires a delete+recreate of the SC to take effect).
 mountOptions:
   - allow-other=true
   - file-perms=0666
   - dir-perms=0777
+  - vfs-cache-mode=full
+  - vfs-cache-max-size=50G
+  - vfs-cache-max-age=24h
 provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
