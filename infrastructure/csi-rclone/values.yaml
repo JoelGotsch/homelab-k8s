@@ -37,15 +37,24 @@ node:
   # leaving the rclone mounter on the chart-default 300Mi). The rclone
   # container holds every FUSE mount's VFS dir cache; a Nextcloud
   # files:scan over a 253k-file tree OOMKilled it at 300Mi → dead mount →
-  # nextcloud CrashLoop (2026-08-05). 1Gi gives large recursive scans
-  # headroom. No CPU limit (ADR 0042: FUSE mount latency-critical).
+  # nextcloud CrashLoop (2026-08-05). 1Gi gave recursive-scan headroom.
+  #
+  # 2026-08-07 → 3Gi: 1Gi was still insufficient under WRITE bursts. A
+  # ~1GB Forgejo registry image push (vfs-cache-mode=full buffers the
+  # whole write + per-mount --buffer-size/--vfs-read-ahead across every
+  # FUSE mount sharing this one cgroup) killed the forgejo-packages mount
+  # ("transport endpoint is not connected" / blob-write "bad file
+  # descriptor" → registry 500), reproducibly, even with Immich idle —
+  # while PID 1 survived (restarts=0), the signature of a child FUSE mount
+  # process cgroup-OOM-killed under the 1Gi cap. Node has ~30GB free; 3Gi
+  # gives write-burst headroom. No CPU limit (ADR 0042: FUSE latency).
   resources:
     rclone:
       requests:
         cpu: 50m
-        memory: 256Mi
+        memory: 512Mi
       limits:
-        memory: 1Gi
+        memory: 3Gi
     livenessProbe:
       requests:
         cpu: 10m
