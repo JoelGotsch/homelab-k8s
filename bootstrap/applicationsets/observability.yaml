@@ -62,3 +62,14 @@ spec:
           namespace: observability-tempo
           jsonPointers:
             - /spec/volumeClaimTemplates
+        # obs-crowdsec: `crowdsec-banned` CiliumCIDRGroup.externalCIDRs
+        # is written at runtime by the cidrgroup-sync CronJob (live IP
+        # bans). git declares it empty, so without this Argo selfHeal
+        # WIPES active bans on every sync AND flags it permanently
+        # OutOfSync. Ignore the controller-owned field (2026-08-09;
+        # operator-state-trap, rule 7).
+        - group: cilium.io
+          kind: CiliumCIDRGroup
+          name: crowdsec-banned
+          jsonPointers:
+            - /spec/externalCIDRs
