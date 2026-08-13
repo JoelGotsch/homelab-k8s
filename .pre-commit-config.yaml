@@ -107,7 +107,7 @@ repos:
         # tracked files); allowlist-by-path inside the script.
 
       - id: check-no-bare-domain
-        name: no hardcoded homelab_domain literal in .yaml without a .yaml.j2 sibling (Pick 3)
+        name: no value hardcodes the site domain (ADR 0045; was Pick 3)
         entry: scripts/check-no-bare-domain.sh
         language: script
         pass_filenames: false
