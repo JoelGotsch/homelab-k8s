@@ -94,7 +94,10 @@ data:
   #     schemaValidation. Autogen rule writeback also conflicts
   #     with SSA (upstream kyverno/kyverno around #11058).
   #   - apps_Deployment: kube-prometheus-stack-grafana subchart
-  #     writes checksum/config annotations on every chart bump.
+  #     writes its OWN dashboards-json-config /
+  #     sc-dashboard-provider-config checksums on every chart bump.
+  #     Scoped to those two names only — see the note on that key;
+  #     the generic checksum/config must NOT be ignored.
   #   - Namespace tracking-id: kube-prom-stack monitoring ns
   #     carries a legacy obs-falco-stack tracking-id; SSA
   #     respects the existing annotation's owner and won't
@@ -140,9 +143,20 @@ data:
       - '.spec.data[].remoteRef.decodingStrategy'
       - '.spec.data[].remoteRef.metadataPolicy'
       - '.spec.target.deletionPolicy'
+  # NOTE the generic `checksum/config` is deliberately NOT ignored (removed
+  # 2026-08-13). It is the standard Helm idiom — hash the ConfigMap, stamp it on
+  # the pod template — so ignoring it broke config rollout for EVERY chart:
+  # Argo applied the new ConfigMap, ignored the changed checksum, left the
+  # Deployment untouched, and the pod served stale config indefinitely while
+  # Argo correctly reported Synced/Healthy. Cost 4h on the vaultwarden DOMAIN
+  # flip; 8 Deployments were affected (forgejo, grafana, minio, litellm, otel
+  # collector, trivy-operator, cnpg, vaultwarden).
+  #
+  # The two Grafana-specific names below stay: they are written by the
+  # kube-prometheus-stack sidecar/subchart and are unique to it, so ignoring
+  # them by name does not affect any other chart.
   resource.customizations.ignoreDifferences.apps_Deployment: |
     jqPathExpressions:
-      - '.spec.template.metadata.annotations."checksum/config"'
       - '.spec.template.metadata.annotations."checksum/dashboards-json-config"'
       - '.spec.template.metadata.annotations."checksum/sc-dashboard-provider-config"'
   resource.customizations.ignoreDifferences.Namespace: |

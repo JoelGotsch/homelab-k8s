@@ -1,0 +1,41 @@
+# Argo CD UI/API via the Cilium Gateway.
+#
+# Internal-only (Tailscale-reachable). Argo CD is NOT published through the
+# Cloudflare Tunnel — it can rewrite the whole cluster, so it stays on the
+# tailnet per ADR 0024's "narrowly, and only for E2EE / internal-media"
+# framing.
+#
+# Added 2026-08-13. Before this, `argocd-cm`'s `url` and the Authentik client's
+# redirect_uri both advertised argocd.<fqdn_suffix> while NO route existed, so
+# the name resolved via the `*.<fqdn_suffix>` DNS wildcard and then answered
+# 404 — a silent dead end rather than NXDOMAIN. Browser SSO could not work.
+#
+# Backend is the `http` port (80 -> pod 8080), which requires
+# `server.insecure: "true"` in argocd-cmd-params-cm so argocd-server speaks
+# plain HTTP behind the TLS-terminating Gateway. Pointing this at the `https`
+# port instead would need a BackendTLSPolicy, which is the unresolved issue
+# that leaves openbao.<fqdn_suffix> answering 503.
+#
+# Hostname resolves from components/site-config (fqdn_suffix) — see the
+# replacement in this directory's kustomization.yaml. Nothing to fill.
+
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: argocd-server
+  namespace: argocd
+spec:
+  parentRefs:
+    - name: homelab-gateway
+      namespace: ingress
+      sectionName: https
+  hostnames:
+    - "argocd.FQDN_SUFFIX"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: argocd-server
+          port: 80

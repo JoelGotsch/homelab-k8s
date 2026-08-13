@@ -53,6 +53,11 @@ resources:
   # of stable org-only pulls). Reuses the read-only svc-argocd token.
   - externalsecret-repo-creds-homelab.yaml
 
+  # Cilium Gateway route for the Argo CD UI/API. Until 2026-08-13 `argocd-cm`
+  # advertised a hostname with no route behind it (silent 404 via the DNS
+  # wildcard). Requires server.insecure in patches/argocd-cmd-params.yaml.
+  - httproute.yaml
+
 patches:
   - path: patches/argocd-cmd-params.yaml
     target:
@@ -128,4 +133,10 @@ replacements:
     targets:
       - select: { kind: ConfigMap, name: argocd-cm }
         fieldPaths: [data.url]
+        options: { delimiter: '.', index: 1 }
+      # Same suffix into the HTTPRoute hostname: argocd.FQDN_SUFFIX ->
+      # argocd.<fqdn_suffix>. Keeps the route and argocd-cm's url in lockstep
+      # from one source, so they cannot drift apart again.
+      - select: { kind: HTTPRoute, name: argocd-server }
+        fieldPaths: [spec.hostnames.0]
         options: { delimiter: '.', index: 1 }

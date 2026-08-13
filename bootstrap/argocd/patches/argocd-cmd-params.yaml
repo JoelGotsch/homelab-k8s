@@ -18,9 +18,14 @@ data:
   # requires an application-controller restart.
   controller.diff.server.side: "true"
 
-  # Don't expose Argo CD over HTTP redirects (we'll wire
-  # ingress + TLS via Gateway API).
-  server.insecure: "false"
+  # TLS terminates at the Cilium Gateway, which then talks plain HTTP to
+  # argocd-server:80. This is the documented Argo CD pattern for running
+  # behind an ingress that terminates TLS (operator-manual/ingress). It has
+  # to be "true": with "false" the pod serves HTTPS on 8080 and a Gateway
+  # API route cannot reach it without a BackendTLSPolicy — the exact reason
+  # openbao.lab still answers 503. Flipped 2026-08-13 together with
+  # bootstrap/argocd/httproute.yaml.
+  server.insecure: "true"
 
   # Logs in JSON for Loki ingestion (per ADR 0021).
   server.log.format: "json"
