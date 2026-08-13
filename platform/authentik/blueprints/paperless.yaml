@@ -82,3 +82,11 @@ entries:
       order: 10
       enabled: true
       negate: false
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf paperless-app
+      group: !Find [authentik_core.group, [name, family-members]]
+    attrs:
+      order: 20
+      enabled: true
+      negate: false

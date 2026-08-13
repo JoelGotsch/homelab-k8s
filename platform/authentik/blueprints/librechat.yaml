@@ -61,14 +61,27 @@ entries:
       group: "AI"
       policy_engine_mode: any
 
-  # Operator-only access binding (same rationale as every other app
-  # blueprint: without it a rebuild reopens the app to any authenticated
-  # user).
+  # Access bindings (same rationale as every other app blueprint: without
+  # them a rebuild reopens the app to any authenticated user).
+  #
+  # family-members added 2026-08-14 to extend the unified-onboarding roster.
+  # LibreChat JIT-provisions on first OIDC login — ALLOW_SOCIAL_REGISTRATION
+  # is true and ALLOW_EMAIL_LOGIN is false, so this binding is the *only*
+  # gate on who gets a LibreChat account. NB every family member's chats hit
+  # llm-gateway, so ADR 0007 / 0026 egress tagging now covers them too.
   - model: authentik_policies.policybinding
     identifiers:
       target: !KeyOf librechat-app
       group: !Find [authentik_core.group, [name, operator]]
     attrs:
       order: 10
+      enabled: true
+      negate: false
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf librechat-app
+      group: !Find [authentik_core.group, [name, family-members]]
+    attrs:
+      order: 20
       enabled: true
       negate: false
