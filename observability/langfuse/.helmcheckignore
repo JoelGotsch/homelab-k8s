@@ -16,7 +16,9 @@ langfuse.web.pod.additionalEnvFrom   # chart consumes additionalEnvFrom list
 langfuse.web.resources               # chart: `toYaml .Values.langfuse.web.resources`
 langfuse.worker.pod.additionalEnv    # chart consumes worker additionalEnv list
 langfuse.worker.resources            # chart: `toYaml .Values.langfuse.worker.resources`
-s3.persistence                       # `.Values.s3` is consumed (bundled MinIO subchart)
+# s3.persistence — REMOVED 2026-08-14. No longer flagged: the check now folds
+# in vendored subcharts' own values.yaml, so the bundled MinIO subchart's keys
+# resolve on their own and this suppression is unnecessary.
 
 # ── KNOWN WRONG-KEYS — value is DROPPED at render (NOT back-compat-OK) ───────
 # Acknowledged here ONLY so the hook stays green and flags NEW drift. These are

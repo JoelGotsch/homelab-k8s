@@ -35,9 +35,9 @@
 #   exists, and soft-fails (warn, don't block) if that fetch can't reach the
 #   repo — a pre-commit hook must never wedge on a network blip.
 #
-# For every kustomization.yaml under the layer roots (infrastructure/,
-# platform/, observability/, apps/) that declares a helmCharts: block,
-# this script:
+# For every kustomization.yaml in the repo that declares a helmCharts:
+# block — homelab-k8s has four layer roots (infrastructure/, platform/,
+# observability/, apps/), an app repo has a single k8s/ — this script:
 #   1. Resolves the chart + version + values file.
 #   2. Runs `helm show values <repo>/<chart> --version <ver>` and extracts
 #      every dotted key path present in the chart's defaults.
@@ -66,13 +66,12 @@
 #       unreachable non-vendored chart repo soft-skip (exit 0), never block.
 #
 # Usage:
-#   scripts/check-helm-values-keys.sh                # check all layers
-#   scripts/check-helm-values-keys.sh <files…>       # pre-commit mode (any
-#                                                    # changed values.yaml /
-#                                                    # kustomization.yaml
-#                                                    # triggers a check of
-#                                                    # the parent layer)
-#   scripts/check-helm-values-keys.sh --layer DIR    # check one layer
+#   check-helm-values-keys.sh                # check all layers
+#   check-helm-values-keys.sh <files…>       # pre-commit mode (any changed
+#                                            # values.yaml / kustomization.yaml
+#                                            # triggers a check of the parent
+#                                            # layer)
+#   check-helm-values-keys.sh --layer DIR    # check one layer
 #
 # Options:
 #   --layer DIR            check this one directory only
@@ -94,7 +93,11 @@ if [ "${SKIP_HELM_VALUES_KEYS_CHECK:-0}" = "1" ]; then
   exit 0
 fi
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Repo root from the INVOCATION, not from $0. This script is consumed as a
+# shared pre-commit hook, so $0 lives in pre-commit's clone cache rather than
+# in the repo being checked; deriving the root from $0 would resolve to the
+# cache. pre-commit runs hooks with cwd = repo root.
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
 layer_arg=""
 strict=0
@@ -137,8 +140,10 @@ fi
 # still trips `set -u` on `${#layers[@]}` in bash 5.x; an empty assignment
 # initializes it safely.
 layers=()
+explicit_layer=0
 if [ -n "$layer_arg" ]; then
   layers=("$layer_arg")
+  explicit_layer=1
 elif [ "${#positional[@]}" -gt 0 ]; then
   # Pre-commit mode: derive layers from changed files.
   declare -A seen
@@ -162,14 +167,22 @@ elif [ "${#positional[@]}" -gt 0 ]; then
     exit 0
   }
 else
-  # Full sweep.
+  # Full sweep. Discover layers rather than naming roots: this script is
+  # shared across repos with different shapes — homelab-k8s has four layer
+  # roots (infrastructure/, platform/, observability/, apps/), while an app
+  # repo has a single k8s/ layer. Prune charts/, because several upstream
+  # charts ship their own kustomization.yaml and those are not our layers.
   while IFS= read -r kf; do
     layers+=("$(dirname "$kf")")
   done < <(
-    find "$REPO_ROOT/infrastructure" "$REPO_ROOT/platform" \
-         "$REPO_ROOT/observability" "$REPO_ROOT/apps" \
-         -name kustomization.yaml 2>/dev/null
+    find "$REPO_ROOT" -type d -name charts -prune -o \
+         -type d -name .git -prune -o \
+         -name kustomization.yaml -print 2>/dev/null
   )
+  [ "${#layers[@]}" -eq 0 ] && {
+    echo "check-helm-values-keys: no kustomization.yaml found under $REPO_ROOT."
+    exit 0
+  }
 fi
 
 mkdir -p /tmp/helmkeys-cache
@@ -178,7 +191,13 @@ mkdir -p /tmp/helmkeys-cache
 # in pure bash + yq + jq combos).
 check_layer() {
   local layer="$1"
-  STRICT="$strict" REPO_ROOT="$REPO_ROOT" "$PYTHON" - <<'PYEOF' "$layer"
+  # EXPLICIT_LAYER: the operator asked for this one layer by name, i.e. they
+  # are triaging it to build a baseline. List the keys even when no
+  # .helmcheckignore exists yet — otherwise the documented workflow ("run
+  # --layer, triage each flag, record it") cannot start, because the key
+  # list only printed once a baseline was already there.
+  STRICT="$strict" REPO_ROOT="$REPO_ROOT" EXPLICIT_LAYER="$explicit_layer" \
+    "$PYTHON" - <<'PYEOF' "$layer"
 import os, re, subprocess, sys, urllib.parse
 from pathlib import Path
 
@@ -234,6 +253,68 @@ def local_chart_dir(name, ver):
             return cand
     return None
 
+def merge_missing(dst, src):
+    """Deep-merge src into dst WITHOUT overwriting: the parent chart's own
+    declaration always wins, we only add key paths it never mentioned."""
+    for k, v in (src or {}).items():
+        if k not in dst:
+            dst[k] = v
+        elif isinstance(dst[k], dict) and isinstance(v, dict):
+            merge_missing(dst[k], v)
+    return dst
+
+def subchart_paths(chart_dir, parent_vals):
+    """`helm show values` renders ONLY the parent chart's values.yaml — it does
+    NOT merge the values.yaml of vendored dependencies. But Helm DOES forward
+    `<subchart>.<key>` from the parent's values at render time, so a key the
+    parent never re-declares is still consumed by the subchart.
+
+    Without this, every such key is a false positive. On nextcloud 9.2.5 that
+    was most of the `redis.*` and `postgresql.*` flags: the parent declares
+    `redis.master.persistence.enabled` but not `.size`/`.storageClass`, which
+    the redis subchart reads perfectly well.
+
+    Dependencies may be aliased, so map each vendored subdirectory through the
+    parent's Chart.yaml `dependencies[].alias` where one is set.
+    """
+    subdir = chart_dir / "charts"
+    if not subdir.is_dir():
+        return parent_vals
+
+    alias_of = {}
+    cy = chart_dir / "Chart.yaml"
+    if cy.is_file():
+        try:
+            cmeta = yaml.safe_load(cy.read_text()) or {}
+            for dep in (cmeta.get("dependencies") or []):
+                if dep.get("name") and dep.get("alias"):
+                    alias_of[dep["name"]] = dep["alias"]
+        except yaml.YAMLError:
+            pass
+
+    for sub in sorted(p for p in subdir.iterdir() if p.is_dir()):
+        vf = sub / "values.yaml"
+        if not vf.is_file():
+            continue
+        try:
+            sub_vals = yaml.safe_load(vf.read_text()) or {}
+        except yaml.YAMLError:
+            continue
+        sub_name = sub.name
+        scy = sub / "Chart.yaml"
+        if scy.is_file():
+            try:
+                sub_name = (yaml.safe_load(scy.read_text()) or {}).get("name", sub.name)
+            except yaml.YAMLError:
+                pass
+        key = alias_of.get(sub_name, sub_name)
+        # Recurse: subcharts can themselves vendor dependencies (bitnami
+        # charts nest a `common` library, mariadb nests its own, ...).
+        sub_vals = subchart_paths(sub, sub_vals)
+        merge_missing(parent_vals.setdefault(key, {}) if isinstance(
+            parent_vals.get(key, {}), dict) else {}, sub_vals)
+    return parent_vals
+
 def cache_chart_values(repo, name, ver):
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_",
                   f"{urllib.parse.urlparse(repo).netloc}_{name}_{ver}")
@@ -248,7 +329,11 @@ def cache_chart_values(repo, name, ver):
             )
             if r.returncode != 0:
                 return None, r.stderr.strip() or "helm show values (local chart) failed"
-            return yaml.safe_load(r.stdout) or {}, None
+            vals = yaml.safe_load(r.stdout) or {}
+            # Fold in vendored dependencies' own defaults — see subchart_paths.
+            # Only possible on this path: the remote fallback has no chart tree
+            # to walk, which is one more reason vendoring matters.
+            return subchart_paths(local, vals), None
         except subprocess.TimeoutExpired:
             return None, "helm show values (local chart) timed out"
     if not cache.exists():
@@ -381,6 +466,18 @@ for c in charts:
               f"— chart reads it → add to {baseline_file} (back-compat-OK "
               f"section); it doesn't → real dropped wrong-key, fix values.yaml.")
         problems += 1
+    elif unknown and os.environ.get("EXPLICIT_LAYER") == "1":
+        # Triage mode: operator named this layer, so show the work. Still
+        # advisory (exit 0) — the layer is gated only once it has a baseline.
+        print(f"  · {vfp}: {len(unknown)} unrecognized key(s) vs chart "
+              f"{name}@{ver}, no .helmcheckignore — NOT enforced:")
+        for p in unknown:
+            print(f"      - {p}")
+        print(f"    Triage each against the vendored chart: "
+              f"`grep -rn '.Values.<key>' {layer}/charts/*/` — chart reads it "
+              f"→ back-compat-OK; it doesn't → real dropped wrong-key.")
+        print(f"    Record the verdicts in {layer}/.helmcheckignore to gate "
+              f"this layer.")
     elif unknown:
         # No baseline yet → enforcement is OPT-IN. Warn, don't block: wiring
         # this hook repo-wide must not red CI on the pre-existing v1 flags that
@@ -390,7 +487,7 @@ for c in charts:
         # `--layer <dir>` to see the keys.
         print(f"  · {vfp}: {len(unknown)} unrecognized key(s), no "
               f".helmcheckignore — NOT enforced. Triage with "
-              f"`scripts/check-helm-values-keys.sh --layer {layer}` and add a "
+              f"`check-helm-values-keys.sh --layer {layer}` and add a "
               f"baseline to gate this layer.", file=sys.stderr)
     elif strict:
         # Optional: warn on overrides that match the chart default exactly.
