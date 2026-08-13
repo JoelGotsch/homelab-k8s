@@ -91,10 +91,17 @@ fi
 # treated as docs), and vendored upstream Helm charts (third-party
 # READMEs ship broken relative links/anchors we don't maintain —
 # e.g. the forgejo chart's bundled redis/postgresql-ha docs).
+# Vendored/generated trees are excluded: they are third-party docs we do not
+# author and cannot fix. `.ansible/` holds Galaxy collections materialized by
+# homelab-infra/scripts/setup-ansible-env.sh — their CHANGELOGs alone produce
+# thousands of false failures (2026-08-13).
 md_files=$(find . -type f -name '*.md' \
     -not -path './.git/*' \
     -not -path './scripts/*' \
-    -not -path '*/charts/*')
+    -not -path '*/charts/*' \
+    -not -path '*/.ansible/*' \
+    -not -path '*/.venv*/*' \
+    -not -path '*/node_modules/*')
 
 # Slug cache: avoid re-extracting headings from the same target
 # file when many links point to it. A temp-dir file cache (one

@@ -124,7 +124,7 @@ member gets:
 ### 3. Calendar / contacts migration from Radicale
 
 Per [`migration/nas.md`](../../../homelab-docs/03-runbooks/migration/nas.md)
-+ [`nextcloud/migrate-from-radicale.md`](../../../homelab-docs/03-runbooks/nextcloud/migrate-from-radicale.md)
++ [`nextcloud/migrate-from-baikal.md`](../../../homelab-docs/03-runbooks/nextcloud/migrate-from-baikal.md)
 (TBD). Export Radicale's .ics + .vcf files; import via
 Nextcloud Calendar/Contacts upload.
 
@@ -195,6 +195,6 @@ dir, then runs `occ files:scan` to register them.
   — per-app OIDC client pattern.
 - [03-runbooks/nextcloud/](../../../homelab-docs/03-runbooks/nextcloud/)
   — per-app runbooks (initial-setup, family-onboarding,
-  migrate-from-synology-drive, migrate-from-radicale).
+  migrate-from-synology-drive, migrate-from-baikal).
 - [03-runbooks/migration/nas.md](../../../homelab-docs/03-runbooks/migration/nas.md)
   — pre-cluster NAS extraction.
