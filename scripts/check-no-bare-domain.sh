@@ -64,7 +64,12 @@ ALLOWLIST_REGEX='(^|/)README\.md$|^platform/authentik/blueprints/[^/]+\.yaml$|si
 # the check can land and gate new regressions immediately (phase 1) while the
 # migration onto replacements happens per-app (phase 2). Deleting a line here
 # is how phase 2 records progress; the list must only ever shrink.
-KNOWN_VIOLATIONS_REGEX='^k8s/values\.yaml$|^k8s/configmap\.yaml$|^k8s/deployment\.yaml$|^apps/nextcloud/values\.yaml$|^apps/paperless/values\.yaml$|^apps/ntfy/configmap\.yaml$|^apps/immich-public-proxy/deployment\.yaml$|^apps/vaultwarden/values\.yaml$'
+#
+# Cleared:
+#   2026-08-14  k8s/deployment.yaml + apps/immich-public-proxy/deployment.yaml
+#               immich-public-proxy PUBLIC_BASE_URL now resolves from
+#               site-config; render verified byte-identical.
+KNOWN_VIOLATIONS_REGEX='^k8s/values\.yaml$|^k8s/configmap\.yaml$|^apps/nextcloud/values\.yaml$|^apps/paperless/values\.yaml$|^apps/ntfy/configmap\.yaml$|^apps/vaultwarden/values\.yaml$'
 
 # Use staged files as a pre-commit hook; otherwise everything tracked.
 if [ -n "${PRE_COMMIT:-}" ] || [ "${1:-}" = "--staged" ]; then
