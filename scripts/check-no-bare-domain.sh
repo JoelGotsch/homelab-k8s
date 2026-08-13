@@ -1,86 +1,140 @@
 #!/usr/bin/env bash
-# Detect hardcoded operator-domain strings (vyramo.com today;
-# the homelab_domain operator var in general) that should be
-# under Jinja templating per Pick 3 (2026-06-03 session, see
-# homelab-docs/04-guides/cold-start.md §9c.1).
+# check-no-bare-domain.sh — no value-bearing field hardcodes the site domain.
 #
-# Why: 45 files were de-hardcoded via .yaml.j2 sources rendered
-# from homelab-infra/ansible/playbooks/00-render-static.yml. New
-# files that hardcode the domain reopen the wound. Pre-commit
-# catches them at author-time, not at fork-and-go time.
+# TRI-REPO SYNCED SCRIPT: byte-identical copies live in homelab-k8s/scripts/,
+# homelab-docs/scripts/ and every app repo's scripts/. Change one, sync all
+# (enforced by the "tri-repo synced scripts are byte-identical" hook).
 #
-# Strategy: every tracked `.yaml` / `.yml` file containing the
-# literal domain string MUST have a `.yaml.j2` / `.yml.j2`
-# sibling (meaning it's a rendered output). Without a sibling
-# it's a regression.
+# ADR 0045: the workspace must be redeployable at another site with another
+# domain, so a domain literal may never sit in a value the cluster consumes.
+# Values resolve from the kustomize `site-config` component instead.
 #
-# Exemptions:
-#   - The .j2 sources themselves use {{ homelab_domain }} so
-#     they don't match the literal grep — naturally exempt.
-#   - README files (worked examples allowed) — by path pattern.
+# Two things this deliberately changed on 2026-08-13 (ADR 0045 phase 1):
 #
-# When the operator forks the homelab, change DOMAIN_LITERAL
-# below to whatever string is hardcoded today, run this once,
-# fix each hit, then it stops firing.
+#   1. The old exemption was "a `.yaml.j2` sibling exists" — i.e. it treated
+#      *being ansible-rendered* as the definition of correct. ADR 0045 D1
+#      retires that model (the reconciler owns the file; Argo-reconciled paths
+#      use site-config replacements), and the seven orphaned .j2 in app repos
+#      were deleted, so the exemption pointed at files that no longer exist.
 #
-# Auth model: none — local file scan; runs in pre-commit.
-# Tested against: bash 5+, macOS + Linux.
+#   2. The domain literal was hardcoded IN THIS SCRIPT — itself the thing it
+#      forbids. It is now read from the site-config the repo already carries,
+#      so a domain change does not need this file edited.
+#
+# What counts as a violation: the literal in a **value position**. Comments are
+# allowed — they are documentation, they do not break portability, and
+# homelab-docs/scripts/check-hostnames.sh already catches a *wrong* hostname
+# anywhere it appears. This is narrower and more honest than the old
+# any-occurrence rule.
 
 set -euo pipefail
 
-DOMAIN_LITERAL="vyramo.com"
+err() { echo "ERROR: $*" >&2; }
 
-# Paths allowed to contain the literal (README examples + outputs
-# of parametric renders that don't follow the per-file .yaml.j2
-# sibling convention).
+# ── Locate the site-config this repo carries. homelab-k8s keeps it at the
+#    top level; an app repo vendors it under k8s/ (ADR 0001 — an app repo must
+#    build standalone).
+SITE_CONFIG=""
+for candidate in \
+  components/site-config/site-config.env \
+  k8s/components/site-config/site-config.env
+do
+  [ -f "$candidate" ] && { SITE_CONFIG="$candidate"; break; }
+done
+
+if [ -z "$SITE_CONFIG" ]; then
+  echo "SKIP: no components/site-config/site-config.env in this repo — nothing to check" >&2
+  exit 0
+fi
+
+DOMAIN_LITERAL="$(grep -E '^domain=' "$SITE_CONFIG" | head -1 | cut -d= -f2-)"
+[ -n "$DOMAIN_LITERAL" ] || { err "no domain= in $SITE_CONFIG"; exit 1; }
+
+# ── Allowlist: paths where the literal is documentation, not configuration.
 #
-# Parametric exemptions:
-#   platform/authentik/blueprints/*.yaml — rendered by
-#     homelab-infra/ansible/playbooks/00-render-static.yml from
-#     ONE template (blueprints/_blueprint.yaml.j2) + an inventory
-#     file (homelab-infra/ansible/inventory/oidc-apps.yml). No
-#     per-app .yaml.j2 sibling exists by design; see Pick 5 in the
-#     workspace audit (and Pick 11 for the inventory-path move).
-ALLOWLIST_REGEX='^README\.md$|^.*/README\.md$|^platform/authentik/blueprints/[^/]+\.yaml$'
+#   READMEs             worked examples.
+#   authentik blueprints rendered from ONE template + an inventory, so no
+#                       per-app .j2 sibling exists by design.
+#   site-config.env     the declaration itself.
+ALLOWLIST_REGEX='(^|/)README\.md$|^platform/authentik/blueprints/[^/]+\.yaml$|site-config\.env$'
 
-err()  { echo "ERROR: $*" >&2; }
+# ── Known violations, dated, to be emptied by ADR 0045 phase 2.
+#
+# These are REAL hardcoded values that predate this check. They are listed so
+# the check can land and gate new regressions immediately (phase 1) while the
+# migration onto replacements happens per-app (phase 2). Deleting a line here
+# is how phase 2 records progress; the list must only ever shrink.
+KNOWN_VIOLATIONS_REGEX='^k8s/values\.yaml$|^k8s/configmap\.yaml$|^k8s/deployment\.yaml$|^apps/nextcloud/values\.yaml$|^apps/paperless/values\.yaml$|^apps/ntfy/configmap\.yaml$|^apps/immich-public-proxy/deployment\.yaml$|^apps/vaultwarden/values\.yaml$'
 
-# Use staged files when running as a pre-commit hook; else scan
-# everything tracked.
+# Use staged files as a pre-commit hook; otherwise everything tracked.
 if [ -n "${PRE_COMMIT:-}" ] || [ "${1:-}" = "--staged" ]; then
   files=$(git diff --cached --name-only --diff-filter=ACM \
-            | grep -E '\.(yaml|yml)$' \
-            | grep -vE '\.j2$' \
-            || true)
+            | grep -E '\.(yaml|yml)$' || true)
 else
-  files=$(git ls-files '*.yaml' '*.yml' | grep -vE '\.j2$')
+  files=$(git ls-files '*.yaml' '*.yml')
 fi
 
 violations=0
+known=0
 while IFS= read -r f; do
   [ -z "$f" ] && continue
+  [ -f "$f" ] || continue
   echo "$f" | grep -qE "$ALLOWLIST_REGEX" && continue
+
+  # A `.j2` sibling still exempts — but only because the ORPHANS were deleted
+  # on 2026-08-13. Before that, seven app-repo files carried a .j2 that nothing
+  # rendered, so this test passed for files that were in fact hand-edited. The
+  # remaining .j2 under homelab-k8s all appear in 00-render-static.yml's list,
+  # which is what makes the signal trustworthy again.
+  #
+  # ADR 0045 D1's end state is no .j2 under an Argo-reconciled path at all; when
+  # that lands, this branch goes away and those files move to the migration list.
   [ -e "${f}.j2" ] && continue
-  grep -q "$DOMAIN_LITERAL" "$f" 2>/dev/null || continue
-  err "$f hardcodes '$DOMAIN_LITERAL' but has no $f.j2 sibling."
+
+  # Strip full-line comments and trailing comments before matching, so only a
+  # value position can trip the check.
+  if ! sed -e 's/[[:space:]]*#.*$//' "$f" | grep -q "$DOMAIN_LITERAL" 2>/dev/null; then
+    continue
+  fi
+
+  if echo "$f" | grep -qE "$KNOWN_VIOLATIONS_REGEX"; then
+    known=$((known + 1))
+    continue
+  fi
+
+  err "$f hardcodes '$DOMAIN_LITERAL' in a value position."
   violations=$((violations + 1))
 done <<< "$files"
 
 if [ "$violations" -gt 0 ]; then
-  cat >&2 << EOF
+  cat >&2 <<EOF
 
-Fix each by one of:
-  (a) Create the .j2 sibling that substitutes {{ homelab_domain }}
-      (and {{ homelab_internal_subdomain }} for *.lab.\$DOMAIN),
-      add an entry to homelab-infra/ansible/playbooks/00-render-static.yml's
-      cross_repo_renders list, run the playbook to regenerate
-      the .yaml, commit both.
-  (b) If the literal is unavoidable (e.g. a runbook example),
-      add the path to ALLOWLIST_REGEX in this script.
+Fix by resolving the value from the site-config component instead of
+typing the domain:
 
-See: homelab-docs/04-guides/cold-start.md §9c.1.
+  components:
+    - components/site-config
+  replacements:
+    - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+      targets:
+        - select: { kind: <Kind>, name: <name> }
+          fieldPaths: [<field>]
+          options: { delimiter: '.', index: 1 }
+
+jellyfin/k8s is the reference implementation. For a value that lands inside
+a helmCharts valuesFile, target the RENDERED resource (e.g. the ConfigMap
+field) — a replacement cannot reach inside the values file itself.
+
+If the literal is genuinely documentation, put it in a comment or a README.
+
+See ADR 0045 and homelab-docs/04-guides/config-single-declaration-rollout.md.
 EOF
   exit 1
 fi
 
+if [ "$known" -gt 0 ]; then
+  echo "OK: no new bare-domain values ($known known violation(s) pending ADR 0045 phase 2)."
+else
+  echo "OK: no value hardcodes '$DOMAIN_LITERAL'."
+fi
 exit 0
