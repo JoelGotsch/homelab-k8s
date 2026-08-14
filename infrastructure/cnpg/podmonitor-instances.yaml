@@ -1,0 +1,62 @@
+# Fleet-wide PodMonitor for every CNPG instance pod, in every
+# namespace.
+#
+# WHY THIS EXISTS (measured 2026-08-14)
+#   `count(cnpg_*)` in Prometheus was **0 series, 0 active targets**,
+#   for all 11 CNPG clusters. Every Cluster sets
+#   `monitoring.enablePodMonitor: true` and the operator duly created a
+#   PodMonitor per cluster — but those objects carry only
+#   `app.kubernetes.io/*` + `cnpg.io/cluster` labels, while this
+#   cluster's Prometheus selects
+#   `podMonitorSelector: {matchLabels: {release: kube-prometheus-stack}}`
+#   (the ADR 0021 convention). So none of them were ever selected, and
+#   `CNPGContinuousArchivingFailing` in archiving-rules.yaml — whose own
+#   header assumes the operator PodMonitor is scraped — has never been
+#   able to fire. That is why librechat-vectordb archived nothing from
+#   2026-08-06 to 2026-08-14 without a single alert.
+#
+# WHY ONE OBJECT INSTEAD OF ELEVEN
+#   `namespaceSelector.any: true` + the operator's own
+#   `cnpg.io/podRole: instance` label matches every instance pod in the
+#   cluster, present and future. That means:
+#     - a new CNPG cluster is scraped the moment it exists, with no
+#       per-app manifest change and no chance of repeating this gap;
+#     - it does not depend on `spec.monitoring.enablePodMonitor`, which
+#       CNPG has deprecated ("This feature will be removed in an
+#       upcoming release. If you need this functionality, you can create
+#       a PodMonitor manually.") — this IS that manual PodMonitor;
+#     - it changes no workload: creating a PodMonitor restarts nothing.
+#
+#   The per-cluster operator-created PodMonitors are left in place for
+#   now (unselected, therefore inert). They are removed together with
+#   `enablePodMonitor` in the barman-plugin migration's cleanup phase —
+#   see homelab-docs/03-runbooks/cnpg/barman-plugin-migration.md.
+#
+# METRICS SURFACE
+#   Port `metrics` (9187) on the instance pod — the CNPG instance
+#   manager's exporter: the `cnpg_pg_stat_archiver_*` family (mirrors
+#   PostgreSQL's pg_stat_archiver), `cnpg_collector_*` backup
+#   timestamps, plus the custom queries from the
+#   `cnpg-default-monitoring` ConfigMap. After the barman-cloud plugin
+#   migration the backup timestamps are additionally published as
+#   `barman_cloud_cloudnative_pg_io_*`; archiving-rules.yaml matches
+#   both names so the alerts survive the migration window.
+
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: cnpg-instances
+  namespace: cnpg-system
+  labels:
+    app.kubernetes.io/name: cloudnative-pg
+    # The label this Prometheus actually selects on. Without it this
+    # object is as invisible as the ones it replaces.
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      cnpg.io/podRole: instance
+  podMetricsEndpoints:
+    - port: metrics

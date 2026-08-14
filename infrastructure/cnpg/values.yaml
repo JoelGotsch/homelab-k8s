@@ -11,6 +11,13 @@ config:
 # PodMonitor for kube-prometheus-stack (per ADR 0021).
 monitoring:
   podMonitorEnabled: true
+  # Without this label the PodMonitor is not selected by this
+  # cluster's Prometheus (`podMonitorSelector: {matchLabels:
+  # {release: kube-prometheus-stack}}`) — the operator's own metrics
+  # were unscraped from install until 2026-08-14. Per-instance metrics
+  # come from podmonitor-instances.yaml in this layer.
+  podMonitorAdditionalLabels:
+    release: kube-prometheus-stack
   grafanaDashboard:
     create: false  # operator imports the upstream dashboard
                    # explicitly under observability/grafana/
