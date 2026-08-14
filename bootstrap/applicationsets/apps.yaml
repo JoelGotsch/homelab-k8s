@@ -25,6 +25,9 @@ spec:
           # 2026-07-28). Skeleton entries still point at the central
           # homelab-k8s repo, which now also lives in the org.
           - {name: approval-channel,    owner: homelab,       repo: approval-channel, path: k8s, autoSync: "true"}
+          # The message archive. Manifests in homelab/conversation-history; the CODE
+          # lives in forgejo-admin/conversation-history and builds the image.
+          - {name: conversation-history, owner: homelab, repo: conversation-history, path: k8s, autoSync: "true"}
           - {name: frigate,             owner: homelab,       repo: homelab-k8s, path: apps/frigate,             autoSync: "true"}
           - {name: immich,              owner: homelab,       repo: immich, path: k8s, autoSync: "true"}
           - {name: immich-public-proxy, owner: homelab,       repo: immich-public-proxy, path: k8s, autoSync: "true"}
