@@ -18,5 +18,14 @@ spec:
   schedule: "0 20 1 * * *"
   backupOwnerReference: self
   immediate: true
+  # Through the Barman Cloud plugin since 2026-08-15; the in-core
+  # barmanObjectStore method disappears in CNPG 1.31.0.
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  # Was inherited from `cluster.spec.backup.target`, which no longer
+  # exists. Unset here would silently move base backups onto the
+  # primary.
+  target: prefer-standby
   cluster:
     name: langfuse-pg

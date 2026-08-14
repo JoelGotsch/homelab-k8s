@@ -58,20 +58,17 @@ spec:
   # to tier-2/3 per ADR 0006. Langfuse traces are personal-class
   # data per ADR 0003 (LLM input/output text); backup-encrypt
   # via barmanObjectStore + restic-tier-3 password.
-  backup:
-    barmanObjectStore:
-      destinationPath: s3://homelab-backups-cluster/cnpg/langfuse
-      endpointURL: http://minio.minio-on-nas.svc.cluster.local:9000
-      s3Credentials:
-        accessKeyId:
-          name: langfuse-cnpg-s3
-          key: ACCESS_KEY_ID
-        secretAccessKey:
-          name: langfuse-cnpg-s3
-          key: SECRET_ACCESS_KEY
-      wal:
-        compression: bzip2
-      data:
-        compression: bzip2
-    # 90d per backup-and-dr.md class-aligned rule (personal class).
-    retentionPolicy: "90d"
+  # Backup: WAL+base to MinIO-on-NAS via the Barman Cloud plugin;
+  # target, credentials and retention live in objectstore.yaml.
+  # Restic mirrors the bucket to tier-2/3 per ADR 0006.
+  #
+  # Migrated off the in-core `spec.backup.barmanObjectStore` on
+  # 2026-08-15: CloudNativePG removes that field in 1.31.0. The two
+  # forms cannot coexist — the Cluster CRD refuses
+  # `isWALArchiver: true` while a barmanObjectStore block is present —
+  # so this is one atomic edit, not a staged cutover.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: langfuse-pg-backups
