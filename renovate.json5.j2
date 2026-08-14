@@ -41,6 +41,34 @@
       // check per cluster/control-plane-upgrade.md.
     },
 
+    // CloudNativePG operator chart — HOLD, all update types.
+    // Chart 0.29.0 = operator 1.30.0. The next chart MINOR carries
+    // operator 1.31.0, which REMOVES in-core
+    // `spec.backup.barmanObjectStore`. Ten CNPG clusters still use
+    // it; merging that bump before the barman-cloud plugin
+    // migration completes deletes WAL archiving + base backups
+    // fleet-wide in a single Argo sync. The hold covers minor and
+    // patch (not just major) precisely because the operator minor
+    // rides in on a chart minor, which the grouping rule above
+    // would sweep into the routine "helm charts (minor+patch)" PR.
+    //
+    // Remove ONLY after Phase 6 of
+    // homelab-docs/03-runbooks/cnpg/barman-plugin-migration.md.
+    {
+      matchManagers: ["helmv3"],
+      matchPackageNames: ["cloudnative-pg"],
+      enabled: false,
+    },
+
+    // Barman Cloud CNPG-I plugin chart — reviewed on its own, never
+    // grouped: it moves in lockstep with the operator's plugin API
+    // and owns the backup path for every database.
+    {
+      matchManagers: ["helmv3"],
+      matchPackageNames: ["plugin-barman-cloud"],
+      groupName: null,
+    },
+
     // Hold the Argo CD chart at the operator's pinned major
     // until v3 / future-major is validated against the rest
     // of the GitOps chain.
