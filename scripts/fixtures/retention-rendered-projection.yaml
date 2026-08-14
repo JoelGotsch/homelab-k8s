@@ -202,7 +202,7 @@ layers:
         source_name_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.name
         source_key_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.key
   - path: observability/crowdsec
-    input_digest_sha256: eee0b2dba7cf10a1ebd1a8fa063cc44b0741853f967a714376e7681c162b2be2
+    input_digest_sha256: 8fabad225540291e5f43733e2608766384f8c0625dc80c19c1f9d0756376dcaf
     chart:
       name: crowdsec
       repository: https://crowdsecurity.github.io/helm-charts

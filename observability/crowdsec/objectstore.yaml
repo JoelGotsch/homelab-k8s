@@ -1,0 +1,56 @@
+# Barman Cloud ObjectStore for the CrowdSec LAPI database.
+#
+# Successor to the Cluster's `spec.backup.barmanObjectStore`, which
+# CloudNativePG removes in 1.31.0. Same bucket, same prefix, same
+# credentials Secret, same compression — only the component that writes
+# them changes: an injected sidecar instead of the instance manager.
+#
+# `serverName` is deliberately unset. The plugin derives it from the
+# Cluster name (`crowdsec-lapi`), which is exactly what the existing
+# objects under s3://homelab-backups-cluster/cnpg/crowdsec/ already
+# use, so the WAL chain and base backups continue rather than starting
+# a second, parallel history.
+#
+# Migration procedure + verification gates:
+# homelab-docs/03-runbooks/cnpg/barman-plugin-migration.md
+
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: crowdsec-lapi-backups
+  namespace: observability-crowdsec
+spec:
+  # Moved here from Cluster.spec.backup.retentionPolicy: with the
+  # plugin, retention is a property of the object store, and the
+  # sidecar enforces it.
+  # 30d per backup-and-dr.md class-aligned rule (internal class —
+  # banned-IP / decision metadata; older PITR satisfied via Restic
+  # tier-2/3 restore if ever needed).
+  retentionPolicy: "30d"
+
+  configuration:
+    destinationPath: s3://homelab-backups-cluster/cnpg/crowdsec
+    endpointURL: http://minio.minio-on-nas.svc.cluster.local:9000
+    s3Credentials:
+      accessKeyId:
+        name: crowdsec-cnpg-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: crowdsec-cnpg-s3
+        key: SECRET_ACCESS_KEY
+    wal:
+      compression: bzip2
+    data:
+      compression: bzip2
+
+  # NOT optional. The namespace LimitRange defaults an unset container
+  # to `memory: 512Mi`, so omitting this does not fail admission — it
+  # silently caps the process that streams and bzip2-compresses base
+  # backups, and the failure surfaces mid-backup as an OOMKill.
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 1Gi

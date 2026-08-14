@@ -61,29 +61,24 @@ spec:
       database: crowdsec
       owner: crowdsec
 
-  # Backup: WAL+base to MinIO-on-NAS. Restic CronJob (separate)
-  # replicates the bucket to tier-2/3 per ADR 0006.
+  # Backup: WAL+base to MinIO-on-NAS via the Barman Cloud plugin.
+  # Restic CronJob (separate) replicates the bucket to tier-2/3 per
+  # ADR 0006. Target, credentials and retention live in
+  # objectstore.yaml.
   #
-  # SEQUENCING: MinIO-on-NAS must be Healthy before this
-  # Cluster's first sync. Pre-MinIO, comment the backup: block;
-  # CrowdSec carries internal-class data, acceptable to
-  # bootstrap without backups. Re-enable once MinIO lands.
-  backup:
-    barmanObjectStore:
-      destinationPath: s3://homelab-backups-cluster/cnpg/crowdsec
-      endpointURL: http://minio.minio-on-nas.svc.cluster.local:9000
-      s3Credentials:
-        accessKeyId:
-          name: crowdsec-cnpg-s3
-          key: ACCESS_KEY_ID
-        secretAccessKey:
-          name: crowdsec-cnpg-s3
-          key: SECRET_ACCESS_KEY
-      wal:
-        compression: bzip2
-      data:
-        compression: bzip2
-    # 30d per backup-and-dr.md class-aligned rule (internal class —
-    # banned-IP / decision metadata; older PITR satisfied via
-    # Restic tier-2/3 restore if ever needed).
-    retentionPolicy: "30d"
+  # Migrated off the in-core `spec.backup.barmanObjectStore` on
+  # 2026-08-14 (first cluster of the fleet migration) because
+  # CloudNativePG removes that field in 1.31.0. The two forms cannot
+  # coexist: the Cluster CRD refuses `isWALArchiver: true` while a
+  # barmanObjectStore block is present, so this was a single atomic
+  # edit, not a staged cutover.
+  #
+  # SEQUENCING: MinIO-on-NAS and infrastructure/cnpg-barman-plugin
+  # must be Healthy before this Cluster's first sync. Pre-MinIO,
+  # comment the plugins: block; CrowdSec carries internal-class data,
+  # acceptable to bootstrap without backups.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: crowdsec-lapi-backups
