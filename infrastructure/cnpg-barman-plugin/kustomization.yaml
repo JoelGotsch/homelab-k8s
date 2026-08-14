@@ -1,0 +1,37 @@
+# Barman Cloud CNPG-I plugin — the backup path for every CNPG
+# database once the in-core `spec.backup.barmanObjectStore` support is
+# gone.
+#
+# In-core barman is deprecated since CloudNativePG 1.26 and REMOVED in
+# 1.31.0. This cluster runs 1.30.0 (chart 0.29.0 in
+# ../cnpg/kustomization.yaml), so the removal arrives as an ordinary
+# Renovate chart bump. The operator chart is held in renovate.json5
+# until every Cluster is migrated onto this plugin; the migration
+# procedure is
+# homelab-docs/03-runbooks/cnpg/barman-plugin-migration.md.
+#
+# Installed from the chart rather than the release manifest.yaml on
+# purpose: the manifest ships the sidecar image reference in a Secret,
+# and `cnpg-system` is a first-party namespace, so Kyverno
+# `homelab-disallow-inline-secrets` would demand an ESO-owned Secret or
+# a waiver annotation for a value that is not secret at all. The chart
+# puts the same value in a ConfigMap, and it fits the repo's
+# helmCharts + Renovate pattern.
+#
+# Prerequisites (both satisfied here): CloudNativePG >= 1.26 in this
+# same namespace, and cert-manager — the chart issues the plugin's
+# gRPC client/server certificates through a namespace-local
+# self-signed Issuer, which is why nothing here touches the homelab
+# PKI.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+helmCharts:
+  - name: plugin-barman-cloud
+    repo: https://cloudnative-pg.github.io/charts
+    version: "0.7.1"  # → plugin v0.14.0. OPERATOR PINS via Renovate.
+    releaseName: barman-cloud
+    namespace: cnpg-system
+    valuesFile: values.yaml
+    includeCRDs: true

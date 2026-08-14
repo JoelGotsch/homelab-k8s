@@ -1,0 +1,29 @@
+# Barman Cloud plugin Helm values.
+#
+# `resources` is NOT optional here. The chart ships `resources: {}`,
+# `cnpg-system` carries no LimitRange to default them in, and Kyverno
+# `homelab-disallow-unlimited-containers` is Enforce cluster-wide
+# (excluding only kube-system / kube-public / kube-node-lease). An
+# unset block means the plugin pod is rejected at admission, not
+# throttled — verified against the policy on 2026-08-14.
+#
+# Sizing follows the CNPG operator next door (100m / 256Mi req,
+# 512Mi limit): this process is a gRPC control-plane component that
+# hands work to per-instance sidecars. It does not move backup bytes
+# itself, so it stays smaller than the operator.
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+# Per-instance sidecar resources are NOT set here — they belong to
+# each ObjectStore's `.spec.instanceSidecarConfiguration.resources`,
+# because that is the container that actually runs
+# barman-cloud-backup / -wal-archive against MinIO-on-NAS and its
+# memory need scales with the database, not with this deployment.
+# Leaving them unset there is a live hazard rather than an admission
+# failure: app namespaces DO have a LimitRange, so the sidecar would
+# silently inherit `memory: 512Mi` and OOM mid-base-backup on the
+# larger clusters.

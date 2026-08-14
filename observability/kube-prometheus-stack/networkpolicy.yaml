@@ -129,6 +129,23 @@ spec:
           protocol: TCP
         - port: 10250  # kubelet metrics
           protocol: TCP
+        # CNPG instance-manager metrics (every Postgres pod, all
+        # namespaces). 5th recurrence of the trap this comment warns
+        # about, and the most expensive one: with 9187 missing, EVERY
+        # cnpg_* series was absent cluster-wide, so
+        # CNPGContinuousArchivingFailing could never fire — measured
+        # 2026-08-14 as 0 series / 0 up targets across 11 clusters,
+        # after librechat-vectordb had already spent 8 days with no
+        # WAL archiving and no alert. Proven with a two-pod A/B in the
+        # monitoring namespace: identical curl to a CNPG pod's :9187
+        # succeeded without the `app.kubernetes.io/name: prometheus`
+        # label and timed out with it — i.e. this allowlist, not the
+        # database namespaces' own ingress rules, was the deny.
+        # The barman-cloud plugin's backup metrics are exported
+        # through the same endpoint, so this one port also covers the
+        # post-migration `barman_cloud_cloudnative_pg_io_*` family.
+        - port: 9187
+          protocol: TCP
     # External hosts via additional-scrape-configs (Mac Studio
     # node-exporter on inference VLAN per
     # observability/prometheus/external-hosts/).
