@@ -1,0 +1,52 @@
+# Barman Cloud ObjectStore for the forgejo-pg database.
+#
+# Successor to the Cluster's `spec.backup.barmanObjectStore`, which
+# CloudNativePG removes in 1.31.0. Same bucket, same prefix, same
+# credentials Secret, same compression — only the component writing
+# them changes: an injected sidecar instead of the instance manager.
+#
+# `serverName` stays unset: the plugin derives it from the Cluster name
+# (`forgejo-pg`), which is what the existing objects under
+# s3://homelab-backups-cluster/cnpg/forgejo/ already use, so the WAL chain
+# and base backups continue instead of starting a parallel one.
+#
+# Procedure + per-cluster gates:
+# homelab-docs/03-runbooks/cnpg/barman-plugin-migration.md
+
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: forgejo-pg-backups
+  namespace: forgejo
+spec:
+  # Moved from Cluster.spec.backup.retentionPolicy — with the plugin,
+  # retention belongs to the object store and the sidecar enforces it.
+  # Forgejo metadata is `internal`-class: 30-day PITR window per backup-and-dr.md (git objects themselves live on the NAS share).
+  retentionPolicy: "30d"
+
+  configuration:
+    destinationPath: s3://homelab-backups-cluster/cnpg/forgejo
+    endpointURL: http://minio.minio-on-nas.svc.cluster.local:9000
+    s3Credentials:
+      accessKeyId:
+        name: forgejo-cnpg-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: forgejo-cnpg-s3
+        key: SECRET_ACCESS_KEY
+    wal:
+      compression: bzip2
+    data:
+      compression: bzip2
+
+  # Do not omit: where the namespace has a LimitRange the sidecar
+  # silently inherits `memory: 512Mi`, and where it has none the
+  # sidecar is unbounded. This is the container that streams and
+  # bzip2-compresses base backups.
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 1Gi
