@@ -81,6 +81,21 @@ spec:
         - ports:
             - port: "3000"
               protocol: TCP
+    # llm-gateway's registry-reconcile CronJob — clones + pushes
+    # homelab/llm-gateway and homelab/librechat to land the Mac's model
+    # inventory. It dials the PUBLIC name, not this Service, but the
+    # Cilium Gateway proxies to :3000 carrying the job pod's identity,
+    # so the request is policed here too — without this rule Envoy
+    # returns a plaintext 403 "Access denied" for every request,
+    # including unauthenticated ones (2026-08-14).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: llm-gateway
+            app.kubernetes.io/name: registry-reconcile
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
     # SSH-over-LoadBalancer (forgejo-ssh Service, 10.10.30.51:22):
     # the Service port 22 DNATs to pod port 2222, and with
     # externalTrafficPolicy: Cluster the L2-announcer node SNATs
