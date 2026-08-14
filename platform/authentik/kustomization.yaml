@@ -83,3 +83,24 @@ configMapGenerator:
       # so values.yaml's static `blueprints.configMaps:`
       # reference stays valid across edits.
       disableNameSuffixHash: true
+
+  # Custom email templates, mounted at /templates on BOTH server and worker
+  # via global.volumes in values.yaml. Authentik's Django TEMPLATES DIRS is
+  # ['/templates'] (confirmed against the running 2026.5.4 instance), so a
+  # file here is selectable on an Email stage by bare filename — see
+  # blueprints/homelab-recovery-flow.yaml, which points
+  # default-recovery-email at homelab_welcome.html instead of the bundled
+  # email/password_reset.html.
+  #
+  # The worker needs this as much as the server: the recovery email is
+  # rendered and sent from a worker task, so mounting it server-only would
+  # fail at send time rather than at startup.
+  - name: authentik-email-templates
+    namespace: authentik
+    files:
+      - email-templates/homelab_welcome.html
+    options:
+      # Same reasoning as the blueprints ConfigMap above: a hash suffix would
+      # rename the ConfigMap on every edit and break the static volume
+      # reference in values.yaml.
+      disableNameSuffixHash: true

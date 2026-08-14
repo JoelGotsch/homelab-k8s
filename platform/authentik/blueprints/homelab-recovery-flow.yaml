@@ -81,7 +81,22 @@ entries:
       from_address: system@authentik.local
       token_expiry: minutes=30
       subject: "Homelab — set or reset your password"
-      template: email/password_reset.html
+      # Custom template mounted at /templates from the authentik-email-templates
+      # ConfigMap (kustomization.yaml), replacing the bundled
+      # email/password_reset.html. Selected by BARE FILENAME because
+      # /templates is itself a TEMPLATES DIR — not "email/homelab_welcome.html",
+      # which is how the bundled ones are addressed inside their app packages.
+      #
+      # The bundled template says only "set your password" and nothing else.
+      # That left a family member's first contact with the homelab with no
+      # mention that the link only resolves on the tailnet, that one account
+      # covers every shared app, or that the password manager is separate —
+      # every one of which they needed on 2026-08-14.
+      #
+      # If this filename stops resolving, the stage falls back to rendering
+      # nothing useful rather than erroring loudly, so verify after changing:
+      #   kubectl exec -n authentik deploy/authentik-worker -- ls /templates
+      template: homelab_welcome.html
       activate_user_on_success: true
       recovery_max_attempts: 5
       recovery_cache_timeout: minutes=5
