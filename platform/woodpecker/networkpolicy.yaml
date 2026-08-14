@@ -115,10 +115,10 @@ spec:
             - port: "6443"
               protocol: TCP
 ---
-# CI step Pods (ci-woodpecker ns): default-deny ingress;
-# egress to kube-DNS + Forgejo (git clone) + curated
-# upstream registries (CCNP toFQDNs in the second policy
-# below).
+# CI step Pods (ci-woodpecker ns): ingress only from sibling
+# step Pods of the same pipeline; egress to kube-DNS + Forgejo
+# (git clone) + sibling step Pods + curated upstream registries
+# (CCNP toFQDNs in the second policy below).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -126,8 +126,30 @@ metadata:
   namespace: ci-woodpecker
 spec:
   endpointSelector: {}
-  # No ingress rules — step pods receive no inbound traffic.
+  ingress:
+    # Sibling step Pods in this namespace. A Woodpecker `services:`
+    # entry (a database, a broker) runs as its OWN Pod with its own
+    # Service, and the step that uses it connects by that name — so
+    # "step pods receive no inbound traffic", which this policy said
+    # until 2026-08-14, is only true of pipelines without services.
+    # conversation-history is the first repo here to declare one: its
+    # integration suite needs a real Postgres (no Docker socket on the
+    # k8s backend, so testcontainers cannot work). Without this rule
+    # the connection is DROPPED, not refused, so the symptom is a
+    # bare `psycopg.errors.ConnectionTimeout` with a service whose own
+    # logs say "ready to accept connections" — 199 errors and an
+    # 11-minute step before anything says "network".
+    #
+    # Scoped to this namespace, which holds nothing but ephemeral CI
+    # step Pods that are already free to run arbitrary pipeline code.
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: ci-woodpecker
   egress:
+    # Sibling step Pods — the other half of the rule above.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: ci-woodpecker
     # kube-DNS.
     - toEndpoints:
         - matchLabels:
