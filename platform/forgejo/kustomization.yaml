@@ -71,9 +71,26 @@ replacements:
 #
 # Consequence while it was broken: with no recurring-job label
 # Longhorn puts a volume in the `default` group, so the volume
-# was snapshotted hourly with 6 retained (~6h of history) rather
-# than 4-hourly with 42 retained (~7d). Protected, but with a
-# fraction of the intended window.
+# is snapshotted hourly with 6 retained (~6h of history) rather
+# than 4-hourly with 42 retained (~7d).
+#
+# It is NOT unprotected, and the first reading of this overstated
+# it. The volume separately carries a `backup` group label applied
+# straight to the Volume CR by scripts/label-backup-volumes.sh, so
+# backup-daily has been taking an OFFSITE backup to NAS MinIO
+# nightly with 14 retained throughout. What was missing is the
+# local-snapshot depth, not the backup.
+#
+# This commit is the GIT HALF ONLY. A PVC label edit does not fire
+# a Volume update, and this cluster deliberately does not use
+# Longhorn's native PVC->Volume sync (`recurring-job.longhorn.io/
+# source: enabled` would strip the script-applied `backup` label).
+# Propagation is the Kyverno `longhorn-volume-label-propagation`
+# policy, which mutates on Volume create/update — so the existing
+# volume keeps `default` until someone re-triggers it. Same
+# operator runtime step already tracked in homelab-docs TODO.md
+# for nextcloud-hot and jellyfin-config; gitea-shared-storage is
+# now listed there too.
 #
 # Only this one PVC is chart-created AND Longhorn-backed, so a
 # name target is exact. The explicit PVCs in pvc.yaml stay
