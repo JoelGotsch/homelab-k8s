@@ -7,17 +7,32 @@
 #
 # Checks, in order:
 #   1. Cluster Ready + ContinuousArchiving=True.
-#   2. Which archiver is in play (in-core barmanObjectStore vs plugin),
-#      and that exactly one is configured.
-#   3. Instance pods carry the barman sidecar with explicit memory
-#      requests+limits (the LimitRange would otherwise cap it at 512Mi).
-#   4. A forced WAL switch produces a NEW object under the SAME S3
-#      prefix within the timeout — the only real proof of archiving.
-#   5. Backup objects: newest phase + method.
+#   2. Exactly one archiver configured: in-core barmanObjectStore XOR
+#      the barman-cloud plugin.
+#   3. Instance pods: every non-postgres container (i.e. the barman
+#      sidecar, once migrated) carries a memory limit. Namespaces with a
+#      LimitRange would silently cap it at 512Mi; namespaces without one
+#      leave it unbounded.
+#   4. THE PROOF: force a new WAL segment and require that this exact
+#      segment lands in S3, under the prefix the cluster already uses.
+#      This is what catches both classes of silent failure seen on
+#      2026-08-14 — archiving that never worked (librechat-vectordb) and
+#      a serverName change that would fork the object history.
+#   5. Backup objects: newest method + phase.
 #   6. lastSuccessfulBackup / firstRecoverabilityPoint are set.
 #
-# Exit non-zero on the first hard failure. Read-only except for
-# pg_switch_wal() on the primary, which is a normal, safe operation.
+# Why a restore point and not just pg_switch_wal(): on an IDLE primary
+# `pg_switch_wal()` is a no-op — there is nothing in the current segment
+# to close, so nothing is archived, and a naive "did a new object
+# appear?" check reports a false failure. (It did, for llm-gateway, on
+# 2026-08-14; the lane was healthy.) `pg_create_restore_point()` writes
+# one small WAL record first, so the switch always has something to
+# archive. Same idle-WAL trap as the standby-rejoin caveat in
+# known-caveats.md.
+#
+# Exit non-zero on the first hard failure. The only write is a restore
+# point plus a WAL switch on the primary: both are routine, and neither
+# touches application data.
 
 set -euo pipefail
 
@@ -39,13 +54,17 @@ mc() {
   pod="$(k -n minio-on-nas get pod -l app=minio \
     -o jsonpath='{.items[0].metadata.name}')"
   [ -n "$pod" ] || fail "no MinIO pod found in minio-on-nas"
-  # mc writes config to ~/.mcli; PSS-restricted + read-only rootfs on the
-  # MinIO pod means only /dev/shm is writable.
+  # mc writes its config to ~/.mcli; PSS-restricted + read-only rootfs
+  # on the MinIO pod means only /dev/shm is writable.
   k -n minio-on-nas exec "$pod" -- sh -c "
     MC_CONFIG_DIR=/dev/shm/mcc mc alias set local http://localhost:9000 \
       minioadmin \"\$MINIO_ROOT_PASSWORD\" >/dev/null
     MC_CONFIG_DIR=/dev/shm/mcc $*
   "
+}
+
+psql_primary() {
+  k exec -n "$NS" "$PRIMARY" -c postgres -- psql -tAc "$1"
 }
 
 say "1. cluster conditions"
@@ -69,15 +88,21 @@ echo "plugin barmanObjectName: ${plugin:-<none>}"
 [ -z "$incore" ] && [ -z "$plugin" ] && fail "NO archiver configured"
 
 say "3. instance pods + sidecar resources"
+# The barman sidecar is injected as a NATIVE sidecar: an initContainer
+# with restartPolicy: Always. It does not appear in .spec.containers, so
+# a check that only walks containers sees nothing and passes vacuously.
 k get pod -n "$NS" -l "cnpg.io/cluster=$CLUSTER,cnpg.io/podRole=instance" \
   -o json | python3 -c '
 import json,sys
 bad=0
 for p in json.load(sys.stdin)["items"]:
-    names=[c["name"] for c in p["spec"]["containers"]]
-    print(" ", p["metadata"]["name"], names)
-    for c in p["spec"]["containers"]:
-        r=c.get("resources",{})
+    spec=p["spec"]
+    sidecars=[c for c in spec.get("initContainers",[]) if c.get("restartPolicy")=="Always"]
+    print(" ", p["metadata"]["name"],
+          "containers=%s sidecars=%s" % ([c["name"] for c in spec["containers"]],
+                                         [c["name"] for c in sidecars]))
+    for c in spec["containers"] + sidecars:
+        r=c.get("resources",{}) or {}
         lim=(r.get("limits") or {}).get("memory")
         req=(r.get("requests") or {}).get("memory")
         print("      %-24s req=%s lim=%s" % (c["name"], req, lim))
@@ -86,21 +111,40 @@ for p in json.load(sys.stdin)["items"]:
 sys.exit(bad)
 ' || fail "a sidecar has no memory limit"
 
-say "4. forced WAL switch lands a new object in s3://$BUCKET/cnpg/$PREFIX/"
-before=$(mc "mc ls --recursive local/$BUCKET/cnpg/$PREFIX/" | wc -l | tr -d ' ')
-primary=$(k get pod -n "$NS" \
+say "4. force a WAL segment and require it in S3 under cnpg/$PREFIX/$CLUSTER/"
+PRIMARY="$(k get pod -n "$NS" \
   -l "cnpg.io/cluster=$CLUSTER,cnpg.io/instanceRole=primary" \
-  -o jsonpath='{.items[0].metadata.name}')
-[ -n "$primary" ] || fail "no primary pod found"
-echo "primary: $primary   objects before: $before"
-k exec -n "$NS" "$primary" -c postgres -- psql -tAc "SELECT pg_switch_wal();" >/dev/null
+  -o jsonpath='{.items[0].metadata.name}')"
+[ -n "$PRIMARY" ] || fail "no primary pod found (cnpg.io/instanceRole=primary)"
+before_count="$(psql_primary 'SELECT archived_count FROM pg_stat_archiver;' | tr -d ' ')"
+before_wal="$(psql_primary 'SELECT last_archived_wal FROM pg_stat_archiver;' | tr -d ' ')"
+echo "primary: $PRIMARY   archived_count=$before_count last=$before_wal"
+
+# A restore point guarantees the current segment is non-empty, so the
+# switch below always produces something to archive.
+psql_primary "SELECT pg_create_restore_point('backup-lane-verify');" >/dev/null
+psql_primary 'SELECT pg_switch_wal();' >/dev/null
+
 deadline=$(( $(date +%s) + WAL_TIMEOUT ))
 while :; do
-  after=$(mc "mc ls --recursive local/$BUCKET/cnpg/$PREFIX/" | wc -l | tr -d ' ')
-  [ "$after" -gt "$before" ] && { echo "objects after: $after — NEW WAL ARCHIVED"; break; }
-  [ "$(date +%s)" -ge "$deadline" ] && fail "no new object after ${WAL_TIMEOUT}s — archiving is NOT working"
+  now_count="$(psql_primary 'SELECT archived_count FROM pg_stat_archiver;' | tr -d ' ')"
+  now_wal="$(psql_primary 'SELECT last_archived_wal FROM pg_stat_archiver;' | tr -d ' ')"
+  if [ "$now_count" -gt "$before_count" ] 2>/dev/null; then
+    echo "archived_count $before_count -> $now_count, last_archived_wal=$now_wal"
+    break
+  fi
+  [ "$(date +%s)" -ge "$deadline" ] && fail "pg_stat_archiver did not advance in ${WAL_TIMEOUT}s — archiving is NOT working"
   sleep 5
 done
+
+# The object must exist under the cluster's OWN prefix. A serverName
+# change would archive successfully into a DIFFERENT prefix and fork the
+# history, which a "did the bucket grow?" check cannot see.
+key="cnpg/$PREFIX/$CLUSTER/wals/${now_wal:0:16}/${now_wal}.bz2"
+echo "expecting s3://$BUCKET/$key"
+mc "mc stat local/$BUCKET/$key" >/dev/null 2>&1 \
+  || fail "archived $now_wal is NOT at the expected key ($key) — serverName or destinationPath drift"
+echo "object present — WAL chain continues under the same prefix"
 
 say "5. backup objects (fully-qualified: 'backup' alone resolves to longhorn.io)"
 k get backups.postgresql.cnpg.io -n "$NS" \
