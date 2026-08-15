@@ -125,9 +125,33 @@ per-lane after reviewing one nightly dry-run diff:
 #     value: "1"
 ```
 
-**Until `RESTIC_FORGET_APPLY=1` is set, neither lane prunes and the repo
-grows unbounded.** The lanes are small (cluster ~120 MiB; NAS bounded), so
-there is time to review, but this env must eventually be flipped.
+### Gate status: OPEN on both lanes since 2026-08-15
+
+~~Until `RESTIC_FORGET_APPLY=1` is set, neither lane prunes and the repo grows
+unbounded.~~ Both lanes now carry `RESTIC_FORGET_APPLY=1`, so `forget` removes
+and `prune` reclaims on every run. The review the gate was waiting for is the
+2026-08-15 dry-run:
+
+| lane | selector | keep | removed on first apply |
+|---|---|---|---|
+| NAS | `nas-personal,personal` | 48 | 45 |
+| NAS | `nas-personal,internal` | 28 | 14 |
+| cluster | `tier-3` | 30 | 3 |
+
+Both splits follow the agreed GFS policy rather than looking like a mis-scoped
+filter, which is the single thing the gate existed to rule out. The selectors
+are disjoint, so neither lane can reach the other's snapshots even though they
+share one repo — that is why both were opened together.
+
+What to watch on the first applied run of each lane: `forget` should report the
+counts above (a wildly larger removal set means the selector changed, not that
+retention "caught up"), and `prune` should run instead of printing
+`prune SKIPPED`. **`prune` is not reversible** — a removed snapshot is gone
+once its blocks are unreferenced.
+
+Note the retention depth is unchanged by this flip; only enforcement is. If a
+snapshot must survive retention, tag it `preserve` (`--keep-tag preserve` is
+already in every `forget_class` call).
 
 ## Layout
 

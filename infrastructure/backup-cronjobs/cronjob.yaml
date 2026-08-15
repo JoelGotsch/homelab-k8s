@@ -355,6 +355,15 @@ spec:
               env:
                 - name: HOME
                   value: /tmp  # restic uses ~/.cache; readOnlyRootFilesystem requires writable HOME
+                # Retention gate OPENED 2026-08-15, same review as the
+                # nas-personal lane. This lane's 2026-08-15 dry-run: `tier-3`
+                # keep 30 / remove 3 — small, and within the agreed policy.
+                # The two lanes share one repo but their forget selectors are
+                # disjoint (`tier-3` here, `nas-personal,<class>` there), so
+                # neither can reach the other's snapshots; that separation is
+                # the reason it is safe to open both at once.
+                - name: RESTIC_FORGET_APPLY
+                  value: "1"
               envFrom:
                 - secretRef:
                     name: hetzner-sb-creds

@@ -203,6 +203,16 @@ spec:
               env:
                 - name: HOME
                   value: /tmp
+                # Retention gate OPENED 2026-08-15, after the review it was
+                # waiting for. The 2026-08-15 dry-run was the diff: per class,
+                # `personal` keep 48 / remove 45 and `internal` keep 28 /
+                # remove 14 — 76 kept, 59 removed of 135. That split follows
+                # the agreed GFS policy (personal 7/5/12/1, internal 7/4/6)
+                # rather than looking like a mis-scoped filter, which is the
+                # one thing this gate existed to rule out. From here `forget`
+                # removes and `prune` reclaims on every run.
+                - name: RESTIC_FORGET_APPLY
+                  value: "1"
               envFrom:
                 - secretRef:
                     name: hetzner-sb-creds
