@@ -53,6 +53,27 @@ spec:
         - ports:
             - port: "8200"
               protocol: TCP
+    # Cilium Gateway envoy — the OpenBao UI/API on openbao.lab.vyramo.com,
+    # reached from the LAN and over the tailnet via the ADR 0044 subnet
+    # router. Uses the reserved `ingress` ENTITY, not a namespace selector:
+    # Gateway API traffic carries the `ingress` identity rather than the
+    # source namespace's, so `k8s:io.kubernetes.pod.namespace: ingress`
+    # silently drops it (the canonical write-up is in
+    # platform/authentik/networkpolicy.yaml).
+    #
+    # Added 2026-08-15. The httproute.yaml here has published
+    # openbao.lab.vyramo.com since it was written, while this policy did not
+    # admit the gateway — so the hostname answered 503
+    # "upstream connect error ... connection timeout" and every operator
+    # reached OpenBao by `kubectl port-forward` instead. The manifest
+    # advertised access the policy denied; one of the two had to change and
+    # the operator chose to make the route work (2026-08-15).
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
     # Raft cluster (8201) + replication (8202) between the server pods.
     - fromEndpoints:
         - matchLabels:
