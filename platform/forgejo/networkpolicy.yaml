@@ -406,6 +406,33 @@ spec:
         - ports:
             - port: "8443"
               protocol: TCP
+    # argocd-repo-server — Helm chart pulls from the mirror (ADR 0052 D3).
+    # Charts are referenced, not vendored, so the reconciler now pulls them
+    # from registry.homelab.internal at render time.
+    #
+    # This was the "unreachable registry" in ADR 0052, and it presented as
+    # the same class as the registry-integrity-probe case above: one
+    # direction missing, so the connection hangs rather than refusing.
+    # Measured from inside the repo-server pod before this rule:
+    # `getent hosts` resolved 10.10.30.52, and
+    # `openssl s_client -connect registry.homelab.internal:443` returned NO
+    # output at all before timing out — while the same command against
+    # forgejo's LB (10.10.30.50) from the same pod completed a handshake,
+    # and the operator's laptop got a clean 401 from the registry. A
+    # silently blackholed destination with a working sibling is a policy
+    # drop, not the LB hairpin first suspected.
+    #
+    # Scoped to the repo-server rather than the whole argocd namespace: it
+    # is the only component that renders manifests, so it is the only one
+    # that needs the mirror.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: argocd
+            app.kubernetes.io/name: argocd-repo-server
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:
