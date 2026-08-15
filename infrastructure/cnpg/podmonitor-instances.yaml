@@ -60,3 +60,11 @@ spec:
       cnpg.io/podRole: instance
   podMetricsEndpoints:
     - port: metrics
+      relabelings:
+        # Expose the cluster name as `cluster`. archiving-rules.yaml has
+        # always referenced {{ $labels.cluster }} in its annotations, and
+        # without this it renders empty -- the alert would have named a
+        # namespace and nothing else.
+        - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+          targetLabel: cluster
+          action: replace

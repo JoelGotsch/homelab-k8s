@@ -107,3 +107,113 @@ spec:
                 4. S3 credentials rotated without reseeding OpenBao
                    `kv/cnpg/<app>/s3-creds`.
             runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/phase_1_bring_up/03-runbooks/cnpg/cluster-rebuild.md"
+
+        # ---------------------------------------------------------------
+        # Base-backup lane. The rule above only sees WAL archiving; a
+        # cluster whose base backups stopped keeps archiving happily
+        # while its recoverability point ages out of the retention
+        # window. That is exactly what happened to librechat-vectordb
+        # between 2026-08-07 and 2026-08-14: WAL was fine once the
+        # credentials landed, but a Backup object wedged in a
+        # non-terminal phase blocked its ScheduledBackup for eight days
+        # ("The system is already taking a backup for this
+        # ScheduledBackup", every 60s, no self-recovery) and nothing
+        # alerted.
+        #
+        # Metric names differ before and after the barman-cloud plugin
+        # migration, so both are matched: `or` unions by label set and
+        # prefers the left-hand series where both exist.
+        #
+        # `> 0` matters: replicas export these gauges as 0, so an
+        # unfiltered max() would report every cluster as never-backed-up.
+        - alert: CNPGBaseBackupStale
+          expr: |
+            time() - max by (namespace, cluster) (
+              (cnpg_collector_last_available_backup_timestamp > 0)
+              or
+              (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp > 0)
+            ) > 129600
+          for: 2h
+          labels:
+            severity: warning
+            component: cnpg
+          annotations:
+            summary: "CNPG base backup is stale for {{ $labels.namespace }}/{{ $labels.cluster }}"
+            description: |
+              No successful base backup in more than 36 hours, against a
+              nightly ScheduledBackup. WAL archiving may still be healthy —
+              this is about the recoverability POINT, not the WAL stream.
+
+              Triage (note the fully-qualified resource: plain `backup`
+              resolves to longhorn.io on this cluster and silently reports
+              nothing):
+                kubectl -n {{ $labels.namespace }} get backups.postgresql.cnpg.io \
+                  --sort-by=.metadata.creationTimestamp
+                kubectl -n {{ $labels.namespace }} get scheduledbackup
+
+              The common cause is a Backup stuck in a non-terminal phase:
+              the ScheduledBackup will not create another until it
+              finishes, and it does not recover on its own. Delete the
+              wedged Backup object, then confirm the next run completes.
+
+        - alert: CNPGBackupFailing
+          expr: |
+            max by (namespace, cluster) (
+              (cnpg_collector_last_failed_backup_timestamp)
+              or
+              (barman_cloud_cloudnative_pg_io_last_failed_backup_timestamp)
+            )
+            >
+            max by (namespace, cluster) (
+              (cnpg_collector_last_available_backup_timestamp)
+              or
+              (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp)
+            )
+          for: 30m
+          labels:
+            severity: warning
+            component: cnpg
+          annotations:
+            summary: "CNPG base backup failing for {{ $labels.namespace }}/{{ $labels.cluster }}"
+            description: |
+              The most recent base backup attempt failed and no successful
+              one has happened since. Same triage as CNPGBaseBackupStale;
+              check the backup object's `.status.error` and the barman
+              sidecar's logs:
+                kubectl -n {{ $labels.namespace }} logs {{ $labels.pod }} \
+                  -c plugin-barman-cloud --tail=50
+
+        # A cluster that has NEVER been backed up reports 0 on every
+        # instance, so the staleness rule above (which filters `> 0`)
+        # cannot see it. conversation-history-pg was exactly this on
+        # 2026-08-14: bootstrapped with no spec.backup, no ObjectStore,
+        # no ScheduledBackup, and no signal anywhere.
+        - alert: CNPGClusterHasNoBackup
+          expr: |
+            count by (namespace, cluster) (
+              cnpg_collector_last_available_backup_timestamp == 0
+            )
+            unless
+            count by (namespace, cluster) (
+              (cnpg_collector_last_available_backup_timestamp > 0)
+              or
+              (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp > 0)
+            )
+          for: 6h
+          labels:
+            severity: warning
+            component: cnpg
+          annotations:
+            summary: "CNPG cluster {{ $labels.namespace }}/{{ $labels.cluster }} has no backup at all"
+            description: |
+              No instance of this cluster reports a successful base backup.
+              Either the cluster was created without a backup lane, or its
+              first backup has never completed.
+
+              A new CNPG cluster needs: an ObjectStore in its namespace, a
+              `plugins:` entry with isWALArchiver on the Cluster, a
+              ScheduledBackup with `method: plugin`, and the MinIO service
+              account seeded into OpenBao (provision-minio-svcacct.sh).
+              See homelab-docs/03-runbooks/cnpg/barman-plugin-migration.md.
+              `for: 6h` tolerates the gap between creating a cluster and
+              its first `immediate: true` backup completing.
