@@ -37,6 +37,28 @@ spec:
     - secret:
         name: openbao-bootstrap-ca
         key: ca.crt
+    # OpenBao's NEW server-TLS CA (cert-manager-managed, 2026-08-16).
+    # inLine rather than a secret ref: trust-manager reads secret sources from
+    # its own namespace, and this CA is managed by cert-manager in the
+    # cert-manager namespace. The material is a public certificate, so
+    # inlining it costs nothing.
+    #
+    # Sits alongside openbao-bootstrap-ca deliberately — that one expires
+    # 2026-08-21 and is being retired. Trust is widened before the serving
+    # cert changes and narrowed afterwards; the reverse order would break
+    # every OpenBao client at once.
+    - inLine: |
+        -----BEGIN CERTIFICATE-----
+        MIIBmzCCAUCgAwIBAgIUIx9vHu56l/4J3L27lJ1N1COr4vIwCgYIKoZIzj0EAwIw
+        KzEQMA4GA1UEChMHaG9tZWxhYjEXMBUGA1UEAxMOb3BlbmJhby10bHMtY2EwHhcN
+        MjYwODE1MjIxNzQ4WhcNMzYwODEyMjIxNzQ4WjArMRAwDgYDVQQKEwdob21lbGFi
+        MRcwFQYDVQQDEw5vcGVuYmFvLXRscy1jYTBZMBMGByqGSM49AgEGCCqGSM49AwEH
+        A0IABG7gthmW+P5wScpGkqLg/xLOjaF+gHi5bnE0p0wc/jFdDv1lTxT7WrPfT0aL
+        kkzwLn3kvu8VdvEdPtZ+6sP3+W+jQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMB
+        Af8EBTADAQH/MB0GA1UdDgQWBBRGFd+K6LKk/IOhFNxllhPxmgIB+jAKBggqhkjO
+        PQQDAgNJADBGAiEA0cycgoMusUVfpqn2V0zpmvlga2Xt2LVsCJ5odpbZjd8CIQCi
+        k7EctPLDj63qzcwb8NdPsHs7LmcUkl9sgFrvnqCy3A==
+        -----END CERTIFICATE-----
   target:
     configMap:
       key: ca-bundle.pem
@@ -135,6 +157,28 @@ spec:
     - secret:
         name: openbao-bootstrap-ca
         key: ca.crt
+    # OpenBao's NEW server-TLS CA (cert-manager-managed, 2026-08-16).
+    # inLine rather than a secret ref: trust-manager reads secret sources from
+    # its own namespace, and this CA is managed by cert-manager in the
+    # cert-manager namespace. The material is a public certificate, so
+    # inlining it costs nothing.
+    #
+    # Sits alongside openbao-bootstrap-ca deliberately — that one expires
+    # 2026-08-21 and is being retired. Trust is widened before the serving
+    # cert changes and narrowed afterwards; the reverse order would break
+    # every OpenBao client at once.
+    - inLine: |
+        -----BEGIN CERTIFICATE-----
+        MIIBmzCCAUCgAwIBAgIUIx9vHu56l/4J3L27lJ1N1COr4vIwCgYIKoZIzj0EAwIw
+        KzEQMA4GA1UEChMHaG9tZWxhYjEXMBUGA1UEAxMOb3BlbmJhby10bHMtY2EwHhcN
+        MjYwODE1MjIxNzQ4WhcNMzYwODEyMjIxNzQ4WjArMRAwDgYDVQQKEwdob21lbGFi
+        MRcwFQYDVQQDEw5vcGVuYmFvLXRscy1jYTBZMBMGByqGSM49AgEGCCqGSM49AwEH
+        A0IABG7gthmW+P5wScpGkqLg/xLOjaF+gHi5bnE0p0wc/jFdDv1lTxT7WrPfT0aL
+        kkzwLn3kvu8VdvEdPtZ+6sP3+W+jQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMB
+        Af8EBTADAQH/MB0GA1UdDgQWBBRGFd+K6LKk/IOhFNxllhPxmgIB+jAKBggqhkjO
+        PQQDAgNJADBGAiEA0cycgoMusUVfpqn2V0zpmvlga2Xt2LVsCJ5odpbZjd8CIQCi
+        k7EctPLDj63qzcwb8NdPsHs7LmcUkl9sgFrvnqCy3A==
+        -----END CERTIFICATE-----
   target:
     configMap:
       # Named exactly like the file Go/distroless expects so the ConfigMap
