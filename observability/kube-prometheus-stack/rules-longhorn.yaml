@@ -339,16 +339,16 @@ spec:
         # 1h` filters legitimate recurring-jobs bursts.
         - alert: LonghornSnapshotAccumulation
           expr: |
-            count(longhorn_snapshot_actual_size_bytes) > 500
+            count(longhorn_snapshot_actual_size_bytes) > 1300
           for: 1h
           labels:
             severity: warning
             component: longhorn
           annotations:
-            summary: "Longhorn holds {{ $value }} snapshots cluster-wide (>500)"
+            summary: "Longhorn holds {{ $value }} snapshots cluster-wide (>1300)"
             description: |
               The Longhorn cluster is holding {{ $value }}
-              snapshots. Steady-state target is ~200 (per the
+              snapshots. Steady-state is ~1076 (per the
               recurring-jobs retention in
               `infrastructure/longhorn/recurring-jobs.yaml`).
 
@@ -369,6 +369,39 @@ spec:
               If growth is unbounded, revisit
               `infrastructure/longhorn/recurring-jobs.yaml` and
               lower `retain:` — the trade-off is RPO vs disk.
+
+              THRESHOLD RECALIBRATED 2026-08-15 (500 -> 1300).
+              The old 500 / "~200 target" was measured in a cluster
+              where the declared retention was NOT in effect: PVC
+              recurring-job labels never reached the Longhorn Volume
+              CRs, so 67 of 69 volumes sat on the `default` catch-all
+              at retain=6 regardless of what their PVC asked for.
+              That was swept on 2026-08-15
+              (scripts/sync-longhorn-recurring-job-labels.sh), and the
+              declared retention now actually applies.
+
+              Steady state is arithmetic, not a guess — recompute it
+              the same way after any membership or retain change:
+
+                default          36 vol x retain  6 =  216
+                internal         10 vol x retain 42 =  420
+                secret-personal  15 vol x retain 20 =  300
+                backup            9 vol x retain 14 =  126
+                internal-media    2 vol x retain  7 =   14
+                                                     -----
+                                                      1076
+
+              1300 is that plus ~20% headroom. The count was 444
+              immediately after the sweep and climbs as the deeper
+              retention fills.
+
+              OPEN, for the operator: whether ~1076 is the RPO/disk
+              trade actually wanted. Nothing has ever run at the
+              declared retention, so those `retain:` values have
+              never been tested against real disk. Longhorn headroom
+              at the sweep was 2847Gi free of 5580Gi (51%), and the
+              LonghornNodeSchedulableCapacity* alerts cover the disk
+              side independently of this count.
             runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/observability/alert-routing.md"
 
         # ===== LonghornBackupStuckPending (warning) =====
