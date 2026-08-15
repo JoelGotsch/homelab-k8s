@@ -1,0 +1,634 @@
+# Static PersistentVolumes for every nas-crypt dataset — ADR 0051.
+#
+# WHY THIS FILE EXISTS
+#
+# The `nas-crypt-*` StorageClasses in storageclasses.yaml used to provision
+# every PVC with `remotePath: ""`, i.e. the ROOT of the share. Dynamic
+# provisioning therefore provisioned nothing: it handed each claimant the same
+# pre-existing directory tree. Six of the seven classes were benign only
+# because exactly one application happened to claim each; `internal-archive`
+# was not, and on 2026-08-15 an ordinary "make a scratch PVC to compare mount
+# behaviour" landed inside `conversation-history`'s live L0 vault and a cleanup
+# `rm` deleted its three ledger files. They were recovered byte-identical and
+# `chist vault verify` passes, but the trap was in the design, not the operator.
+#
+# Per ADR 0051 these volumes are **named datasets, not dynamic volumes**. Each
+# one is declared here, once, with its `remotePath` written out. What shares a
+# directory with what is now visible in a single file instead of being an
+# emergent property of who claimed a class first.
+#
+# THESE PVs ARE CLUSTER-SCOPED AND LIVE HERE, NOT IN THE APP REPOS
+#
+# ADR 0049 puts an app's manifests in the app's own repo, and its PVC still
+# lives there. The PV does not, deliberately: the share layout is exactly the
+# thing that must be reviewable in one place, and a PV is cluster-scoped. An
+# app repo declares "I claim the dataset named X"; this file declares "dataset
+# X is that directory on that share". See ADR 0051 §D3.
+#
+# ADDING A DATASET
+#
+#   1. Pick `remotePath: <namespace>/<component>` — the convention below.
+#   2. Add the PV here with a `claimRef` naming the exact PVC.
+#   3. Add the PVC in the owning repo with `volumeName` pointing back.
+#   4. Never reuse a `remotePath`. Two PVs on one path is the bug this file
+#      exists to prevent, and nothing in Kubernetes will stop you.
+#
+# MOUNT OPTIONS ARE COPIED FROM THE LIVE PV, NOT NORMALISED
+#
+# The live volumes are two generations: the older ones (nextcloud x3, forgejo
+# x2, paperless) carry NO mountOptions, the newer ones (conversation-history,
+# every backup-src-*) carry `allow-other` + `file-perms=0666` +
+# `dir-perms=0777`. Each PV below reproduces what its predecessor actually ran
+# with. Normalising them is a real change to file permissions — Nextcloud's
+# setup check warns on a world-readable data directory — and it does not belong
+# in the same change as a data move. Tracked separately; see ADR 0051
+# §Consequences.
+#
+# reclaimPolicy is Retain on every volume: the underlying directory pre-exists
+# the PV and must outlive it. `DeleteVolume` is a no-op in this driver
+# (v0.4.11, pkg/rclone/controllerserver.go), so deleting a PV never deletes NAS
+# data either way — Retain is what makes that explicit rather than incidental.
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# share: internal-archive        (the one share with two unrelated tenants)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# conversation-history's L0 vault. Append-only message archive whose whole
+# value is that nothing else writes to it — which was not true until this file
+# landed.
+#
+# vfs-cache-mode=writes is LOAD-BEARING here, not tuning. Without a VFS cache
+# an rclone mount cannot append to an existing file: measured 2026-08-15 on
+# this cluster, `open(path, "a")` on an existing file failed 8/8 with
+# `PermissionError [Errno 1]` on this class and succeeded 8/8 on
+# `personal-photos` (which has `vfs-cache-mode=full`). That broke this
+# service's nightly `seal` and `contacts-sync` from the moment its archive
+# moved into the cluster, leaving half-written state each time.
+#
+# `writes` rather than `full`: the vault needs write caching, and `full` would
+# also cache reads of a 14 GiB archive that is read rarely (a `vault verify`
+# would pull the whole thing through the cache for no benefit).
+#
+# DURABILITY NOTE: with a write cache, `close()` returns once the data is in
+# the node-local cache; the upload follows within `--vfs-write-back` (5s
+# default). A node lost inside that window loses an acknowledged write. That is
+# a real change to the guarantee and it is accepted here — the alternative is
+# appends that fail outright.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-internal-archive-conversation-history-vault
+  labels:
+    homelab.internal/nas-share: internal-archive
+    homelab.internal/data-class: internal
+  annotations:
+    homelab.internal/dataset: "conversation-history L0 vault (append-only message archive)"
+spec:
+  capacity:
+    # Nominal. rclone does not enforce capacity — the real constraint is the
+    # 56 TB share. Kept at the previous PVC's number so nothing reads as a
+    # downgrade; see ADR 0051 §Consequences on quota being fiction here.
+    storage: 100Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-internal-archive
+  mountOptions:
+    - allow-other=true
+    - file-perms=0666
+    - dir-perms=0777
+    - vfs-cache-mode=writes
+    - vfs-cache-max-size=10G
+    - vfs-cache-max-age=6h
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: conversation-history
+    name: vault
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-internal-archive#conversation-history-vault
+    volumeAttributes:
+      remote: "nas-crypt-internal-archive"
+      remotePath: "conversation-history/vault"
+      allow_other: "true"
+      uid: "0"
+      gid: "0"
+    nodePublishSecretRef:
+      name: nas-crypt-internal-archive-config
+      namespace: csi-rclone
+---
+# Nextcloud's "internal-archive" Group Folder.
+#
+# This share held NOTHING of Nextcloud's before the migration — every
+# `share:internal-archive` restic snapshot taken before 2026-08-15 recorded 0
+# files, and a live listing of /mnt/internal-archive inside the Nextcloud pod
+# showed only the vault's own files. So this dataset's migration is a no-op:
+# there is no Nextcloud data to move, only a mount point to re-point.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-internal-archive-nextcloud
+  labels:
+    homelab.internal/nas-share: internal-archive
+    homelab.internal/data-class: internal
+  annotations:
+    homelab.internal/dataset: "Nextcloud Group Folder: internal-archive"
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-internal-archive
+  # Predecessor PV carried no mountOptions. vfs-cache-mode=writes is added
+  # deliberately (ADR 0051 §D4 applies it class-wide) and is safe to introduce
+  # here precisely because this dataset is empty — no existing file's
+  # durability semantics change.
+  mountOptions:
+    - vfs-cache-mode=writes
+    - vfs-cache-max-size=10G
+    - vfs-cache-max-age=6h
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: nextcloud
+    name: nextcloud-internal-archive
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-internal-archive#nextcloud-internal-archive
+    volumeAttributes:
+      remote: "nas-crypt-internal-archive"
+      remotePath: "nextcloud/internal-archive"
+    nodePublishSecretRef:
+      name: nas-crypt-internal-archive-config
+      namespace: csi-rclone
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# share: personal-photos
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Immich originals. Per ADR 0030 §D2 only the storage-template-organised
+# originals live here; thumbs / encoded-video / profile stay on Longhorn.
+#
+# mountOptions reproduce the live PV exactly (patched by hand 2026-08-07).
+# vfs-cache-mode=full is load-bearing for Immich: without a write cache rclone
+# cannot seek on writes, so Node's fs.copyFile — the storage-template hot→cold
+# move — fails EBADF and strands originals on the hot tier.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-personal-photos-immich-originals
+  labels:
+    homelab.internal/nas-share: personal-photos
+    homelab.internal/data-class: personal
+  annotations:
+    homelab.internal/dataset: "Immich originals (storage-template organised)"
+spec:
+  capacity:
+    storage: 4Ti
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-personal-photos
+  mountOptions:
+    - vfs-cache-mode=full
+    - vfs-cache-max-size=50G
+    - vfs-cache-max-age=24h
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: immich
+    name: immich-originals
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-personal-photos#immich-originals
+    volumeAttributes:
+      remote: "nas-crypt-personal-photos"
+      remotePath: "immich/originals"
+    nodePublishSecretRef:
+      name: nas-crypt-personal-photos-config
+      namespace: csi-rclone
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# share: personal-files
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Nextcloud's primary data directory — <userid>/files/... for the operator and
+# four family members. The largest migration in this set.
+#
+# NO mountOptions, reproducing the live PV. Do not add `dir-perms=0777` here
+# without deciding it on purpose: Nextcloud's admin setup check raises "Your
+# data directory is readable by other users" on a world-readable data dir.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-personal-files-nextcloud-data
+  labels:
+    homelab.internal/nas-share: personal-files
+    homelab.internal/data-class: personal
+  annotations:
+    homelab.internal/dataset: "Nextcloud primary data directory (user home trees)"
+spec:
+  capacity:
+    storage: 1Ti
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-personal-files
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: nextcloud
+    name: nextcloud-personal-files
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-personal-files#nextcloud-personal-files
+    volumeAttributes:
+      remote: "nas-crypt-personal-files"
+      remotePath: "nextcloud/data"
+    nodePublishSecretRef:
+      name: nas-crypt-personal-files-config
+      namespace: csi-rclone
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# share: family-shared
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-family-shared-nextcloud
+  labels:
+    homelab.internal/nas-share: family-shared
+    homelab.internal/data-class: personal
+  annotations:
+    homelab.internal/dataset: "Nextcloud Group Folder: family-shared"
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-family-shared
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: nextcloud
+    name: nextcloud-family-shared
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-family-shared#nextcloud-family-shared
+    volumeAttributes:
+      remote: "nas-crypt-family-shared"
+      remotePath: "nextcloud/family-shared"
+    nodePublishSecretRef:
+      name: nas-crypt-family-shared-config
+      namespace: csi-rclone
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# share: personal-documents
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-personal-documents-paperless-media
+  labels:
+    homelab.internal/nas-share: personal-documents
+    homelab.internal/data-class: personal
+  annotations:
+    homelab.internal/dataset: "Paperless-ngx document originals + archive variants"
+spec:
+  capacity:
+    storage: 500Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-personal-documents
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: paperless
+    name: paperless-media
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-personal-documents#paperless-media
+    volumeAttributes:
+      remote: "nas-crypt-personal-documents"
+      remotePath: "paperless/media"
+    nodePublishSecretRef:
+      name: nas-crypt-personal-documents-config
+      namespace: csi-rclone
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# share: forgejo-lfs
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-forgejo-lfs-forgejo
+  labels:
+    homelab.internal/nas-share: forgejo-lfs
+    homelab.internal/data-class: internal
+  annotations:
+    homelab.internal/dataset: "Forgejo Git LFS objects (content-addressed, WORM-shape)"
+spec:
+  capacity:
+    storage: 200Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-forgejo-lfs
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: forgejo
+    name: forgejo-lfs
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-forgejo-lfs#forgejo-lfs
+    volumeAttributes:
+      remote: "nas-crypt-forgejo-lfs"
+      remotePath: "forgejo/lfs"
+    nodePublishSecretRef:
+      name: nas-crypt-forgejo-lfs-config
+      namespace: csi-rclone
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# share: registry-blobs
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# NOT covered by the NAS→Hetzner restic lane, deliberately: the blobs are
+# regenerable container images. See nas-personal-pvcs.yaml. That decision is
+# re-affirmed rather than inherited — ADR 0051 §Consequences.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-registry-blobs-forgejo-packages
+  labels:
+    homelab.internal/nas-share: registry-blobs
+    homelab.internal/data-class: internal
+  annotations:
+    homelab.internal/dataset: "Forgejo Packages blobs (OCI / PyPI / Helm artefacts)"
+    homelab.internal/offsite-backup: "none — regenerable, snapshot-only (deliberate)"
+spec:
+  capacity:
+    storage: 200Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-registry-blobs
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: forgejo
+    name: forgejo-packages
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-registry-blobs#forgejo-packages
+    volumeAttributes:
+      remote: "nas-crypt-registry-blobs"
+      remotePath: "forgejo/packages"
+    nodePublishSecretRef:
+      name: nas-crypt-registry-blobs-config
+      namespace: csi-rclone
+---
+# ═════════════════════════════════════════════════════════════════════════════
+# BACKUP SOURCE VOLUMES — these stay at the share ROOT, ON PURPOSE
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# Everything above pins an application to one subdirectory. These six do the
+# opposite and mount `remotePath: ""` — the whole share — because that is what
+# makes the offsite lane correct: `restic-nas-personal-to-hetzner` backs up by
+# path, so a share-root mount covers every dataset on that share, including
+# datasets added after the backup job was last edited.
+#
+# This is the single most important thing to NOT "clean up" for consistency.
+# Give these per-dataset subpaths and the restic job keeps completing
+# successfully while backing up empty directories — a silent failure that stays
+# invisible until a restore. It is also why ADR 0051 rejected templated
+# per-PVC paths (`${pvc.metadata.namespace}/${pvc.metadata.name}`) as the
+# cluster-wide default even though the driver supports them: the template would
+# have hit these six too.
+#
+# The CronJob mounts every one of these `readOnly: true`, so this share-wide
+# view can never write. csi-rclone decrypts on the node; the backup pod reads
+# plaintext and restic re-encrypts to Hetzner (operator decision 2026-07-16).
+#
+# registry-blobs is deliberately absent — see that PV above.
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-personal-photos-backup-root
+  labels:
+    homelab.internal/nas-share: personal-photos
+    homelab.internal/component: backup-source
+  annotations:
+    homelab.internal/dataset: "SHARE ROOT — deliberate. Offsite backup source; see header."
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-personal-photos
+  mountOptions:
+    - allow-other=true
+    - file-perms=0666
+    - dir-perms=0777
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: backup-cronjobs
+    name: backup-src-personal-photos
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-personal-photos#backup-src
+    volumeAttributes:
+      remote: "nas-crypt-personal-photos"
+      remotePath: ""
+      allow_other: "true"
+      uid: "0"
+      gid: "0"
+    nodePublishSecretRef:
+      name: nas-crypt-personal-photos-config
+      namespace: csi-rclone
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-personal-files-backup-root
+  labels:
+    homelab.internal/nas-share: personal-files
+    homelab.internal/component: backup-source
+  annotations:
+    homelab.internal/dataset: "SHARE ROOT — deliberate. Offsite backup source; see header."
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-personal-files
+  mountOptions:
+    - allow-other=true
+    - file-perms=0666
+    - dir-perms=0777
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: backup-cronjobs
+    name: backup-src-personal-files
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-personal-files#backup-src
+    volumeAttributes:
+      remote: "nas-crypt-personal-files"
+      remotePath: ""
+      allow_other: "true"
+      uid: "0"
+      gid: "0"
+    nodePublishSecretRef:
+      name: nas-crypt-personal-files-config
+      namespace: csi-rclone
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-family-shared-backup-root
+  labels:
+    homelab.internal/nas-share: family-shared
+    homelab.internal/component: backup-source
+  annotations:
+    homelab.internal/dataset: "SHARE ROOT — deliberate. Offsite backup source; see header."
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-family-shared
+  mountOptions:
+    - allow-other=true
+    - file-perms=0666
+    - dir-perms=0777
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: backup-cronjobs
+    name: backup-src-family-shared
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-family-shared#backup-src
+    volumeAttributes:
+      remote: "nas-crypt-family-shared"
+      remotePath: ""
+      allow_other: "true"
+      uid: "0"
+      gid: "0"
+    nodePublishSecretRef:
+      name: nas-crypt-family-shared-config
+      namespace: csi-rclone
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-personal-documents-backup-root
+  labels:
+    homelab.internal/nas-share: personal-documents
+    homelab.internal/component: backup-source
+  annotations:
+    homelab.internal/dataset: "SHARE ROOT — deliberate. Offsite backup source; see header."
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-personal-documents
+  mountOptions:
+    - allow-other=true
+    - file-perms=0666
+    - dir-perms=0777
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: backup-cronjobs
+    name: backup-src-personal-documents
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-personal-documents#backup-src
+    volumeAttributes:
+      remote: "nas-crypt-personal-documents"
+      remotePath: ""
+      allow_other: "true"
+      uid: "0"
+      gid: "0"
+    nodePublishSecretRef:
+      name: nas-crypt-personal-documents-config
+      namespace: csi-rclone
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-internal-archive-backup-root
+  labels:
+    homelab.internal/nas-share: internal-archive
+    homelab.internal/component: backup-source
+  annotations:
+    homelab.internal/dataset: "SHARE ROOT — deliberate. Offsite backup source; see header."
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-internal-archive
+  # No vfs cache: this mount is read-only. The write-cache decision in §D4
+  # applies to the writers on this share, not to the backup reader.
+  mountOptions:
+    - allow-other=true
+    - file-perms=0666
+    - dir-perms=0777
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: backup-cronjobs
+    name: backup-src-internal-archive
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-internal-archive#backup-src
+    volumeAttributes:
+      remote: "nas-crypt-internal-archive"
+      remotePath: ""
+      allow_other: "true"
+      uid: "0"
+      gid: "0"
+    nodePublishSecretRef:
+      name: nas-crypt-internal-archive-config
+      namespace: csi-rclone
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-forgejo-lfs-backup-root
+  labels:
+    homelab.internal/nas-share: forgejo-lfs
+    homelab.internal/component: backup-source
+  annotations:
+    homelab.internal/dataset: "SHARE ROOT — deliberate. Offsite backup source; see header."
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-forgejo-lfs
+  mountOptions:
+    - allow-other=true
+    - file-perms=0666
+    - dir-perms=0777
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: backup-cronjobs
+    name: backup-src-forgejo-lfs
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-forgejo-lfs#backup-src
+    volumeAttributes:
+      remote: "nas-crypt-forgejo-lfs"
+      remotePath: ""
+      allow_other: "true"
+      uid: "0"
+      gid: "0"
+    nodePublishSecretRef:
+      name: nas-crypt-forgejo-lfs-config
+      namespace: csi-rclone

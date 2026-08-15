@@ -29,6 +29,10 @@ resources:
   - resourcequota.yaml
   - externalsecret.yaml
   - storageclasses.yaml
+  # Static PVs — one per named dataset, ADR 0051. These are the
+  # supported way to get storage on a nas-crypt share; the classes
+  # above no longer hand out the share root.
+  - persistentvolumes.yaml
   - networkpolicy.yaml
 
 # Post-render patch: both this node DaemonSet AND nfs-csi's csi-nfs-node

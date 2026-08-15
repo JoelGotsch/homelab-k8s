@@ -30,6 +30,16 @@ repos:
         pass_filenames: false
         files: '\.(yaml|yml|j2)$'
 
+      - id: check-nas-crypt-dataset-paths
+        name: every nas-crypt dataset has a unique remotePath, a claimRef, and a bound PVC (ADR 0051)
+        entry: scripts/check-nas-crypt-dataset-paths.sh
+        language: script
+        pass_filenames: false
+        # Cross-repo: also reads PVCs from sibling app repos, so it cannot be
+        # scoped to this repo's changed files alone. Runs whenever the PV
+        # declarations, the classes, or any PVC-bearing manifest here changes.
+        files: '(infrastructure/csi-rclone/|.*pvc.*\.ya?ml$|scripts/check-nas-crypt-dataset-paths\.sh$)'
+
       - id: check-eso-readme
         name: every ExternalSecret-using layer has '## OpenBao paths to seed' in its README
         entry: scripts/check-eso-readme.sh

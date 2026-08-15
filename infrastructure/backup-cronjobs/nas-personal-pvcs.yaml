@@ -1,27 +1,52 @@
 # Read-only source PVCs for the NAS personal+ offsite backup (Workstream C).
 #
-# Each PVC mounts the SAME fixed share its owning app uses: the csi-rclone
-# `nas-crypt-*` StorageClasses set remotePath="" and the nfs-csi
-# `nfs-internal-media` SC targets a fixed `share`, so EVERY PVC on the SC
-# mounts the share ROOT — verified 2026-07-16 via the immich PV volumeHandle
-# (`nas-crypt-personal-photos#pvc-…`, remotePath ""). So a second PVC here
-# sees exactly the data the app writes. csi-rclone decrypts on the node
-# (crypt key stays on the node, not in this pod); the backup pod reads
-# PLAINTEXT and restic re-encrypts to Hetzner (operator decision 2026-07-16).
+# THESE MOUNT THE SHARE ROOT ON PURPOSE. That is the whole design: restic backs
+# up by path, so a root mount covers every dataset on the share — including
+# datasets added after this file was last edited. Do not "fix" them to match the
+# per-dataset subpaths used everywhere else. Give these six their own
+# subdirectories and the restic job keeps completing successfully while backing
+# up empty directories: a silent failure that stays invisible until a restore.
+#
+# ── 2026-08-15, ADR 0051 ─────────────────────────────────────────────────────
+# Share-root mounting used to be the behaviour of EVERY PVC on a `nas-crypt-*`
+# class, because every class carried remotePath="" (verified 2026-07-16 via the
+# immich PV volumeHandle). That was a trap for everyone else — a scratch PVC on
+# `nas-crypt-internal-archive` landed inside conversation-history's live vault
+# and a cleanup `rm` deleted its ledger files. Applications are now pinned to
+# named subdirectories by static PVs in `infrastructure/csi-rclone/
+# persistentvolumes.yaml`, and the classes park accidental dynamic provisions in
+# `_unallocated/`.
+#
+# So what used to be the default is now a DELIBERATE, DECLARED EXCEPTION held by
+# exactly these six volumes. Each is a static PV labelled
+# `homelab.internal/component: backup-source` — the label is what
+# `scripts/check-nas-crypt-dataset-paths.sh` accepts as "this empty remotePath
+# is intentional". An unlabelled share-root PV now fails pre-commit.
+#
+# csi-rclone decrypts on the node (crypt key stays on the node, not in this
+# pod); the backup pod reads PLAINTEXT and restic re-encrypts to Hetzner
+# (operator decision 2026-07-16).
 #
 # accessMode ReadWriteMany matches the proven SC behaviour (the apps bind RWX;
 # ROX provisioning on csi-rclone is unproven and would risk failing at Argo).
 # The CronJob mounts every one of these `readOnly: true`, so the backup can
 # never write to the NAS — RWX here is a provisioning detail, not write intent.
 #
-# reclaimPolicy Retain (inherited from the SCs) is harmless: these are mount
-# handles over a pre-existing share, so a deleted PVC leaves only a Released
-# PV with no underlying storage to leak. Nominal 1Gi request — fixed-share
-# CSI ignores size (the mount shows the whole share).
+# reclaimPolicy Retain is harmless: these are mount handles over a pre-existing
+# share, so a deleted PVC leaves only a Released PV with no underlying storage
+# to leak. Nominal 1Gi request — rclone ignores capacity entirely (the mount
+# shows the whole share, 56 TB of it).
 #
 # NOT included: nas-crypt-registry-blobs (Forgejo container registry — the
 # blobs are regenerable/re-pushable images; snapshot-only). Add here if that
-# assumption changes.
+# assumption changes. Re-affirmed rather than inherited on 2026-08-15, and now
+# annotated on the PV itself so the omission is visible at the object rather
+# than only in this header.
+#
+# MIGRATION NOTE (ADR 0051): these six still bind dynamically. Their cutover is
+# the cheapest of the eight — the new static PV mounts the same share root, so
+# there is no data to move, only a delete-and-recreate of the PVC with
+# `volumeName` set. See the runbook.
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

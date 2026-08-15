@@ -1,7 +1,57 @@
 # StorageClasses backed by csi-rclone — one per `personal+`
 # share per ADR 0030 §D1. Each maps to a chained
-# `crypt:` over `nfs:` remote whose config sits in the matching
+# `crypt:` over `smb:` remote whose config sits in the matching
 # Secret (see externalsecret.yaml).
+#
+# ══════════════════════════════════════════════════════════════
+# READ THIS BEFORE CLAIMING ONE OF THESE CLASSES — ADR 0051
+# ══════════════════════════════════════════════════════════════
+#
+# **Every real dataset on these shares is a STATIC PV declared in
+# persistentvolumes.yaml.** Claim one by name:
+#
+#   spec:
+#     storageClassName: nas-crypt-<share>
+#     volumeName: nas-<share>-<namespace>-<component>   # <- required
+#
+# Dynamic provisioning against these classes is NOT the supported
+# path and never allocates you a dataset. Until 2026-08-15 it was
+# actively dangerous: every class carried `remotePath: ""`, so a
+# freshly provisioned PVC mounted the ROOT of the share — the same
+# directory tree every other claimant already had. That is how a
+# scratch PVC ended up inside `conversation-history`'s live L0
+# vault, and a routine cleanup `rm` deleted its ledger files. The
+# mistake was reasonable: nothing here said a PVC meant anything
+# other than what a PVC normally means.
+#
+# So `remotePath` below is now a PARKING PATH, not the share root.
+# A PVC provisioned dynamically by accident lands in an empty,
+# isolated `_unallocated/<namespace>/<pvc-name>` directory where it
+# can do no harm — while still sitting inside the share, so the
+# offsite backup covers it and it shows up in a listing rather than
+# vanishing. Template substitution is supported by the pinned
+# driver (v0.4.11, `pkg/rclone/rclone.go:38-40`, applied in
+# `controllerserver.go:122`); the provisioner runs with
+# `--extra-create-metadata=true`, which is what supplies the PVC
+# name and namespace.
+#
+# The parking path is a backstop, not an allocation mechanism. If
+# you find a PVC living in `_unallocated/`, that is a bug to fix by
+# declaring a proper PV — not a working configuration.
+#
+# NOTE: BOTH `mountOptions` AND `parameters` are IMMUTABLE on a
+# StorageClass. Verified by server dry-run 2026-08-15, which is how
+# this was caught rather than discovered during a sync:
+#
+#   StorageClass "nas-crypt-internal-archive" is invalid:
+#   parameters: Invalid value: {...}: field is immutable
+#
+# So editing `remotePath` here is a delete-and-recreate, not a patch.
+# Each class therefore carries `Force=true,Replace=true` sync options
+# so Argo performs that recreate itself instead of failing every sync
+# forever. Deleting a StorageClass is safe for existing data: a class
+# is consulted only at provisioning time, and every bound PV carries
+# its own copy of these values.
 #
 # Adding a new share at consumer-onboarding time:
 #   1. Operator generates the per-share crypt key +
@@ -11,7 +61,11 @@
 #      `kv/prod/nas-encryption/<share>/rclone_config`.
 #   3. Add the matching StorageClass below pointing at the
 #      Secret name.
-#   4. Cold-start.md Step 13c gets a row for the new share.
+#   4. Add the dataset's static PV to persistentvolumes.yaml.
+#   5. Add the share to the offsite backup source list in
+#      `infrastructure/backup-cronjobs/nas-personal-pvcs.yaml`,
+#      or record why not.
+#   6. Cold-start.md Step 13c gets a row for the new share.
 
 # nas-crypt-personal-photos — Immich library backend.
 # Per ADR 0030 §D2 only the *originals* sub-tree of Immich's
@@ -21,15 +75,24 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-personal-photos
+  annotations:
+    # `parameters` and `mountOptions` are immutable — Argo must delete and
+    # recreate this class to change them, not patch it. Without this, every
+    # edit below wedges the csi-rclone Application in a permanent sync error.
+    # Safe: bound PVs hold their own copy; a class is read only at provision.
+    argocd.argoproj.io/sync-options: Force=true,Replace=true
 # 2026-08-07: vfs-cache-mode=full is LOAD-BEARING for Immich. Without a
 # write cache rclone can't seek on writes, so Node's fs.copyFile (the
 # storage-template hot→cold move) fails EBADF and strands originals on the
 # hot tier; cache-off also RAM-buffers writes and OOMs the mounter. Format
 # is `key=value` (no leading --) — the driver's only mount-flag lever
 # (values.yaml defaultMountOptions is dead config; see there). The live
-# immich-originals PV was patched with these same options; this SC makes
-# future re-provisions correct (SC mountOptions are immutable → this file
-# change requires a delete+recreate of the SC to take effect).
+# immich-originals PV was patched with these same options, and as of ADR 0051
+# they are written out on the static PV that replaces it — which is now the
+# only thing that mounts this share for real. These options remain here so a
+# parked `_unallocated/` volume behaves sanely, not because Immich depends on
+# them. (The old note about needing a manual SC delete+recreate is handled by
+# the Force=true,Replace=true sync option above.)
 mountOptions:
   - allow-other=true
   - file-perms=0666
@@ -45,7 +108,9 @@ parameters:
   # Top-level remote name as defined in the rclone INI in the
   # referenced Secret. Driver mounts `<remote>:<remotePath>`.
   remote: "nas-crypt-personal-photos"
-  remotePath: ""
+  # Parking path — see the header. NOT the share root, and NOT where any
+  # real dataset lives. Real datasets are static PVs in persistentvolumes.yaml.
+  remotePath: "_unallocated/${pvc.metadata.namespace}/${pvc.metadata.name}"
   allow_other: "true"
   uid: "0"
   gid: "0"
@@ -55,11 +120,6 @@ parameters:
   # another.
   csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-personal-photos-config"
   csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
-
-  # Per-share mount options override the driver-level defaults
-  # in values.yaml when the workload calls for it. Immich's
-  # cold-originals access pattern is well-served by the
-  # driver-level defaults; left empty here.
 ---
 # nas-crypt-personal-files — Nextcloud's primary data dir.
 # Per ADR 0030 §D2 only the user-files tree lives here;
@@ -69,6 +129,12 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-personal-files
+  annotations:
+    # `parameters` and `mountOptions` are immutable — Argo must delete and
+    # recreate this class to change them, not patch it. Without this, every
+    # edit below wedges the csi-rclone Application in a permanent sync error.
+    # Safe: bound PVs hold their own copy; a class is read only at provision.
+    argocd.argoproj.io/sync-options: Force=true,Replace=true
 mountOptions:
   - allow-other=true
   - file-perms=0666
@@ -79,7 +145,9 @@ volumeBindingMode: Immediate
 allowVolumeExpansion: true
 parameters:
   remote: "nas-crypt-personal-files"
-  remotePath: ""
+  # Parking path — see the header. NOT the share root, and NOT where any
+  # real dataset lives. Real datasets are static PVs in persistentvolumes.yaml.
+  remotePath: "_unallocated/${pvc.metadata.namespace}/${pvc.metadata.name}"
   allow_other: "true"
   uid: "0"
   gid: "0"
@@ -92,6 +160,12 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-family-shared
+  annotations:
+    # `parameters` and `mountOptions` are immutable — Argo must delete and
+    # recreate this class to change them, not patch it. Without this, every
+    # edit below wedges the csi-rclone Application in a permanent sync error.
+    # Safe: bound PVs hold their own copy; a class is read only at provision.
+    argocd.argoproj.io/sync-options: Force=true,Replace=true
 mountOptions:
   - allow-other=true
   - file-perms=0666
@@ -102,30 +176,67 @@ volumeBindingMode: Immediate
 allowVolumeExpansion: true
 parameters:
   remote: "nas-crypt-family-shared"
-  remotePath: ""
+  # Parking path — see the header. NOT the share root, and NOT where any
+  # real dataset lives. Real datasets are static PVs in persistentvolumes.yaml.
+  remotePath: "_unallocated/${pvc.metadata.namespace}/${pvc.metadata.name}"
   allow_other: "true"
   uid: "0"
   gid: "0"
   csi.storage.k8s.io/node-publish-secret-name: "nas-crypt-family-shared-config"
   csi.storage.k8s.io/node-publish-secret-namespace: "csi-rclone"
 ---
-# nas-crypt-internal-archive — Nextcloud Group Folder for
-# archived internal documents (operator-driven, non-active).
+# nas-crypt-internal-archive — TWO tenants, both declared as
+# static PVs in persistentvolumes.yaml:
+#   conversation-history/vault      → conversation-history/vault
+#   nextcloud/internal-archive      → nextcloud/internal-archive
+# This is the share where the shared-root default did real damage
+# (see the header). Two tenants is fine; two tenants *at the same
+# path* was not.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-internal-archive
+  annotations:
+    # `parameters` and `mountOptions` are immutable — Argo must delete and
+    # recreate this class to change them, not patch it. Without this, every
+    # edit below wedges the csi-rclone Application in a permanent sync error.
+    # Safe: bound PVs hold their own copy; a class is read only at provision.
+    argocd.argoproj.io/sync-options: Force=true,Replace=true
+# vfs-cache-mode=writes is LOAD-BEARING on this share, not tuning.
+# An rclone mount without a VFS cache cannot append to an existing
+# file. Measured 2026-08-15, same driver / node / minute:
+#   this class (no cache)          → open(path,"a") failed 8/8, PermissionError [Errno 1]
+#   personal-photos (cache=full)   → succeeded 8/8
+# That broke conversation-history's nightly `seal` and
+# `contacts-sync` from the moment its archive landed in-cluster,
+# leaving half-written state each time (files copied, ledger not
+# updated).
+#
+# `writes` not `full`: the writers here need a write cache; `full`
+# would additionally cache reads of a 14 GiB archive that is read
+# rarely. Cost is bounded and measured — 512 MiB written through a
+# cached mount moved the node plugin's RSS by under 1 MB (the VFS
+# stages to disk, not memory), and the cache lives on the node root
+# filesystem (workers: 1.9 TB, 1.2 TB free).
+#
+# The cache is per-REMOTE, not per-PVC, so vfs-cache-max-size is a
+# budget shared by every mount of this share on a node.
 mountOptions:
   - allow-other=true
   - file-perms=0666
   - dir-perms=0777
+  - vfs-cache-mode=writes
+  - vfs-cache-max-size=10G
+  - vfs-cache-max-age=6h
 provisioner: rclone.csi.veloxpack.io
 reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 parameters:
   remote: "nas-crypt-internal-archive"
-  remotePath: ""
+  # Parking path — see the header. NOT the share root, and NOT where any
+  # real dataset lives. Real datasets are static PVs in persistentvolumes.yaml.
+  remotePath: "_unallocated/${pvc.metadata.namespace}/${pvc.metadata.name}"
   allow_other: "true"
   uid: "0"
   gid: "0"
@@ -139,6 +250,12 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-forgejo-lfs
+  annotations:
+    # `parameters` and `mountOptions` are immutable — Argo must delete and
+    # recreate this class to change them, not patch it. Without this, every
+    # edit below wedges the csi-rclone Application in a permanent sync error.
+    # Safe: bound PVs hold their own copy; a class is read only at provision.
+    argocd.argoproj.io/sync-options: Force=true,Replace=true
 mountOptions:
   - allow-other=true
   - file-perms=0666
@@ -149,7 +266,9 @@ volumeBindingMode: Immediate
 allowVolumeExpansion: true
 parameters:
   remote: "nas-crypt-forgejo-lfs"
-  remotePath: ""
+  # Parking path — see the header. NOT the share root, and NOT where any
+  # real dataset lives. Real datasets are static PVs in persistentvolumes.yaml.
+  remotePath: "_unallocated/${pvc.metadata.namespace}/${pvc.metadata.name}"
   allow_other: "true"
   uid: "0"
   gid: "0"
@@ -163,6 +282,12 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-registry-blobs
+  annotations:
+    # `parameters` and `mountOptions` are immutable — Argo must delete and
+    # recreate this class to change them, not patch it. Without this, every
+    # edit below wedges the csi-rclone Application in a permanent sync error.
+    # Safe: bound PVs hold their own copy; a class is read only at provision.
+    argocd.argoproj.io/sync-options: Force=true,Replace=true
 mountOptions:
   - allow-other=true
   - file-perms=0666
@@ -173,7 +298,9 @@ volumeBindingMode: Immediate
 allowVolumeExpansion: true
 parameters:
   remote: "nas-crypt-registry-blobs"
-  remotePath: ""
+  # Parking path — see the header. NOT the share root, and NOT where any
+  # real dataset lives. Real datasets are static PVs in persistentvolumes.yaml.
+  remotePath: "_unallocated/${pvc.metadata.namespace}/${pvc.metadata.name}"
   allow_other: "true"
   uid: "0"
   gid: "0"
@@ -188,6 +315,12 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: nas-crypt-personal-documents
+  annotations:
+    # `parameters` and `mountOptions` are immutable — Argo must delete and
+    # recreate this class to change them, not patch it. Without this, every
+    # edit below wedges the csi-rclone Application in a permanent sync error.
+    # Safe: bound PVs hold their own copy; a class is read only at provision.
+    argocd.argoproj.io/sync-options: Force=true,Replace=true
 mountOptions:
   - allow-other=true
   - file-perms=0666
@@ -198,7 +331,9 @@ volumeBindingMode: Immediate
 allowVolumeExpansion: true
 parameters:
   remote: "nas-crypt-personal-documents"
-  remotePath: ""
+  # Parking path — see the header. NOT the share root, and NOT where any
+  # real dataset lives. Real datasets are static PVs in persistentvolumes.yaml.
+  remotePath: "_unallocated/${pvc.metadata.namespace}/${pvc.metadata.name}"
   allow_other: "true"
   uid: "0"
   gid: "0"
