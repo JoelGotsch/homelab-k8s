@@ -237,6 +237,31 @@ repos:
         # Canonical copy lives in the homelab-hooks repo; mirrored here
         # because this config's policy (above) is repo-local hooks only.
 
+      - id: check-patch-targets-match
+        name: every kustomize patch actually changes the render (ADR 0052 D3)
+        entry: scripts/check-patch-targets-match.sh
+        language: script
+        pass_filenames: false
+        files: '(kustomization\.yaml|values\.yaml|^.*/patches/.*\.yaml)$'
+        exclude: '/charts/'
+        # ADR 0052 kept kustomize in the Helm render path so layers can patch
+        # chart-rendered objects — capability Argo's own Helm source does not
+        # have. The price is that kustomize drops a patch whose target selector
+        # stops matching SILENTLY: exit 0, no stderr, patch absent from the
+        # render, Argo syncs it green. Only JSON-6902 with a missing `path`
+        # fails loudly. A chart bump is exactly what moves a target.
+        #
+        # It found one on its first full run: platform/forgejo's PVC patch
+        # selected `app.kubernetes.io/managed-by=Helm`, which the Forgejo chart
+        # never sets, so gitea-shared-storage never joined the Longhorn
+        # `internal` snapshot group.
+        #
+        # Renders each layer once per patch, so it is slower than the other
+        # hooks — scoped to layers owning staged files, not the whole repo.
+        # `--all` is the CI form. NOTE: chart bumps arrive as Renovate commits
+        # that pre-commit never observes, so this needs a CI home too; this
+        # repo has no pipeline yet, which is tracked with the ADR 0052 rollout.
+
       - id: check-helm-values-keys
         name: every values.yaml key is recognized by its Helm chart (baseline via .helmcheckignore)
         entry: scripts/check-helm-values-keys.sh
