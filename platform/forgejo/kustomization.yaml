@@ -57,15 +57,32 @@ replacements:
 # on Longhorn — git repos + config + runtime state). Patch in
 # the recurring-job-group label so it joins
 # infrastructure/longhorn/recurring-jobs.yaml's `internal`
-# group (4-hourly × 7d retain). Targets only Helm-managed PVCs
-# (`app.kubernetes.io/managed-by=Helm`) so the explicit
-# csi-rclone PVCs in pvc.yaml are not touched (those live on
-# NAS, not Longhorn — recurring-jobs are per-storage-class
-# anyway).
+# group (4-hourly × 7d retain).
+#
+# TARGETED BY NAME, not by `app.kubernetes.io/managed-by=Helm`.
+# That selector was here from the start and matched NOTHING: the
+# Forgejo chart labels its PVC with `app.kubernetes.io/name` +
+# `component` and never sets `managed-by`, so kustomize dropped
+# the patch silently — exit 0, no stderr, no label in the render,
+# Argo green. Found 2026-08-15 by scripts/check-patch-targets-match.sh
+# on its first run, which is the failure mode that script exists
+# for. Verified against the live cluster: gitea-shared-storage
+# carried no recurring-job label at all.
+#
+# Consequence while it was broken: with no recurring-job label
+# Longhorn puts a volume in the `default` group, so the volume
+# was snapshotted hourly with 6 retained (~6h of history) rather
+# than 4-hourly with 42 retained (~7d). Protected, but with a
+# fraction of the intended window.
+#
+# Only this one PVC is chart-created AND Longhorn-backed, so a
+# name target is exact. The explicit PVCs in pvc.yaml stay
+# untouched — they are csi-rclone on the NAS, where Longhorn
+# recurring jobs mean nothing.
 patches:
   - target:
       kind: PersistentVolumeClaim
-      labelSelector: "app.kubernetes.io/managed-by=Helm"
+      name: gitea-shared-storage
     patch: |-
       apiVersion: v1
       kind: PersistentVolumeClaim
