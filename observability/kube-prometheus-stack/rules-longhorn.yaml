@@ -339,13 +339,13 @@ spec:
         # 1h` filters legitimate recurring-jobs bursts.
         - alert: LonghornSnapshotAccumulation
           expr: |
-            count(longhorn_snapshot_actual_size_bytes) > 1300
+            count(longhorn_snapshot_actual_size_bytes) > 2000
           for: 1h
           labels:
             severity: warning
             component: longhorn
           annotations:
-            summary: "Longhorn holds {{ $value }} snapshots cluster-wide (>1300)"
+            summary: "Longhorn holds {{ $value }} snapshots cluster-wide (>2000)"
             description: |
               The Longhorn cluster is holding {{ $value }}
               snapshots. Steady-state is ~1076 (per the
@@ -370,7 +370,7 @@ spec:
               `infrastructure/longhorn/recurring-jobs.yaml` and
               lower `retain:` — the trade-off is RPO vs disk.
 
-              THRESHOLD RECALIBRATED 2026-08-15 (500 -> 1300).
+              THRESHOLD RECALIBRATED 2026-08-15 (500 -> 2000).
               The old 500 / "~200 target" was measured in a cluster
               where the declared retention was NOT in effect: PVC
               recurring-job labels never reached the Longhorn Volume
@@ -391,9 +391,12 @@ spec:
                                                      -----
                                                       1076
 
-              1300 is that plus ~20% headroom. The count was 444
+              2000 is that plus deliberate headroom — an operator
+              call on 2026-08-15, chosen over a tighter 1300 so the
+              alert cannot fire on ordinary fill. The count was 444
               immediately after the sweep and climbs as the deeper
-              retention fills.
+              retention fills. If it approaches 2000, that is real
+              accumulation, not the sweep settling.
 
               OPEN, for the operator: whether ~1076 is the RPO/disk
               trade actually wanted. Nothing has ever run at the
