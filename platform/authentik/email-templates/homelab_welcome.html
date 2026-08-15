@@ -1,41 +1,52 @@
 {% extends "email/base.html" %}
-{# ^^ MUST BE LINE 1. Django requires {% extends %} to be the first tag in the
- # file, and a {# … #} comment counts as a tag. A comment header above it
- # raises TemplateSyntaxError — which Authentik reports out of
- # /core/users/{id}/recovery_email/ as **HTTP 405**, a status that reads like
- # a routing or method problem and sends you looking anywhere but here. The
- # real error is only visible in the authentik-server event log. Landed that
- # way on 2026-08-14 and blocked onboarding until the log was read.
- #
- # Homelab set-password email.
- #
- # Replaces the bundled email/password_reset.html on the default-recovery-email
- # stage. Same link, same flow — this one also tells the recipient what the
- # password is FOR and what they have to do before the link will even open.
- #
- # Why: a family member's first contact with the homelab was an email whose
- # entire content was "set your password", with no mention that the link only
- # resolves on the tailnet, that one account covers every shared app, or that
- # Vaultwarden is deliberately separate. Everything they needed lived in the
- # operator's head (2026-08-14).
- #
- # NO HOSTNAMES AND NO APP LIST HERE ON PURPOSE. Authentik's own launcher is
- # generated from the applications the recipient's groups are bound to, so it
- # is correct by construction and stays correct as apps are added or access
- # changes. A list written here would be a second roster to maintain, and it
- # would be wrong the first time someone edits access_groups in
- # homelab-infra/ansible/inventory/oidc-apps.yml. `{{ url }}` already carries
- # the right host, so the domain is never spelled out either.
- #
- # THIS FLOW ALSO SERVES SELF-SERVICE PASSWORD RESET (the default brand's
- # flow_recovery points at it), so the wording has to read correctly for
- # someone who has been using their account for a year and just forgot their
- # password — not only for a first-time invite. Keep it welcoming but never
- # assume this is the first time.
- #
- # Context available: `user`, `url`, `expires`. See the bundled
- # email/password_reset.html in the authentik image for the original.
-#}
+{% comment %}
+  THE EXTENDS TAG MUST BE LINE 1, AND COMMENTS MUST USE THIS BLOCK FORM.
+
+  Django requires the extends tag to be the first tag in a template. Note
+  {# ... #} is a SINGLE-LINE comment only — its lexer pattern is not DOTALL,
+  so a multi-line {# ... #} block is not recognised as a comment at all and
+  its text leaks into the template as content. That is what broke this file
+  twice on 2026-08-14/15: first the leaked header pushed the extends tag out
+  of first position, then a rewrite that mentioned the extends tag literally
+  inside such a pseudo-comment had it parsed as a real tag with no argument.
+
+  Both failures surface from POST /core/users/{id}/recovery_email/ as
+  HTTP 405 — a status that reads like a wrong method and sends you checking
+  routes, the API schema and the gateway, all of which are fine. The actual
+  TemplateSyntaxError appears only in the authentik-server event log. If this
+  email ever 405s again, read that log first.
+
+  Verify a change by RENDERING it, not by checking the file is mounted:
+    kubectl exec -n authentik deploy/authentik-server -c server -- python -c \
+      "import os,django;os.environ.setdefault('DJANGO_SETTINGS_MODULE','authentik.root.settings');django.setup();\
+       from django.template.loader import render_to_string;\
+       print(len(render_to_string('homelab_welcome.html',{'user':type('U',(),{'username':'x','name':'X'})(),'url':'u','expires':None})))"
+{% endcomment %}
+{% comment %}
+  Homelab set-password email. Replaces the bundled email/password_reset.html
+  on the default-recovery-email stage: same link, same flow, but it also says
+  what the password is FOR and what has to happen before the link will open.
+
+  Why: a family member's first contact with the homelab was an email whose
+  entire content was "set your password", with no mention that the link only
+  resolves on the tailnet, that one account covers every shared app, or that
+  Vaultwarden is deliberately separate.
+
+  NO HOSTNAMES AND NO APP LIST HERE ON PURPOSE. Authentik's launcher is built
+  from the applications the recipient's groups are bound to, so it is correct
+  by construction and stays correct as access changes. A list written here
+  would be a second roster to maintain, wrong the first time someone edits
+  access_groups in homelab-infra/ansible/inventory/oidc-apps.yml. The url
+  variable already carries the right host, so the domain is never spelled out.
+
+  THIS FLOW ALSO SERVES SELF-SERVICE PASSWORD RESET (the default brand's
+  flow_recovery points at it), so the wording must read correctly for someone
+  who has used their account for a year and forgot their password — not only
+  for a first-time invite. Welcoming, but never assuming this is the first time.
+
+  Context available: user, url, expires. See the bundled
+  email/password_reset.html in the authentik image for the original.
+{% endcomment %}
 
 {% load i18n %}
 {% load humanize %}
