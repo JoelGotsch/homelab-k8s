@@ -1,0 +1,46 @@
+# Kustomize overlay for the quarterly Vaultwarden restore
+# drill per [`03-runbooks/vaultwarden/restore-drill.md`](../../../../../homelab-docs/03-runbooks/vaultwarden/restore-drill.md).
+#
+# The drill spins up a parallel Vaultwarden + recovered
+# CNPG cluster in a throwaway `vw-restore-drill-<date>`
+# namespace. This overlay:
+#   1. Renames the CNPG cluster + Vaultwarden release so
+#      they don't collide with production
+#   2. Bootstraps the CNPG cluster from production's barman
+#      backup at a recoveryTarget time
+#   3. Skips the production HTTPRoute (port-forward only;
+#      no CF Tunnel, no public ingress)
+#   4. Skips the production ESOs that aren't relevant
+#      (admin-token, oidc, smtp, cnpg-s3 — drill instance
+#      doesn't need to back up + uses a one-off admin
+#      token only operator knows)
+#
+# Usage:
+#   NS="vw-restore-drill-$(date +%Y%m%d)"
+#   kubectl create namespace $NS
+#   kubectl apply -n $NS -k apps/vaultwarden/overlays/restore-drill/
+#
+# Per the runbook, operator port-forwards to verify; tears
+# down with `kubectl delete namespace $NS` when done.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Inherit the production CNPG cluster spec but override the
+# bootstrap section + cluster name. Don't pull in the full
+# parent kustomization — that would also pull values.yaml +
+# helmCharts which we re-do separately.
+resources:
+  - cnpg-cluster-recovery.yaml
+  - vaultwarden-drill.yaml
+  - drill-admin-secret.yaml
+
+# OPERATOR FILLS:
+#   <DRILL_TARGET_TIME>  ISO-8601 UTC timestamp;
+#                        recoveryTarget for CNPG bootstrap
+#                        (typically "1 hour ago"
+#                        per the runbook RPO check)
+#   <DRILL_ADMIN_TOKEN_ARGON2>  Argon2 hash of a one-shot
+#                               admin password (operator
+#                               generates per first-install
+#                               recipe; throwaway).

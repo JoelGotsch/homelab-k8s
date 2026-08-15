@@ -1,0 +1,86 @@
+# CNPG Postgres cluster for LiteLLM's budget/spend tracking.
+# Per ADR 0026 D1 + backup-and-dr.md §Postgres databases (CNPG).
+#
+# Data classification: internal (per ADR 0003). RPO 4h, RTO 24h.
+# CNPG WAL+base covers RPO; this is well within the matrix.
+#
+# Service exposed: llm-gateway-rw.llm-gateway.svc:5432 — values.yaml
+# points the chart at this DSN through the ExternalSecret-managed
+# DATABASE_URL.
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: llm-gateway
+  namespace: llm-gateway
+spec:
+  instances: 2
+  # CVE remediation 2026-07-13: pin patched postgres image
+  # (was inheriting operator default 17.2 / Debian-11 base).
+  # 17.6-bookworm = latest patched 17.x, Debian-12 base.
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.6-bookworm
+
+  # Propagate labels to CNPG-managed children (Pods, PVCs,
+  # Services). Picked up by infrastructure/longhorn/recurring-jobs.yaml's
+  # `internal` group: 4-hourly snapshots × 7d retain.
+  #
+  # CNPG primaries opt into replica3 per ADR 0016 — instances: 2
+  # is DB-level redundancy, replica3 is disk-level redundancy
+  # for the authoritative copy. Both layers earned.
+  # 2026-07-09 ADR 0036: CNPG Postgres data volume moves to
+  # the -retain family. Default longhorn-replica3 is now
+  # reclaim=Delete; the LiteLLM spend/budget DB is the source
+  # of truth for cost accounting — PVC delete must not evict.
+  # CNPG propagates inheritedMetadata.annotations to child PVCs at
+  # reconcile time (per CNPG docs), satisfying the Kyverno
+  # homelab-disallow-retain-reclaim-without-annotation policy.
+  inheritedMetadata:
+    labels:
+      recurring-job-group.longhorn.io/internal: "enabled"
+    annotations:
+      retention.homelab.internal/reason: "LiteLLM budget/spend DB — cost accounting source of truth."
+
+  storage:
+    size: 5Gi
+    storageClass: longhorn-replica3-retain
+
+  monitoring:
+    enablePodMonitor: true
+
+  postgresql:
+    parameters:
+      max_connections: "100"
+      shared_buffers: "128MB"
+
+  bootstrap:
+    initdb:
+      database: litellm
+      owner: litellm
+
+  # Backup pipeline — WAL+base to MinIO-on-NAS. Restic CronJob
+  # (separate) replicates the bucket to tier-2/3.
+  #
+  # SEQUENCING: MinIO-on-NAS must be up before this Cluster's
+  # first sync. Pre-MinIO, comment the backup: block; the
+  # cluster will come up without backups. llm-gateway carries
+  # internal-class data (budget/spend), acceptable to bootstrap
+  # without backups. Re-enable once MinIO lands.
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://homelab-backups-cluster/cnpg/llm-gateway
+      endpointURL: http://minio.minio-on-nas.svc.cluster.local:9000
+      s3Credentials:
+        accessKeyId:
+          name: llm-gateway-cnpg-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: llm-gateway-cnpg-s3
+          key: SECRET_ACCESS_KEY
+      wal:
+        compression: bzip2
+      data:
+        compression: bzip2
+    # 30d per backup-and-dr.md class-aligned rule (internal class —
+    # budget/spend metadata; older PITR satisfied via Restic
+    # tier-2/3 restore if ever needed).
+    retentionPolicy: "30d"

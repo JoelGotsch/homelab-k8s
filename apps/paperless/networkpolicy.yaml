@@ -1,0 +1,181 @@
+# NetworkPolicies for Paperless-ngx.
+#
+# Implemented as CiliumNetworkPolicy (not vanilla NetworkPolicy)
+# because Cilium Gateway API traffic carries the reserved
+# `ingress` identity, NOT the source namespace identity. K8s
+# NetPol's `namespaceSelector: kubernetes.io/metadata.name=ingress`
+# silently drops Gateway → Paperless traffic (503 / 5s timeout).
+# See homelab-k8s/platform/authentik/networkpolicy.yaml for the
+# canonical write-up.
+#
+# Pod fan-out:
+#   - paperless         (web + task worker — Django on port 8000)
+#   - paperless-redis-master (chart-bundled redis)
+#   - paperless-pg-rw / -ro  (CNPG)
+#
+# Same-namespace traffic is allowed broadly; cross-namespace
+# is narrow per the established homelab pattern.
+
+# Same-ns allow remains a vanilla NetworkPolicy: it has no
+# rules referencing the ingress namespace, so it doesn't
+# trip the Cilium Gateway identity mismatch.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: paperless-allow-same-ns
+  namespace: paperless
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: paperless
+  namespace: paperless
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: paperless-ngx
+  ingress:
+    # Cilium Gateway envoy — reserved `ingress` identity.
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+    # Prometheus scrape.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: prometheus
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Authentik OIDC.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+---
+# CCNP for cluster-internal external dependencies.
+# NAS NFS egress is NOT here — per ADR 0030 §D1 csi-rclone
+# is the only NAS-talking pod; Paperless sees the encrypted
+# share via CSI.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: paperless-egress
+  namespace: paperless
+spec:
+  endpointSelector: {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # CNPG instance manager → kube-apiserver. 10.96.0.1:443 is the
+    # reserved `kube-apiserver` Cilium entity, NOT a regular pod/CIDR —
+    # a plain port:443 toFQDNs/toCIDR rule does not match it. Without
+    # this the initdb pod times out reading its Cluster CR → cluster
+    # stuck "Unable to create required cluster objects". Fixed 2026-05-27.
+    # BOTH 443 and 6443: Cilium socket-LB translates the ClusterIP
+    # (10.96.0.1:443) to the Talos apiserver backend (:6443) BEFORE
+    # egress policy is evaluated, so the rule must allow the backend
+    # port 6443 too (matches the alloy/crowdsec/clickhouse convention).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # MinIO (cluster-internal — for CNPG WAL). Lives in minio-on-nas,
+    # not `minio` (the Thread-3 namespace fix; this CNP uses the Cilium
+    # label form so the earlier sed missed it). Fixed 2026-05-27.
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": minio-on-nas
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+    # Paperless's first-run downloads NLTK data + spacy
+    # models from upstream. Operator extends if other
+    # Paperless-side fetches show up in logs (e.g., new
+    # tessdata language pack).
+    - toFQDNs:
+        - matchName: "raw.githubusercontent.com"
+        - matchName: "github.com"
+        - matchName: "objects.githubusercontent.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# CNPG instance pods need INGRESS from the operator (cnpg-system) on the
+# instance-manager status port (8000) and from Prometheus (monitoring) on
+# the metrics port (9187). The namespace-wide `paperless-allow-same-ns`
+# NetworkPolicy (podSelector {}, ingress only from the same namespace) flips
+# every paperless pod — including the CNPG instances — to ingress default-
+# deny, so the cross-namespace operator probe to :8000 timed out
+# ("Get https://<pod-ip>:8000/pg/status: i/o timeout") → the cluster hung in
+# "Instance Status Extraction Error: HTTP communication issue" and never
+# left bootstrap. Healthy clusters (forgejo/authentik) have no same-ns
+# policy, so their operator reaches the instances freely. Added 2026-05-27.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: paperless-pg-operator-ingress
+  namespace: paperless
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: paperless-pg
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+            - port: "9187"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "9187"
+              protocol: TCP

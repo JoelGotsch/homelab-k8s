@@ -1,0 +1,292 @@
+# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
+# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
+#   ansible-playbook ansible/playbooks/00-render-static.yml
+# (from the homelab-infra repo root).
+# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
+# Nextcloud helm values (nextcloud/nextcloud official chart).
+# Per ADR 0024 D5 + ADR 0030 (csi-rclone hot/cold split) +
+# identity.md.
+#
+# Storage layout per ADR 0030 §D2:
+#   /var/www/html              ← Longhorn (nextcloud-hot PVC)
+#                                config, custom_apps, themes,
+#                                tmp — hot, regenerable-or-
+#                                tiny, LUKS-at-rest via ADR 0017
+#   /var/www/html/data         ← csi-rclone (nextcloud-personal-
+#                                files PVC, nas-crypt-personal-
+#                                files SC) — operator + family
+#                                user-home tree, encrypted at NAS
+#   /mnt/family-shared         ← csi-rclone (nextcloud-family-
+#                                shared PVC) — Group Folder
+#                                target, operator configures
+#                                post-install via Group Folders
+#                                admin UI
+#   /mnt/internal-archive      ← csi-rclone (nextcloud-internal-
+#                                archive PVC) — Group Folder
+#                                target, operator-only access
+#
+# Tailscale-only ingress at first commit (Nextcloud is the
+# Synology Drive + Radicale replacement; calendar/contacts/
+# files are non-E2EE so don't qualify for Cloudflare TLS
+# termination per ADR 0024 D4).
+
+# Single replica + external CNPG + bundled Redis + NFS-backed
+# data PVC.
+replicaCount: 1
+
+# RWO PVC + replicaCount: 1 deadlocks RollingUpdate (new pod
+# can't attach the volume while the old pod holds it). Forces
+# operator to manually scale the old RS to 0 on every rollout.
+# See known-caveats §"Helm-chart rollouts on RWO PVCs" (2026-05-25).
+strategy:
+  type: Recreate
+
+image:
+  repository: nextcloud
+  # OPERATOR PINS via Renovate. APACHE variant (serves HTTP on :80 directly
+  # via mod_php). The previous `30-fpm-alpine` pin was php-fpm (FastCGI only)
+  # with nginx.enabled:false → nothing served :80, so the liveness/startup
+  # probe (:80/status.php) could never pass — nextcloud could never come up.
+  # Under the namespace's baseline PSS the apache entrypoint runs as root and
+  # binds :80 fine. (Switching to fpm+nginx-non-root is the deferred hardening
+  # TODO.) Fixed 2026-05-29.
+  # 34-apache directly (not staged 30→31→…→34): the 2026-07-17
+  # investigation found the instance was NEVER installed — occ
+  # `installed: false`, 0 tables in the CNPG DB, data dir contained
+  # only nextcloud.log (a half-completed maintenance:install from
+  # 2026-05-29 wrote config but no schema). Staged upgrades exist to
+  # protect data; there was none. The half-install was wiped off the
+  # hot PVC and the entrypoint auto-installs fresh at 34.
+  tag: "34-apache"
+  pullPolicy: IfNotPresent
+
+# Use external CNPG. Chart's bundled Postgres dependency off.
+internalDatabase:
+  enabled: false
+externalDatabase:
+  enabled: true
+  type: postgresql
+  host: nextcloud-pg-rw.nextcloud.svc.cluster.local
+  database: nextcloud
+  user: nextcloud
+  existingSecret:
+    enabled: true
+    # Read the DB password straight from the CNPG-generated secret
+    # (nextcloud-pg-app has a `password` key), NOT a mirror through
+    # OpenBao. The old nextcloud-postgres-creds ExternalSecret pulled
+    # kv/nextcloud/postgres (never seeded → CreateContainerConfigError),
+    # the same CNPG-creds-via-OpenBao anti-pattern fixed for forgejo.
+    # Fixed 2026-05-29; dead ES removed 2026-06-02.
+    secretName: nextcloud-pg-app
+    # CNPG names the keys `username` + `password`; the chart defaults
+    # usernameKey to `db-username` (which doesn't exist in the CNPG
+    # secret → POSTGRES_USER CreateContainerConfigError). Map both.
+    usernameKey: username
+    passwordKey: password
+
+# Bundled Redis for sessions + file-locking. Persistence on
+# Longhorn-replica2.
+redis:
+  enabled: true
+  # Bitnami sunset their free docker.io/bitnami images (2025); the old
+  # bitnami/redis tags 404. Repoint to the bitnamilegacy archive (same
+  # tags). Matches the langfuse valkey repoint. Added 2026-05-27.
+  image:
+    repository: bitnamilegacy/redis
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      storageClass: longhorn-replica2
+      size: 5Gi
+
+# Cron sidecar for Nextcloud's background jobs (file scans,
+# preview generation, federated calendar sync, etc.). Chart
+# default but explicit here.
+cronjob:
+  enabled: true
+  # nextcloud-cron runs the same image entrypoint as root → www-data, so
+  # it keeps the default cap set (NET_BIND_SERVICE/CHOWN/SETUID/SETGID).
+  # Under the namespace's baseline PSS (2026-05-29) this is allowed; only
+  # readOnlyRootFilesystem stays false (image writes to rootfs). A prior
+  # restricted-PSS block here (allowPrivilegeEscalation:false + caps drop
+  # ALL) blocked the root entrypoint.
+  securityContext:
+    readOnlyRootFilesystem: false
+
+# Hot-bucket PVC mounted at /var/www/html (the chart's primary
+# mount). Subpath mappings cover everything EXCEPT data —
+# data lives on the csi-rclone PVC mounted via extraVolumes
+# below.
+persistence:
+  enabled: true
+  existingClaim: nextcloud-hot
+  # subPath is a SCALAR STRING prefix, not a map (audit 2026-06-04, finding #14).
+  # The chart template (nextcloud-5.5.0 templates/deployment.yaml) uses it as:
+  #   subPath: {{ ternary "html" (printf "%s/html" .Values.persistence.subPath) (empty .Values.persistence.subPath) }}
+  # and similarly for root, config, custom_apps, themes sub-mounts.
+  # Passing a YAML map caused the `empty` check to evaluate to false (non-nil map)
+  # and `printf "%s/html"` on a map object → garbled mount path. Leave empty:
+  # the chart then uses bare dir names (html, config, custom_apps, themes) as
+  # the subPath within the PVC — correct for a flat single-PVC layout.
+  subPath: ""
+  # Chart-native data-dir split (ADR 0030 §D2): mounts the csi-rclone
+  # personal-files PVC at nextcloud.datadir (/var/www/html/data),
+  # replacing the previous top-level extraVolumes/extraVolumeMounts
+  # approach — those keys were SILENTLY DROPPED (chart only reads
+  # nextcloud.extraVolumes; found 2026-07-17: the live pod mounted only
+  # nextcloud-hot, so user data would have landed on Longhorn instead
+  # of the NAS-encrypted share). Empty subPath → files live under
+  # data/ inside the PVC (same scalar-subPath semantics as above).
+  nextcloudData:
+    enabled: true
+    existingClaim: nextcloud-personal-files
+    subPath: ""
+
+nextcloud:
+  # Main 'nextcloud' container. The apache image entrypoint runs as root
+  # (PHP conf.d writes, chown, bind :80) then drops to www-data, so it keeps
+  # the default cap set — dropping ALL would stop even root from binding :80
+  # and from setuid-dropping. Allowed under the namespace's baseline PSS
+  # (2026-05-29). readOnlyRootFilesystem stays false (image writes rootfs).
+  securityContext:
+    readOnlyRootFilesystem: false
+  host: "nextcloud.lab.vyramo.com"
+  existingSecret:
+    enabled: true
+    secretName: nextcloud-admin
+    usernameKey: NEXTCLOUD_ADMIN_USER
+    passwordKey: NEXTCLOUD_ADMIN_PASSWORD
+
+  # Trusted reverse-proxy + domain config so URLs render
+  # correctly behind Cilium Gateway.
+  trustedDomains:
+    - "nextcloud.lab.vyramo.com"
+
+  # Rendered config injected via the chart's configs section.
+  # Operator extends with per-deployment options (default
+  # background job, locale, etc.) post-first-install.
+  configs:
+    proxy.config.php: |-
+      <?php
+      $CONFIG = array(
+        'trusted_proxies' => ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'],
+        'overwriteprotocol' => 'https',
+        'default_phone_region' => 'DE',
+      );
+    # The data dir is a csi-rclone FUSE mount (NAS-encrypted share,
+    # ADR 0030) — its POSIX perms are synthetic and chmod 0770 is not
+    # honorable, so Nextcloud's default permission check aborts every
+    # occ invocation ("Your data directory is readable by other
+    # people" → "Environment not properly prepared", hit on first
+    # install 2026-07-17). Disabling the check is the documented
+    # approach for network-mounted data dirs; actual protection is
+    # the mount boundary + namespace isolation + NAS-side encryption.
+    # trusted_domains pinned here too: the entrypoint only sets them
+    # during the install branch, and that step was what the perms
+    # abort interrupted.
+    datadir.config.php: |-
+      <?php
+      $CONFIG = array(
+        'check_data_directory_permissions' => false,
+        'trusted_domains' => ['localhost', 'nextcloud.lab.vyramo.com'],
+      );
+
+  # OIDC env (for the user_oidc app — operator installs +
+  # configures via occ post-Authentik). The chart doesn't
+  # natively wire OIDC; instead, projection of the OIDC
+  # Secret as env vars makes the values available to occ
+  # commands run in the cron pod.
+  extraEnv:
+    - name: OIDC_CLIENT_ID
+      valueFrom:
+        secretKeyRef:
+          name: nextcloud-oidc
+          key: client_id
+    - name: OIDC_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: nextcloud-oidc
+          key: client_secret
+    - name: OIDC_ISSUER
+      valueFrom:
+        secretKeyRef:
+          name: nextcloud-oidc
+          key: issuer
+
+  # Cold-bucket Group Folder mounts (ADR 0030 §D2). MUST live under
+  # `nextcloud:` — the chart only reads .Values.nextcloud.extraVolumes;
+  # the previous top-level placement was silently dropped (2026-07-17).
+  # /var/www/html/data moved to the chart-native
+  # persistence.nextcloudData block above. Operator post-install
+  # points Group Folders at these paths via `occ groupfolders:create`.
+  extraVolumes:
+    - name: nextcloud-family-shared
+      persistentVolumeClaim:
+        claimName: nextcloud-family-shared
+    - name: nextcloud-internal-archive
+      persistentVolumeClaim:
+        claimName: nextcloud-internal-archive
+
+  extraVolumeMounts:
+    - name: nextcloud-family-shared
+      mountPath: /mnt/family-shared
+    - name: nextcloud-internal-archive
+      mountPath: /mnt/internal-archive
+
+# Don't expose Service externally — Cilium HTTPRoute owns
+# ingress.
+service:
+  type: ClusterIP
+ingress:
+  enabled: false
+
+# Pod-level security: non-root, dropped caps. Nextcloud-
+# fpm-alpine runs as user 82 (www-data) by default; override
+# carefully — chart manages fsGroup correctly.
+#
+# Do NOT set `fsGroup` here. The nextcloud chart v5.5.0
+# template hardcodes `fsGroup: 33` at the bottom of the pod
+# securityContext block (after the "# Will mount configuration
+# files as www-data (id: 33)" comment). Setting it again via
+# values.yaml renders both entries inside the SAME map →
+# YAML duplicate-key error → kustomize build fails with
+# `mapping key "fsGroup" already defined at line N`. Observed
+# 2026-05-23 — Argo app-nextcloud stuck Sync=Unknown.
+# Pod-level securityContext (this top-level key maps to the pod in chart
+# v5.5.0). Container-level securityContext lives under
+# `nextcloud.securityContext` + `cronjob.securityContext` above — the
+# chart has no `containerSecurityContext` key, so the block previously
+# here was silently dropped (the cause of the restricted-PSS rejection).
+# Nextcloud writes to /var at runtime (PHP session/cache) so the
+# containers keep readOnlyRootFilesystem: false.
+#
+# Run as the IMAGE DEFAULT (root): the apache entrypoint needs root to
+# write PHP conf.d, chown data, and bind :80, then drops to www-data
+# itself. runAsNonRoot/runAsUser:33 here forced the entrypoint non-root →
+# "can't create conf.d/redis-session.ini: Permission denied". Allowed by
+# the namespace's baseline PSS (2026-05-29 decision). fsGroup:33 is added
+# by the chart template (don't set it here — duplicate-key). seccompProfile
+# kept (baseline-compatible hardening).
+securityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    memory: 2Gi
+
+# First-run install/migration takes minutes, but the chart's startupProbe is
+# disabled by default, so the livenessProbe (10s delay, 3 failures) kills
+# nextcloud at ~40s mid-install ("failed liveness probe: status.php connection
+# refused") → restart loop, install never completes. Enable the startupProbe so
+# liveness/readiness hold off until status.php responds; failureThreshold 60 ×
+# 10s ≈ 10min headroom for the install. Added 2026-05-29.
+startupProbe:
+  enabled: true
+  failureThreshold: 60

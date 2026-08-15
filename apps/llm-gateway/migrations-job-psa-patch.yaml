@@ -1,0 +1,54 @@
+# Strategic-merge patch for the litellm-helm chart's
+# pre-install / pre-upgrade migration Job.
+#
+# Upstream chart (1.85.1) renders `securityContext: {}` at pod
+# level and emits only an incomplete container-level block
+# (allowPrivilegeEscalation: false + capabilities.drop: [ALL]
+#  + readOnlyRootFilesystem: true). The namespace enforces
+# `pod-security.kubernetes.io/enforce: restricted`, so kubelet
+# refuses to create the pod with:
+#   "runAsNonRoot != true (...) must set
+#    seccompProfile.type to RuntimeDefault or Localhost"
+# observed 2026-06-05 with FailedCreate x342 / 5h45m loop.
+#
+# The chart exposes NO `migrationJob.podSecurityContext` /
+# `migrationJob.securityContext` values keys — this kustomize
+# patch is the only way to add PSA-restricted-compliant fields
+# without forking the chart.
+#
+# UID/fsGroup picks: prisma-migrations needs to write nothing
+# durable (DB is the migration target). We force a non-root
+# UID; if the litellm-database image's default USER is also
+# non-root, kubelet won't complain even though the values here
+# look "made up" — `runAsNonRoot` only requires uid != 0.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: llm-gateway-litellm-migrations
+spec:
+  template:
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      # The policies-ConfigMap volume mount is stripped via a
+      # separate JSON-6902 patch in kustomization.yaml — strategic
+      # merge inherits sibling list items so it can't reliably
+      # zero `volumes`/`volumeMounts`.
+      containers:
+        # LiteLLM's `prisma_migration.py` shells out to the
+        # prisma CLI which spawns node + downloads the schema
+        # client on start. 1Gi wasn't enough — pod OOMKilled
+        # in 16s under 1Gi. Bumped to 2Gi. Migration only
+        # runs on chart upgrade, so the ceiling is short-lived.
+        - name: prisma-migrations
+          resources:
+            requests:
+              cpu: 100m
+              memory: 1Gi
+            limits:
+              memory: 2Gi

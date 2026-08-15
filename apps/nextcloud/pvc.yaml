@@ -1,0 +1,122 @@
+# PVCs for Nextcloud's hot/cold storage split per ADR 0030 §D2.
+#
+# The Nextcloud helm chart's `persistence` block mounts ONE
+# PVC at /var/www/html with subPath logic for /config,
+# /custom_apps, /themes, /tmp, /data. Per ADR 0030 only the
+# /data subtree (where user files live) qualifies as cold +
+# encrypted-at-NAS — the rest is config / installed-app
+# binaries / themes / tmp, which is hot, regenerable-or-tiny,
+# and lives well on Longhorn (LUKS-at-rest via ADR 0017).
+#
+# The split is achieved by:
+#   - Mounting `nextcloud-hot` (Longhorn) at /var/www/html
+#     via the chart's `persistence.existingClaim` (subPath
+#     mappings drop `data`).
+#   - Mounting `nextcloud-personal-files` (csi-rclone) at
+#     /var/www/html/data via `extraVolumes` +
+#     `extraVolumeMounts` in values.yaml.
+#   - Mounting `nextcloud-family-shared` and
+#     `nextcloud-internal-archive` (csi-rclone) at
+#     /mnt/family-shared and /mnt/internal-archive
+#     respectively. Operator post-install configures these as
+#     Nextcloud Group Folders pointing at those mount paths.
+#
+# Three separate csi-rclone PVCs (per share) instead of one
+# big PVC because of ADR 0025 D8 — per-share keys, so
+# compromise of one share doesn't expose another. Storage
+# sizes are soft caps; the underlying NAS share is the actual
+# constraint.
+
+# Hot bucket — config, custom_apps, themes, tmp + chart-
+# bundled Redis persistence + chart-bundled Postgres if it
+# were enabled (it isn't; CNPG handles DB). LUKS-at-rest via
+# ADR 0017.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nextcloud-hot
+  namespace: nextcloud
+  labels:
+    app.kubernetes.io/name: nextcloud
+    app.kubernetes.io/component: hot-storage
+  annotations:
+    # ADR 0036: -retain SCs require a rationale. The hot bucket
+    # holds Nextcloud config, custom_apps (installed integrations),
+    # themes + preview cache. Rebuild-from-scratch is possible but
+    # multi-hour (re-download apps, regenerate previews).
+    retention.homelab.internal/reason: "Nextcloud config + installed apps + preview cache; regenerating costs hours of re-download + preview generation."
+spec:
+  accessModes: [ReadWriteMany]
+  # 2026-07-09 ADR 0036: migrate to -retain family.
+  storageClassName: longhorn-replica2
+  resources:
+    requests:
+      # Sized for: config (~MB), custom_apps (~500MB across
+      # operator's expected app set), themes (~50MB),
+      # tmp (~10GB peak during chunked uploads), preview
+      # cache (~5GB), session/lock files (~MB). 50Gi covers
+      # comfortably with headroom.
+      storage: 50Gi
+---
+# Cold bucket — primary data dir. Contains operator's +
+# family members' user-home trees: <userid>/files/...,
+# <userid>/files_versions/..., <userid>/files_trashbin/...
+# All `personal`-classified per ADR 0003.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nextcloud-personal-files
+  namespace: nextcloud
+  labels:
+    app.kubernetes.io/name: nextcloud
+    app.kubernetes.io/component: cold-storage
+    nextcloud.share/class: personal-files
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nas-crypt-personal-files
+  resources:
+    requests:
+      # Sized for the operator + 4 family members' home
+      # trees. Soft cap; NAS share is the actual constraint.
+      # Adjust per actual usage post-bring-up.
+      storage: 1Ti
+---
+# Cold bucket — family-shared Group Folder. Operator
+# post-install creates a Nextcloud Group Folder named
+# "family-shared", points it at /mnt/family-shared, assigns
+# to the "family" group.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nextcloud-family-shared
+  namespace: nextcloud
+  labels:
+    app.kubernetes.io/name: nextcloud
+    app.kubernetes.io/component: cold-storage
+    nextcloud.share/class: family-shared
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nas-crypt-family-shared
+  resources:
+    requests:
+      storage: 500Gi
+---
+# Cold bucket — archived internal documents Group Folder.
+# Operator post-install creates a Nextcloud Group Folder
+# named "internal-archive", points it at
+# /mnt/internal-archive, assigns to operator only.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nextcloud-internal-archive
+  namespace: nextcloud
+  labels:
+    app.kubernetes.io/name: nextcloud
+    app.kubernetes.io/component: cold-storage
+    nextcloud.share/class: internal-archive
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nas-crypt-internal-archive
+  resources:
+    requests:
+      storage: 1Ti

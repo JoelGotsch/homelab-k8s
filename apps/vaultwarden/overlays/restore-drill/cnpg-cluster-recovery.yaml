@@ -1,0 +1,57 @@
+# Drill-only CNPG cluster bootstrapped from production
+# barman backup at the operator-chosen recoveryTarget time.
+#
+# `externalClusters[].barmanObjectStore` config matches what
+# production's vaultwarden-pg writes (MinIO target,
+# bzip2 compression). The recovered cluster gets fresh
+# credentials (CNPG generates a new vw-pg-drill-app Secret).
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: vw-pg-drill
+spec:
+  instances: 1   # single-instance for the drill; production
+                 # is 2
+
+  storage:
+    size: 5Gi
+    storageClass: longhorn-replica2   # replica2 sufficient for
+                                      # an ephemeral drill
+
+  bootstrap:
+    recovery:
+      source: vaultwarden-pg
+      recoveryTarget:
+        targetTime: "<DRILL_TARGET_TIME>"   # e.g.,
+                                            # "2026-05-02T10:00:00Z"
+
+  externalClusters:
+    - name: vaultwarden-pg
+      barmanObjectStore:
+        destinationPath: s3://homelab-backups-cluster/cnpg/vaultwarden
+        endpointURL: http://minio.minio-on-nas.svc.cluster.local:9000
+        s3Credentials:
+          accessKeyId:
+            name: vaultwarden-cnpg-s3-drill
+            key: ACCESS_KEY_ID
+          secretAccessKey:
+            name: vaultwarden-cnpg-s3-drill
+            key: SECRET_ACCESS_KEY
+        wal:
+          compression: bzip2
+        data:
+          compression: bzip2
+---
+# The drill needs its own copy of the s3-creds Secret in
+# the drill namespace (CNPG can't reach across namespaces
+# for barman creds). Operator copies the Secret manually
+# at drill time:
+#   kubectl get secret vaultwarden-cnpg-s3 -n vaultwarden -o yaml \
+#     | sed "s/namespace: vaultwarden/namespace: $NS/; \
+#            s/name: vaultwarden-cnpg-s3/name: vaultwarden-cnpg-s3-drill/" \
+#     | kubectl apply -f -
+#
+# (The Secret resource isn't templated here because
+# kustomize overlays can't easily pull from another
+# namespace; operator-side cp is simpler.)

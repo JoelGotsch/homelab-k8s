@@ -1,0 +1,32 @@
+# Immich HTTPRoute via Cilium Gateway.
+#
+# The hostname is NOT hardcoded — `immich.FQDN_SUFFIX` is resolved to
+# `immich.<internal_subdomain>.<domain>` at build time by the site-config
+# replacement in kustomization.yaml (source: components/site-config). To trace
+# it: kustomization.yaml `replacements:` → site-config.env `fqdn_suffix`.
+#
+# Phase 1 (today): Tailscale-only on immich.<internal_subdomain>.<domain>.
+# Phase 2: NEVER public on this hostname. Per ADR 0024 D1, public album-sharing
+# is delegated to the read-only `apps/immich-public-proxy/` layer published at
+# photos.<domain> via Cloudflare Tunnel — Immich's admin UI / API / mobile-backup
+# endpoint stay Tailscale-only. See `04-guides/photo-management-with-immich.md`.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: immich
+  namespace: immich
+spec:
+  parentRefs:
+    - name: homelab-gateway
+      namespace: ingress
+      sectionName: https
+  hostnames:
+    - "immich.FQDN_SUFFIX"   # -> immich.<fqdn_suffix> via site-config replacement
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: immich-server
+          port: 2283

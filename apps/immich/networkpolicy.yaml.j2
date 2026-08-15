@@ -1,0 +1,209 @@
+# NetworkPolicies for Immich.
+#
+# Implemented as CiliumNetworkPolicy (not vanilla NetworkPolicy)
+# because Cilium Gateway API traffic carries the reserved
+# `ingress` identity, NOT the source namespace identity. K8s
+# NetPol's `namespaceSelector: kubernetes.io/metadata.name=ingress`
+# silently drops Gateway → immich-server traffic (503 / 5s timeout).
+# See homelab-k8s/platform/authentik/networkpolicy.yaml for the
+# canonical write-up.
+#
+# Pod fan-out:
+#   - immich-server         (HTTP API + web frontend, port 2283)
+#   - immich-microservices  (background jobs — no HTTP)
+#   - immich-machine-learning (port 3003 internal)
+#   - immich-redis-master   (chart-bundled redis)
+#   - immich-pg-rw / -ro    (CNPG)
+#
+# Same-namespace traffic is allowed broadly; cross-namespace is
+# narrow per the established homelab pattern.
+
+# Same-ns allow remains a vanilla NetworkPolicy: it has no
+# rules referencing the ingress namespace, so it doesn't
+# trip the Cilium Gateway identity mismatch.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: immich-allow-same-ns
+  namespace: immich
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+---
+# LABEL TRAP: the immich-app/immich-charts helm chart labels every
+# component pod `app.kubernetes.io/name: <component>` (e.g.
+# `server`, `microservices`, `machine-learning`) + a shared
+# `app.kubernetes.io/instance: immich`. The Service NAMES are
+# `immich-server` / `immich-machine-learning` (chart prefixes with
+# release name), but the pod LABELS are not. Selecting on
+# `app.kubernetes.io/name: immich-server` matched zero endpoints,
+# leaving this CNP unrealized (latent bug — when the operator
+# would have expected ingress default-deny + explicit allows, the
+# pod was actually fully open, gated only by `immich-allow-same-ns`
+# + the IPP-side egress). Selector below uses chart-native labels.
+# Fixed 2026-06-02 alongside the IPP egress label fix that was
+# crashlooping IPP.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: immich-server
+  namespace: immich
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: server
+      app.kubernetes.io/instance: immich
+  ingress:
+    # Cilium Gateway envoy — reserved `ingress` identity.
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "2283"
+              protocol: TCP
+    # Prometheus scrape.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: prometheus
+      toPorts:
+        - ports:
+            - port: "2283"
+              protocol: TCP
+    # immich-public-proxy (when that layer lands per ADR 0024 D1
+    # for `photos.{{ homelab_domain }}` public album sharing).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: immich-public-proxy
+      toPorts:
+        - ports:
+            - port: "2283"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Authentik OIDC.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+---
+# CCNP for NFS egress to NAS + reverse-geocoding for Map view.
+# Microservices does the OCR / face-detection / smart-search
+# indexing too, but those run on-cluster (ML pod is in-namespace).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: immich-egress
+  namespace: immich
+spec:
+  endpointSelector: {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # NAS NFS egress is NOT allowed from Immich pods — per
+    # ADR 0030 §D1 the csi-rclone driver in `csi-rclone` ns
+    # is the only thing that talks to the NAS. Immich pods
+    # see the encrypted library as a normal mounted FS via
+    # the CSI provisioning. If the PVC fails to bind, the
+    # pod fails to start (correct behaviour — fail-closed).
+    # CNPG instance manager → kube-apiserver. 10.96.0.1:443 is the
+    # reserved `kube-apiserver` Cilium entity, NOT a regular pod/CIDR;
+    # the CNPG initdb/instance manager times out reading its Cluster CR
+    # without it. BOTH 443 and 6443: Cilium socket-LB translates the
+    # ClusterIP (:443) to the Talos apiserver backend (:6443) before
+    # egress policy is evaluated, so the backend port must be allowed
+    # too (matches the alloy/crowdsec/clickhouse convention). Fixed
+    # 2026-05-27.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # MinIO (cluster-internal — for CNPG WAL). Lives in minio-on-nas,
+    # not `minio` (Thread-3 namespace fix; Cilium label form missed by
+    # the earlier sed). Fixed 2026-05-27.
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": minio-on-nas
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+    # Reverse geocoding source — Immich downloads the offline
+    # GeoNames cities500 db on first start. Operator extends if
+    # other Immich-side fetches show up in logs.
+    - toFQDNs:
+        - matchName: "download.geonames.org"
+        - matchName: "github.com"
+        - matchName: "objects.githubusercontent.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# CNPG instance pods need INGRESS from the operator (cnpg-system) on the
+# instance-manager status port (8000) and from Prometheus (monitoring) on
+# the metrics port (9187). The namespace-wide `immich-allow-same-ns`
+# NetworkPolicy (podSelector {}, ingress only from the same namespace) flips
+# every immich pod — including the CNPG instances — to ingress default-deny,
+# so the cross-namespace operator probe to :8000 timed out
+# ("Get https://<pod-ip>:8000/pg/status: i/o timeout") → the cluster hung in
+# "Instance Status Extraction Error: HTTP communication issue" and never
+# left bootstrap. Healthy clusters (forgejo/authentik) have no same-ns
+# policy, so their operator reaches the instances freely. Added 2026-05-27.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: immich-pg-operator-ingress
+  namespace: immich
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: immich-pg
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+            - port: "9187"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "9187"
+              protocol: TCP

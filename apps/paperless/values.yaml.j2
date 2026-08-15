@@ -1,0 +1,254 @@
+# Paperless-ngx helm values (gabe565/charts/paperless-ngx).
+# Per ADR 0024 (Tailscale-only — `personal` data) +
+# ADR 0025 D4 (cluster app for personal-documents share) +
+# ADR 0030 (csi-rclone hot/cold split) +
+# identity.md (Authentik OIDC).
+#
+# Storage layout per ADR 0030 §D2:
+#   /usr/src/paperless/data    ← Longhorn (paperless-data PVC)
+#                                 config, ML model cache, migrations
+#   /usr/src/paperless/media   ← csi-rclone (paperless-media PVC)
+#                                 documents + archive + thumbs + OCR
+#   /usr/src/paperless/consume ← Longhorn (paperless-consume PVC)
+#                                 transient watch dir
+#   /usr/src/paperless/export  ← Longhorn (paperless-export PVC)
+#                                 operator bulk-export target
+#
+# Postgres: external CNPG (bundled subchart off).
+# Redis: bundled (chart default; ephemeral task queue, no
+# durability requirement).
+
+image:
+  repository: ghcr.io/paperless-ngx/paperless-ngx
+  # OPERATOR PINS via Renovate.
+  tag: "2.20.15"
+  pullPolicy: IfNotPresent
+
+# Disable bundled Postgres + MariaDB; use external CNPG.
+postgresql:
+  enabled: false
+mariadb:
+  enabled: false
+
+# Bundled Redis kept (chart default).
+# The bundled bitnami redis subchart verifies its image against the
+# known bitnami registry and refuses bitnamilegacy/* (render hard-fails:
+# "Original containers have been substituted for unrecognized ones")
+# unless this global is set (bitnami/charts#30850). Required alongside
+# the redis.image.repository override below. Added 2026-05-27.
+global:
+  security:
+    allowInsecureImages: true
+
+redis:
+  enabled: true
+  # Bitnami sunset their free docker.io/bitnami images (2025); the old
+  # bitnami/redis tags 404 → paperless-redis-master ImagePullBackOff.
+  # Repoint to the bitnamilegacy archive (same tags). Matches the
+  # nextcloud-redis + langfuse-valkey repoints. Added 2026-05-27.
+  image:
+    repository: bitnamilegacy/redis
+  # Redis auth ON, via existingSecret. The paperless-ngx chart's
+  # `templates/common.yaml` unconditionally injects an env var
+  # `A_REDIS_PASSWORD` with `secretKeyRef name: <release>-redis`
+  # whenever `redis.enabled: true` — there is NO gate on
+  # `auth.enabled` (chart bug). With `auth.enabled: false` AND no
+  # existingSecret, the bitnami redis subchart never renders the
+  # Secret, so the app pod hangs in CreateContainerConfigError with
+  # `secret "paperless-redis" not found`. Fix per chart README:
+  # provide an existingSecret. Operator materializes the Secret
+  # `paperless-redis` (key: redis-password) from OpenBao via
+  # externalsecret.yaml. Both the bitnami redis pods and the
+  # paperless app pod read from the same Secret.
+  auth:
+    enabled: true
+    existingSecret: paperless-redis
+    existingSecretPasswordKey: redis-password
+  master:
+    persistence:
+      enabled: true
+      storageClass: longhorn-replica2
+      size: 2Gi
+
+# Persistence — claim each chart-defined mount via
+# existingClaim against the PVCs declared in pvc.yaml.
+persistence:
+  data:
+    enabled: true
+    type: pvc
+    existingClaim: paperless-data
+  media:
+    enabled: true
+    type: pvc
+    existingClaim: paperless-media
+  consume:
+    enabled: true
+    type: pvc
+    existingClaim: paperless-consume
+  export:
+    enabled: true
+    type: pvc
+    existingClaim: paperless-export
+
+# Don't expose Service externally — Cilium HTTPRoute owns
+# ingress.
+#
+# bjw-s common library expects a nested service schema:
+#   service.<name>.{type, ports.<portName>.port}
+# not the flat `service.type` + `service.port`. The flat
+# shape fails deep in `_ports.tpl` with:
+#   `<$service>: wrong type for value; expected map[string]
+#    interface {}; got float64`
+# because the chart iterates services as a map keyed by name.
+service:
+  main:
+    type: ClusterIP
+    ports:
+      http:
+        port: 8000
+
+# bjw-s common: ingress.<name>.enabled, not flat ingress.enabled
+ingress:
+  main:
+    enabled: false
+
+# Paperless config + secrets via env (chart's `env` block).
+# DB_* + REDIS_* + URL + OIDC vars projected from Secrets
+# created by cnpg-cluster.yaml + externalsecret.yaml.
+env:
+  # paperless-ngx image: run as root (podSecurityContext) but remap
+  # the internal paperless user to 1000 so the app process + all
+  # files it writes are uid/gid 1000, not root. s6-overlay starts
+  # root, chowns /run, then s6-setuidgid drops to this uid.
+  USERMAP_UID: "1000"
+  USERMAP_GID: "1000"
+
+  # Timezone — operator's locale.
+  PAPERLESS_TIME_ZONE: "Europe/Berlin"
+
+  # The URL the app generates self-references against.
+  PAPERLESS_URL: "https://paperless.{{ homelab_internal_subdomain }}.{{ homelab_domain }}"
+
+  # CNPG-issued DB creds — Secret name comes from CNPG's
+  # role-binding on the paperless-pg cluster.
+  PAPERLESS_DBHOST:
+    valueFrom:
+      secretKeyRef:
+        name: paperless-pg-app
+        key: host
+  PAPERLESS_DBNAME:
+    valueFrom:
+      secretKeyRef:
+        name: paperless-pg-app
+        key: dbname
+  PAPERLESS_DBUSER:
+    valueFrom:
+      secretKeyRef:
+        name: paperless-pg-app
+        key: username
+  PAPERLESS_DBPASS:
+    valueFrom:
+      secretKeyRef:
+        name: paperless-pg-app
+        key: password
+
+  # Bundled Redis — DO NOT set PAPERLESS_REDIS here. The chart's
+  # templates/common.yaml auto-renders
+  #   PAPERLESS_REDIS: redis://:$(A_REDIS_PASSWORD)@<release>-redis-master
+  # when `redis.enabled: true`, with A_REDIS_PASSWORD wired from the
+  # existingSecret above. Overriding here would strip the embedded
+  # password and break AUTH against the now-password-protected redis.
+
+  # Pre-seeded admin (chart creates on first start). Operator
+  # rotates via UI to OIDC-only post-Authentik wiring.
+  PAPERLESS_ADMIN_USER:
+    valueFrom:
+      secretKeyRef:
+        name: paperless-admin
+        key: username
+  PAPERLESS_ADMIN_PASSWORD:
+    valueFrom:
+      secretKeyRef:
+        name: paperless-admin
+        key: password
+  PAPERLESS_ADMIN_MAIL:
+    valueFrom:
+      secretKeyRef:
+        name: paperless-admin
+        key: email
+
+  # OCR languages — operator-extends as needed; default
+  # English + German covers operator's common documents.
+  PAPERLESS_OCR_LANGUAGE: "eng+deu"
+
+  # Consume directory — Paperless watches this for new
+  # files. Operator drops via Nextcloud sync, web UI
+  # upload, or scp-into-pod.
+  PAPERLESS_CONSUMPTION_DIR: "/usr/src/paperless/consume"
+
+  # Polling-based consumer (vs inotify) — works reliably
+  # over both csi-rclone and Longhorn mounts; inotify is
+  # spotty over FUSE.
+  PAPERLESS_CONSUMER_POLLING: "60"
+
+  # OIDC (Authentik) — chart projects PAPERLESS_APPS env
+  # the operator extends post-Authentik wiring. Below env
+  # vars are referenced by an operator-side `occ`-style
+  # one-shot configuration command (or web-UI Settings →
+  # Authentication → SocialAccountSettings) that ingests
+  # these values into Paperless's database.
+  OIDC_CLIENT_ID:
+    valueFrom:
+      secretKeyRef:
+        name: paperless-oidc
+        key: client_id
+  OIDC_CLIENT_SECRET:
+    valueFrom:
+      secretKeyRef:
+        name: paperless-oidc
+        key: client_secret
+  OIDC_ISSUER:
+    valueFrom:
+      secretKeyRef:
+        name: paperless-oidc
+        key: issuer
+
+  # Tika + Gotenberg integration — DISABLED at first install.
+  # Operator enables via these env vars + sibling Deployments
+  # if Office-document conversion becomes a need.
+  PAPERLESS_TIKA_ENABLED: "false"
+
+# Pod-level security: paperless-ngx 2.16+ s6-overlay must START as
+# root (chowns /run at preinit) then drops the app to uid 1000 via
+# USERMAP_UID/GID (env). Hence runAsNonRoot:false / runAsUser:0.
+# fsGroup 1000 keeps the mounted PVCs group-writable for the
+# dropped-to-1000 app. baseline PSS (namespace.yaml) permits this.
+podSecurityContext:
+  runAsNonRoot: false
+  runAsUser: 0
+  runAsGroup: 0
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  # s6 manages its own uid/gid transitions; keep escalation allowed.
+  allowPrivilegeEscalation: true
+  # readOnlyRootFilesystem: false — Paperless writes to
+  # /tmp at runtime (PDF processing, OCR scratch).
+  readOnlyRootFilesystem: false
+  # Drop ALL, add back only what s6-overlay preinit needs to chown
+  # /run + drop privileges to 1000 (all baseline-permitted).
+  capabilities:
+    drop: [ALL]
+    add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID, KILL]
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    # Memory budget covers: Paperless web (Django ~200MB) +
+    # task worker (Celery ~300MB) + OCR job in flight
+    # (Tesseract ~500MB-1GB on a typical scan).
+    memory: 2Gi
