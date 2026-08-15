@@ -251,7 +251,7 @@ print(int((now-t).total_seconds()//3600))
 # renames. Same code path, so what plan reports is what move acts on.
 
 run_share_job() {
-  local share="$1" subpath="$2" mode="$3"
+  local share="$1" subpath="$2" mode="$3" target="${4:-}"
   local src_pvc job_name
   src_pvc="$(backup_src_pvc "$share")"
   [ -n "$src_pvc" ] || die "share '$share' has no share-root PVC in $NS.
@@ -298,6 +298,7 @@ spec:
             - { name: MODE,     value: "$mode" }
             - { name: SUBPATH,  value: "$subpath" }
             - { name: RESERVED, value: "$reserved" }
+            - { name: TARGET,   value: "$target" }
           command: ["/bin/sh","-c"]
           args:
             - |
@@ -312,7 +313,35 @@ spec:
                 return 1
               }
 
-              MOVE_LIST=""
+              # busybox has these, but fail loudly rather than silently
+              # reporting files=0 if a future image does not.
+              command -v find >/dev/null && command -v du >/dev/null && command -v wc >/dev/null \
+                || { echo "!! find/du/wc missing in \$(cat /etc/os-release 2>/dev/null | head -1)"; echo "RESULT=missing-tools"; exit 1; }
+
+              # ── ledger: count what is there, before and after a move. Two
+              #    identical ledgers are the evidence that a rename moved
+              #    everything and invented nothing. TARGET empty = share root.
+              if [ "\$MODE" = "ledger" ]; then
+                T="\$ROOT/\${TARGET:-.}"
+                [ -d "\$T" ] || { echo "!! no such path: \$T"; echo "RESULT=no-such-path"; exit 1; }
+                # wc -l pads its output; these numbers get compared by eye
+                # against the run before the move, so strip the padding.
+                echo "LEDGER path=\$T files=\$(find "\$T" -type f | wc -l | tr -d ' ') dirs=\$(find "\$T" -type d | wc -l | tr -d ' ') kib=\$(du -sk "\$T" | cut -f1 | tr -d ' ')"
+                echo "RESULT=ledger"
+                exit 0
+              fi
+
+              # ── Three passes over the SAME glob. Entry names never pass
+              #    through a whitespace-split variable: the previous version
+              #    accumulated them into MOVE_LIST and re-split on IFS, so any
+              #    name containing a space became two bogus names and the mv
+              #    failed mid-run. It also tested each conflict inside the
+              #    rename loop, so a collision on the fifth entry left the
+              #    first four already moved — a half-migrated share, which is
+              #    the one outcome this script exists to prevent.
+              #
+              #    pass 1 plan · pass 2 ALL conflicts · pass 3 rename.
+
               COUNT=0
               for entry in "\$ROOT"/* "\$ROOT"/.[!.]*; do
                 [ -e "\$entry" ] || continue
@@ -322,7 +351,6 @@ spec:
                   continue
                 fi
                 echo "   move     \$base"
-                MOVE_LIST="\$MOVE_LIST \$base"
                 COUNT=\$((COUNT+1))
               done
 
@@ -338,15 +366,34 @@ spec:
                 exit 0
               fi
 
-              mkdir -p "\$ROOT/\$SUBPATH"
-              for base in \$MOVE_LIST; do
+              CONFLICT=0
+              for entry in "\$ROOT"/* "\$ROOT"/.[!.]*; do
+                [ -e "\$entry" ] || continue
+                base="\$(basename "\$entry")"
+                is_reserved "\$base" && continue
                 if [ -e "\$ROOT/\$SUBPATH/\$base" ]; then
                   echo "!! \$SUBPATH/\$base already exists — refusing to overwrite."
-                  echo "RESULT=conflict"
-                  exit 1
+                  CONFLICT=1
                 fi
-                mv "\$ROOT/\$base" "\$ROOT/\$SUBPATH/\$base"
-                echo "   moved    \$base"
+              done
+              if [ "\$CONFLICT" = "1" ]; then
+                echo "== refusing to move: every conflict above is listed, and NOTHING has been renamed."
+                echo "RESULT=conflict"
+                exit 1
+              fi
+
+              mkdir -p "\$ROOT/\$SUBPATH"
+              # Pass 3 re-globs AFTER the mkdir, so the directory just created
+              # is itself a glob hit. It is skipped only because
+              # reserved_components() emits the first path component of EVERY
+              # dataset on this share, including this one — so \$SUBPATH's own
+              # head is always reserved. Do not relax that: without it this
+              # loop would mv the target into itself.
+              for entry in "\$ROOT"/* "\$ROOT"/.[!.]*; do
+                [ -e "\$entry" ] || continue
+                base="\$(basename "\$entry")"
+                is_reserved "\$base" && continue
+                mv "\$ROOT/\$base" "\$ROOT/\$SUBPATH/\$base" && echo "   moved    \$base"
               done
               echo "== moved \$COUNT entries into \$SUBPATH"
               echo "RESULT=moved"
@@ -436,6 +483,34 @@ EOF
   echo
 }
 
+# ── ledger: the before/after evidence a dataset window turns on.
+#
+# Run it on the share ROOT before the move and on the dataset's SUBPATH after.
+# Identical files/dirs/kib is what "the rename moved everything and invented
+# nothing" looks like; anything else stops the window. It is deliberately not
+# folded into `move`: the operator must hold both numbers, and a script that
+# prints its own pass mark is not evidence.
+cmd_ledger() {
+  local ds="$1" where="${2:-root}"
+  local row; row="$(dataset_row "$ds")"
+  [ -n "$row" ] || die "unknown dataset '$ds'. Known: $(all_datasets | tr '\n' ' ')"
+  IFS='|' read -r name share subpath quiesce pvc <<EOF
+$row
+EOF
+  local target=""
+  case "$where" in
+    root)   target="" ;;
+    target) target="$subpath" ;;
+    *) die "ledger takes 'root' (the share root, before the move) or 'target'
+      (the dataset's subpath, after it). Got '$where'." ;;
+  esac
+  echo "── ledger $name ($where)"
+  note "share:    $share"
+  note "path:     ${target:-<share root>}"
+  run_share_job "$share" "$subpath" ledger "$target"
+  echo
+}
+
 cmd_status() {
   echo "nas-crypt datasets (ADR 0051)"
   echo
@@ -472,6 +547,10 @@ case "${1:-plan}" in
     [ -n "${2:-}" ] || die "move requires a dataset name. Known: $(all_datasets | tr '\n' ' ')"
     cmd_move "$2"
     ;;
+  ledger)
+    [ -n "${2:-}" ] || die "ledger requires a dataset name. Known: $(all_datasets | tr '\n' ' ')"
+    cmd_ledger "$2" "${3:-root}"
+    ;;
   status) cmd_status ;;
-  *) die "unknown command '${1}'. Use: plan [dataset] | move <dataset> | status" ;;
+  *) die "unknown command '${1}'. Use: plan [dataset] | move <dataset> | ledger <dataset> [root|target] | status" ;;
 esac
