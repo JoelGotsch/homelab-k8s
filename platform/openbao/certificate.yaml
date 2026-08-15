@@ -1,0 +1,82 @@
+# OpenBao server TLS, issued by cert-manager (2026-08-16).
+#
+# Replaces the hand-generated bootstrap cert from
+# homelab-infra/scripts/generate-openbao-bootstrap-tls.sh, which was created
+# 2026-05-23 with 90-day validity and was 5 days from expiry when this landed.
+# Nothing was watching it — it was not a cert-manager Certificate, so no
+# certificate-expiry alerting could see it, and its lapse would have taken out
+# ESO, the cert-manager Vault issuer and signal-bridge simultaneously.
+#
+# Issued by openbao-tls-issuer (a local CA issuer), NOT by
+# homelab-internal-issuer. The latter signs through OpenBao itself, which would
+# make renewing this cert depend on this cert. See
+# infrastructure/cert-manager/openbao-tls-issuer.yaml.
+#
+# SANs reproduce every name the bootstrap cert carried — verified against the
+# live cert, not copied from the script — plus one addition:
+#
+#   openbao.lab.vyramo.com   the public hostname. httproute.yaml has published
+#                            it since it was written, but the Gateway
+#                            terminates TLS and forwards plain HTTP while this
+#                            listener requires TLS, so the route answered
+#                            "Client sent an HTTP request to an HTTPS server".
+#                            Cilium 1.19 has no BackendTLSPolicy, so the fix is
+#                            TLS passthrough — and passthrough means the client
+#                            validates THIS cert directly, so the public name
+#                            has to be on it.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: openbao-tls
+  namespace: openbao
+spec:
+  # NOT `openbao-tls`: that Secret is the live hand-applied one. Writing here
+  # would have cert-manager fight the running config and roll the vault's TLS
+  # the moment this syncs. The cutover is a separate, deliberate step.
+  secretName: openbao-tls-cm
+  duration: 2160h     # 90d, matching the bootstrap cert's lifetime
+  renewBefore: 720h   # 30d — renews with a third of the life left
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  usages:
+    - server auth
+    - client auth
+  dnsNames:
+    # Public hostname FIRST so the site-config replacement below has a stable
+    # index. Written as the FQDN_SUFFIX placeholder, not a literal: ADR 0045
+    # forbids the domain in a value the cluster consumes, and
+    # check-no-bare-domain caught the literal when this was first written.
+    - "openbao.FQDN_SUFFIX"
+    # Service names
+    - openbao
+    - openbao.openbao
+    - openbao.openbao.svc
+    - openbao.openbao.svc.cluster.local
+    - openbao-internal
+    - openbao-internal.openbao
+    - openbao-internal.openbao.svc
+    - openbao-internal.openbao.svc.cluster.local
+    # Per-pod names (headless service, raft peers)
+    - openbao-0
+    - openbao-0.openbao-internal
+    - openbao-0.openbao-internal.openbao
+    - openbao-0.openbao-internal.openbao.svc.cluster.local
+    - openbao-1
+    - openbao-1.openbao-internal
+    - openbao-1.openbao-internal.openbao
+    - openbao-1.openbao-internal.openbao.svc.cluster.local
+    - openbao-2
+    - openbao-2.openbao-internal
+    - openbao-2.openbao-internal.openbao
+    - openbao-2.openbao-internal.openbao.svc.cluster.local
+    # Loopback — `bao status` inside the pod uses BAO_ADDR=https://127.0.0.1:8200
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+    - ::1
+  issuerRef:
+    name: openbao-tls-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io

@@ -28,6 +28,9 @@ resources:
   - snapshot-prometheusrule.yaml
   - httproute.yaml
   - networkpolicy.yaml
+  # cert-manager-issued server TLS, replacing the hand-generated bootstrap
+  # cert. Writes openbao-tls-cm; the cutover to it is a separate step.
+  - certificate.yaml
 configMapGenerator:
   - name: openbao-snapshot-scripts
     namespace: openbao
@@ -53,4 +56,9 @@ replacements:
     targets:
       - select: { kind: HTTPRoute, name: openbao-ui }
         fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }
+      # Same hostname on the serving cert: Gateway TLS passthrough makes the
+      # client validate OpenBao's own cert, so the public name must be a SAN.
+      - select: { kind: Certificate, name: openbao-tls }
+        fieldPaths: [spec.dnsNames.0]
         options: { delimiter: '.', index: 1 }

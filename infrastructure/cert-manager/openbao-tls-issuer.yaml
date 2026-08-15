@@ -1,0 +1,79 @@
+# A CA issuer for OpenBao's OWN server TLS — deliberately independent of
+# OpenBao (ADR 0034 hybrid, 2026-08-16).
+#
+# WHY NOT homelab-internal-issuer
+#
+# That issuer signs via OpenBao's PKI, reaching it at
+# https://openbao.openbao.svc:8200 and verifying that connection against
+# `openbao-ca-cert`. Using it to issue OpenBao's own serving cert is circular:
+# renewing the cert requires a working TLS connection secured by the cert being
+# renewed. cert-manager renews at ~2/3 of lifetime so steady state is fine, but
+# any cert-manager outage lasting into the final third becomes unrecoverable
+# without hand-regenerating a cert — which is exactly the situation this
+# replaces.
+#
+# A CA issuer signs locally from a key pair in this namespace. It needs nothing
+# running to renew, so the vault's TLS can never be blocked on the vault.
+#
+# WHAT THIS REPLACES
+#
+# scripts/generate-openbao-bootstrap-tls.sh, run once during bring-up on
+# 2026-05-23. Its own header said "After cert-manager is operational, operator
+# triggers a rotation: cert-manager Certificate resource issues a real cert" —
+# that handoff never happened, and the 90-day bootstrap cert was 5 days from
+# expiry when this was written, with no alert covering it (nothing was watching:
+# it is not a cert-manager Certificate, so certificate-expiry alerting could not
+# see it). Expiry would have taken ESO, the cert-manager Vault issuer and
+# signal-bridge down together.
+#
+# The script stays as break-glass for a cluster with no cert-manager yet.
+---
+# Self-signed issuer, used ONLY to sign the CA below. cert-manager has no
+# built-in root; a SelfSigned issuer is the documented way to bootstrap one.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-bootstrap
+spec:
+  selfSigned: {}
+---
+# The CA key pair. Long-lived on purpose: rotating it means redistributing
+# trust to every OpenBao client (ESO, cert-manager, signal-bridge), which is a
+# coordinated operation. The LEAF it signs rotates automatically and often;
+# that is where short lifetimes belong.
+#
+# Lands in `cert-manager` because a CA ClusterIssuer reads its secret from the
+# cluster resource namespace, which this cluster leaves at the default
+# (--cluster-resource-namespace=$(POD_NAMESPACE), i.e. cert-manager).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: openbao-tls-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: openbao-tls-ca
+  subject:
+    organizations: [homelab]
+  secretName: openbao-tls-ca
+  duration: 87600h    # 10y
+  renewBefore: 8760h  # 1y — a year of warning before a trust-redistribution
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - cert sign
+    - crl sign
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+# The issuer OpenBao's serving cert comes from.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: openbao-tls-issuer
+spec:
+  ca:
+    secretName: openbao-tls-ca

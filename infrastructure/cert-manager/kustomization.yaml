@@ -43,3 +43,6 @@ resources:
   - externalsecret-cloudflare-api-token.yaml
   # netpol-audit.md MEDIUM-1 residual: default-deny + least-privilege.
   - networkpolicy.yaml
+  # Local CA that issues OpenBao's own server TLS. Independent of OpenBao so
+  # renewal can never depend on the cert being renewed.
+  - openbao-tls-issuer.yaml
