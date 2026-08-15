@@ -30,10 +30,23 @@ metadata:
   name: openbao-tls
   namespace: openbao
 spec:
-  # NOT `openbao-tls`: that Secret is the live hand-applied one. Writing here
-  # would have cert-manager fight the running config and roll the vault's TLS
-  # the moment this syncs. The cutover is a separate, deliberate step.
-  secretName: openbao-tls-cm
+  # PHASE 3 (2026-08-16): cert-manager now owns the live Secret name.
+  #
+  # Phase 1 issued into `openbao-tls-cm` so the cert could be inspected without
+  # touching the running vault; that cert verified correct (22 SANs, chain to
+  # openbao-tls-ca), and phase 2 taught every client to trust the new CA. This
+  # takes over `openbao-tls` itself.
+  #
+  # Taking over the existing NAME rather than repointing the Helm values is
+  # deliberate. The listener paths (/openbao/userconfig/openbao-tls/...) are
+  # identical in the Argo-managed values and the Ansible bootstrap values, and
+  # check-values-drift.sh requires them to match. Repointing only the runtime
+  # copy would drift the pair; repointing both would make the BOOTSTRAP config
+  # reference a Secret that cannot exist before cert-manager does, breaking
+  # cold start. Owning the name keeps one path that works in both worlds — and
+  # it is exactly the handoff generate-openbao-bootstrap-tls.sh described:
+  # "replace the openbao-tls Secret, roll OpenBao pods".
+  secretName: openbao-tls
   duration: 2160h     # 90d, matching the bootstrap cert's lifetime
   renewBefore: 720h   # 30d — renews with a third of the life left
   privateKey:
