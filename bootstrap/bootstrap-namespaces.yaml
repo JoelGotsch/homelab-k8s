@@ -88,3 +88,24 @@ metadata:
     pod-security.kubernetes.io/enforce: restricted
     homelab.internal/first-party: "true"
     homelab.internal/data-class: internal
+---
+# Argo CD's own namespace. Created by the installer
+# (homelab-infra/argocd/install/), declared here from 2026-08-15 so the
+# CA-injection label is in git rather than applied by hand — trust-manager
+# writes the homelab-trust-bundle ConfigMap only into namespaces carrying it,
+# and argocd-repo-server needs the internal CA to pull charts from the
+# Forgejo Packages mirror (ADR 0052 D3).
+#
+# Labels mirror what the namespace already carries so adopting it changes
+# nothing but the one addition. No homelab.internal/first-party or data-class
+# label: Argo CD's workloads predate that scheme here and adding them would
+# pull the namespace into Kyverno policy scope as a side effect of a TLS fix.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+    homelab.lab/inject-ca: "true"

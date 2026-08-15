@@ -53,6 +53,10 @@ resources:
   # of stable org-only pulls). Reuses the read-only svc-argocd token.
   - externalsecret-repo-creds-homelab.yaml
 
+  # Helm chart-mirror pull credential (ADR 0052 D3). Consumed by the
+  # repo-server patch below via HELM_REGISTRY_CONFIG.
+  - externalsecret-helm-registry.yaml
+
   # Cilium Gateway route for the Argo CD UI/API. Until 2026-08-13 `argocd-cm`
   # advertised a hostname with no route behind it (silent 404 via the DNS
   # wildcard). Requires server.insecure in patches/argocd-cmd-params.yaml.
@@ -83,6 +87,7 @@ patches:
     target:
       kind: Deployment
       name: argocd-repo-server
+
 
   - path: patches/application-controller-resources.yaml
     target:
