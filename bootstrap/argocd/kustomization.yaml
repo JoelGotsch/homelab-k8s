@@ -88,6 +88,11 @@ patches:
       kind: Deployment
       name: argocd-repo-server
 
+  # Chart mirror: credential file + internal CA (ADR 0052 D3).
+  - path: patches/repo-server-helm-registry.yaml
+    target:
+      kind: Deployment
+      name: argocd-repo-server
 
   - path: patches/application-controller-resources.yaml
     target:

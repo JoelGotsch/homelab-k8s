@@ -1,0 +1,60 @@
+# argocd-repo-server: reach the Helm chart mirror (ADR 0052 D3).
+#
+# Two things the renderer needs that it did not have:
+#
+#   HELM_REGISTRY_CONFIG  the mirror credential, as a FILE PATH. Naming the
+#                         file is what survives kustomize's Helm invocation —
+#                         it replaces HELM_CONFIG_HOME/CACHE_HOME/DATA_HOME
+#                         with a throwaway directory (so `helm registry login`
+#                         state is discarded) but passes the rest of the
+#                         environment through.
+#
+#   SSL_CERT_FILE         trust for registry.homelab.internal, whose cert
+#                         chains to the internal CA (OpenBao PKI).
+#
+# WHY NOT MOUNT OVER /etc/ssl/certs, which is the pattern kyverno uses:
+# kyverno's image is distroless, so replacing that directory costs nothing.
+# argocd-repo-server is Ubuntu-based and its /etc/ssl/certs carries the real
+# ca-certificates layout that git's TLS (OpenSSL, not Go) reads. Mounting a
+# ConfigMap over it would swap that whole directory out on a Deployment with
+# ONE replica, and if it went wrong Argo could render nothing for any
+# application until reverted. A separate path plus SSL_CERT_FILE gets Go —
+# and therefore helm — onto the internal CA while leaving git's trust store
+# exactly as the image ships it.
+#
+# The bundle carries useDefaultCAs: true, so public CAs are present too and
+# helm can still reach upstream chart repos during the migration.
+#
+# No subPath on the mount: the ConfigMap is mounted as a directory so
+# trust-manager bundle rotation propagates into the running pod.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-repo-server
+spec:
+  template:
+    spec:
+      containers:
+        - name: argocd-repo-server
+          env:
+            - name: HELM_REGISTRY_CONFIG
+              value: /helm-registry/config.json
+            - name: SSL_CERT_FILE
+              value: /etc/argocd-tls/ca-certificates.crt
+          volumeMounts:
+            - name: helm-registry
+              mountPath: /helm-registry
+              readOnly: true
+            - name: homelab-trust-bundle
+              mountPath: /etc/argocd-tls
+              readOnly: true
+      volumes:
+        - name: helm-registry
+          secret:
+            secretName: argocd-helm-registry
+            items:
+              - key: .dockerconfigjson
+                path: config.json
+        - name: homelab-trust-bundle
+          configMap:
+            name: homelab-trust-bundle
