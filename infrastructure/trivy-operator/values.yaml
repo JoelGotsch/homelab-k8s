@@ -45,11 +45,16 @@ operator:
   infraAssessmentScannerEnabled: false
   clusterComplianceEnabled: false
 
-  # SBOM generation is needed for the per-workload Vulnerability
-  # Report flow we want. Cluster-wide SBOM CACHE (a separate
-  # ClusterSbomReport CRD) is off — adds CRD volume without a
-  # consumer in our observability stack.
-  sbomGenerationEnabled: true
+  # SBOM generation OFF (2026-08-16). The earlier comment here said it was
+  # "needed for the per-workload Vulnerability Report flow" — upstream's own
+  # values doc says the flag is "required for enabling
+  # ClusterVulnerabilityReports" only, which we do not use (ADR 0019 D2 scope
+  # is VulnerabilityReport / ConfigAuditReport / ExposedSecretReport /
+  # RbacAssessmentReport). Nothing in the workspace consumed the SbomReports,
+  # and they were 153 objects / 46.5 MiB (up to 1.4 MiB each) — the single
+  # largest kind in the API server and in Argo's controller cache, which was
+  # OOM-looping. Cluster-wide SBOM CACHE (ClusterSbomReport CRD) stays off.
+  sbomGenerationEnabled: false
   clusterSbomCacheEnabled: false
 
   # Let the operator copy private-registry pull secrets out of

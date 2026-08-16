@@ -33,11 +33,64 @@ data:
   # argocd-self take-over (this same file rendered).
   kustomize.buildOptions: --enable-helm
 
+  # Keep the controller's cluster cache to what Argo actually manages or
+  # needs for health/resource trees. Measured 2026-08-16 while root-causing
+  # the application-controller OOM loop (see homelab-docs TODO.md and
+  # homelab/plans/argo-render-nondeterminism.md "Controller memory"):
+  # the cache held 8081 objects / ~102 MiB serialized, of which
+  # trivy-operator reports were ~60 MiB (SbomReport 46.5 MiB in 153 objects,
+  # VulnerabilityReport 11.4 MiB) — held in memory as unstructured maps at
+  # several times their JSON size — and the top watch-event churn was
+  # kyverno EphemeralReport (~156 events/min), Longhorn Engine/Volume
+  # (~55/min each), PolicyReport, BackupVolume, Snapshot. None of these
+  # kinds is managed by any Application (checked against every
+  # Application's status.resources); Argo re-decoded every update for
+  # nothing. Excluding a kind removes it from the cache AND the watch.
+  # NOT excluded on purpose: Pods/Jobs/ReplicaSets (resource trees +
+  # health), longhorn.io RecurringJob (managed), kyverno.io ClusterPolicy
+  # (managed), cilium.io policies/pools/CIDR groups (managed),
+  # postgresql.cnpg.io Cluster/ScheduledBackup (managed).
+  # A change here needs a controller restart to purge already-cached objects
+  # (Argo docs, "Resource Exclusion/Inclusion").
   resource.exclusions: |
     - apiGroups:
       - cilium.io
       kinds:
       - CiliumIdentity
+      - CiliumEndpoint
+      clusters:
+      - "*"
+    # trivy-operator: security reports are read by Grafana/alerts via the
+    # operator's metrics, never by Argo.
+    - apiGroups:
+      - aquasecurity.github.io
+      kinds:
+      - "*"
+      clusters:
+      - "*"
+    # kyverno: policy/ephemeral/admission reports (kyverno.io/ClusterPolicy
+    # itself stays — it is managed).
+    - apiGroups:
+      - wgpolicyk8s.io
+      - reports.kyverno.io
+      kinds:
+      - "*"
+      clusters:
+      - "*"
+    # Longhorn internals: per-volume engine/replica/snapshot/backup objects
+    # churn with every snapshot job and are never in git.
+    - apiGroups:
+      - longhorn.io
+      kinds:
+      - Engine
+      - Replica
+      - Snapshot
+      - Backup
+      - BackupVolume
+      - VolumeAttachment
+      - Orphan
+      - InstanceManager
+      - Volume
       clusters:
       - "*"
 
