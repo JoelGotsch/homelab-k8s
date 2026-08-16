@@ -167,7 +167,6 @@ spec:
 #                                       trashbin + config.php instance secret)
 #   langfuse/data-volume-chi-…-0-0-0   (personal: ClickHouse trace store —
 #                                       raw-volume, re-eval Sept vs logical)
-#   langfuse/langfuse-s3               (personal: Langfuse blob payloads)
 # Everything else = snapshot-only (CNPG DBs → barman incl. langfuse-pg;
 # openbao → raft
 # snapshot; telemetry/caches → regenerable). NB: nextcloud/paperless BULK

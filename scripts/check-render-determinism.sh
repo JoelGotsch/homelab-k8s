@@ -48,7 +48,6 @@ HELM_BIN="${HELM_BIN:-helm3}"
 # gets recorded.
 KNOWN='
 observability/crowdsec|csLapiSecret + registrationToken + checksum/lapi-secret
-observability/langfuse|s3 root-password + checksum/credentials-secret
 platform/woodpecker|WOODPECKER_AGENT_SECRET
 '
 

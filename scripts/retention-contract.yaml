@@ -13,7 +13,7 @@
 # claim/template merely to make this file green; KST-03 owns attended migration.
 version: 1
 owner_repository: homelab-k8s
-declared_count: 22
+declared_count: 21
 declared_implicit_default_count: 1
 
 scope:
@@ -297,31 +297,6 @@ entries:
     migration_owner: none
     required_restore_test: recreate a disposable Valkey claim and verify Langfuse reconnects
     reason: Postgres and ClickHouse hold the durable state
-
-  - id: langfuse-s3
-    workload: Langfuse chart-managed MinIO compatibility deployment
-    namespace: langfuse
-    claim: PersistentVolumeClaim/langfuse-s3
-    source:
-      file: observability/langfuse/values.yaml
-      value_path: '.s3.persistence.storageClass'
-      document_index: 0
-      selector_path: s3.persistence.storageClass
-      mirrors:
-        - observability/langfuse/values.yaml.j2
-    rendered_claim_id: langfuse-s3
-    current_storage_class: longhorn-replica2
-    target_storage_class: longhorn-replica2-retain
-    desired_reclaim_policy: Retain
-    state: known-mismatch
-    data_class: personal
-    data_value: bundled MinIO data; expected unused because every Langfuse S3 endpoint targets minio-on-nas, but not yet proven empty
-    backup_tier: declared selective Longhorn backup to NAS MinIO longhorn-backups, then tier-3 Restic; live membership observed; restore evidence pending
-    rpo: 1 hour policy target
-    rto: 4 to 24 hours
-    migration_owner: KST-03 Langfuse S3 disposition and PVC migration
-    required_restore_test: compare bundled and external object inventories; restore the claim if any unique object exists
-    reason: the pinned chart renders this PVC; retain it conservatively until KST-03 proves it disposable or migrates unique data
 
   - id: loki-local
     workload: Loki single-binary local storage

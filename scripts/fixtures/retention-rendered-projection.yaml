@@ -17,7 +17,7 @@ cluster_defaults:
     chart_default_enabled: false
 layers:
 - path: observability/langfuse
-  input_digest_sha256: 7cd73f963b790929a2e875d936effa64989924cd313b0e2674e391df30c1d66c
+  input_digest_sha256: ba26c5ab62f093f77b42cd5bf70479b1c69e39372a86e5bc1530939e4646870d
   chart:
     name: langfuse
     repository: oci://registry.homelab.internal/homelab
@@ -26,7 +26,7 @@ layers:
     package_sha256: c597fb91cccb5f32b69dbfffdb26964a8292aee43998e0826f73e36a039ebb94
     values_mirrors:
     - values.yaml.j2
-  declared_claim_count: 2
+  declared_claim_count: 1
   declared_implicit_default_claim_count: 0
   declared_secret_reference_count: 12
   declared_externalsecret_mirror_count: 2
@@ -76,14 +76,6 @@ layers:
     label_key: app.kubernetes.io/component
     label_value: worker
   claims:
-  - contract_id: langfuse-s3
-    rendered_claim_id: langfuse-s3
-    kind: PersistentVolumeClaim
-    resource_name: langfuse-s3
-    claim_name: langfuse-s3
-    selector_path: spec.storageClassName
-    storage_class: longhorn-replica2
-    storage_class_mode: explicit
   - contract_id: langfuse-valkey
     rendered_claim_id: langfuse-redis-primary/valkey-data
     kind: StatefulSet

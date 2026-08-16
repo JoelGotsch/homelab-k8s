@@ -94,7 +94,7 @@ fi
 missing_class_render="$TEMP_ROOT/missing-rendered-class.yaml"
 cp "$RENDERED_CLAIM_FIXTURE" "$missing_class_render"
 yq e -i '
-  (select(.kind == "PersistentVolumeClaim" and .metadata.name == "langfuse-s3") | .spec) |=
+  (select(.kind == "PersistentVolumeClaim" and .metadata.name == "explicit-nfs-example") | .spec) |=
     del(.storageClassName)
 ' "$missing_class_render"
 if missing_output="$($CLAIM_CHECK --rendered "$missing_class_render" \
@@ -337,7 +337,7 @@ printf '%s\n' "$externalsecret_remote_ref_output" | \
 
 claim_fixture="$TEMP_ROOT/claim-class-drift.yaml"
 cp "$FIXTURE" "$claim_fixture"
-CLAIM_ID=langfuse-s3 yq e -i '
+CLAIM_ID=langfuse-redis-primary/valkey-data yq e -i '
   (.layers[].claims[] | select(.rendered_claim_id == strenv(CLAIM_ID)) | .storage_class) =
     "longhorn-replica3"
 ' "$claim_fixture"

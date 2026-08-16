@@ -227,13 +227,12 @@ redis:
 # Langfuse ships traces' large payloads (LLM I/O text,
 # attachments) to S3 instead of bloating ClickHouse / Postgres.
 s3:
-  # The chart deploys a bundled MinIO dependency by default. Keep the current
-  # deployment explicitly represented until KST-03 proves whether its PVC has
-  # unique objects and either migrates or retires it. An implicit default class
-  # would bypass the retention contract.
-  deploy: true
-  persistence:
-    storageClass: longhorn-replica2
+  # The chart deploys a bundled MinIO dependency by default. Disabled
+  # 2026-08-16: KST-03 proved the bundled instance held zero objects (bucket
+  # created 2026-05-24, never written) and nothing referenced it — every
+  # Langfuse S3 endpoint below targets minio-on-nas. Its render-time random
+  # root password also re-rolled the pod on every commit (Argo generation 566).
+  deploy: false
   # Event uploads (raw trace data before ClickHouse ingest).
   eventUpload:
     bucket: "langfuse-blobs"
