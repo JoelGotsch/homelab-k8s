@@ -26,10 +26,7 @@ resources:
   - snapshot-uploader-config.yaml
   - snapshot-networkpolicy.yaml
   - snapshot-prometheusrule.yaml
-  # httproute.yaml removed 2026-08-16 — an HTTPS listener terminates TLS and
-  # OpenBao requires it, so that route could only ever return 400. Replaced by
-  # tlsroute.yaml (passthrough).
-  - tlsroute.yaml
+  - httproute.yaml
   - networkpolicy.yaml
   # cert-manager-issued server TLS, replacing the hand-generated bootstrap
   # cert. Writes openbao-tls-cm; the cutover to it is a separate step.
@@ -57,7 +54,7 @@ components:
 replacements:
   - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
     targets:
-      - select: { kind: TLSRoute, name: openbao-ui }
+      - select: { kind: HTTPRoute, name: openbao-ui }
         fieldPaths: [spec.hostnames.0]
         options: { delimiter: '.', index: 1 }
       # Same hostname on the serving cert: Gateway TLS passthrough makes the

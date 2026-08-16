@@ -39,47 +39,6 @@ spec:
       allowedRoutes:
         namespaces:
           from: All
-    # TLS PASSTHROUGH for OpenBao, on its own port (2026-08-16).
-    #
-    # OpenBao's listener requires TLS (tls_disable = 0), and an HTTPS listener
-    # here TERMINATES and forwards plain HTTP — so the openbao HTTPRoute
-    # answered `400 Client sent an HTTP request to an HTTPS server`. Gateway
-    # API's answer to that is BackendTLSPolicy, which Cilium 1.19 does not
-    # implement (its supported set is GatewayClass, Gateway, HTTPRoute,
-    # GRPCRoute, TLSRoute, ReferenceGrant). So the traffic must not be
-    # terminated at all: passthrough hands the raw TLS to OpenBao, which is
-    # also the better posture for a secret store — the gateway never sees
-    # plaintext vault traffic.
-    #
-    # WHY PORT 8200 AND NOT 443
-    #
-    # A passthrough listener on 443 would sit beside the `https` listener,
-    # which is Terminate on `*.FQDN_SUFFIX` and carries 19 attached routes.
-    # Whether an implementation accepts Terminate and Passthrough on one port
-    # is not something a server-side dry-run can answer — the apiserver
-    # accepts the object either way, and only Cilium's listener status
-    # conditions after a real apply reveal a conflict. Getting that wrong
-    # risks those 19 routes, i.e. most of the cluster's ingress, to save a
-    # port suffix on one URL. Its own port cannot conflict by construction.
-    #
-    # Cost, stated plainly: the URL is https://openbao.FQDN_SUFFIX:8200 rather
-    # than https://openbao.FQDN_SUFFIX. Moving to 443 later is possible if the
-    # conflict question is worth testing during a window.
-    #
-    # The client validates OpenBao's OWN certificate (passthrough does no
-    # substitution), which is why openbao.FQDN_SUFFIX had to be added as a SAN
-    # in platform/openbao/certificate.yaml.
-    - name: tls-openbao
-      port: 8200
-      protocol: TLS
-      hostname: "openbao.FQDN_SUFFIX"
-      tls:
-        mode: Passthrough
-      allowedRoutes:
-        namespaces:
-          from: All
-        kinds:
-          - kind: TLSRoute
     # HTTP listener for ACME http-01 challenges (cert-manager
     # uses DNS-01 by default once DNS provider configured;
     # http-01 listed here as fallback).

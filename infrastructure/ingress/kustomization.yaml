@@ -29,22 +29,9 @@ replacements:
   - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
     targets:
       - select: { kind: Gateway, name: homelab-gateway }
-        # INDEX-BASED, so it must be kept in step with the listener order in
-        # gateway.yaml. Inserting the tls-openbao listener at index 1 on
-        # 2026-08-16 shifted `http` from 1 to 2, which would have left it with
-        # a literal `*.FQDN_SUFFIX` hostname — a placeholder that renders and
-        # syncs perfectly happily while matching no request.
-        #   0 https        *.FQDN_SUFFIX
-        #   1 tls-openbao  openbao.FQDN_SUFFIX
-        #   2 http         *.FQDN_SUFFIX
-        #   3 https-registry / 4 http-registry — registry.homelab.internal,
-        #     deliberately NOT listed: they carry no FQDN_SUFFIX, and a
-        #     replacement here would mangle them into
-        #     registry.lab.<domain>.internal.
         fieldPaths:
           - spec.listeners.0.hostname
           - spec.listeners.1.hostname
-          - spec.listeners.2.hostname
         options: { delimiter: '.', index: 1 }
       - select: { kind: Certificate, name: homelab-wildcard-tls }
         fieldPaths:
