@@ -10,7 +10,8 @@ namespace: authentik
 
 helmCharts:
   - name: authentik
-    repo: https://charts.goauthentik.io
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://charts.goauthentik.io).
+    repo: oci://registry.homelab.internal/homelab
     version: "2026.5.4"  # OPERATOR PINS via Renovate
     releaseName: authentik
     namespace: authentik
