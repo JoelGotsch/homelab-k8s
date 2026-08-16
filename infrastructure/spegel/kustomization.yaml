@@ -16,7 +16,8 @@ resources:
 
 helmCharts:
   - name: spegel
-    repo: oci://ghcr.io/spegel-org/helm-charts
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was oci://ghcr.io/spegel-org/helm-charts).
+    repo: oci://registry.homelab.internal/homelab
     version: "0.7.4"  # OPERATOR PINS via Renovate (helmv3 manager)
     releaseName: spegel
     namespace: spegel
