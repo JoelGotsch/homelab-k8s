@@ -73,7 +73,27 @@ hubble:
     auto:
       enabled: true
       method: cronJob
-      certValidityDuration: 1095
+      # LEAF validity, and it must stay comfortably BELOW the CA's own
+      # remaining life. It was 1095 — identical to the CA's total
+      # validity (notBefore 2026-07-13, notAfter 2029-07-12, exactly
+      # 1095 days) — so a leaf issued at any moment after the CA was
+      # minted would outlive it. certgen 0.4.5 never checked; 0.4.8,
+      # which arrives with Cilium 1.20, does:
+      #
+      #   CA certificate "Cilium CA" expires at 2029-07-12T07:17:00Z,
+      #   which is before the requested validity of 26280h0m0s
+      #
+      # It refuses rather than re-minting the CA, so the existing CA
+      # and a live hubble-relay were never at risk — the cronJob
+      # method held, exactly as the note above intends. The upgrade
+      # surfaced this early; the next quarterly rotation (1st of the
+      # month, every 3rd month) would have failed the same way and
+      # left stale leaves behind without anything obviously breaking.
+      #
+      # 365 is generous given leaves rotate quarterly, and leaves room
+      # as the CA ages. When the CA itself is renewed, this ceiling
+      # moves with it.
+      certValidityDuration: 365
       schedule: "0 0 1 */3 *"   # rotate leaves quarterly; CA persists
   metrics:
     enabled:
