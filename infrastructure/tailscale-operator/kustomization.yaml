@@ -7,7 +7,8 @@ kind: Kustomization
 
 helmCharts:
   - name: tailscale-operator
-    repo: https://pkgs.tailscale.com/helmcharts
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://pkgs.tailscale.com/helmcharts).
+    repo: oci://registry.homelab.internal/homelab
     version: "1.98.9"  # OPERATOR PINS via Renovate (appVersion v1.98.9)
     releaseName: tailscale-operator
     namespace: tailscale
