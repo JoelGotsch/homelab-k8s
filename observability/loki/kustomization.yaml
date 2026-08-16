@@ -10,7 +10,8 @@ kind: Kustomization
 
 helmCharts:
   - name: loki
-    repo: https://grafana.github.io/helm-charts
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://grafana.github.io/helm-charts).
+    repo: oci://registry.homelab.internal/homelab
     version: "6.55.0"  # OPERATOR PINS via Renovate
     releaseName: loki
     namespace: monitoring
