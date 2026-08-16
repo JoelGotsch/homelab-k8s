@@ -162,9 +162,17 @@ note "combined lock digest: ${lock_digest:0:16}…"
 #   2. The Kubernetes Secret ESO already materialised — for workstation runs.
 #   3. OpenBao directly — the source of truth, when `bao` is authenticated.
 #
-# 2 is listed before 3 deliberately: OpenBao's own API is not reachable through
-# the gateway (it serves HTTPS, the HTTPRoute speaks HTTP to the backend), so on
-# a laptop the Secret is the path that actually works without a port-forward.
+# 2 is listed before 3 deliberately, but NOT for the reason this comment used to
+# give. It said OpenBao's API was unreachable through the gateway — true until
+# 2026-08-16, when the gateway was taught to re-encrypt to the backend
+# (Cilium 1.20 + platform/openbao/backendtlspolicy.yaml). `BAO_ADDR=https://
+# openbao.lab.<fqdn> bao status` now works from a laptop with no port-forward and
+# no client-side CA setup, since the gateway serves the public wildcard cert.
+#
+# The order still stands on its own merits: source 2 needs only a kubeconfig,
+# while source 3 needs `bao` installed AND an authenticated token. Cheapest
+# working path first. What changed is that 3 is now a real fallback rather than
+# a dead one.
 from_k8s() {
   command -v kubectl >/dev/null 2>&1 || return 0
   kubectl -n "$1" get secret "$2" -o "jsonpath={.data.$3}" 2>/dev/null | base64 -d 2>/dev/null || true
