@@ -170,7 +170,14 @@ print(len(d.get('patches') or []))
 
   if [ -n "$build_root" ]; then
     # Repo-relative path inside the copy, so `../../components/...` resolves.
-    rel="$(cd "$layer" && git rev-parse --show-prefix)"
+    # Path arithmetic, NOT `git rev-parse --show-prefix`: git exports GIT_DIR
+    # to hooks in a linked worktree (`git worktree add`), and with GIT_DIR set
+    # and no GIT_WORK_TREE, rev-parse treats the cwd as the top level and
+    # --show-prefix returns "" — the layer then "renders" from the repo root
+    # and every layer fails with "unable to find kustomization.yaml"
+    # (2026-08-16, first commit made from a worktree).
+    layer_abs="$(cd "$layer" && pwd -P)"
+    rel="${layer_abs#"$repo_root"/}"
     work="$build_root/${rel%/}"
   else
     work="$tmp_root/$(echo "$layer" | tr '/' '_')"
