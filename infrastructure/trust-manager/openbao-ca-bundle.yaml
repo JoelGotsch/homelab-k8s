@@ -1,0 +1,104 @@
+# OpenBao server-TLS CA, distributed to the `openbao` namespace ONLY, as a
+# ConfigMap keyed `ca.crt`.
+#
+# WHY THIS EXISTS
+# ---------------
+# Cilium's Gateway re-encrypts to OpenBao via a BackendTLSPolicy
+# (platform/openbao/backendtlspolicy.yaml), and that policy must name a CA to
+# validate the backend against. The Gateway API v1.6.1 CRD is narrow about what
+# it will accept, verbatim:
+#
+#   Support: Core - An optional single reference to a Kubernetes ConfigMap,
+#   with the CA certificate in a key named `ca.crt`.
+#
+# and Cilium is narrower still. Probed on this cluster 2026-08-16 with a
+# caCertificateRef of kind Secret pointing at the existing `openbao-tls`:
+#
+#   Accepted=False      reason NoValidCACertificate
+#   ResolvedRefs=False  reason InvalidKind
+#   message: "Only ConfigMaps are supported for CA Certificate Refs"
+#
+# So: a ConfigMap, key `ca.crt`, and — since caCertificateRefs has no namespace
+# field at all and cross-namespace refs are invalid — in `openbao` itself.
+#
+# WHY NOT THE EXISTING BUNDLES
+# ----------------------------
+# Neither can serve this, on the key name alone:
+#   homelab-trust-bundle -> ca-certificates.crt
+#   homelab-root-ca      -> ca-bundle.pem
+# Labelling the `openbao` namespace for either would produce a ConfigMap the
+# policy rejects. They are also both far wider than needed: this namespace needs
+# exactly one CA, not the public roots plus every internal root.
+#
+# WHY THE MIRROR CERTIFICATE BELOW, INSTEAD OF INLINING THE PEM
+# -------------------------------------------------------------
+# The two existing Bundles carry this CA as a hardcoded `inLine:` PEM, because
+# trust-manager resolves `secret:` sources ONLY from its own trust namespace
+# (--trust-namespace=trust-manager) while the CA lives in `cert-manager` — a CA
+# ClusterIssuer reads its secret from the cluster resource namespace. Inlining
+# was the only shape available, and it is a pin: nothing detects divergence.
+#
+# This avoids a third pin without a copier job. cert-manager writes the ISSUING
+# CA's certificate into the `ca.crt` key of every Secret it issues from a CA
+# issuer — verified on this cluster: the `ca.crt` in `openbao/openbao-tls`
+# matches `cert-manager/openbao-tls-ca` byte for byte. So a small leaf issued
+# from `openbao-tls-issuer` INTO the trust namespace carries the CA with it, and
+# cert-manager keeps it current for free.
+#
+# The leaf is otherwise unused. Its only job is to be a `secret:` source
+# trust-manager is allowed to read. It renews on cert-manager's normal schedule;
+# if the CA is ever rotated, the renewed leaf carries the new `ca.crt` and the
+# Bundle follows without anyone editing a PEM.
+#
+# The CA itself is 10y / renewBefore 1y and its rotation is a deliberate,
+# coordinated trust-redistribution (see infrastructure/cert-manager/
+# openbao-tls-issuer.yaml). This mirror does not make that automatic — it makes
+# it *propagate* once done, which is the part that previously required editing
+# two inline PEMs by hand.
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: openbao-ca-mirror
+  namespace: trust-manager
+spec:
+  # Deliberately short. This leaf authenticates nothing; a short life means the
+  # mirrored ca.crt is re-fetched often, so a CA rotation propagates in days
+  # rather than at the CA's own renewal horizon.
+  duration: 2160h      # 90d
+  renewBefore: 720h    # 30d
+  commonName: openbao-ca-mirror
+  subject:
+    organizations: [homelab]
+  secretName: openbao-ca-mirror
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - digital signature
+  issuerRef:
+    name: openbao-tls-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: trust.cert-manager.io/v1alpha1
+kind: Bundle
+metadata:
+  name: openbao-ca
+spec:
+  sources:
+    # ca.crt here is the openbao-tls-ca certificate, placed by cert-manager
+    # because openbao-tls-issuer is a CA issuer. Not the leaf's own cert.
+    - secret:
+        name: openbao-ca-mirror
+        key: ca.crt
+  target:
+    # `ca.crt` is required by the Gateway API CRD. Do not rename it.
+    configMap:
+      key: ca.crt
+    # `openbao` and nowhere else. This is a single-purpose trust anchor for one
+    # BackendTLSPolicy, not a cluster-wide root — deliberately NOT selected by
+    # the homelab.lab/inject-ca label the wide bundles use.
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: openbao

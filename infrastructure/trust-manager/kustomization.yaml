@@ -17,4 +17,5 @@ helmCharts:
 resources:
   - namespace.yaml
   - bundles.yaml
+  - openbao-ca-bundle.yaml
   - networkpolicy.yaml
