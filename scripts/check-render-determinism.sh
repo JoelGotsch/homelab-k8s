@@ -47,7 +47,6 @@ HELM_BIN="${HELM_BIN:-helm3}"
 # non-determinism without failing on the known set. Deleting a line is how a fix
 # gets recorded.
 KNOWN='
-observability/crowdsec|csLapiSecret + registrationToken + checksum/lapi-secret
 platform/woodpecker|WOODPECKER_AGENT_SECRET
 '
 

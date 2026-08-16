@@ -194,7 +194,7 @@ layers:
     source_name_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.name
     source_key_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.key
 - path: observability/crowdsec
-  input_digest_sha256: 58919574a6c0e4eeb3c4cc94e69507cf7db2784164dd19e315e90af887acb811
+  input_digest_sha256: b056c66d6df3b0d4786c43bcac8e7644815157e25fa9d7741d10721bf729cc73
   chart:
     name: crowdsec
     repository: oci://registry.homelab.internal/homelab

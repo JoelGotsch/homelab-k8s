@@ -99,6 +99,18 @@ agent:
     # but the Loki acquisition stream goes unparsed — buckets fire
     # nothing until the parser lands.
 
+# === LAPI shared secret + registration token — pinned (2026-08-16) ===
+# Chart 0.24.0 mints csLapiSecret / registrationToken at render time when
+# neither a value nor an existing Secret is found; under Argo (`helm
+# template`, no `lookup`) that meant a new value on every commit and a LAPI
+# recreate per commit via checksum/lapi-secret. Pointing the chart at the
+# ESO-managed Secret (externalsecret.yaml, kv/crowdsec/lapi-auth) makes the
+# render deterministic and puts both values under the ADR 0046 rotation graph.
+# Key names default to csLapiSecret / registrationToken.
+secrets:
+  externalSecret:
+    name: crowdsec-lapi-auth
+
 # === LAPI ===
 lapi:
   enabled: true
