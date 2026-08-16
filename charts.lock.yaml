@@ -92,12 +92,12 @@
   mirror_artifact_sha256: sha256:25fa2740480d1ebc9e64340854a6c42d3a7bc39c2a77378da91b21f144faa9af
 - layer: infrastructure/nfs-csi
   name: csi-driver-nfs
-  version: v4.13.4
+  version: 4.13.4
   upstream: https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
   mirror: oci://registry.homelab.internal/homelab/csi-driver-nfs
-  content_digest: null
-  upstream_artifact_sha256: null
-  mirror_artifact_sha256: null
+  content_digest: sha256:eee9019cc62cda6b7dab5116f8118ed5e8c3b178b36a868854ea3279d7f525fd
+  upstream_artifact_sha256: sha256:3b923d981776f37b19808a3ad790d88517ff437ffce6fa1b97e3a10bb5f771a6
+  mirror_artifact_sha256: sha256:3b923d981776f37b19808a3ad790d88517ff437ffce6fa1b97e3a10bb5f771a6
 - layer: infrastructure/spegel
   name: spegel
   version: 0.7.4

@@ -7,8 +7,16 @@ kind: Kustomization
 
 helmCharts:
   - name: csi-driver-nfs
-    repo: https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
-    version: "v4.13.4"  # OPERATOR PINS via Renovate
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts).
+    repo: oci://registry.homelab.internal/homelab
+    # 4.13.4, NOT v4.13.4. The chart's own Chart.yaml says 4.13.4; the `v` was
+    # operator-typed, and a classic HTTP helm index tolerates the prefix — so
+    # this layer rendered correctly for its whole life. OCI tags are EXACT, so
+    # the mirrored chart is tagged 4.13.4 and a v-prefixed pin cannot resolve.
+    # Found 2026-08-16 by scripts/check-chart-lock.sh --online; the only such
+    # mismatch in 26 charts. Renovate writes the bare upstream version (checked
+    # against its own PR diffs: 0.43.1 -> 0.44.0), so it will not put the v back.
+    version: "4.13.4"  # OPERATOR PINS via Renovate
     releaseName: csi-driver-nfs
     namespace: nfs-csi
     valuesFile: values.yaml
