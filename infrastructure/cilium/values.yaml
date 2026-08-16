@@ -8,6 +8,36 @@
 # both the chart version + image tags. Per network.md (Cilium
 # NetPol + Hubble + Gateway API) + ADR 0021 (observability).
 
+# Upgrade compatibility — REQUIRED by upstream when moving a minor
+# version, and load-bearing here beyond the usual reasons.
+#
+# At 1.20 the chart's default `envoy.xdsMode` becomes `ads`; the
+# chart documents that it stays on the legacy mode "when
+# upgradeCompatibility is set below 1.20". The Gateway renders to a
+# SINGLE Envoy listener object shared by every route (one CEC, 3
+# filter chains, 18 backendServices for 4 listeners), and a rebuild
+# of that object is the leading explanation for the 2026-08-16
+# outage where attachedRoutes on `https` went 19 -> 0 while every
+# listener still reported Accepted=True/Programmed=True. Changing
+# the xDS delivery mode in the same step as the agent upgrade is
+# exactly the risk we are not taking.
+#
+# Verified rather than assumed: rendering this layer with the key set
+# omits `envoy-xds-mode` from cilium-config entirely; rendering it
+# without emits `envoy-xds-mode: ads`. That one-line delta is the
+# whole reason the key is here.
+#
+# DELIBERATE DRIFT: ansible/files/cilium-values.yaml (the cold-start
+# path) must NOT carry this. That is a fresh install, where upstream
+# says the flag is not required, and setting it would pin every
+# rebuilt-from-zero cluster to a legacy Envoy mode for a migration it
+# never went through. check-values-drift.sh will report this pair;
+# it is intentional and documented in both headers.
+#
+# Raise to "1.20" (or drop it) as a SEPARATE, deliberate change once
+# 1.20 is bedded in — not as part of the upgrade.
+upgradeCompatibility: "1.19"
+
 autoDirectNodeRoutes: true
 bandwidthManager:
   bbr: true
