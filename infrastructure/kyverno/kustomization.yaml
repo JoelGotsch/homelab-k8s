@@ -6,7 +6,8 @@ kind: Kustomization
 
 helmCharts:
   - name: kyverno
-    repo: https://kyverno.github.io/kyverno
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://kyverno.github.io/kyverno).
+    repo: oci://registry.homelab.internal/homelab
     version: "3.8.2"  # OPERATOR PINS via Renovate
     releaseName: kyverno
     namespace: kyverno
