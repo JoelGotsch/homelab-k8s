@@ -14,6 +14,16 @@ metadata:
 data:
   url: "https://argocd.FQDN_SUFFIX"
 
+  # Application resync period. The controller reads this from THIS ConfigMap
+  # (env ARGOCD_RECONCILIATION_TIMEOUT <- argocd-cm/timeout.reconciliation in
+  # upstream install.yaml). Until 2026-08-16 the key lived only in
+  # argocd-cmd-params-cm, where nothing reads it, so the effective period was
+  # the code default of 120s (+60s default jitter, timeout.reconciliation.jitter).
+  # 180s is the operator intent since first commit; on 68 Applications it takes
+  # the periodic full-manifest compare rate from ~27/min (120-180s) down to
+  # ~19/min (180-240s).
+  timeout.reconciliation: "180s"
+
   # Enable kustomize's Helm chart inflation generator. See
   # homelab-infra/argocd/install/patches/argocd-cm.yaml.j2 for
   # the full rationale — short version: helmCharts-using

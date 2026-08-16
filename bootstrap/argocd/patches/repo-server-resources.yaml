@@ -1,3 +1,12 @@
+# Repo-server resources.
+#
+# Sizing (measured 2026-08-16): 30-day working-set peaks of 484 and 512 MiB
+# on one pod (2 restarts at limits.memory=512Mi) during Helm/kustomize
+# inflation of the largest layers; typical peaks 300-400 MiB. Doubling the
+# limit gives 2x the observed ceiling; the request tracks the typical
+# resident set. MUST match homelab-infra/argocd/install/patches/
+# repo-server-resources.yaml (checked by check-values-drift.sh).
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -10,6 +19,6 @@ spec:
           resources:
             requests:
               cpu: 50m
-              memory: 128Mi
+              memory: 256Mi
             limits:
-              memory: 512Mi
+              memory: 1Gi

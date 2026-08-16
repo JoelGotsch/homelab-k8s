@@ -9,9 +9,11 @@ kind: ConfigMap
 metadata:
   name: argocd-cmd-params-cm
 data:
-  # Reduce reconcile interval at small scale.
+  # Repo-server RPC timeout for the controller.
   controller.repo.server.timeout.seconds: "60"
-  timeout.reconciliation: "180s"
+  # NB: timeout.reconciliation does NOT belong here — the controller reads it
+  # from argocd-cm (see patches/argocd-cm.yaml). It sat here as a no-op until
+  # 2026-08-16.
 
   # Use an API-server dry-run to predict live state during comparisons. This
   # is the documented Argo CD 3.4 controller-level switch; changing it

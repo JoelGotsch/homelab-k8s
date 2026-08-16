@@ -1,3 +1,18 @@
+# Application-controller resources.
+#
+# Sizing (measured 2026-08-16, 68 Applications, 8255 cached cluster objects,
+# server-side diff on):
+#   - steady-state working set p50 ~570 MiB, flat since 2026-07-31;
+#   - transient spikes of +300..450 MiB every few minutes when a batch of
+#     app comparisons expires together (and a full-cluster storm at start-up,
+#     when all 68 comparisons expire at once);
+#   - at limits.memory=1Gi the spikes hit the ceiling: 577 OOMKills, ~98/day
+#     and rising with the cluster object count (+20% since 08-05).
+# Request covers the resident baseline; the limit is >=2x the observed
+# ceiling (the true peak is unknown — it was always killed at 1 GiB).
+# MUST match homelab-infra/argocd/install/patches/application-controller-
+# resources.yaml (checked by homelab-infra/scripts/check-values-drift.sh).
+
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -10,6 +25,6 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 768Mi
             limits:
-              memory: 1Gi
+              memory: 2Gi
