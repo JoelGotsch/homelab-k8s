@@ -191,6 +191,7 @@ the namespace; without them, the CronJob's pods stay
 | `kv/prod/restic/cluster-tier-3/password` | `value` | `openssl rand -base64 32`. **Persist to offline-recovery archive** per [ADR 0011](../../../homelab-docs/02-decisions/0011-distributed-offline-recovery.md) — loss = no decrypt of any tier-3 snapshot. |
 | `kv/prod/backup/hetzner-storage-box` | `host`, `user`, `port`, `ssh_key`, `ssh_known_host` *(optional)* | from Hetzner Robot account; SSH key is operator-generated ed25519 keypair, public half added to Storage Box console. **Reused** by openbao raft-snapshot-cronjob. The `ssh_known_host` field is the post-TOFU pinned host-key — see "Host-key pinning" below. |
 | `kv/prod/backup/minio-reader/s3-creds` | `access_key_id`, `secret_access_key` | provisioned post-MinIO-Healthy via `mc admin user svcacct add` with **read-only** policy on `homelab-backups-cluster` + `longhorn-backups` buckets. |
+| `kv/shared/smtp` | `host`, `port`, `username`, `password`, `from` | **Already seeded** — the homelab-wide outbound relay that authentik, vaultwarden and nextcloud send through. Projected here as `chart-bundle-smtp` so `publish-chart-bundle.sh` can email the redundant copy of the offsite chart bundle without reaching into another app's namespace. Nothing new to seed. |
 
 **First-install seed (after MinIO + OpenBao are Healthy):**
 
@@ -374,6 +375,58 @@ re-capture the current key + re-write to OpenBao.
 Annual quarterly-checklist line item: confirm the pinned
 value still matches what `ssh-keyscan` returns. If
 divergence: investigate (legitimate rotation vs MITM).
+
+## Offsite chart bundle (ADR 0052 D7)
+
+The Storage Box also holds `chart-bundle/`, a copy of every Helm
+chart the workspace pins. It is not produced by a CronJob in this
+layer — it shares the credentials, not the schedule.
+
+**Why it exists.** ADR 0052 moved chart references to the Forgejo
+Packages mirror, which runs *in the cluster*. The tier-0 charts
+(cilium, cert-manager, external-secrets, openbao, cnpg, longhorn,
+csi-rclone, forgejo) are precisely what must exist *before* Forgejo
+can serve anything, so a cold start has no source for them unless a
+copy lives elsewhere. 32 charts, ~4.5 MB total.
+
+**How it stays current.** `homelab-k8s/scripts/publish-chart-bundle.sh`
+is driven by content, not a clock: it hashes the contents of all
+seven `charts.lock.yaml` files, stores that as `chart-bundle/lock.digest`,
+and does nothing when it still matches. Run it as often as you like —
+it acts only when a chart pin actually changed (a Renovate bump, a
+manual re-pin). `lock.digest` uploads last, so an interrupted transfer
+leaves the old value and the next run republishes rather than trusting
+a half-written directory.
+
+```sh
+KNOWN_HOSTS=~/.config/homelab/sb_known_hosts \
+BUNDLE_DIR=~/.config/homelab/chart-bundle \
+  homelab-k8s/scripts/publish-chart-bundle.sh --apply <workspace-root>
+```
+
+`BUNDLE_DIR` is optional but worth setting: charts already present
+with a matching `.sha256` are not re-downloaded, so a rebuild after a
+single bump fetches one chart rather than all 32.
+
+**Two copies, deliberately unequal.** The Storage Box copy is the one
+a cold start should read — it is verifiable and not subject to a
+mailbox retention policy. The emailed `.tar.gz` (via `chart-bundle-smtp`,
+the same relay authentik and vaultwarden use) is a genuine redundant
+copy rather than a notification, since the whole bundle fits an
+attachment — but treat it as a backstop behind the box.
+
+**Restore** is the other half, `import-chart-bundle.sh`, which verifies
+every artifact against its recorded hash and refuses to push anything
+if any file fails. Order on a cold start: Ansible installs tier-0 from
+the bundle *files* → Forgejo comes up → `import-chart-bundle.sh --apply`
+repopulates the mirror → Argo renders from the mirror again.
+
+**Where it runs.** From a workstation today. An in-cluster CronJob is
+not yet possible in this namespace: egress here allows only DNS, MinIO
+and ports 22/23, so SMTP, Forgejo and the registry are all blocked, and
+no mirrored image in this layer carries `helm`. Adding it means three
+egress rules and a mirrored helm image — deliberately deferred rather
+than half-built.
 
 ## Known caveats
 
