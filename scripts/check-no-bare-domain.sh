@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # check-no-bare-domain.sh — no value-bearing field hardcodes the site domain.
 #
-# SYNCED SCRIPT: the canonical copy is homelab-k8s/scripts/; byte-identical
+# SYNCED SCRIPT: the canonical copy is homelab-hooks/scripts/ (ADR 0047,
+# Track G1, 2026-08-16); homelab-k8s/scripts/ keeps a byte-identical
 # copies live in every app repo's scripts/. Change the canonical one, sync all.
 #
 # It said "TRI-REPO SYNCED … and homelab-docs/scripts/" until 2026-08-15. That

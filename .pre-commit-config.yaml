@@ -158,18 +158,25 @@ repos:
         # third-party hook repo — per the header policy above.
 
       - id: check-synced-scripts
-        name: tri-repo synced scripts are byte-identical
+        name: synced scripts are byte-identical with homelab-hooks (canonical)
         entry: >-
           bash -c 'for f in check-broken-links.sh check-no-mac-addresses.sh
-          check-no-operator-email.sh; do
-          for r in ../homelab-docs ../homelab-infra ../homelab-k8s; do
+          check-no-operator-email.sh check-no-bare-domain.sh; do
+          for r in ../homelab-hooks ../homelab-docs ../homelab-infra ../homelab-k8s; do
           [ -f "$r/scripts/$f" ] && [ -f "scripts/$f" ]
           && ! cmp -s "scripts/$f" "$r/scripts/$f"
           && { echo "DRIFT: $f vs $r"; exit 1; };
           done; done; exit 0'
         language: system
         pass_filenames: false
-        # Plan B5 step 3. The canonical copies live in homelab-docs/
+        # Track G1 (2026-08-16): canonical is now ../homelab-hooks, consumed by
+        # app repos via a pre-commit repo:/rev: entry. These three repos keep
+        # byte-identical MIRRORS per ADR 0047 D3 so they can gate without
+        # reaching Forgejo — which is exactly why drift between the mirrors and
+        # the canonical copy has to be caught. Adding ../homelab-hooks closes
+        # that gap; check-no-bare-domain.sh was never covered at all.
+        # The [ -f ] guards make each pair a no-op where a copy is absent.
+        # Plan B5 step 3. Historical note: canonical copies lived in homelab-docs/
         # scripts/ (per each script's own header); editing one copy
         # without re-syncing the siblings silently forks the guard
         # logic across repos. Always-on (cheap byte compares); repos

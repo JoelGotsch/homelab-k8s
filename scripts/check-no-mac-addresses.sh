@@ -17,9 +17,12 @@
 # justification — keep the list as small as possible.
 #
 # Per the operator's "script everything scriptable now" policy
-# (memory feedback_script-don-t-defer.md). Canonical copy lives in
-# homelab-docs/scripts/; mirror copies in homelab-k8s/scripts/ and
-# homelab-infra/scripts/ are byte-identical (sync when this changes).
+# (memory feedback_script-don-t-defer.md). CANONICAL COPY LIVES IN
+# homelab-hooks/scripts/ and is consumed by app repos as a pre-commit
+# `repo:`/`rev:` entry (ADR 0047, Track G1, 2026-08-16). The copies in
+# homelab-docs/, homelab-infra/ and homelab-k8s/ are byte-identical
+# MIRRORS kept per ADR 0047 D3 so those three repos can gate without
+# reaching Forgejo. Change homelab-hooks first, then re-sync the mirrors.
 
 set -eu
 
