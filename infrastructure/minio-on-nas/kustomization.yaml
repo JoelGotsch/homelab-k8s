@@ -21,7 +21,8 @@ kind: Kustomization
 
 helmCharts:
   - name: minio
-    repo: https://charts.min.io/
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://charts.min.io/).
+    repo: oci://registry.homelab.internal/homelab
     version: "5.4.0"  # OPERATOR PINS via Renovate
     releaseName: minio
     namespace: minio-on-nas
