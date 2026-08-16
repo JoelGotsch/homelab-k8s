@@ -49,16 +49,22 @@ KNOWN_HOSTS="${KNOWN_HOSTS:-}"
 MAIL_TO="${MAIL_TO:-}"
 DO_UPLOAD="${DO_UPLOAD:-true}"
 DO_EMAIL="${DO_EMAIL:-true}"
+# Attach the bundle, or just say it changed. Attaching makes the mailbox a real
+# third copy; notify-only keeps ~4.5 MB out of the inbox on every chart bump.
+# The Storage Box copy is unaffected either way — it is the one that matters.
+EMAIL_ATTACH="${EMAIL_ATTACH:-true}"
 
 usage() {
   cat >&2 <<EOF
-usage: $0 [--dry-run|--apply] [--force] <workspace-root>
+usage: $0 [--dry-run|--apply] [--force] (<workspace-root> | --sources <file>)
 
   Publishes the chart bundle when the combined lock digest has changed.
 
-  --dry-run   (default) report what would happen
-  --apply     build, upload, and email
-  --force     act even if the digest is unchanged
+  --dry-run        (default) report what would happen
+  --apply          build, upload, and email
+  --force          act even if the digest is unchanged
+  --sources <file> read locks from git instead of a local workspace.
+                   Lines: <name> <clone-url> <branch>, # comments ignored.
 
 env: REMOTE_DIR (default chart-bundle), KNOWN_HOSTS=<file>, BUNDLE_DIR=<dir>,
      MAIL_TO=<addr>, DO_UPLOAD/DO_EMAIL=true|false, HELM_BIN,
@@ -67,19 +73,26 @@ EOF
   exit 2
 }
 
-APPLY=false; FORCE=false
+APPLY=false; FORCE=false; SOURCES=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --apply) APPLY=true; shift ;;
     --dry-run) APPLY=false; shift ;;
     --force) FORCE=true; shift ;;
+    --sources) SOURCES="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
     *) break ;;
   esac
 done
-[ "$#" -eq 1 ] || usage
-WS="$1"
-[ -d "$WS" ] || { err "no such workspace: $WS"; exit 1; }
+WS=""
+if [ -n "$SOURCES" ]; then
+  [ "$#" -eq 0 ] || usage
+  [ -f "$SOURCES" ] || { err "no such sources file: $SOURCES"; exit 1; }
+else
+  [ "$#" -eq 1 ] || usage
+  WS="$1"
+  [ -d "$WS" ] || { err "no such workspace: $WS"; exit 1; }
+fi
 
 for t in "$HELM_BIN" python3 sftp ssh curl shasum tar; do
   command -v "$t" >/dev/null 2>&1 || { err "required tool missing: $t"; exit 1; }
@@ -91,10 +104,49 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/publish-bundle.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 chmod 700 "$work"
 
-# ── 1. Collect every lock in the workspace and digest them together.
+# ── 1. Collect every lock and digest them together.
+#
+# --sources fetches each lock from git rather than reading a working tree. Two
+# reasons, and the second is the important one:
+#
+#   * A launchd agent cannot read ~/Desktop — macOS TCC denies it, and the run
+#     fails with a bare "Operation not permitted" (exit 126).
+#   * More to the point, the offsite bundle should track what is COMMITTED.
+#     Publishing from a working tree would ship charts matching someone's
+#     half-finished local edit, and the digest would flap with it.
+#
+# Blobless sparse clone: one small object per repo, not a history.
+LOCK_ROOT="$work/locks"
+if [ -n "$SOURCES" ]; then
+  mkdir -p "$LOCK_ROOT"
+  export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
+  nrepo=0; nfail=0
+  while read -r rname rurl rbranch; do
+    case "$rname" in ''|\#*) continue ;; esac
+    rbranch="${rbranch:-main}"
+    if git clone --quiet --depth 1 --branch "$rbranch" --filter=blob:none --sparse \
+         "$rurl" "$LOCK_ROOT/$rname" 2>"$work/git.err" \
+       && git -C "$LOCK_ROOT/$rname" sparse-checkout set --no-cone charts.lock.yaml 2>>"$work/git.err" \
+       && [ -f "$LOCK_ROOT/$rname/charts.lock.yaml" ]; then
+      nrepo=$((nrepo+1))
+    else
+      err "$rname: could not fetch charts.lock.yaml from $rbranch"
+      sed 's/^/      /' "$work/git.err" | head -2 >&2
+      nfail=$((nfail+1))
+    fi
+  done < "$SOURCES"
+  # A repo that silently drops out would change the digest and publish a bundle
+  # missing its charts. Refuse rather than publish something incomplete.
+  [ "$nfail" -eq 0 ] || { err "$nfail source(s) unreachable — not publishing a partial bundle"; exit 1; }
+  note "locks fetched from git: $nrepo"
+  SEARCH_ROOT="$LOCK_ROOT"
+else
+  SEARCH_ROOT="$WS"
+fi
+
 locks=()
-while IFS= read -r f; do locks+=("$f"); done < <(find "$WS" -maxdepth 2 -name charts.lock.yaml -not -path '*/.git/*' | LC_ALL=C sort)
-[ "${#locks[@]}" -gt 0 ] || { err "no charts.lock.yaml found under $WS"; exit 1; }
+while IFS= read -r f; do locks+=("$f"); done < <(find "$SEARCH_ROOT" -maxdepth 2 -name charts.lock.yaml -not -path '*/.git/*' | LC_ALL=C sort)
+[ "${#locks[@]}" -gt 0 ] || { err "no charts.lock.yaml found under $SEARCH_ROOT"; exit 1; }
 note "locks found: ${#locks[@]}"
 
 # Digest the CONTENT of the locks, not their paths or mtimes, so an unrelated
@@ -270,7 +322,11 @@ if [ "$DO_EMAIL" = true ]; then
     err "kv/shared/smtp incomplete — skipping email (the Storage Box copy still landed)"
   else
     tarball="$work/chart-bundle-${lock_digest:0:12}.tar.gz"
-    tar -czf "$tarball" -C "$(dirname "$bundle")" "$(basename "$bundle")"
+    if [ "$EMAIL_ATTACH" = true ]; then
+      tar -czf "$tarball" -C "$(dirname "$bundle")" "$(basename "$bundle")"
+    else
+      tarball=""
+    fi
     # Build with the email library rather than by hand. A hand-rolled MIME body
     # put the whole base64 payload on ONE line; SMTP limits a line to 1000
     # characters (RFC 5321 §4.5.3.1), so the relay stalled and curl reported a
@@ -282,28 +338,37 @@ from email.message import EmailMessage
 from email import policy
 
 tarball, sender, to, digest, count, size, remote = sys.argv[1:8]
-name = os.path.basename(tarball)
 
 m = EmailMessage(policy=policy.SMTP)
 m['From'] = sender
 m['To'] = to
 m['Subject'] = f"[homelab] chart bundle {digest[:12]} ({count} charts, {size})"
-m.set_content(
-    "Chart bundle published because charts.lock.yaml changed.\n\n"
-    f"  charts      : {count}\n"
-    f"  size        : {size}\n"
-    f"  lock digest : {digest}\n\n"
-    "This attachment is the REDUNDANT copy. The durable one is on the Hetzner\n"
-    f"Storage Box under {remote}/, which is what a cold start should read --\n"
-    "it is the copy that gets verified, and it is not subject to a mailbox\n"
-    "retention policy.\n\n"
-    "Verify either copy with:\n\n"
-    f"  tar xzf {name} && cd chart-bundle && shasum -a 256 -c *.sha256\n\n"
-    "Restore into a rebuilt registry with:\n\n"
-    "  homelab-k8s/scripts/import-chart-bundle.sh --apply <dir> <registry>\n"
-)
-m.add_attachment(open(tarball, 'rb').read(),
-                 maintype='application', subtype='gzip', filename=name)
+
+body = ("Chart bundle published because charts.lock.yaml changed.\n\n"
+        f"  charts      : {count}\n"
+        f"  size        : {size}\n"
+        f"  lock digest : {digest}\n\n"
+        f"The durable copy is on the Hetzner Storage Box under {remote}/. That\n"
+        "is the one a cold start should read: it gets verified, and it is not\n"
+        "subject to a mailbox retention policy.\n\n")
+
+if tarball:
+    name = os.path.basename(tarball)
+    body += ("The attachment is a REDUNDANT copy -- the whole bundle fits, so it\n"
+             "is a real copy rather than a notification. Verify it with:\n\n"
+             f"  tar xzf {name} && cd chart-bundle && shasum -a 256 -c *.sha256\n\n")
+else:
+    body += ("No attachment: EMAIL_ATTACH=false, so this message is notification\n"
+             "only and the Storage Box holds the sole offsite copy.\n\n")
+
+body += ("Restore into a rebuilt registry with:\n\n"
+         "  homelab-k8s/scripts/import-chart-bundle.sh --apply <dir> <registry>\n")
+
+m.set_content(body)
+if tarball:
+    m.add_attachment(open(tarball, 'rb').read(),
+                     maintype='application', subtype='gzip',
+                     filename=os.path.basename(tarball))
 sys.stdout.write(m.as_string())
 PY
     # Port picks the scheme: 465 is implicit TLS, everything else is submission
