@@ -29,7 +29,8 @@ namespace: trivy-system
 
 helmCharts:
   - name: trivy-operator
-    repo: https://aquasecurity.github.io/helm-charts/
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://aquasecurity.github.io/helm-charts/).
+    repo: oci://registry.homelab.internal/homelab
     version: "0.34.0"  # OPERATOR PINS via Renovate
     releaseName: trivy-operator
     namespace: trivy-system
