@@ -47,7 +47,6 @@ HELM_BIN="${HELM_BIN:-helm3}"
 # non-determinism without failing on the known set. Deleting a line is how a fix
 # gets recorded.
 KNOWN='
-platform/woodpecker|WOODPECKER_AGENT_SECRET
 '
 
 usage() { echo "usage: $0 [--all | <layer-dir>...]" >&2; exit 2; }

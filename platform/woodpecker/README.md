@@ -39,6 +39,8 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 | Path | Field(s) | Source |
 |---|---|---|
 | `kv/data/woodpecker/oauth` | `client_id`, `client_secret` | From Forgejo — operator creates the OAuth2 application in Forgejo (Settings → Applications → OAuth2 Applications → Create), then copies values. |
+| `kv/data/woodpecker/agent-secret` | `token` | Server-side shared "system" agent secret (`WOODPECKER_AGENT_SECRET`). Random, script-seeded: `seed-random-secret.sh kv/woodpecker/agent-secret token`. Pinned 2026-08-16 so the chart stops minting a new one per render (`server.createAgentSecret: false`). Only gates system-token registration of new agents; rotation = re-seed `--force`, refresh the ExternalSecret, delete the server pod (OnDelete) in a no-CI window. |
+| `kv/data/woodpecker/agent-token` | `token` | Per-agent token — operator-filled after the server is up: Woodpecker UI → Settings → Agents → agent detail → token (ADR 0046 manual mint; rotated end-to-end 2026-07-29). Projected as `WOODPECKER_AGENT_TOKEN` + `WOODPECKER_AGENT_SECRET` on the agent. |
 
 **First-install seed:**
 
