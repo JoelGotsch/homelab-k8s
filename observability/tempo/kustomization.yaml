@@ -12,7 +12,8 @@ namespace: observability-tempo
 
 helmCharts:
   - name: tempo
-    repo: https://grafana.github.io/helm-charts
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://grafana.github.io/helm-charts).
+    repo: oci://registry.homelab.internal/homelab
     version: "1.10.1"  # OPERATOR PINS via Renovate
     releaseName: tempo
     namespace: observability-tempo
