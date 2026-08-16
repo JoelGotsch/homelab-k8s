@@ -15,5 +15,6 @@ helmCharts:
     includeCRDs: true
 
 resources:
+  - namespace.yaml
   - bundles.yaml
   - networkpolicy.yaml

@@ -1,0 +1,19 @@
+# Namespace for `longhorn-system`.
+#
+# ADDED 2026-08-16. These labels existed ONLY on the running cluster — no
+# namespace.yaml declared them and nothing in Ansible or Kyverno applied them,
+# so they were out-of-band state, which "everything is in git" forbids. Found by
+# the local A8 rehearsal: Longhorn REQUIRES enforce=privileged: longhorn-manager runs
+  # privileged with hostPath mounts (boot, dev, proc, etc). Installing
+  # it into a restricted namespace gets the DaemonSet rejected outright.
+#
+# Values are transcribed from the live namespace so adopting this manifest is a
+# no-op sync. ADR 0036 D4 for the first-party/data-class labels.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: longhorn-system
+  labels:
+    homelab.internal/data-class: "internal"
+    homelab.internal/first-party: "true"
+    pod-security.kubernetes.io/enforce: "privileged"

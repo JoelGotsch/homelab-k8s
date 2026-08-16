@@ -12,5 +12,6 @@ helmCharts:
     valuesFile: values.yaml
     includeCRDs: true
 resources:
+  - namespace.yaml
   - clustersecretstore.yaml
   - networkpolicy.yaml

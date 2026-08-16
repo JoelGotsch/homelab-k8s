@@ -9,6 +9,7 @@ helmCharts:
   valuesFile: values.yaml
   includeCRDs: true
 resources:
+- namespace.yaml
 - storageclasses.yaml
 - externalsecret.yaml
 - recurring-jobs.yaml

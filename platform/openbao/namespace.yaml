@@ -1,0 +1,20 @@
+# Namespace for `openbao`.
+#
+# ADDED 2026-08-16. These labels existed ONLY on the running cluster — no
+# namespace.yaml declared them and nothing in Ansible or Kyverno applied them,
+# so they were out-of-band state, which "everything is in git" forbids. Found by
+# the local A8 rehearsal: OpenBao is data-class `secret` (ADR 0003). baseline rather than
+  # restricted because the pod needs IPC_LOCK to mlock its memory.
+#
+# Values are transcribed from the live namespace so adopting this manifest is a
+# no-op sync. ADR 0036 D4 for the first-party/data-class labels.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openbao
+  labels:
+    homelab.internal/data-class: "secret"
+    homelab.internal/first-party: "true"
+    pod-security.kubernetes.io/audit: "privileged"
+    pod-security.kubernetes.io/enforce: "baseline"
+    pod-security.kubernetes.io/warn: "baseline"

@@ -35,6 +35,7 @@ helmCharts:
     includeCRDs: true
 
 resources:
+  - namespace.yaml
   # OpenBao-PKI ClusterIssuer (cluster-internal mTLS only)
   - clusterissuer.yaml
   - openbao-pki-secret.yaml

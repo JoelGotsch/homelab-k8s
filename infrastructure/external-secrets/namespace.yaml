@@ -1,0 +1,18 @@
+# Namespace for `external-secrets`.
+#
+# ADDED 2026-08-16. These labels existed ONLY on the running cluster — no
+# namespace.yaml declared them and nothing in Ansible or Kyverno applied them,
+# so they were out-of-band state, which "everything is in git" forbids. Found by
+# the local A8 rehearsal: ESO reads OpenBao and writes Secrets cluster-wide; infra-tier.
+#
+# Values are transcribed from the live namespace so adopting this manifest is a
+# no-op sync. ADR 0036 D4 for the first-party/data-class labels.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external-secrets
+  labels:
+    homelab.internal/data-class: "internal"
+    homelab.internal/first-party: "true"
+    pod-security.kubernetes.io/enforce: "restricted"
+    pod-security.kubernetes.io/warn: "restricted"
