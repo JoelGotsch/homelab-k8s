@@ -11,6 +11,10 @@ resources:
   - grpcroutes.yaml
   - referencegrants.yaml
   - tlsroutes.yaml
+  - backendtlspolicies.yaml
+  - listenersets.yaml
+  - tcproutes.yaml
+  - udproutes.yaml
 
 commonAnnotations:
   argocd.argoproj.io/sync-wave: "-20"
