@@ -20,7 +20,8 @@ kind: Kustomization
 
 helmCharts:
   - name: crowdsec
-    repo: https://crowdsecurity.github.io/helm-charts
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://crowdsecurity.github.io/helm-charts).
+    repo: oci://registry.homelab.internal/homelab
     version: "0.24.0"  # OPERATOR PINS via Renovate (chart app v1.7.8)
     releaseName: crowdsec
     namespace: observability-crowdsec 

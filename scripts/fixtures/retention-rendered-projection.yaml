@@ -16,258 +16,260 @@ cluster_defaults:
     chart_default_value_path: .persistence.defaultClass
     chart_default_enabled: false
 layers:
-  - path: observability/langfuse
-    input_digest_sha256: ff75dda99025ce897e0d37ad5e0741dcaa49b870146a118ba232dcbc294e0b0b
-    chart:
-      name: langfuse
-      repository: https://langfuse.github.io/langfuse-k8s
-      version: "1.5.38"
-      app_version: "3.205.1"
-      package_sha256: c597fb91cccb5f32b69dbfffdb26964a8292aee43998e0826f73e36a039ebb94
-      values_mirrors:
-        - values.yaml.j2
-    declared_claim_count: 2
-    declared_implicit_default_claim_count: 0
-    declared_secret_reference_count: 12
-    declared_externalsecret_mirror_count: 2
-    declared_externalsecret_projection_count: 6
-    declared_pod_selector_count: 2
-    declared_forbidden_literal_count: 3
-    externalsecret_mirrors:
-      - observability/langfuse/externalsecret.yaml
-      - observability/langfuse/externalsecret.yaml.j2
-    externalsecret_projections:
-      - secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
-        remote_ref_key: langfuse/s3
-        remote_ref_property: access_key_id
-      - secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
-        remote_ref_key: langfuse/s3
-        remote_ref_property: secret_access_key
-      - secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID
-        remote_ref_key: langfuse/s3
-        remote_ref_property: access_key_id
-      - secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY
-        remote_ref_key: langfuse/s3
-        remote_ref_property: secret_access_key
-      - secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
-        remote_ref_key: langfuse/s3
-        remote_ref_property: access_key_id
-      - secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
-        remote_ref_key: langfuse/s3
-        remote_ref_property: secret_access_key
-    forbidden_literal_paths:
-      - .s3.accessKeyId.value
-      - .s3.secretAccessKey.value
-      - .s3.auth.rootPassword
-    secret_reference_env_pattern: ^LANGFUSE_S3_(EVENT_UPLOAD|BATCH_EXPORT|MEDIA_UPLOAD)_(ACCESS_KEY_ID|SECRET_ACCESS_KEY)$
-    pod_selectors:
-      - workload_kind: Deployment
-        workload_name: langfuse-web
-        label_key: app.kubernetes.io/component
-        label_value: web
-      - workload_kind: Deployment
-        workload_name: langfuse-worker
-        label_key: app.kubernetes.io/component
-        label_value: worker
-    claims:
-      - contract_id: langfuse-s3
-        rendered_claim_id: langfuse-s3
-        kind: PersistentVolumeClaim
-        resource_name: langfuse-s3
-        claim_name: langfuse-s3
-        selector_path: spec.storageClassName
-        storage_class: longhorn-replica2
-        storage_class_mode: explicit
-      - contract_id: langfuse-valkey
-        rendered_claim_id: langfuse-redis-primary/valkey-data
-        kind: StatefulSet
-        resource_name: langfuse-redis-primary
-        claim_name: valkey-data
-        selector_path: spec.volumeClaimTemplates.0.spec.storageClassName
-        storage_class: longhorn-replica2
-        storage_class_mode: explicit
-    secret_references:
-      - workload_kind: Deployment
-        workload_name: langfuse-web
-        container_name: langfuse-web
-        env_name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
-        secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
-        source_value_path: .s3.eventUpload.accessKeyId.value
-        source_name_path: .s3.eventUpload.accessKeyId.secretKeyRef.name
-        source_key_path: .s3.eventUpload.accessKeyId.secretKeyRef.key
-      - workload_kind: Deployment
-        workload_name: langfuse-web
-        container_name: langfuse-web
-        env_name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
-        secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
-        source_value_path: .s3.eventUpload.secretAccessKey.value
-        source_name_path: .s3.eventUpload.secretAccessKey.secretKeyRef.name
-        source_key_path: .s3.eventUpload.secretAccessKey.secretKeyRef.key
-      - workload_kind: Deployment
-        workload_name: langfuse-web
-        container_name: langfuse-web
-        env_name: LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID
-        secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID
-        source_value_path: .s3.batchExport.accessKeyId.value
-        source_name_path: .s3.batchExport.accessKeyId.secretKeyRef.name
-        source_key_path: .s3.batchExport.accessKeyId.secretKeyRef.key
-      - workload_kind: Deployment
-        workload_name: langfuse-web
-        container_name: langfuse-web
-        env_name: LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY
-        secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY
-        source_value_path: .s3.batchExport.secretAccessKey.value
-        source_name_path: .s3.batchExport.secretAccessKey.secretKeyRef.name
-        source_key_path: .s3.batchExport.secretAccessKey.secretKeyRef.key
-      - workload_kind: Deployment
-        workload_name: langfuse-web
-        container_name: langfuse-web
-        env_name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
-        secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
-        source_value_path: .s3.mediaUpload.accessKeyId.value
-        source_name_path: .s3.mediaUpload.accessKeyId.secretKeyRef.name
-        source_key_path: .s3.mediaUpload.accessKeyId.secretKeyRef.key
-      - workload_kind: Deployment
-        workload_name: langfuse-web
-        container_name: langfuse-web
-        env_name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
-        secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
-        source_value_path: .s3.mediaUpload.secretAccessKey.value
-        source_name_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.name
-        source_key_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.key
-      - workload_kind: Deployment
-        workload_name: langfuse-worker
-        container_name: langfuse-worker
-        env_name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
-        secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
-        source_value_path: .s3.eventUpload.accessKeyId.value
-        source_name_path: .s3.eventUpload.accessKeyId.secretKeyRef.name
-        source_key_path: .s3.eventUpload.accessKeyId.secretKeyRef.key
-      - workload_kind: Deployment
-        workload_name: langfuse-worker
-        container_name: langfuse-worker
-        env_name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
-        secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
-        source_value_path: .s3.eventUpload.secretAccessKey.value
-        source_name_path: .s3.eventUpload.secretAccessKey.secretKeyRef.name
-        source_key_path: .s3.eventUpload.secretAccessKey.secretKeyRef.key
-      - workload_kind: Deployment
-        workload_name: langfuse-worker
-        container_name: langfuse-worker
-        env_name: LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID
-        secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID
-        source_value_path: .s3.batchExport.accessKeyId.value
-        source_name_path: .s3.batchExport.accessKeyId.secretKeyRef.name
-        source_key_path: .s3.batchExport.accessKeyId.secretKeyRef.key
-      - workload_kind: Deployment
-        workload_name: langfuse-worker
-        container_name: langfuse-worker
-        env_name: LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY
-        secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY
-        source_value_path: .s3.batchExport.secretAccessKey.value
-        source_name_path: .s3.batchExport.secretAccessKey.secretKeyRef.name
-        source_key_path: .s3.batchExport.secretAccessKey.secretKeyRef.key
-      - workload_kind: Deployment
-        workload_name: langfuse-worker
-        container_name: langfuse-worker
-        env_name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
-        secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
-        source_value_path: .s3.mediaUpload.accessKeyId.value
-        source_name_path: .s3.mediaUpload.accessKeyId.secretKeyRef.name
-        source_key_path: .s3.mediaUpload.accessKeyId.secretKeyRef.key
-      - workload_kind: Deployment
-        workload_name: langfuse-worker
-        container_name: langfuse-worker
-        env_name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
-        secret_name: langfuse-app-secrets
-        secret_key: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
-        source_value_path: .s3.mediaUpload.secretAccessKey.value
-        source_name_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.name
-        source_key_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.key
-  - path: observability/crowdsec
-    input_digest_sha256: 8fabad225540291e5f43733e2608766384f8c0625dc80c19c1f9d0756376dcaf
-    chart:
-      name: crowdsec
-      repository: https://crowdsecurity.github.io/helm-charts
-      version: "0.24.0"
-      app_version: "v1.7.8"
-      package_sha256: fa383e922a46536db813a514e2bf082bab355081bab4aefaa964fbdbbfd7f8f1
-    declared_claim_count: 1
-    declared_implicit_default_claim_count: 0
-    declared_secret_reference_count: 0
-    declared_externalsecret_mirror_count: 0
-    declared_externalsecret_projection_count: 0
-    declared_pod_selector_count: 0
-    declared_forbidden_literal_count: 0
-    externalsecret_mirrors: []
-    externalsecret_projections: []
-    forbidden_literal_paths: []
-    pod_selectors: []
-    claims:
-      - contract_id: crowdsec-lapi-data
-        rendered_claim_id: crowdsec-db-pvc
-        kind: PersistentVolumeClaim
-        resource_name: crowdsec-db-pvc
-        claim_name: crowdsec-db-pvc
-        selector_path: spec.storageClassName
-        storage_class: longhorn-replica2
-        storage_class_mode: explicit
-    secret_references: []
-  - path: platform/woodpecker
-    input_digest_sha256: 8ed8dc773e7ad57762b097016b379163bdd81be612f3121d1e1e8a3ac3f4e365
-    chart:
-      name: woodpecker
-      repository: https://woodpecker-ci.org/
-      version: "3.6.5"
-      app_version: "3.16.0"
-      package_sha256: 9a527325de4f9d2945f2a15db42e72a221f2577245fff3059a78aba0e6571025
-      values_mirrors:
-        - values.yaml.j2
-    declared_claim_count: 2
-    declared_implicit_default_claim_count: 1
-    declared_secret_reference_count: 0
-    declared_externalsecret_mirror_count: 0
-    declared_externalsecret_projection_count: 0
-    declared_pod_selector_count: 0
-    declared_forbidden_literal_count: 0
-    externalsecret_mirrors: []
-    externalsecret_projections: []
-    forbidden_literal_paths: []
-    pod_selectors: []
-    claims:
-      - contract_id: woodpecker-agent-config
-        rendered_claim_id: woodpecker-agent/agent-config
-        kind: StatefulSet
-        resource_name: woodpecker-agent
-        claim_name: agent-config
-        selector_path: spec.volumeClaimTemplates.0.spec.storageClassName
-        storage_class: longhorn-replica2
-        storage_class_mode: implicit-default
-        exception_owner: KST-03 Woodpecker agent StatefulSet recreation and explicit class adoption
-        exception_removal_condition: recreate only the Woodpecker agent StatefulSet controller in an attended window with the explicit template, preserve and reuse the existing agent-config-* PVC, verify that PVC remains longhorn-replica2 and the agent is healthy, then retire this exception atomically
-      - contract_id: woodpecker-sqlite
-        rendered_claim_id: woodpecker-server/data
-        kind: StatefulSet
-        resource_name: woodpecker-server
-        claim_name: data
-        selector_path: spec.volumeClaimTemplates.0.spec.storageClassName
-        storage_class: longhorn-replica2
-        storage_class_mode: explicit
-    secret_references: []
+- path: observability/langfuse
+  input_digest_sha256: 7cd73f963b790929a2e875d936effa64989924cd313b0e2674e391df30c1d66c
+  chart:
+    name: langfuse
+    repository: oci://registry.homelab.internal/homelab
+    version: 1.5.38
+    app_version: 3.205.1
+    package_sha256: c597fb91cccb5f32b69dbfffdb26964a8292aee43998e0826f73e36a039ebb94
+    values_mirrors:
+    - values.yaml.j2
+  declared_claim_count: 2
+  declared_implicit_default_claim_count: 0
+  declared_secret_reference_count: 12
+  declared_externalsecret_mirror_count: 2
+  declared_externalsecret_projection_count: 6
+  declared_pod_selector_count: 2
+  declared_forbidden_literal_count: 3
+  externalsecret_mirrors:
+  - observability/langfuse/externalsecret.yaml
+  - observability/langfuse/externalsecret.yaml.j2
+  externalsecret_projections:
+  - secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+    remote_ref_key: langfuse/s3
+    remote_ref_property: access_key_id
+  - secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+    remote_ref_key: langfuse/s3
+    remote_ref_property: secret_access_key
+  - secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID
+    remote_ref_key: langfuse/s3
+    remote_ref_property: access_key_id
+  - secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY
+    remote_ref_key: langfuse/s3
+    remote_ref_property: secret_access_key
+  - secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+    remote_ref_key: langfuse/s3
+    remote_ref_property: access_key_id
+  - secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+    remote_ref_key: langfuse/s3
+    remote_ref_property: secret_access_key
+  forbidden_literal_paths:
+  - .s3.accessKeyId.value
+  - .s3.secretAccessKey.value
+  - .s3.auth.rootPassword
+  secret_reference_env_pattern: ^LANGFUSE_S3_(EVENT_UPLOAD|BATCH_EXPORT|MEDIA_UPLOAD)_(ACCESS_KEY_ID|SECRET_ACCESS_KEY)$
+  pod_selectors:
+  - workload_kind: Deployment
+    workload_name: langfuse-web
+    label_key: app.kubernetes.io/component
+    label_value: web
+  - workload_kind: Deployment
+    workload_name: langfuse-worker
+    label_key: app.kubernetes.io/component
+    label_value: worker
+  claims:
+  - contract_id: langfuse-s3
+    rendered_claim_id: langfuse-s3
+    kind: PersistentVolumeClaim
+    resource_name: langfuse-s3
+    claim_name: langfuse-s3
+    selector_path: spec.storageClassName
+    storage_class: longhorn-replica2
+    storage_class_mode: explicit
+  - contract_id: langfuse-valkey
+    rendered_claim_id: langfuse-redis-primary/valkey-data
+    kind: StatefulSet
+    resource_name: langfuse-redis-primary
+    claim_name: valkey-data
+    selector_path: spec.volumeClaimTemplates.0.spec.storageClassName
+    storage_class: longhorn-replica2
+    storage_class_mode: explicit
+  secret_references:
+  - workload_kind: Deployment
+    workload_name: langfuse-web
+    container_name: langfuse-web
+    env_name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+    secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+    source_value_path: .s3.eventUpload.accessKeyId.value
+    source_name_path: .s3.eventUpload.accessKeyId.secretKeyRef.name
+    source_key_path: .s3.eventUpload.accessKeyId.secretKeyRef.key
+  - workload_kind: Deployment
+    workload_name: langfuse-web
+    container_name: langfuse-web
+    env_name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+    secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+    source_value_path: .s3.eventUpload.secretAccessKey.value
+    source_name_path: .s3.eventUpload.secretAccessKey.secretKeyRef.name
+    source_key_path: .s3.eventUpload.secretAccessKey.secretKeyRef.key
+  - workload_kind: Deployment
+    workload_name: langfuse-web
+    container_name: langfuse-web
+    env_name: LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID
+    secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID
+    source_value_path: .s3.batchExport.accessKeyId.value
+    source_name_path: .s3.batchExport.accessKeyId.secretKeyRef.name
+    source_key_path: .s3.batchExport.accessKeyId.secretKeyRef.key
+  - workload_kind: Deployment
+    workload_name: langfuse-web
+    container_name: langfuse-web
+    env_name: LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY
+    secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY
+    source_value_path: .s3.batchExport.secretAccessKey.value
+    source_name_path: .s3.batchExport.secretAccessKey.secretKeyRef.name
+    source_key_path: .s3.batchExport.secretAccessKey.secretKeyRef.key
+  - workload_kind: Deployment
+    workload_name: langfuse-web
+    container_name: langfuse-web
+    env_name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+    secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+    source_value_path: .s3.mediaUpload.accessKeyId.value
+    source_name_path: .s3.mediaUpload.accessKeyId.secretKeyRef.name
+    source_key_path: .s3.mediaUpload.accessKeyId.secretKeyRef.key
+  - workload_kind: Deployment
+    workload_name: langfuse-web
+    container_name: langfuse-web
+    env_name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+    secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+    source_value_path: .s3.mediaUpload.secretAccessKey.value
+    source_name_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.name
+    source_key_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.key
+  - workload_kind: Deployment
+    workload_name: langfuse-worker
+    container_name: langfuse-worker
+    env_name: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+    secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
+    source_value_path: .s3.eventUpload.accessKeyId.value
+    source_name_path: .s3.eventUpload.accessKeyId.secretKeyRef.name
+    source_key_path: .s3.eventUpload.accessKeyId.secretKeyRef.key
+  - workload_kind: Deployment
+    workload_name: langfuse-worker
+    container_name: langfuse-worker
+    env_name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+    secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+    source_value_path: .s3.eventUpload.secretAccessKey.value
+    source_name_path: .s3.eventUpload.secretAccessKey.secretKeyRef.name
+    source_key_path: .s3.eventUpload.secretAccessKey.secretKeyRef.key
+  - workload_kind: Deployment
+    workload_name: langfuse-worker
+    container_name: langfuse-worker
+    env_name: LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID
+    secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID
+    source_value_path: .s3.batchExport.accessKeyId.value
+    source_name_path: .s3.batchExport.accessKeyId.secretKeyRef.name
+    source_key_path: .s3.batchExport.accessKeyId.secretKeyRef.key
+  - workload_kind: Deployment
+    workload_name: langfuse-worker
+    container_name: langfuse-worker
+    env_name: LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY
+    secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY
+    source_value_path: .s3.batchExport.secretAccessKey.value
+    source_name_path: .s3.batchExport.secretAccessKey.secretKeyRef.name
+    source_key_path: .s3.batchExport.secretAccessKey.secretKeyRef.key
+  - workload_kind: Deployment
+    workload_name: langfuse-worker
+    container_name: langfuse-worker
+    env_name: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+    secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID
+    source_value_path: .s3.mediaUpload.accessKeyId.value
+    source_name_path: .s3.mediaUpload.accessKeyId.secretKeyRef.name
+    source_key_path: .s3.mediaUpload.accessKeyId.secretKeyRef.key
+  - workload_kind: Deployment
+    workload_name: langfuse-worker
+    container_name: langfuse-worker
+    env_name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+    secret_name: langfuse-app-secrets
+    secret_key: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+    source_value_path: .s3.mediaUpload.secretAccessKey.value
+    source_name_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.name
+    source_key_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.key
+- path: observability/crowdsec
+  input_digest_sha256: 58919574a6c0e4eeb3c4cc94e69507cf7db2784164dd19e315e90af887acb811
+  chart:
+    name: crowdsec
+    repository: oci://registry.homelab.internal/homelab
+    version: 0.24.0
+    app_version: v1.7.8
+    package_sha256: fa383e922a46536db813a514e2bf082bab355081bab4aefaa964fbdbbfd7f8f1
+  declared_claim_count: 1
+  declared_implicit_default_claim_count: 0
+  declared_secret_reference_count: 0
+  declared_externalsecret_mirror_count: 0
+  declared_externalsecret_projection_count: 0
+  declared_pod_selector_count: 0
+  declared_forbidden_literal_count: 0
+  externalsecret_mirrors: []
+  externalsecret_projections: []
+  forbidden_literal_paths: []
+  pod_selectors: []
+  claims:
+  - contract_id: crowdsec-lapi-data
+    rendered_claim_id: crowdsec-db-pvc
+    kind: PersistentVolumeClaim
+    resource_name: crowdsec-db-pvc
+    claim_name: crowdsec-db-pvc
+    selector_path: spec.storageClassName
+    storage_class: longhorn-replica2
+    storage_class_mode: explicit
+  secret_references: []
+- path: platform/woodpecker
+  input_digest_sha256: 53b77e35361ef618ea85ec6f8992b1efe98d56169387a10082fd284be8f8f73e
+  chart:
+    name: woodpecker
+    repository: oci://registry.homelab.internal/homelab
+    version: 3.6.5
+    app_version: 3.16.0
+    package_sha256: 9a527325de4f9d2945f2a15db42e72a221f2577245fff3059a78aba0e6571025
+    values_mirrors:
+    - values.yaml.j2
+  declared_claim_count: 2
+  declared_implicit_default_claim_count: 1
+  declared_secret_reference_count: 0
+  declared_externalsecret_mirror_count: 0
+  declared_externalsecret_projection_count: 0
+  declared_pod_selector_count: 0
+  declared_forbidden_literal_count: 0
+  externalsecret_mirrors: []
+  externalsecret_projections: []
+  forbidden_literal_paths: []
+  pod_selectors: []
+  claims:
+  - contract_id: woodpecker-agent-config
+    rendered_claim_id: woodpecker-agent/agent-config
+    kind: StatefulSet
+    resource_name: woodpecker-agent
+    claim_name: agent-config
+    selector_path: spec.volumeClaimTemplates.0.spec.storageClassName
+    storage_class: longhorn-replica2
+    storage_class_mode: implicit-default
+    exception_owner: KST-03 Woodpecker agent StatefulSet recreation and explicit class adoption
+    exception_removal_condition: recreate only the Woodpecker agent StatefulSet controller in an attended
+      window with the explicit template, preserve and reuse the existing agent-config-* PVC, verify that
+      PVC remains longhorn-replica2 and the agent is healthy, then retire this exception atomically
+  - contract_id: woodpecker-sqlite
+    rendered_claim_id: woodpecker-server/data
+    kind: StatefulSet
+    resource_name: woodpecker-server
+    claim_name: data
+    selector_path: spec.volumeClaimTemplates.0.spec.storageClassName
+    storage_class: longhorn-replica2
+    storage_class_mode: explicit
+  secret_references: []

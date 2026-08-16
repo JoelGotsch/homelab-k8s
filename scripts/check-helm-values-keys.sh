@@ -336,6 +336,48 @@ def cache_chart_values(repo, name, ver):
             return subchart_paths(local, vals), None
         except subprocess.TimeoutExpired:
             return None, "helm show values (local chart) timed out"
+    # No vendored copy. Since ADR 0052 that is the NORMAL state, not an
+    # exception — charts are referenced from the OCI mirror. Pull and UNTAR it,
+    # then analyse it exactly like a vendored tree, so subchart folding still
+    # works.
+    #
+    # Without this, deleting the vendored charts silently degraded the check:
+    # `helm show values` returns only the PARENT chart's documented defaults, so
+    # every key consumed by an aliased dependency became a false positive. It
+    # resurfaced langfuse's `s3.persistence` — a key whose suppression had been
+    # deliberately REMOVED on 2026-08-14 precisely because subchart folding made
+    # it unnecessary. Suppressing it again would have hidden the regression
+    # instead of fixing it. (`s3` is the alias for the bundled minio subchart;
+    # `s3.persistence.storageClass` demonstrably reaches the rendered
+    # langfuse-s3 PVC.)
+    if repo.startswith("oci://"):
+        untar_root = Path(f"/tmp/helmkeys-charts/{safe}")
+        chart_dir = untar_root / name
+        if not (chart_dir / "Chart.yaml").is_file():
+            untar_root.mkdir(parents=True, exist_ok=True)
+            try:
+                r = subprocess.run(
+                    ["helm", "pull", f"{repo.rstrip('/')}/{name}", "--version", ver,
+                     "--untar", "--untardir", str(untar_root)],
+                    check=False, capture_output=True, text=True, timeout=180,
+                )
+                if r.returncode != 0:
+                    return None, (r.stderr.strip() or "helm pull (oci) failed")
+            except subprocess.TimeoutExpired:
+                return None, "helm pull (oci) timed out"
+        if (chart_dir / "Chart.yaml").is_file():
+            try:
+                r = subprocess.run(
+                    ["helm", "show", "values", str(chart_dir)],
+                    check=False, capture_output=True, text=True, timeout=60,
+                )
+                if r.returncode != 0:
+                    return None, r.stderr.strip() or "helm show values (mirror chart) failed"
+                vals = yaml.safe_load(r.stdout) or {}
+                return subchart_paths(chart_dir, vals), None
+            except subprocess.TimeoutExpired:
+                return None, "helm show values (mirror chart) timed out"
+
     if not cache.exists():
         try:
             r = subprocess.run(

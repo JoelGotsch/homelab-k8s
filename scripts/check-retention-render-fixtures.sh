@@ -334,8 +334,24 @@ for ((layer_index = 0; layer_index < layer_count; layer_index++)); do
     layer_render_dir="$render_root/repo/$layer_rel"
     package_dir="$render_root/packages/$layer_index"
     mkdir -p "$package_dir" "$layer_render_dir/charts"
-    helm pull "$chart_name" --repo "$chart_repo" --version "$chart_version" \
-      --destination "$package_dir" >/dev/null
+    # An OCI repository takes the chart name in the REFERENCE, not in --repo;
+    # `helm pull <name> --repo oci://…` fails with "invalid reference". Added
+    # 2026-08-16 when ADR 0052 moved these layers onto the Forgejo mirror.
+    #
+    # The digest assertion below is unaffected and is the point: the package
+    # this pulls must still hash to the fixture's package_sha256, so moving the
+    # SOURCE cannot smuggle in a different chart. All three layers verified
+    # byte-identical upstream vs mirrored at the time of the move.
+    case "$chart_repo" in
+      oci://*)
+        helm pull "${chart_repo%/}/$chart_name" --version "$chart_version" \
+          --destination "$package_dir" >/dev/null
+        ;;
+      *)
+        helm pull "$chart_name" --repo "$chart_repo" --version "$chart_version" \
+          --destination "$package_dir" >/dev/null
+        ;;
+    esac
     package_file="$package_dir/$chart_name-$chart_version.tgz"
     [ -f "$package_file" ] || { error "$layer_rel: helm did not produce $chart_name-$chart_version.tgz"; continue; }
     actual_package_digest="$(sha256_file "$package_file")"
