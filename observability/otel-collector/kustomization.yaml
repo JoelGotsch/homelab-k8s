@@ -14,14 +14,16 @@ namespace: monitoring
 
 helmCharts:
   - name: opentelemetry-collector
-    repo: https://open-telemetry.github.io/opentelemetry-helm-charts
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://open-telemetry.github.io/opentelemetry-helm-charts).
+    repo: oci://registry.homelab.internal/homelab
     version: "0.108.0"  # OPERATOR PINS via Renovate
     releaseName: opentelemetry-collector-gateway
     namespace: monitoring
     valuesFile: values-gateway.yaml
     includeCRDs: false
   - name: opentelemetry-collector
-    repo: https://open-telemetry.github.io/opentelemetry-helm-charts
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://open-telemetry.github.io/opentelemetry-helm-charts).
+    repo: oci://registry.homelab.internal/homelab
     version: "0.108.0"
     releaseName: opentelemetry-collector-agent
     namespace: monitoring
