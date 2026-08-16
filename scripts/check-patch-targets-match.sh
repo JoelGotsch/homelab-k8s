@@ -50,6 +50,9 @@ err()  { printf 'ERROR: %s\n' "$*" >&2; }
 note() { printf '  %s\n' "$*"; }
 
 KUSTOMIZE_BIN="${KUSTOMIZE_BIN:-kustomize}"
+# CI sets this: a layer whose chart source is unreachable is a FAILURE there,
+# because CI is the only place that observes Renovate's server-side commits.
+REQUIRE_RENDER="${REQUIRE_RENDER:-false}"
 HELM_BIN="${HELM_BIN:-helm}"
 
 for tool in "$KUSTOMIZE_BIN" python3 git; do
@@ -68,6 +71,8 @@ usage: $0 [--all | <layer-dir>...]
 
   (no args)     layers owning staged files — the pre-commit mode
   --all         every kustomization.yaml with a 'patches:' block
+  (env REQUIRE_RENDER=true turns an unreachable chart source into a failure —
+   set it in CI, leave it unset on a workstation)
   <layer-dir>   check exactly these layers
 
 env: KUSTOMIZE_BIN (default: kustomize), HELM_BIN (default: helm)
@@ -149,6 +154,7 @@ render() {
 problems=0
 checked=0
 render_failures=0
+unreachable=0
 
 for layer in "${layers[@]}"; do
   k="$layer/kustomization.yaml"
@@ -176,6 +182,26 @@ print(len(d.get('patches') or []))
   echo "== $layer ($n_patches patch(es))"
 
   if ! render "$work" > "$tmp_root/.baseline.yaml" 2> "$tmp_root/.baseline.err"; then
+    # Distinguish "this host cannot reach the chart source" from "this layer is
+    # broken". Since ADR 0052 the charts come from an OCI mirror, and a macOS
+    # workstation cannot pull from it at all: Go on darwin verifies through
+    # Security.framework and ignores SSL_CERT_FILE, so every converted layer
+    # fails with x509 locally while rendering perfectly in argocd-repo-server,
+    # which is Linux. Treating that as a patch defect would block every commit
+    # touching a converted layer, on the machine where commits are made.
+    if grep -qE 'x509|tls: failed|FetchReference|connection refused|no such host' "$tmp_root/.baseline.err"; then
+      if [ "$REQUIRE_RENDER" = true ]; then
+        err "$layer: cannot reach the chart source, and --require-render is set."
+        sed 's/^/      /' "$tmp_root/.baseline.err" | head -3 >&2
+        render_failures=$((render_failures+1))
+      else
+        note "$layer: SKIPPED — chart source unreachable from this host (expected on"
+        note "    macOS for a mirror-backed layer). NOT verified here; CI runs this"
+        note "    with --require-render, which is where it is enforced."
+        unreachable=$((unreachable+1))
+      fi
+      continue
+    fi
     err "$layer: baseline render FAILED — fix that before this check can mean anything"
     sed 's/^/      /' "$tmp_root/.baseline.err" | head -5 >&2
     render_failures=$((render_failures+1))
@@ -267,5 +293,9 @@ fi
 
 if [ "$render_failures" -gt 0 ]; then exit 1; fi
 
+if [ "$unreachable" -gt 0 ]; then
+  echo "NOTE: $unreachable layer(s) skipped — chart source unreachable from this host."
+  echo "      They are enforced in CI (REQUIRE_RENDER=true). This run did not verify them."
+fi
 echo "OK: $checked patch(es) across ${#layers[@]} layer(s) all change the render."
 exit 0

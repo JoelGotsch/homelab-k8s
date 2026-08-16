@@ -19,7 +19,8 @@ namespace: clickhouse-operator
 
 helmCharts:
   - name: altinity-clickhouse-operator
-    repo: https://docs.altinity.com/clickhouse-operator/
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://docs.altinity.com/clickhouse-operator/).
+    repo: oci://registry.homelab.internal/homelab
     version: "0.26.3"  # OPERATOR PINS via Renovate
     releaseName: clickhouse-operator
     namespace: clickhouse-operator
