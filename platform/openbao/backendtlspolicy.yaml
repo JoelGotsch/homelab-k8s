@@ -1,0 +1,67 @@
+# Re-encrypt from the Gateway to OpenBao.
+#
+# THE BUG THIS FIXES
+# ------------------
+# The `https` listener terminates TLS at Envoy and forwards plain HTTP to the
+# backend. OpenBao runs with `tls_disable = 0`, so it answered its own clients:
+#
+#   $ BAO_ADDR=https://openbao.lab.<fqdn> bao status
+#   Code: 400. Raw Message: Client sent an HTTP request to an HTTPS server.
+#
+# That message comes from OpenBao, not the Gateway — proof the request arrived
+# and the last hop was plaintext. Cilium 1.19 had no re-encryption path at all;
+# 1.20 + Gateway API v1.6.1 add BackendTLSPolicy, which is why both were
+# upgraded ahead of this file.
+#
+# WHY THIS SHAPE
+# --------------
+# The policy attaches to the SERVICE, and is consumed by the EXISTING HTTPRoute
+# on the EXISTING listener. Nothing here edits the Gateway's listener list —
+# which matters more than it reads: this Gateway renders to a single shared
+# Envoy listener object, and adding a listener to it on 2026-08-16 detached all
+# 19 HTTPRoutes and could not self-heal, because Argo fetches git through the
+# gateway it had just broken. The alternative fix (TLS passthrough) required
+# exactly that operation. This one requires none of it.
+#
+# Rolling this back is deleting one object, and deleting a policy cannot detach
+# routes.
+#
+# FIELD NOTES (from the v1.6.1 CRD, not from prose)
+# -------------------------------------------------
+# - `validation.hostname` is REQUIRED. It is the SNI sent to the backend and
+#   must match the served certificate; openbao.<fqdn> is dnsNames[0] on
+#   openbao-tls. Filled from site-config below — never hardcode the domain.
+# - `caCertificateRefs` items have no namespace field; cross-namespace refs are
+#   invalid. The ConfigMap must be in THIS namespace.
+# - Core support is one ConfigMap with the CA in a key named `ca.crt`, and
+#   Cilium enforces the kind strictly: a Secret ref is rejected with
+#   "Only ConfigMaps are supported for CA Certificate Refs".
+#   `openbao-ca` is produced by infrastructure/trust-manager/openbao-ca-bundle.yaml.
+# - Do NOT also set `wellKnownCACertificates`; a CEL rule on the CRD rejects
+#   having both, and another rejects having neither.
+#
+# Failures are loud and specific, which is worth knowing before debugging:
+#   ResolvedRefs=False / InvalidCACertificateRef  -> ConfigMap missing, or its
+#                                                    key is not `ca.crt`
+#   ResolvedRefs=False / InvalidKind              -> ref is not a ConfigMap
+#   Accepted=False     / NoValidCACertificate     -> every ref is invalid
+#
+# OPERATOR FILLS hostname domain (via site-config, as the HTTPRoute does).
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: openbao
+  namespace: openbao
+spec:
+  targetRefs:
+    # The Service the HTTPRoute already routes to. Not openbao-ui, not
+    # openbao-active.
+    - group: ""
+      kind: Service
+      name: openbao
+  validation:
+    hostname: "openbao.FQDN_SUFFIX"
+    caCertificateRefs:
+      - group: ""
+        kind: ConfigMap
+        name: openbao-ca

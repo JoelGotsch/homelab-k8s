@@ -28,6 +28,9 @@ resources:
   - snapshot-networkpolicy.yaml
   - snapshot-prometheusrule.yaml
   - httproute.yaml
+  # Makes the gateway re-encrypt to OpenBao instead of forwarding plaintext.
+  # Attaches to the Service; the HTTPRoute above is reused unchanged.
+  - backendtlspolicy.yaml
   - networkpolicy.yaml
   # cert-manager-issued server TLS, replacing the hand-generated bootstrap
   # cert. Writes openbao-tls-cm; the cutover to it is a separate step.
@@ -58,8 +61,15 @@ replacements:
       - select: { kind: HTTPRoute, name: openbao-ui }
         fieldPaths: [spec.hostnames.0]
         options: { delimiter: '.', index: 1 }
-      # Same hostname on the serving cert: Gateway TLS passthrough makes the
-      # client validate OpenBao's own cert, so the public name must be a SAN.
+      # Same hostname on the serving cert. The BackendTLSPolicy below sends this
+      # name as SNI and validates it against the served cert, so it must be a
+      # SAN. (This comment previously said "Gateway TLS passthrough" — that
+      # design was abandoned after the 2026-08-16 listener outage; the
+      # requirement is unchanged, the reason for it is not.)
       - select: { kind: Certificate, name: openbao-tls }
         fieldPaths: [spec.dnsNames.0]
+        options: { delimiter: '.', index: 1 }
+      # The SNI the gateway presents to the backend must equal the cert's name.
+      - select: { kind: BackendTLSPolicy, name: openbao }
+        fieldPaths: [spec.validation.hostname]
         options: { delimiter: '.', index: 1 }
