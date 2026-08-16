@@ -38,8 +38,13 @@ CA_FILE="${CA_FILE:-$HOME/.config/homelab/ca.pem}"
 # The tier-0 chain, in A8.2's install order. `layer` is the homelab-k8s path
 # whose values.yaml is the real input; `chart` is the bundle basename. Chart
 # names differ from layer names in three places (cnpg -> cloudnative-pg,
-# csi-rclone -> csi-driver-rclone, and cnpg's barman plugin is separate), which
-# is exactly the sort of thing worth having written down.
+# csi-rclone -> csi-driver-rclone, cnpg-barman-plugin -> plugin-barman-cloud),
+# which is exactly the sort of thing worth having written down.
+#
+# cnpg-barman-plugin was MISSING from this list until 2026-08-16. The plan reads
+# "cnpg (+barman plugin)", which looks like one install; it is two charts and two
+# homelab-k8s layers, each with its own values.yaml and lock pin. A tier-0 chart
+# was therefore unguarded here while this check reported a confident 9 of 9.
 TIER0='
 cilium|infrastructure/cilium|cilium
 cert-manager|infrastructure/cert-manager|cert-manager
@@ -47,6 +52,7 @@ trust-manager|infrastructure/trust-manager|trust-manager
 external-secrets|infrastructure/external-secrets|external-secrets
 longhorn|infrastructure/longhorn|longhorn
 cnpg|infrastructure/cnpg|cloudnative-pg
+cnpg-barman-plugin|infrastructure/cnpg-barman-plugin|plugin-barman-cloud
 openbao|platform/openbao|openbao
 csi-rclone|infrastructure/csi-rclone|csi-driver-rclone
 forgejo|platform/forgejo|forgejo
