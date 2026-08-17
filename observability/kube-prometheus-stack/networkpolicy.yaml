@@ -369,3 +369,81 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+---
+# prometheus-gateway-ingress / alertmanager-gateway-ingress
+#
+# `prometheus.lab.<fqdn>` and `alertmanager.lab.<fqdn>` returned 503 from the
+# gateway for ~3 months — found 2026-08-17 while sweeping every hostname after
+# the Cilium 1.20 upgrade, and NOT caused by it. The body is the signature of
+# the trap already documented above grafana-allow:
+#
+#   upstream connect error or disconnect/reset before headers.
+#   reset reason: connection timeout
+#
+# `prometheus-allow` and `alertmanager-allow` are K8s NetworkPolicies whose
+# ingress rules admit only `podSelector` sources. Cilium's Gateway API tags
+# gateway-egressing traffic with the reserved `ingress` ENTITY, which no K8s
+# NetworkPolicy selector can express — so the HTTPRoutes existed, resolved and
+# reported healthy while every request was policy-dropped. The 2026-05-25
+# conversion that fixed grafana and authentik missed these two.
+#
+# WHY ADDITIVE, RATHER THAN CONVERTING THE NETPOLS LIKE grafana-allow
+#
+# Rewriting a working NetworkPolicy by hand is the risk here, not the entity
+# rule: `prometheus-allow` and `alertmanager-allow` carry port allowlists and a
+# deliberately wide `namespaceSelector: {}` whose semantics are easy to change
+# by accident in translation. These policies add ONLY the missing allow and
+# touch nothing that currently works.
+#
+# Cilium unions allow rules across both policy kinds. Verified in this cluster
+# rather than assumed — seven endpoints are already selected by both a
+# NetworkPolicy with ingress and a CiliumNetworkPolicy with ingress, including
+# `cluster-dns` (a default-deny NetworkPolicy plus a CNP supplying the
+# LoadBalancer allow, which is exactly this shape and carries all lab DNS) and
+# `loki` in this very namespace.
+#
+# Rollback is deleting these two objects; the NetworkPolicies are untouched.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: prometheus-gateway-ingress
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  ingress:
+    # Cluster Gateway HTTPRoute — operator reaches the Prometheus UI.
+    # 9090 is the POD port (container 9090, Service 9090 -> targetPort 9090).
+    # CNP ports are pod ports: the socket-LB DNATs before policy evaluation.
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "9090"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: alertmanager-gateway-ingress
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: alertmanager
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+  ingress:
+    # Cluster Gateway HTTPRoute — operator reaches the Alertmanager UI.
+    # 9093 is the pod port; 9094 is the cluster-gossip port and is deliberately
+    # NOT exposed to the gateway (`alertmanager-allow` already scopes it to
+    # peer alertmanagers).
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "9093"
+              protocol: TCP
