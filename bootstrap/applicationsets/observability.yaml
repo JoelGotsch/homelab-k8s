@@ -31,6 +31,8 @@ spec:
         path: '{{.path.path}}'
       destination:
         server: https://kubernetes.default.svc
+        # Default: observability-<layer>. Three layers deploy elsewhere
+        # (their manifests pin the namespace) — see templatePatch below.
         namespace: 'observability-{{.path.basename}}'
       syncPolicy:
         automated:
@@ -73,3 +75,22 @@ spec:
           name: crowdsec-banned
           jsonPointers:
             - /spec/externalCIDRs
+  # Destination overrides for layers whose manifests pin a namespace other
+  # than observability-<basename>. Before 2026-08-17 the default destination
+  # made CreateNamespace=true mint an EMPTY observability-{langfuse,
+  # kube-prometheus-stack,falco-stack} next to the real langfuse /
+  # monitoring namespaces (85 days), and deleting the empties by hand
+  # would have been recreated on the next sync. The destination is only
+  # used for namespace creation and un-namespaced resources here, so this
+  # is metadata hygiene, not a move. Renaming the real namespaces instead
+  # would mean re-creating every PVC-backed workload in them.
+  templatePatch: |
+    {{- if eq .path.basename "langfuse" }}
+    spec:
+      destination:
+        namespace: langfuse
+    {{- else if or (eq .path.basename "kube-prometheus-stack") (eq .path.basename "falco-stack") }}
+    spec:
+      destination:
+        namespace: monitoring
+    {{- end }}

@@ -191,11 +191,17 @@ class AlertRouterTests(unittest.TestCase):
             timeout=10,
         ).stdout
         application_set = json.loads(applicationset)
-        self.assertNotIn(
-            "templatePatch",
-            application_set["spec"],
-            "observability apps must no longer receive a generated compare exception",
-        )
+        # A templatePatch is allowed for destination overrides (2026-08-17:
+        # langfuse / kube-prometheus-stack / falco-stack pin their own
+        # namespaces), but it must never smuggle back a compare exception.
+        template_patch = application_set["spec"].get("templatePatch", "")
+        for forbidden in ("ServerSideDiff", "syncOptions", "ignoreDifferences", "compare"):
+            self.assertNotIn(
+                forbidden,
+                template_patch,
+                "observability templatePatch may only override destination, "
+                "never a generated compare exception",
+            )
         self.assertNotIn(
             "ServerSideDiff=false",
             OBSERVABILITY_APPLICATIONSET.read_text(encoding="utf-8"),
