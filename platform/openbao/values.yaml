@@ -109,6 +109,22 @@ server:
       # form. Bootstrap parity tracked at homelab-infra/ansible/
       # files/openbao-values.yaml.
       config: |
+        # Serve the web UI at /ui/ on the SAME listener as the API (8200).
+        #
+        # Enabling the UI takes two settings in two different places and the
+        # chart-level one alone does nothing:
+        #   ui.enabled: true (below)  -> creates the `openbao-ui` Service
+        #   ui = true       (here)    -> makes the SERVER actually serve /ui/
+        # Only the first was set, so `openbao.lab.<fqdn>/ui/` returned a 404
+        # FROM OpenBao while the HTTPRoute — named `openbao-ui` — reported
+        # Accepted/ResolvedRefs=True. Fixed 2026-08-17.
+        #
+        # Safe to expose on this listener: it binds [::]:8200, not localhost,
+        # and the gateway terminates TLS with the public wildcard cert while
+        # re-encrypting to this listener via the BackendTLSPolicy. The UI is
+        # authenticated; it is not an unauthenticated surface.
+        ui = true
+
         cluster_addr = "https://POD_IP:8201"
         api_addr = "https://POD_IP:8200"
 
