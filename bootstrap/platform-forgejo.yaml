@@ -1,0 +1,118 @@
+# platform-forgejo — the ONE platform Application that must be able to
+# reconcile from somewhere other than Forgejo.
+#
+# ############################################################################
+# NOT ACTIVE YET. This file is deliberately absent from
+# bootstrap/kustomization.yaml's `resources:`, so kustomize does not render it
+# and Argo never sees it. Activating it is three edits — and one of them will
+# DELETE FORGEJO if done in the wrong order. Read the next paragraph before
+# touching any of them.
+#
+# THE HAZARD (found 2026-08-18, during plan step B7.0; the plan did not
+# anticipate it, which is why it is written down here rather than in a commit
+# message nobody will read):
+#
+# The `platform` ApplicationSet currently generates an Application called
+# `platform-forgejo`. Argo CD's ApplicationSet controller adds
+# `resources-finalizer.argocd.argoproj.io` to every Application it generates
+# unless `.spec.syncPolicy.preserveResourcesOnDeletion` is true (it is unset
+# here, so the default applies — verified against the Argo CD 3.4 operator
+# manual and against the live object, which carries the finalizer AND an
+# ownerReference to the ApplicationSet).
+#
+# So the moment `platform/forgejo` is excluded from that generator, the
+# controller deletes the generated Application, and the finalizer turns that
+# deletion into a CASCADING PRUNE of everything it manages: the Forgejo
+# Deployment, its Services, its PVCs — the git server that holds this
+# repository. Adding `exclude: true` and pushing is not a partial step; it is
+# the destructive one.
+#
+# ACTIVATION, in this order, operator-attended (the plan marks the sync 🔴):
+#   1. Set `syncPolicy.preserveResourcesOnDeletion: true` on the `platform`
+#      ApplicationSet. Push. Sync. Then CONFIRM the finalizer is actually gone
+#      from the live object before going further — the doc says the flag stops
+#      the finalizer being *added*; whether the controller also strips an
+#      existing one is not documented and must be observed, not assumed:
+#        kubectl -n argocd get application platform-forgejo \
+#          -o jsonpath='{.metadata.finalizers}'
+#      Expect `[]` or absent. If it is still there, remove it explicitly and
+#      re-check that the controller does not put it back.
+#   2. Only then: add `exclude: true` for `platform/forgejo` to the
+#      ApplicationSet's git generator, add this file to
+#      bootstrap/kustomization.yaml `resources:`, and add the whole-URL
+#      replacement from `data.forgejo_layer_repo_url`. One commit.
+#      The Application name here is identical to the generated one, so Argo
+#      adopts the live resources instead of recreating them.
+#   3. Strip the now-stale ownerReference to the ApplicationSet from the
+#      adopted Application, or a future deletion of that ApplicationSet
+#      garbage-collects this Application through it.
+#
+# The replacement block for step 2 (kept here so it is not re-derived):
+#   - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_layer_repo_url }
+#     targets:
+#       - select: { kind: Application, name: platform-forgejo }
+#         fieldPaths: [spec.source.repoURL]
+#   NO `options:` — every other repoURL replacement here swaps the host token
+#   and keeps `/homelab/homelab-k8s`; this one must be able to become
+#   https://github.com/<user>/homelab-k8s, whose path segment differs.
+# ############################################################################
+#
+# WHY IT IS NOT IN THE platform ApplicationSet
+#
+# Migrating Forgejo's own datasets (ADR 0051, plan step B7) requires scaling
+# Forgejo to 0. While it is down, Argo cannot read the git repository that
+# describes how to bring it back up: the layer that owns Forgejo is stored in
+# Forgejo. The way out is to point THIS Application at the GitHub push-mirror
+# for the duration of the window, and back afterwards.
+#
+# That cannot be done from inside `applicationsets/platform.yaml`, because one
+# `repoURL` there serves all six platform apps, and its site-config replacement
+# swaps only the HOST token (`delimiter: '/', index: 2`). GitHub's path is
+# `JoelGotsch/homelab-k8s`, not `homelab/homelab-k8s`, so a host-only swap
+# would produce a URL that does not exist. Hence: excluded from the set, and
+# declared here with a WHOLE-URL replacement from `forgejo_layer_repo_url`.
+#
+# The Application NAME is deliberately identical to the one the ApplicationSet
+# generated (`platform-<basename>`), so Argo adopts the existing Application
+# instead of deleting and recreating it — no resource churn, no window where
+# platform/forgejo is unmanaged.
+#
+# `syncPolicy`, wave, project and destination below MUST stay identical to
+# applicationsets/platform.yaml's template. If that template changes, change
+# this too — there is no generator keeping them in step, and `platform-forgejo`
+# silently drifting to different sync semantics than its five siblings is
+# exactly the failure this comment exists to prevent.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-forgejo
+  namespace: argocd
+  labels:
+    layer: platform
+    component: forgejo
+  annotations:
+    argocd.argoproj.io/sync-wave: '0'
+spec:
+  project: default
+  source:
+    # Replaced WHOLE (not a delimiter token) from
+    # ConfigMap/site-config.data.forgejo_layer_repo_url — see
+    # bootstrap/kustomization.yaml. Flipping that one key between the Forgejo
+    # URL and the GitHub mirror URL is the entire break-glass mechanism.
+    repoURL: FORGEJO_LAYER_REPO_URL
+    targetRevision: main
+    path: platform/forgejo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: forgejo
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff: {duration: 30s, factor: 2, maxDuration: 5m}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - ApplyOutOfSyncOnly=true
