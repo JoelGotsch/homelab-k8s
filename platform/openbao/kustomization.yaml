@@ -13,7 +13,9 @@ kind: Kustomization
 # — operator keeps these in sync.
 helmCharts:
   - name: openbao
-    repo: https://openbao.github.io/openbao-helm
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://openbao.github.io/openbao-helm).
+    repo: oci://registry.homelab.internal/homelab
+
     version: "0.28.4" # OPERATOR PINS via Renovate
     releaseName: openbao
     namespace: openbao
