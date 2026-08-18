@@ -243,7 +243,11 @@ spec:
     volumeHandle: nas-crypt-personal-files#nextcloud-personal-files
     volumeAttributes:
       remote: "nas-crypt-personal-files"
-      remotePath: "nextcloud/data"
+      # NOT "nextcloud/data" — the chart mounts this PVC with `subPath: data`,
+      # so the app sees `<remotePath>/data/<user>`. Declaring "nextcloud" yields
+      # `nextcloud/data/<user>` on the NAS; "nextcloud/data" would yield
+      # `nextcloud/data/data/<user>`. ADR 0051, D-7.
+      remotePath: "nextcloud"
     nodePublishSecretRef:
       name: nas-crypt-personal-files-config
       namespace: csi-rclone

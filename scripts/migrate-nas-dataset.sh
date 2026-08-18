@@ -91,7 +91,7 @@ DATASETS="
 internal-archive-vault|internal-archive|conversation-history/vault|conversation-history/cronjob/seal-signal,conversation-history/cronjob/seal-whatsapp,conversation-history/cronjob/contacts-sync|conversation-history/vault
 internal-archive-nextcloud|internal-archive|nextcloud/internal-archive|nextcloud/deployment/nextcloud|nextcloud/nextcloud-internal-archive
 personal-photos-immich|personal-photos|immich/originals|immich/deployment/immich-server|immich/immich-originals
-personal-files-nextcloud|personal-files|nextcloud/data|nextcloud/deployment/nextcloud|nextcloud/nextcloud-personal-files
+personal-files-nextcloud|personal-files|nextcloud|nextcloud/deployment/nextcloud|nextcloud/nextcloud-personal-files
 family-shared-nextcloud|family-shared|nextcloud/family-shared|nextcloud/deployment/nextcloud|nextcloud/nextcloud-family-shared
 personal-documents-paperless|personal-documents|paperless/media|paperless/deployment/paperless-paperless-ngx|paperless/paperless-media
 forgejo-lfs-forgejo|forgejo-lfs|forgejo/lfs|forgejo/deployment/forgejo|forgejo/forgejo-lfs
