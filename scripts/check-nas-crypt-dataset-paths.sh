@@ -72,8 +72,6 @@ pv_file, workspace_root = sys.argv[1], sys.argv[2]
 # entry, meaning the list stopped describing reality. Delete the line when the
 # dataset cuts over.
 PENDING_MIGRATION = {
-    ("nextcloud", "nextcloud-personal-files"),
-    ("nextcloud", "nextcloud-family-shared"),
     ("immich", "immich-originals"),
     ("forgejo", "forgejo-lfs"),
     ("forgejo", "forgejo-packages"),
