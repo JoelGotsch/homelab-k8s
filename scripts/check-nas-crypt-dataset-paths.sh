@@ -75,7 +75,6 @@ PENDING_MIGRATION = {
     ("nextcloud", "nextcloud-personal-files"),
     ("nextcloud", "nextcloud-family-shared"),
     ("immich", "immich-originals"),
-    ("paperless", "paperless-media"),
     ("forgejo", "forgejo-lfs"),
     ("forgejo", "forgejo-packages"),
     ("backup-cronjobs", "backup-src-personal-photos"),
