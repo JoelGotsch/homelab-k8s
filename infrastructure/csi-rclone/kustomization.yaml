@@ -17,7 +17,9 @@ namespace: csi-rclone
 
 helmCharts:
   - name: csi-driver-rclone
-    repo: oci://ghcr.io/veloxpack/charts
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was oci://ghcr.io/veloxpack/charts).
+    repo: oci://registry.homelab.internal/homelab
+
     version: "0.4.11"  # OPERATOR PINS via Renovate
     releaseName: csi-rclone
     namespace: csi-rclone
