@@ -29,7 +29,9 @@ kind: Kustomization
 
 helmCharts:
   - name: plugin-barman-cloud
-    repo: https://cloudnative-pg.github.io/charts
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://cloudnative-pg.github.io/charts).
+    repo: oci://registry.homelab.internal/homelab
+
     version: "0.7.1"  # → plugin v0.14.0. OPERATOR PINS via Renovate.
     releaseName: barman-cloud
     namespace: cnpg-system
