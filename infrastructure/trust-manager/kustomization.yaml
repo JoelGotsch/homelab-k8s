@@ -7,7 +7,9 @@ kind: Kustomization
 
 helmCharts:
   - name: trust-manager
-    repo: https://charts.jetstack.io
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://charts.jetstack.io).
+    repo: oci://registry.homelab.internal/homelab
+
     version: "v0.24.0"  # OPERATOR PINS via Renovate
     releaseName: trust-manager
     namespace: trust-manager
