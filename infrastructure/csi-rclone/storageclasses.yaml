@@ -47,7 +47,11 @@
 #   parameters: Invalid value: {...}: field is immutable
 #
 # So editing `remotePath` here is a delete-and-recreate, not a patch.
-# Each class therefore carries `Force=true,Replace=true` sync options
+# The one-time recreate these classes needed was done 2026-08-15. Any FUTURE
+# immutable edit must be a deliberate delete/recreate, not a standing
+# Force=true,Replace=true — which would let Argo silently recreate a
+# StorageClass (and orphan its PVs) on any accidental immutable change.
+# Historically each class carried those sync options
 # so Argo performs that recreate itself instead of failing every sync
 # forever. Deleting a StorageClass is safe for existing data: a class
 # is consulted only at provisioning time, and every bound PV carries
@@ -80,7 +84,6 @@ metadata:
     # recreate this class to change them, not patch it. Without this, every
     # edit below wedges the csi-rclone Application in a permanent sync error.
     # Safe: bound PVs hold their own copy; a class is read only at provision.
-    argocd.argoproj.io/sync-options: Force=true,Replace=true
 # 2026-08-07: vfs-cache-mode=full is LOAD-BEARING for Immich. Without a
 # write cache rclone can't seek on writes, so Node's fs.copyFile (the
 # storage-template hot→cold move) fails EBADF and strands originals on the
@@ -92,7 +95,7 @@ metadata:
 # only thing that mounts this share for real. These options remain here so a
 # parked `_unallocated/` volume behaves sanely, not because Immich depends on
 # them. (The old note about needing a manual SC delete+recreate is handled by
-# the Force=true,Replace=true sync option above.)
+# a deliberate delete/recreate; the standing sync option was removed 2026-08-18.)
 mountOptions:
   - allow-other=true
   - file-perms=0666
@@ -134,7 +137,6 @@ metadata:
     # recreate this class to change them, not patch it. Without this, every
     # edit below wedges the csi-rclone Application in a permanent sync error.
     # Safe: bound PVs hold their own copy; a class is read only at provision.
-    argocd.argoproj.io/sync-options: Force=true,Replace=true
 mountOptions:
   - allow-other=true
   - file-perms=0666
@@ -165,7 +167,6 @@ metadata:
     # recreate this class to change them, not patch it. Without this, every
     # edit below wedges the csi-rclone Application in a permanent sync error.
     # Safe: bound PVs hold their own copy; a class is read only at provision.
-    argocd.argoproj.io/sync-options: Force=true,Replace=true
 mountOptions:
   - allow-other=true
   - file-perms=0666
@@ -201,7 +202,6 @@ metadata:
     # recreate this class to change them, not patch it. Without this, every
     # edit below wedges the csi-rclone Application in a permanent sync error.
     # Safe: bound PVs hold their own copy; a class is read only at provision.
-    argocd.argoproj.io/sync-options: Force=true,Replace=true
 # vfs-cache-mode=writes is LOAD-BEARING on this share, not tuning.
 # An rclone mount without a VFS cache cannot append to an existing
 # file. Measured 2026-08-15, same driver / node / minute:
@@ -255,7 +255,6 @@ metadata:
     # recreate this class to change them, not patch it. Without this, every
     # edit below wedges the csi-rclone Application in a permanent sync error.
     # Safe: bound PVs hold their own copy; a class is read only at provision.
-    argocd.argoproj.io/sync-options: Force=true,Replace=true
 mountOptions:
   - allow-other=true
   - file-perms=0666
@@ -287,7 +286,6 @@ metadata:
     # recreate this class to change them, not patch it. Without this, every
     # edit below wedges the csi-rclone Application in a permanent sync error.
     # Safe: bound PVs hold their own copy; a class is read only at provision.
-    argocd.argoproj.io/sync-options: Force=true,Replace=true
 mountOptions:
   - allow-other=true
   - file-perms=0666
@@ -320,7 +318,6 @@ metadata:
     # recreate this class to change them, not patch it. Without this, every
     # edit below wedges the csi-rclone Application in a permanent sync error.
     # Safe: bound PVs hold their own copy; a class is read only at provision.
-    argocd.argoproj.io/sync-options: Force=true,Replace=true
 mountOptions:
   - allow-other=true
   - file-perms=0666
