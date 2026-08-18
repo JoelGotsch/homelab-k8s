@@ -12,7 +12,9 @@ kind: Kustomization
 
 helmCharts:
   - name: cloudnative-pg
-    repo: https://cloudnative-pg.github.io/charts
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://cloudnative-pg.github.io/charts).
+    repo: oci://registry.homelab.internal/homelab
+
     version: "0.29.0"  # OPERATOR PINS via Renovate
     releaseName: cnpg
     namespace: cnpg-system
