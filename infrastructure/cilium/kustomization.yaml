@@ -15,7 +15,15 @@ kind: Kustomization
 
 helmCharts:
   - name: cilium
-    repo: https://helm.cilium.io
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://helm.cilium.io).
+    #
+    # Converted last of the tier-0 group, 2026-08-19. The circularity is real and
+    # accepted (plan A5 G4): Cilium is the CNI, so if it is down the registry is
+    # unreachable and this layer cannot be rendered from the mirror. Running
+    # state persists regardless, and the break-glass is a commit repointing this
+    # line at upstream or the bundle — the same shape as ADR 0037 for git, and
+    # the same one platform/forgejo needed on 2026-08-19.
+    repo: oci://registry.homelab.internal/homelab
     version: "1.20.0"  # OPERATOR PINS via Renovate
     releaseName: cilium
     namespace: kube-system

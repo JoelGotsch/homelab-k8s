@@ -237,22 +237,30 @@ repos:
         # is NOT enforced at admission by Kyverno, so this shift-left guard
         # keeps a new namespace from shipping without a classification.
 
-      - id: check-chart-pin-vendored
-        name: vendored Helm chart matches the version pinned in kustomization.yaml
-        entry: scripts/check-chart-pin-vendored.sh
+      - id: check-chart-lock
+        name: every pinned chart is locked and points at the mirror (ADR 0052)
+        entry: scripts/check-chart-lock.sh
         language: script
-        files: 'kustomization\.yaml$'
+        pass_filenames: false
+        files: '(kustomization\.yaml|charts\.lock\.yaml)$'
         exclude: '/charts/'
-        # Precondition for check-helm-values-keys below: that check reads the
-        # VENDORED chart to learn the schema. Renovate bumps the pin but
-        # cannot re-pull a tarball, so the vendored copy silently desyncs —
-        # on 2026-08-13 four layers (longhorn, trivy-operator, cnpg, alloy)
-        # pinned a version they vendored no copy of at all, which made the
-        # values check fall through to a network fetch that soft-fails to a
-        # warning under deny-by-default CI egress. Green, checking nothing.
+        # REPLACES check-chart-pin-vendored (A6), which compared a pin against a
+        # VENDORED tarball — a comparison with nothing left to compare, since
+        # ADR 0052 deleted every charts/ tree. It was still the only chart hook
+        # registered here, so from the moment the trees went the layer pins had
+        # no guard at all.
         #
-        # Canonical copy lives in the homelab-hooks repo; mirrored here
-        # because this config's policy (above) is repo-local hooks only.
+        # That cost something real and this hook is here because of it: on
+        # 2026-08-16 a cilium bump moved infrastructure/cilium to 1.20.0 while
+        # charts.lock.yaml, the mirror and the OFFLINE BUNDLE all stayed at
+        # 1.19.5. Nothing complained, because cilium was also the one layer
+        # still pulling from upstream, so the bump simply worked. Production ran
+        # 1.20.0 and a cold start from the bundle would have installed 1.19.5 —
+        # of the CNI. Found 2026-08-19; the lock, mirror, bundle and layer were
+        # reconciled in the same change that registered this.
+        #
+        # pass_filenames: false because the check reads charts.lock.yaml against
+        # EVERY layer pin; handed a subset it would pass while a sibling drifted.
 
       - id: check-patch-targets-match
         name: every kustomize patch actually changes the render (ADR 0052 D3)
