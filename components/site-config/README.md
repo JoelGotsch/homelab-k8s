@@ -6,9 +6,21 @@ consume — domain, subdomain, ingress/NAS IPs, github user. Set them **once** i
 changing a value here changes it everywhere on the next render.
 
 This is the k8s half of the site config; the pre-cluster/hardware half lives in
-`homelab-infra/.../main.yml`, and the human schema (required vs optional) is
-`homelab/examples/site-config.yaml`. Ansible reads `domain`/`internal_subdomain`
-from *this* file cross-repo, so the domain is declared exactly once.
+`homelab-infra/ansible/inventory/group_vars/all/main.yml`, and the human schema
+(required vs optional) is `homelab/examples/site-config.yaml`.
+
+**Corrected 2026-08-19.** This used to say Ansible reads `domain` /
+`internal_subdomain` from *this* file cross-repo, "so the domain is declared
+exactly once". It does not. `group_vars/all/main.yml` carries its own
+`homelab_domain` and `homelab_internal_subdomain`, plus `cluster_ingress_ip`,
+`forgejo_ssh_ingress_ip`, `registry_direct_ip` and `operator_github_user` — the
+same values, typed twice. Ansible cannot read a kustomize component, so that
+overlap is unavoidable and is the ONE duplication ADR 0045 D2 permits.
+
+It is therefore linted rather than wished away:
+`homelab-infra/scripts/check-site-config-cross-surface.sh` fails when the two
+surfaces disagree. Believing the old sentence is what makes the drift dangerous
+— you would change one surface and expect the other to follow.
 
 ## How it works
 

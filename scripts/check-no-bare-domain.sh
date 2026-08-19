@@ -113,7 +113,7 @@ REPO_NAME="$(basename "$(git rev-parse --show-toplevel)")"
 #               eight legacy `apps/*` files become live findings again unless
 #               the guarded `apps/*` cleanup has deleted them first. Do the
 #               cleanup first, or re-add them here for the interval.
-KNOWN_VIOLATIONS_REGEX='^nextcloud:k8s/values\.yaml$|^paperless:k8s/values\.yaml$|^vaultwarden:k8s/values\.yaml$'
+KNOWN_VIOLATIONS_REGEX='^nextcloud:k8s/values\.yaml$'
 
 # Use staged files as a pre-commit hook; otherwise everything tracked. Both
 # lists are narrowed to SCOPE_REGEX — a file the cluster never reads cannot
