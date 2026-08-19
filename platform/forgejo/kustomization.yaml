@@ -17,20 +17,18 @@ namespace: forgejo
 
 helmCharts:
   - name: forgejo
-    # TEMPORARILY UPSTREAM — ADR 0051 migration window, B7 (2026-08-19).
+    # ADR 0052 D3: chart from the Forgejo Packages mirror (was oci://code.forgejo.org/forgejo-helm).
     #
-    # ADR 0052 D3 normally pulls this from the Forgejo Packages mirror
-    # (oci://registry.homelab.internal/homelab). That is a DEADLOCK for this one
-    # layer and only this one: registry-direct's upstream is the Forgejo pod, so
-    # while Forgejo is scaled to 0 the repo-server cannot pull the chart, cannot
-    # render platform/forgejo at all, and therefore cannot apply the very commit
-    # that scales Forgejo back up. The layer that restarts Forgejo cannot depend
-    # on Forgejo — that is true of its git repository (hence
-    # bootstrap/platform-forgejo.yaml and the GitHub mirror) and equally true of
-    # its chart, which the plan had not accounted for.
-    #
-    # Flipped back to the mirror once Forgejo is up again.
-    repo: oci://code.forgejo.org/forgejo-helm
+    # Pointed at upstream for the 2026-08-19 migration window and back here
+    # after: registry-direct's upstream is the Forgejo pod, so this layer cannot
+    # pull its chart from the mirror while Forgejo is scaled to 0 — and without
+    # a render there is no way to apply the commit that scales it back up. If
+    # Forgejo ever has to be taken down again, flip this to
+    # oci://code.forgejo.org/forgejo-helm FIRST, with Forgejo still up, and
+    # confirm the layer still renders. Verified byte-identical either way (30
+    # resources, `cmp` clean, with the gitignored charts/ pull cache deleted so
+    # the render actually contacted each registry).
+    repo: oci://registry.homelab.internal/homelab
 
     version: "17.1.3"  # OPERATOR PINS via Renovate (app v15.0.5)
     releaseName: forgejo
