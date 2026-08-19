@@ -128,10 +128,47 @@ done < "$work/entries.tsv"
   done
 } > "$OUTDIR/bundle.manifest"
 
+# ── Prune superseded versions, so the bundle IS the locked set.
+#
+# This script used to be purely additive, which quietly broke its consumers.
+# install-tier0-from-bundle.sh and check-bundle-installable.sh both select a
+# chart with `ls <name>-*.tgz | tail -1` — ALPHABETICAL order, not version
+# order. With one version per chart that is unambiguous; with two it is a
+# coin toss that happens to be right today and is wrong at the next minor
+# rollover:
+#
+#   $ printf 'cilium-1.9.0.tgz\ncilium-1.10.0.tgz\n' | sort | tail -1
+#   cilium-1.9.0.tgz            <- older chart wins
+#
+# A cold start would then install a chart nobody pinned, silently. Rather than
+# teach three scripts to compare semver, the bundle holds exactly what the
+# locks pin — "ensure a state, don't just perform actions".
+#
+# Only ever removes <name>-<version>.tgz(.sha256) whose name is a chart in the
+# locks but whose version is not the locked one. A file for a chart that is not
+# in any lock is left alone and reported: it may belong to a lock that was not
+# passed on this invocation, and deleting it would make a partial run
+# destructive.
+pruned=0
+while IFS= read -r f; do
+  base="$(basename "$f")"; base="${base%.sha256}"; base="${base%.tgz}"
+  keep=0; known=0
+  while IFS=$'\t' read -r n v _a _c; do
+    [ "$base" = "$n-$v" ] && keep=1
+    case "$base" in "$n"-*) known=1 ;; esac
+  done < "$work/manifest.tsv"
+  if [ "$known" = "1" ] && [ "$keep" = "0" ]; then
+    rm -f "$f"; pruned=$((pruned+1)); echo "  pruned $(basename "$f") (superseded)"
+  elif [ "$known" = "0" ]; then
+    echo "  kept $(basename "$f") — no chart of that name in the locks passed to this run"
+  fi
+done < <(find "$OUTDIR" -maxdepth 1 -type f \( -name '*.tgz' -o -name '*.tgz.sha256' \) | sort)
+
 echo
 echo "── state"
 echo "   newly downloaded : $pulled"
 echo "   already present  : $present"
+echo "   superseded pruned: $pruned"
 echo "   failed           : $failed"
 echo "   bundle           : $OUTDIR ($(du -sh "$OUTDIR" | cut -f1))"
 [ "$failed" -gt 0 ] && exit 1
