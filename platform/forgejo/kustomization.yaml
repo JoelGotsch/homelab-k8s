@@ -55,6 +55,15 @@ resources:
   - registry-direct.yaml
   - servicemonitor.yaml
 
+# TEMPORARILY 0 — second ADR 0051 window (registry-blobs), 2026-08-19.
+# Via the kustomize `replicas:` transformer, NOT values.yaml: the Forgejo chart
+# ships a values schema that rejects replicaCount 0 outright
+# ("at '/replicaCount': minimum: got 0, want 1"), so helm template fails and the
+# layer does not render at all. Removed once the dataset is cut over.
+replicas:
+  - name: forgejo
+    count: 0
+
 # ADR 0036: cluster-wide resource-governance baseline.
 components:
   - ../../components/first-party-namespace
