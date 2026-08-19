@@ -37,11 +37,22 @@
 # to leak. Nominal 1Gi request — rclone ignores capacity entirely (the mount
 # shows the whole share, 56 TB of it).
 #
-# NOT included: nas-crypt-registry-blobs (Forgejo container registry — the
-# blobs are regenerable/re-pushable images; snapshot-only). Add here if that
-# assumption changes. Re-affirmed rather than inherited on 2026-08-15, and now
-# annotated on the PV itself so the omission is visible at the object rather
-# than only in this header.
+# INCLUDED since 2026-08-19: nas-crypt-registry-blobs. This header previously
+# said the opposite — that the blobs are regenerable/re-pushable images and so
+# need snapshots only, "re-affirmed rather than inherited on 2026-08-15". That
+# re-affirmation was wrong: ADR 0051's Consequences had already reversed it,
+# because ADR 0052 deleted vendored charts/ from git and made this same volume
+# the Helm chart mirror. The manifests were contradicting an accepted ADR.
+#
+# The operator confirmed the decision on 2026-08-19 with the fuller picture:
+# the charts do now have a second offsite copy (the chart bundle publishes 32
+# of them to the Storage Box independently), so the chart argument is weaker
+# than ADR 0051 assumed — but essentially all 7.5 GiB is CONTAINER IMAGES,
+# which have no second copy anywhere, are digest-pinned across several app
+# repos, and are cosign-signed. Rebuilding them means new digests committed in
+# each repo and re-signing, during an incident. 7.5 GiB is ~0.75% of the
+# smallest Storage Box, and these are immutable content-addressed blobs, so
+# every snapshot after the first costs roughly the delta.
 #
 # MIGRATION NOTE (ADR 0051): cut over 2026-08-19 (plan step B8). Each of these
 # now binds the named `nas-<share>-backup-root` PV by `volumeName` instead of
@@ -137,12 +148,11 @@ spec:
 # PV would live at /volume1/docker/media-center/media (server 10.10.40.2) if
 # ever revived here.
 ---
-# registry-blobs share root. NOT a backup source — see the PV's comment and the
-# header above: this share stays out of the offsite lane (regenerable,
-# re-pushable images). It exists so migrate-nas-dataset.sh has a mount to
-# perform the ADR 0051 rename through, which is the only reason this dataset
-# could not be migrated with the other seven. There is deliberately no
-# `backup_share /nas/registry-blobs` call in nas-personal-cronjob.yaml.
+# registry-blobs share root. Created 2026-08-19 so migrate-nas-dataset.sh had a
+# mount to perform the ADR 0051 rename through — the only reason this dataset
+# could not be migrated with the other seven — and, since the same day, a real
+# offsite backup source: nas-personal-cronjob.yaml mounts it and calls
+# `backup_share /nas/registry-blobs internal`. The name now means what it says.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

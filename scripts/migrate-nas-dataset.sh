@@ -101,13 +101,11 @@ registry-blobs-forgejo|registry-blobs|forgejo/packages|forgejo/deployment/forgej
 # Shares whose root is mounted by a `backup-src-*` PVC — i.e. the shares this
 # script has a mount to perform a rename through.
 #
-# NOT the same thing as "shares in the offsite lane", though it was until
-# 2026-08-19. registry-blobs stays out of the offsite backup (regenerable,
-# re-pushable images; decided 2026-07-16, re-affirmed 2026-08-15) but was given
-# a share-root PVC anyway, purely so this script can migrate it — otherwise it
-# is the one dataset of eight that cannot be moved. The authority on what is
-# actually backed up is the `backup_share` list in nas-personal-cronjob.yaml,
-# which has six entries, not this one, which has seven.
+# As of 2026-08-19 this list and the offsite lane agree again: seven shares
+# here, seven `backup_share` calls in nas-personal-cronjob.yaml. They are still
+# DIFFERENT QUESTIONS, though, and briefly diverged — registry-blobs got its
+# share-root PVC hours before it joined the lane. If they diverge again, the
+# authority on what is backed up is the CronJob, not this variable.
 BACKUP_SRC_SHARES="internal-archive personal-photos personal-files family-shared personal-documents forgejo-lfs registry-blobs"
 
 MAX_BACKUP_AGE_HOURS=48

@@ -647,10 +647,11 @@ spec:
 # migration runbook §7 offers exactly two ways to close that, and this is the
 # first: give it a share-root mount and run the standard procedure.
 #
-# THIS DOES NOT PUT registry-blobs IN THE OFFSITE LANE. It is a mount handle,
-# not a backup source. nas-personal-cronjob.yaml has no `backup_share` call for
-# it and must not gain one without deciding that question on its merits. The
-# `backup-src-` name is kept only for consistency with its five siblings.
+# It is BOTH a migration mount handle and a real offsite backup source: since
+# 2026-08-19 nas-personal-cronjob.yaml mounts it and calls
+# `backup_share /nas/registry-blobs internal`, implementing what ADR 0051's
+# Consequences already required. An earlier version of this comment said the
+# opposite; the manifests had been contradicting the ADR.
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -659,7 +660,7 @@ metadata:
     homelab.internal/nas-share: registry-blobs
     homelab.internal/component: backup-source
   annotations:
-    homelab.internal/dataset: "SHARE ROOT — deliberate. Migration mount handle; NOT an offsite backup source."
+    homelab.internal/dataset: "SHARE ROOT — deliberate. Migration mount handle AND offsite backup source."
 spec:
   capacity:
     storage: 1Gi
