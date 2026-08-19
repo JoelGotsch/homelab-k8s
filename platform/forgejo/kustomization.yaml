@@ -52,27 +52,6 @@ resources:
   - registry-direct.yaml
   - servicemonitor.yaml
 
-# TEMPORARILY 0 — ADR 0051 nas-crypt dataset migration, B7 (2026-08-19).
-#
-# NOT `replicaCount: 0` in values.yaml, which is what the plan said: the Forgejo
-# chart ships a values JSON schema that rejects it outright —
-#   at '/replicaCount': minimum: got 0, want 1
-# so helm template fails and the layer does not render at all. Caught locally by
-# scripts/check-patch-targets-match.sh before it reached Argo, which would have
-# failed the same way and left the layer unrenderable.
-#
-# The kustomize `replicas:` transformer edits the RENDERED Deployment instead,
-# after helm has had its say, so the chart's schema never sees a zero. Same
-# approach B4 needed for paperless.
-#
-# Forgejo is the sole writer of both forgejo-lfs and registry-blobs. While this
-# is 0 there is no git, no container registry (registry-direct proxies to this
-# pod) and no CI — do not restart anything that pulls from
-# registry.homelab.internal. Removed once both datasets are cut over.
-replicas:
-  - name: forgejo
-    count: 0
-
 # ADR 0036: cluster-wide resource-governance baseline.
 components:
   - ../../components/first-party-namespace
