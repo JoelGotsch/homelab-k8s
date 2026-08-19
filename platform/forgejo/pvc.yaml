@@ -56,6 +56,17 @@ metadata:
 spec:
   accessModes: [ReadWriteMany]
   storageClassName: nas-crypt-registry-blobs
+  # ADR 0051: bind the NAMED dataset PV, not a dynamic one at the share root.
+  # Moved 2026-08-19 with Forgejo quiesced: 247 top-level entries (the
+  # content-addressed 00-ff tree plus tmp), 734 files / 1082 dirs / 7.54 GiB,
+  # relocated into forgejo/packages in 13 seconds — a server-side rename.
+  # Before/after ledgers identical: files=734 dirs=1082 kib=7908475 either side.
+  #
+  # This was the last of the eight, and the only one the standard script could
+  # not move until 2026-08-19, when the share was finally given a share-root
+  # mount (backup-src-registry-blobs — a mount handle, NOT an offsite backup
+  # source; see infrastructure/backup-cronjobs/nas-personal-pvcs.yaml).
+  volumeName: nas-registry-blobs-forgejo-packages
   resources:
     requests:
       storage: 200Gi

@@ -59,21 +59,16 @@ except ImportError:
 
 pv_file, workspace_root = sys.argv[1], sys.argv[2]
 
-# ── Datasets not yet cut over ────────────────────────────────────────────────
+# ── Migration complete ───────────────────────────────────────────────────────
 #
-# `spec.volumeName` is immutable on a bound PVC, so the app-repo commit that
-# adds it IS the cutover step and cannot be pushed ahead of the data move (ADR
-# 0051 §Consequences). This list is the honest record of what has not happened
-# yet. It must SHRINK to empty as the migration in
-# `homelab-docs/03-runbooks/nas/nas-crypt-dataset-migration.md` proceeds.
-#
-# The check enforces the list in both directions: a PVC listed here may lack
-# volumeName, and a PVC listed here that ALREADY has one is a failure — a stale
-# entry, meaning the list stopped describing reality. Delete the line when the
-# dataset cuts over.
-PENDING_MIGRATION = {
-    ("forgejo", "forgejo-packages"),
-}
+# Until 2026-08-19 this script carried a PENDING_MIGRATION set: the PVCs whose
+# ADR 0051 cutover had not happened yet, which it allowed to lack a volumeName
+# and failed if they gained one while still listed. The set shrank to empty as
+# the eight datasets cut over, and was then deleted along with its logic (plan
+# B9.1) — the moment it became `{}` it stopped being a set and became an empty
+# dict, and `PENDING_MIGRATION - pending_seen` raised TypeError, a bug that
+# could only ever fire on the last dataset. The check is now unconditional:
+# EVERY nas-crypt PVC binds a named PV. There is no pending state to describe.
 
 # ── Stale central copies, deliberately not enforced ──────────────────────────
 #
@@ -94,7 +89,6 @@ STALE_CENTRAL_COPIES = (
 
 failures = []
 notes = []
-pending_seen = set()
 stale_copies_seen = set()
 
 # ── Load the declared datasets ───────────────────────────────────────────────
@@ -196,18 +190,6 @@ for entry in sorted(os.listdir(workspace_root)):
 
                 checked_pvcs += 1
 
-                if (ns, nm) in PENDING_MIGRATION:
-                    pending_seen.add((ns, nm))
-                    if vol:
-                        failures.append(
-                            f"{rel}: PVC {ns}/{nm} already binds volumeName '{vol}', but it "
-                            f"is still listed in PENDING_MIGRATION in this script.\n"
-                            f"    The dataset has cut over — remove the line so the list "
-                            f"keeps describing reality."
-                        )
-                    else:
-                        continue  # legitimately not migrated yet
-
                 if not vol:
                     failures.append(
                         f"{rel}: PVC {ns}/{nm} claims {sc} with no volumeName.\n"
@@ -252,20 +234,6 @@ if skipped_repos:
 # ── Report ───────────────────────────────────────────────────────────────────
 print(f"nas-crypt datasets declared: {len(declared)}")
 print(f"nas-crypt PVCs found in workspace: {checked_pvcs}")
-
-still_pending = sorted(pending_seen)
-if still_pending:
-    print(f"pending migration (ADR 0051, not yet cut over): {len(still_pending)}")
-    for ns, nm in still_pending:
-        print(f"    - {ns}/{nm}")
-
-stale = sorted(PENDING_MIGRATION - pending_seen)
-if stale:
-    notes.append(
-        "PENDING_MIGRATION lists PVCs that were not found on disk — either they "
-        "cut over and the manifest moved, or the sibling repo is absent:\n    "
-        + "\n    ".join(f"{ns}/{nm}" for ns, nm in stale)
-    )
 
 if stale_copies_seen:
     print(f"skipped (superseded central copies, ADR 0001): {len(stale_copies_seen)}")
