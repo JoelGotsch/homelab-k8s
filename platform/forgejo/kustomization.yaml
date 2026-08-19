@@ -28,12 +28,7 @@ helmCharts:
     # confirm the layer still renders. Verified byte-identical either way (30
     # resources, `cmp` clean, with the gitignored charts/ pull cache deleted so
     # the render actually contacted each registry).
-    # TEMPORARILY UPSTREAM — second ADR 0051 window (registry-blobs), 2026-08-19.
-    # Same deadlock as the forgejo-lfs window: registry-direct proxies to the
-    # Forgejo pod, so with Forgejo at 0 the repo-server cannot pull this chart,
-    # cannot render the layer, and cannot apply the commit that scales it back
-    # up. Flipped back once Forgejo is serving again.
-    repo: oci://code.forgejo.org/forgejo-helm
+    repo: oci://registry.homelab.internal/homelab
 
     version: "17.1.3"  # OPERATOR PINS via Renovate (app v15.0.5)
     releaseName: forgejo
