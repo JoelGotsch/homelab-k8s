@@ -636,3 +636,54 @@ spec:
     nodePublishSecretRef:
       name: nas-crypt-forgejo-lfs-config
       namespace: csi-rclone
+---
+# registry-blobs SHARE ROOT.
+#
+# Added 2026-08-19 for the ADR 0051 migration of the registry-blobs dataset,
+# which is the ONE dataset migrate-nas-dataset.sh could not move: it renames
+# through a share-root mount, and this share had none — it is deliberately
+# outside the offsite lane (Forgejo Packages blobs are regenerable,
+# re-pushable images; decision 2026-07-16, re-affirmed 2026-08-15). The
+# migration runbook §7 offers exactly two ways to close that, and this is the
+# first: give it a share-root mount and run the standard procedure.
+#
+# THIS DOES NOT PUT registry-blobs IN THE OFFSITE LANE. It is a mount handle,
+# not a backup source. nas-personal-cronjob.yaml has no `backup_share` call for
+# it and must not gain one without deciding that question on its merits. The
+# `backup-src-` name is kept only for consistency with its five siblings.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-registry-blobs-backup-root
+  labels:
+    homelab.internal/nas-share: registry-blobs
+    homelab.internal/component: backup-source
+  annotations:
+    homelab.internal/dataset: "SHARE ROOT — deliberate. Migration mount handle; NOT an offsite backup source."
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-registry-blobs
+  mountOptions:
+    - allow-other=true
+    - file-perms=0666
+    - dir-perms=0777
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: backup-cronjobs
+    name: backup-src-registry-blobs
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-registry-blobs#backup-src
+    volumeAttributes:
+      remote: "nas-crypt-registry-blobs"
+      remotePath: ""
+      allow_other: "true"
+      uid: "0"
+      gid: "0"
+    nodePublishSecretRef:
+      name: nas-crypt-registry-blobs-config
+      namespace: csi-rclone

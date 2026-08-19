@@ -136,3 +136,21 @@ spec:
 # NFS PVC in this job. See TODO "jellyfin media (7.8 TB) offsite". Its static NFS
 # PV would live at /volume1/docker/media-center/media (server 10.10.40.2) if
 # ever revived here.
+---
+# registry-blobs share root. NOT a backup source — see the PV's comment and the
+# header above: this share stays out of the offsite lane (regenerable,
+# re-pushable images). It exists so migrate-nas-dataset.sh has a mount to
+# perform the ADR 0051 rename through, which is the only reason this dataset
+# could not be migrated with the other seven. There is deliberately no
+# `backup_share /nas/registry-blobs` call in nas-personal-cronjob.yaml.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-src-registry-blobs
+  namespace: backup-cronjobs
+  labels: { app.kubernetes.io/component: backup-pipeline, homelab.internal/data-class: internal }
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nas-crypt-registry-blobs
+  volumeName: nas-registry-blobs-backup-root
+  resources: { requests: { storage: 1Gi } }
