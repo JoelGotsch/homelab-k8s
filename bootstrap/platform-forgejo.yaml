@@ -2,59 +2,37 @@
 # reconcile from somewhere other than Forgejo.
 #
 # ############################################################################
-# NOT ACTIVE YET. This file is deliberately absent from
-# bootstrap/kustomization.yaml's `resources:`, so kustomize does not render it
-# and Argo never sees it. Activating it is three edits — and one of them will
-# DELETE FORGEJO if done in the wrong order. Read the next paragraph before
-# touching any of them.
+# ACTIVE since 2026-08-19. Registered in bootstrap/kustomization.yaml, excluded
+# from applicationsets/platform.yaml, repoURL replaced whole from
+# site-config's `forgejo_layer_repo_url`.
 #
-# THE HAZARD (found 2026-08-18, during plan step B7.0; the plan did not
-# anticipate it, which is why it is written down here rather than in a commit
-# message nobody will read):
+# TO USE IT: flip that ONE key between
+#   https://forgejo.<fqdn_suffix>/homelab/homelab-k8s     (normal)
+#   https://github.com/<operator_github_user>/homelab-k8s (Forgejo is down)
+# and push. check-site-config.sh enforces it is one of exactly those two and
+# prints a loud NOTE while it is parked on the mirror.
 #
-# The `platform` ApplicationSet currently generates an Application called
-# `platform-forgejo`. Argo CD's ApplicationSet controller adds
-# `resources-finalizer.argocd.argoproj.io` to every Application it generates
-# unless `.spec.syncPolicy.preserveResourcesOnDeletion` is true (it is unset
-# here, so the default applies — verified against the Argo CD 3.4 operator
-# manual and against the live object, which carries the finalizer AND an
-# ownerReference to the ApplicationSet).
+# WHY THE EXCLUDE WAS DANGEROUS, since the danger is invisible in git.
+# Argo CD's ApplicationSet controller stamps
+# `resources-finalizer.argocd.argoproj.io` onto every Application it generates
+# unless `.spec.syncPolicy.preserveResourcesOnDeletion` is true. Removing an app
+# from a generator therefore deletes the Application and PRUNES everything it
+# manages — here, the Deployment, Services and PVCs of the git server holding
+# this repository. Nothing in the ApplicationSet template says so; only the live
+# object does.
 #
-# So the moment `platform/forgejo` is excluded from that generator, the
-# controller deletes the generated Application, and the finalizer turns that
-# deletion into a CASCADING PRUNE of everything it manages: the Forgejo
-# Deployment, its Services, its PVCs — the git server that holds this
-# repository. Adding `exclude: true` and pushing is not a partial step; it is
-# the destructive one.
-#
-# ACTIVATION, in this order, operator-attended (the plan marks the sync 🔴):
-#   1. Set `syncPolicy.preserveResourcesOnDeletion: true` on the `platform`
-#      ApplicationSet. Push. Sync. Then CONFIRM the finalizer is actually gone
-#      from the live object before going further — the doc says the flag stops
-#      the finalizer being *added*; whether the controller also strips an
-#      existing one is not documented and must be observed, not assumed:
-#        kubectl -n argocd get application platform-forgejo \
-#          -o jsonpath='{.metadata.finalizers}'
-#      Expect `[]` or absent. If it is still there, remove it explicitly and
-#      re-check that the controller does not put it back.
-#   2. Only then: add `exclude: true` for `platform/forgejo` to the
-#      ApplicationSet's git generator, add this file to
-#      bootstrap/kustomization.yaml `resources:`, and add the whole-URL
-#      replacement from `data.forgejo_layer_repo_url`. One commit.
-#      The Application name here is identical to the generated one, so Argo
-#      adopts the live resources instead of recreating them.
-#   3. Strip the now-stale ownerReference to the ApplicationSet from the
-#      adopted Application, or a future deletion of that ApplicationSet
-#      garbage-collects this Application through it.
-#
-# The replacement block for step 2 (kept here so it is not re-derived):
-#   - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_layer_repo_url }
-#     targets:
-#       - select: { kind: Application, name: platform-forgejo }
-#         fieldPaths: [spec.source.repoURL]
-#   NO `options:` — every other repoURL replacement here swaps the host token
-#   and keeps `/homelab/homelab-k8s`; this one must be able to become
-#   https://github.com/<user>/homelab-k8s, whose path segment differs.
+# So the ordering was, and must remain for any future generator narrowing:
+#   1. set preserveResourcesOnDeletion on the set, sync, and OBSERVE the
+#      finalizer is gone (upstream documents the flag as preventing the
+#      finalizer being ADDED, and says nothing about stripping an existing one —
+#      on Argo CD 3.4.5 it did strip all six, but that was checked, not assumed):
+#        kubectl -n argocd get application platform-forgejo -o jsonpath='{.metadata.finalizers}'
+#   2. add the `exclude`, ON ITS OWN, and confirm the namespace is unchanged
+#      before continuing — the controller's delete and root-app's create
+#      otherwise race, and a create that lands first can still be deleted after.
+#   3. register this file and the replacement, letting the same-named
+#      Application adopt the orphaned resources.
+#   4. strip the stale ownerReference the ApplicationSet left behind.
 # ############################################################################
 #
 # WHY IT IS NOT IN THE platform ApplicationSet
