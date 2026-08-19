@@ -171,7 +171,8 @@ repos:
         name: synced scripts are byte-identical with homelab-hooks (canonical)
         entry: >-
           bash -c 'for f in check-broken-links.sh check-no-mac-addresses.sh
-          check-no-operator-email.sh check-no-bare-domain.sh; do
+          check-no-operator-email.sh check-no-bare-domain.sh
+          check-helm-values-keys.sh check-chart-lock.sh; do
           for r in ../homelab-hooks ../homelab-docs ../homelab-infra ../homelab-k8s; do
           [ -f "$r/scripts/$f" ] && [ -f "scripts/$f" ]
           && ! cmp -s "scripts/$f" "$r/scripts/$f"
@@ -186,6 +187,16 @@ repos:
         # the canonical copy has to be caught. Adding ../homelab-hooks closes
         # that gap; check-no-bare-domain.sh was never covered at all.
         # The [ -f ] guards make each pair a no-op where a copy is absent.
+        #
+        # check-helm-values-keys.sh and check-chart-lock.sh added 2026-08-19,
+        # after the list's omission cost something. check-helm-values-keys was
+        # fixed HERE per ADR 0052 D6 (pull+untar the chart from the mirror
+        # instead of falling back to `helm show values`, which returns only the
+        # parent chart's defaults and so turns every aliased-subchart key into a
+        # false positive) — and homelab-hooks never received the fix, so every
+        # app repo consuming it ran the degraded version for days. Nothing
+        # reported that, because the list did not cover the file. A sync check
+        # is only worth its runtime over the files it actually names.
         # Plan B5 step 3. Historical note: canonical copies lived in homelab-docs/
         # scripts/ (per each script's own header); editing one copy
         # without re-syncing the siblings silently forks the guard
