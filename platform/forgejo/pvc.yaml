@@ -27,6 +27,14 @@ metadata:
 spec:
   accessModes: [ReadWriteMany]
   storageClassName: nas-crypt-forgejo-lfs
+  # ADR 0051: bind the NAMED dataset PV, not a dynamic one at the share root.
+  # Nothing to migrate — the share was verified empty on 2026-08-19 with Forgejo
+  # quiesced (root ledger files=0 dirs=1 kib=0, and no forgejo/lfs directory on
+  # the NAS): no LFS object has ever been pushed to this forge. `plan` reports
+  # "already-migrated", which on an empty share means "nothing here", NOT "the
+  # data is in place" — so this bind is verified by checking the mount is
+  # present and writable, not by a ledger comparison with nothing on either side.
+  volumeName: nas-forgejo-lfs-forgejo
   resources:
     requests:
       # Soft cap; NAS share is the actual constraint. LFS
