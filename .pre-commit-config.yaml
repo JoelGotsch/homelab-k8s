@@ -40,6 +40,16 @@ repos:
         # declarations, the classes, or any PVC-bearing manifest here changes.
         files: '(infrastructure/csi-rclone/|.*pvc.*\.ya?ml$|scripts/check-nas-crypt-dataset-paths\.sh$)'
 
+      - id: check-backup-share-mounts
+        name: every share the offsite job backs up is actually mounted into it
+        entry: scripts/check-backup-share-mounts.sh
+        language: script
+        pass_filenames: false
+        # backup_share returns 0 on a missing path, so a typo'd mountPath or a
+        # dropped volume removes a share from the offsite backup while the
+        # CronJob stays green. Only a comparison of the two files catches it.
+        files: '^infrastructure/backup-cronjobs/(nas-personal-cronjob|nas-personal-pvcs)\.ya?ml$|^scripts/check-backup-share-mounts\.sh$'
+
       - id: check-eso-readme
         name: every ExternalSecret-using layer has '## OpenBao paths to seed' in its README
         entry: scripts/check-eso-readme.sh
