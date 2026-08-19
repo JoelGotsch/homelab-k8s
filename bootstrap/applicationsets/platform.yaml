@@ -41,6 +41,19 @@ spec:
         revision: main
         directories:
           - path: platform/*
+          # platform/forgejo is declared standalone in
+          # bootstrap/platform-forgejo.yaml, so it can be pointed at the GitHub
+          # push-mirror while Forgejo itself is down — Argo cannot read the
+          # layer that restarts Forgejo out of Forgejo (ADR 0051 migration, B7).
+          # It cannot live here: this template's site-config replacement swaps
+          # only the HOST token of one repoURL shared by six apps, and the
+          # mirror's path segment differs (JoelGotsch/... vs homelab/...).
+          #
+          # Safe only because syncPolicy.preserveResourcesOnDeletion is set
+          # above. Without it this exclude would delete the generated
+          # Application AND prune the Forgejo Deployment, Services and PVCs.
+          - path: platform/forgejo
+            exclude: true
   template:
     metadata:
       name: 'platform-{{.path.basename}}'
