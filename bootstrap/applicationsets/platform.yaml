@@ -11,6 +11,30 @@ metadata:
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
+  # Do NOT arm generated Applications for cascading deletion.
+  #
+  # By default the ApplicationSet controller stamps
+  # `resources-finalizer.argocd.argoproj.io` onto every Application it
+  # generates, so the moment one stops being generated — a changed path glob, an
+  # `exclude`, a renamed directory — deleting that Application PRUNES everything
+  # it manages. For platform/forgejo that is the Deployment, the Services and
+  # the PVCs of the git server holding this repository, and the template here
+  # declares no finalizer, so nothing in git hints that this is what removal
+  # means.
+  #
+  # `preserveResourcesOnDeletion: true` prevents the finalizer being added, so
+  # removing an app from this set orphans its resources instead of destroying
+  # them. That is the right default for a homelab whose stated principle is
+  # "nothing is deleted": an orphaned Deployment is a five-second re-adoption, a
+  # pruned one is a restore. The trade is that intentionally retiring a platform
+  # component now needs its resources removed deliberately rather than as a side
+  # effect — which is the point.
+  #
+  # Added 2026-08-19 as the prerequisite for moving platform/forgejo out of this
+  # set (ADR 0051 migration, plan B7.0). Verify with:
+  #   kubectl -n argocd get application platform-forgejo -o jsonpath='{.metadata.finalizers}'
+  syncPolicy:
+    preserveResourcesOnDeletion: true
   generators:
     - git:
         repoURL: https://FORGEJO_FQDN/homelab/homelab-k8s
