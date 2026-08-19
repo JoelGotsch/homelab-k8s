@@ -43,10 +43,20 @@
 # annotated on the PV itself so the omission is visible at the object rather
 # than only in this header.
 #
-# MIGRATION NOTE (ADR 0051): these six still bind dynamically. Their cutover is
-# the cheapest of the eight — the new static PV mounts the same share root, so
-# there is no data to move, only a delete-and-recreate of the PVC with
-# `volumeName` set. See the runbook.
+# MIGRATION NOTE (ADR 0051): cut over 2026-08-19 (plan step B8). Each of these
+# now binds the named `nas-<share>-backup-root` PV by `volumeName` instead of
+# provisioning dynamically. This was the cheapest of the cutovers — the static
+# PV mounts the same share root, so there was no data to move, only a
+# delete-and-recreate of each PVC.
+#
+# Two things worth knowing before touching them again:
+#   * They are mounted ONLY while a backup Job runs, so nothing needs scaling
+#     down — but deleting one WHILE a run is in flight leaves it Terminating
+#     behind the pvc-protection finalizer until that pod exits. Check for a
+#     running restic Job first, not just the CronJob schedule.
+#   * `migrate-nas-dataset.sh` performs every dataset move THROUGH these PVCs;
+#     they are the only mount it has on a share root. Do not rebind one while a
+#     move or ledger Job is running against that share.
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -57,6 +67,7 @@ metadata:
 spec:
   accessModes: [ReadWriteMany]
   storageClassName: nas-crypt-personal-photos
+  volumeName: nas-personal-photos-backup-root
   resources: { requests: { storage: 1Gi } }
 ---
 apiVersion: v1
@@ -68,6 +79,7 @@ metadata:
 spec:
   accessModes: [ReadWriteMany]
   storageClassName: nas-crypt-personal-files
+  volumeName: nas-personal-files-backup-root
   resources: { requests: { storage: 1Gi } }
 ---
 apiVersion: v1
@@ -79,6 +91,7 @@ metadata:
 spec:
   accessModes: [ReadWriteMany]
   storageClassName: nas-crypt-family-shared
+  volumeName: nas-family-shared-backup-root
   resources: { requests: { storage: 1Gi } }
 ---
 apiVersion: v1
@@ -90,6 +103,7 @@ metadata:
 spec:
   accessModes: [ReadWriteMany]
   storageClassName: nas-crypt-personal-documents
+  volumeName: nas-personal-documents-backup-root
   resources: { requests: { storage: 1Gi } }
 ---
 apiVersion: v1
@@ -101,6 +115,7 @@ metadata:
 spec:
   accessModes: [ReadWriteMany]
   storageClassName: nas-crypt-internal-archive
+  volumeName: nas-internal-archive-backup-root
   resources: { requests: { storage: 1Gi } }
 ---
 apiVersion: v1
@@ -112,6 +127,7 @@ metadata:
 spec:
   accessModes: [ReadWriteMany]
   storageClassName: nas-crypt-forgejo-lfs
+  volumeName: nas-forgejo-lfs-backup-root
   resources: { requests: { storage: 1Gi } }
 # NOTE: jellyfin media (internal-media) is NOT here. Verification (2026-07-16)
 # found the library is 7.8 TB — too big for the tier-3 Hetzner repo — so its

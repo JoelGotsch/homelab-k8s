@@ -74,12 +74,6 @@ pv_file, workspace_root = sys.argv[1], sys.argv[2]
 PENDING_MIGRATION = {
     ("forgejo", "forgejo-lfs"),
     ("forgejo", "forgejo-packages"),
-    ("backup-cronjobs", "backup-src-personal-photos"),
-    ("backup-cronjobs", "backup-src-personal-files"),
-    ("backup-cronjobs", "backup-src-family-shared"),
-    ("backup-cronjobs", "backup-src-personal-documents"),
-    ("backup-cronjobs", "backup-src-internal-archive"),
-    ("backup-cronjobs", "backup-src-forgejo-lfs"),
 }
 
 # ── Stale central copies, deliberately not enforced ──────────────────────────
