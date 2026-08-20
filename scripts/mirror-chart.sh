@@ -51,10 +51,23 @@ CA_FILE="${CA_FILE:-$HOME/.config/homelab/ca.pem}"
 
 APPLY=false
 UPDATE_LOCK=false
+# A LOOP, not a single `case`. It was a bare `case "${1:-}"` until 2026-08-20,
+# which meant only the FIRST flag was ever parsed: in
+# `mirror-chart.sh --apply --update-lock cilium` the `--apply` matched, and
+# `--update-lock` fell through into ONLY=("$@") as a CHART-NAME FILTER. It
+# matched no chart, so it was silently ignored and the lock was never written —
+# while the chart really was pushed, so the run looked entirely successful.
+#
+# That is the exact command `check-chart-lock.sh` prints as its remedy, so the
+# documented fix for a lock problem could not fix it. Cost a wrong diagnosis on
+# 2026-08-19 ("the mirror was absent so there was nothing verified to record"),
+# which was not the reason.
+while [ "$#" -gt 0 ]; do
 case "${1:-}" in
   --apply) APPLY=true; shift ;;
   --update-lock) UPDATE_LOCK=true; shift ;;
-  --dry-run|"") APPLY=false; shift || true ;;
+  --dry-run) APPLY=false; shift ;;
+  "") shift || true ;;
   -h|--help)
     cat >&2 <<EOF
 usage: $0 [--dry-run | --apply] [chart-name ...]
@@ -69,7 +82,9 @@ Reads charts.lock.yaml in the current repo. env: HELM_BIN (default helm3),
 REGISTRY, ORG, CA_FILE, BAO_ADDR/BAO_CACERT for the push credential.
 EOF
     exit 2 ;;
+  *) break ;;                # first non-flag: the rest are chart-name filters
 esac
+done
 ONLY=("$@")
 
 for t in "$HELM_BIN" python3 bao; do
@@ -137,7 +152,14 @@ while IFS=$'\t' read -r name version upstream want_digest; do
   up_art="$(shasum -a 256 "$work/$name"/up/*.tgz | cut -d' ' -f1)"
   note "upstream  content=${up_digest:0:16}… artifact=${up_art:0:16}…"
 
-  if [ -n "$want_digest" ] && [ "$want_digest" != "$up_digest" ]; then
+  # Compare BARE hex to BARE hex. The lock stores `content_digest: sha256:<hex>`
+  # while content_digest() returns the hex alone, so comparing the two strings
+  # directly was true for EVERY entry that had ever been through --update-lock:
+  # each one reported "UPSTREAM CHANGED under a pinned version" and the script
+  # exited 1. Reproduced 2026-08-20 on cilium 1.20.0, where the two values are
+  # the same hash. The bug hid behind the `-n` guard — a freshly generated lock
+  # has null digests, so a first run looks clean and only the SECOND is wrong.
+  if [ -n "$want_digest" ] && [ "${want_digest#sha256:}" != "${up_digest#sha256:}" ]; then
     err "$name: UPSTREAM CHANGED under a pinned version."
     note "  lock says   ${want_digest:0:24}…"
     note "  upstream is ${up_digest:0:24}…"

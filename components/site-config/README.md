@@ -81,7 +81,7 @@ reference site-config is the deliberate reusability pass tracked in
 `homelab/reusability-architecture.md` (Workstream B) — do it per-app, verifying
 each render against live, behind the CI equality gate.
 
-## Phase 2 (2026-07-19): what resolves from here vs. what stays rendered
+## What resolves from here vs. what stays rendered
 
 Migrated onto replacements (`.j2` siblings deleted):
 - all 14 HTTPRoutes (phase 1)
@@ -90,21 +90,57 @@ Migrated onto replacements (`.j2` siblings deleted):
 - `infrastructure/ingress/gateway.yaml` (wildcard listeners + wildcard cert)
 - `infrastructure/ingress/loadbalancer-ippool.yaml` (its `.j2` had no live
   variables at all)
+- **2026-08-20, ADR 0045 C2** — `platform/pr-agent/configmap.yaml`
+  (`GITEA__URL`), `platform/woodpecker/networkpolicy.yaml` (the Forgejo
+  `matchName`), `infrastructure/backup-cronjobs/prometheusrule.yaml` (five
+  `runbook_url` owners), and the first three Helm `values.yaml`:
+  `platform/authentik` (`AUTHENTIK_HOST`), `platform/woodpecker`
+  (`WOODPECKER_HOST` + `WOODPECKER_FORGEJO_URL`), `observability/langfuse`
+  (`NEXTAUTH_URL`). Four more `.j2` were deleted outright because their only
+  Jinja was inside a comment (`observability/{crowdsec,langfuse}/networkpolicy`,
+  `observability/{kube-prometheus-stack,langfuse}/externalsecret`), and
+  `renovate.json5.j2` because it templated nothing at all.
 
-**Intentionally still ansible-rendered** — the `.j2` boundary, with reasons:
-- **Helm `values.yaml.j2` (9 files):** kustomize replacements cannot reach
-  inside a `helmCharts.valuesFile`; patching the post-render resources
-  field-by-field would recreate the wrong-chart-key trap.
-- **Free-text blobs:** `renovate.json5.j2`, app configmaps (ntfy, pr-agent,
-  cloudflare-tunnel, llm-gateway policies), `bootstrap/argocd/patches/
-  oidc-config.yaml.j2` (issuer URL lives INSIDE the `oidc.config` string),
-  authentik `_blueprint` generator — replacements cannot substitute inside
-  strings.
-- **Index-brittle rule arrays:** netpol `.j2`s (woodpecker/langfuse/crowdsec/
-  immich) and `backup-cronjobs/prometheusrule.yaml.j2` — their FQDNs sit at
-  `spec.<rules>.N.M...` paths whose indices shift on every rule edit (netpol
-  rules were inserted twice in the week this was decided); a replacement that
-  silently retargets the wrong rule is worse than a render step.
+### Two objections that were withdrawn, and why
+
+Both were written on 2026-07-19 and are no longer true:
+
+- *"kustomize replacements cannot reach inside a `helmCharts.valuesFile`"* —
+  correct, and irrelevant. They do not have to: replacements run on the final
+  resource tree, so the placeholder survives Helm inflation and is fixed in the
+  RENDERED object (`spec.template.spec.containers.[name=…].env.[name=…].value`).
+  ADR 0052's A3 spike settled this as D3a. Three values files moved this way
+  with byte-identical renders.
+- *"index-brittle rule arrays"* — the fix is not a render step, it is to stop
+  using indices. Select the element by its own value or name:
+  `spec.egress.*.toFQDNs.[matchName=FORGEJO_FQDN].matchName`,
+  `spec.groups.[name=…].rules.[alert=…].annotations.runbook_url`,
+  `…imageReferences.[=FORGEJO_FQDN/homelab/*]`. A value selector that stops
+  matching is a hard `kustomize build` error ("unable to find field … in
+  replacement target"), not a silent no-op. Never use `*` over the list that
+  holds the placeholder — see lessons.md.
+
+### Still rendered, with the specific reason
+
+The remaining reason is always the same one: **the value sits inside a
+free-text string**, and a replacement substitutes a whole field or a
+delimiter-token, never a substring of a blob.
+
+| File | Where the value sits |
+|---|---|
+| `infrastructure/cloudflare-tunnel/configmap.yaml.j2` | three public hostnames inside the `data.config\.yaml` blob |
+| `platform/renovate/configmap.yaml.j2` | `endpoint:` inside the `data.config\.js` JavaScript blob |
+| `observability/kube-prometheus-stack/values.yaml.j2` | five URLs inside the rendered `grafana.ini` blob |
+| `platform/forgejo/values.yaml.j2` | `DOMAIN`/`ROOT_URL`/`SSH_DOMAIN` inside the rendered app.ini `stringData`, plus the init-script blob |
+| `bootstrap/argocd/patches/oidc-config.yaml.j2` | issuer inside the `oidc.config` blob — **and** the patch is commented out in `bootstrap/argocd/kustomization.yaml`, so there is no rendered field for a replacement to target until it is enabled |
+| `infrastructure/kyverno/policies/verify-first-party-image-signature.yaml.j2` | the `imageReferences` are convertible (verified: byte-identical render). The blocker is the `policies.kyverno.io/description` **annotation**, which names the host in prose. Removing that literal changes the rendered annotation, so it needs a reviewed wording change, not a mechanical conversion |
+| `platform/authentik/blueprints/_blueprint.yaml.j2` | a generator over `homelab-infra/ansible/inventory/oidc-apps.yml`, not a projection — documented ADR 0045 exception |
+| `scripts/fixtures/retention-unparseable-default-storageclass.yaml.j2` | a deliberately unparseable test fixture on a non-Argo path — documented ADR 0045 exception |
+| `apps/*` (8 files) | superseded central copies. Every one of these apps reconciles from its OWN repo at `k8s/` per `bootstrap/applicationsets/apps.yaml`; these files are not rendered by anything and go with the guarded `apps/*` cleanup |
+
+Note that "still rendered" overstates it: `00-render-static.yml` has hard-failed
+on its own drift guard since 2026-07-17, so none of these can actually be
+re-rendered today.
 
 Derived keys (`forgejo_fqdn`) exist because replacements substitute whole
 delimiter-tokens and cannot compose `forgejo.` + `fqdn_suffix` inside a URL
