@@ -25,9 +25,17 @@ spec:
           # 2026-07-28). Skeleton entries still point at the central
           # homelab-k8s repo, which now also lives in the org.
           - {name: approval-channel,    owner: homelab,       repo: approval-channel, path: k8s, autoSync: "true"}
-          # The message archive. Manifests in homelab/conversation-history; the CODE
-          # lives in forgejo-admin/conversation-history and builds the image.
-          - {name: conversation-history, owner: homelab, repo: conversation-history, path: k8s, autoSync: "true"}
+          # The message archive. This repo is MANIFESTS ONLY, hence the -k8s
+          # suffix (ADR 0048 D1, renamed 2026-08-20). The CODE lives in
+          # forgejo-admin/conversation-history and builds the image — deliberately
+          # NOT in this org: the app is not core homelab infrastructure and has
+          # not earned org membership, unlike llm-gateway which ships code and
+          # keeps its bare name (ADR 0048 D2). Pinning the image digest the
+          # pipeline produced is this repo's job.
+          #
+          # The Application NAME stays `conversation-history` (no suffix) — it
+          # names the deployed service, not the repository.
+          - {name: conversation-history, owner: homelab, repo: conversation-history-k8s, path: k8s, autoSync: "true"}
           - {name: frigate,             owner: homelab,       repo: homelab-k8s, path: apps/frigate,             autoSync: "true"}
           - {name: immich,              owner: homelab,       repo: immich, path: k8s, autoSync: "true"}
           - {name: immich-public-proxy, owner: homelab,       repo: immich-public-proxy, path: k8s, autoSync: "true"}
