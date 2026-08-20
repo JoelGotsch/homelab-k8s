@@ -22,3 +22,32 @@ resources:
   - sa-default.yaml
   - restic-passwd-configmap.yaml
   - restic-known-hosts-configmap.yaml
+
+# Build-only ConfigMap for the runbook_url replacements below.
+components:
+  - ../../components/site-config
+
+# Resolve the runbook owner from the single site-config (no hardcoded GitHub
+# user): `https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/...` ->
+# `.../<operator_github_user>/...`. Provenance: this rule ->
+# ConfigMap/site-config.data.operator_github_user ->
+# components/site-config/site-config.env.
+#
+# Every alert is addressed BY NAME (`[name=…]` / `[alert=…]`), never by list
+# index: rules get inserted into these groups (BackupCronJobMissing24h and
+# ResticSnapshotStale both arrived after the first two), and an index-based
+# path would silently retarget onto a neighbouring alert. A name selector that
+# stops matching is a hard `kustomize build` error, not a silent no-op — so
+# renaming an alert without updating this list fails the build instead of
+# shipping a literal `OPERATOR_GITHUB_USER` in a page.
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.operator_github_user }
+    targets:
+      - select: { kind: PrometheusRule, name: backup-cronjobs }
+        fieldPaths:
+          - spec.groups.[name=backup-cronjobs.staging-pvc].rules.[alert=ResticStagingPVCNearFull].annotations.runbook_url
+          - spec.groups.[name=backup-cronjobs.staging-pvc].rules.[alert=ResticStagingPVCCritical].annotations.runbook_url
+          - spec.groups.[name=backup-cronjobs.job-failed].rules.[alert=BackupCronJobFailed].annotations.runbook_url
+          - spec.groups.[name=backup-cronjobs.job-failed].rules.[alert=BackupCronJobMissing24h].annotations.runbook_url
+          - spec.groups.[name=backup-cronjobs.staleness].rules.[alert=ResticSnapshotStale].annotations.runbook_url
+        options: { delimiter: '/', index: 3 }
