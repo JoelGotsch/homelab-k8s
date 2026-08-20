@@ -17,7 +17,7 @@ cluster_defaults:
     chart_default_enabled: false
 layers:
 - path: observability/langfuse
-  input_digest_sha256: ba26c5ab62f093f77b42cd5bf70479b1c69e39372a86e5bc1530939e4646870d
+  input_digest_sha256: f5f87e85796f147c27ba3936607b5c54f7665e9ea480ab203392371b7f46baa0
   chart:
     name: langfuse
     repository: oci://registry.homelab.internal/homelab
@@ -29,13 +29,12 @@ layers:
   declared_claim_count: 1
   declared_implicit_default_claim_count: 0
   declared_secret_reference_count: 12
-  declared_externalsecret_mirror_count: 2
+  declared_externalsecret_mirror_count: 1
   declared_externalsecret_projection_count: 6
   declared_pod_selector_count: 2
   declared_forbidden_literal_count: 3
   externalsecret_mirrors:
   - observability/langfuse/externalsecret.yaml
-  - observability/langfuse/externalsecret.yaml.j2
   externalsecret_projections:
   - secret_name: langfuse-app-secrets
     secret_key: LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID
@@ -194,7 +193,7 @@ layers:
     source_name_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.name
     source_key_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.key
 - path: observability/crowdsec
-  input_digest_sha256: b056c66d6df3b0d4786c43bcac8e7644815157e25fa9d7741d10721bf729cc73
+  input_digest_sha256: 269198f34bbc0440b6b917ce8a7fe6319981a4b2d84b5e2b7fbb1f15573de95b
   chart:
     name: crowdsec
     repository: oci://registry.homelab.internal/homelab

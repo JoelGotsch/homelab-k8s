@@ -299,7 +299,7 @@ cp "$FIXTURE" "$externalsecret_mirror_fixture"
 S3_SECRET_KEY=LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY yq e -i '
   (select(.kind == "ExternalSecret" and .spec.target.name == "langfuse-app-secrets") |
     .spec.data) |= map(select(.secretKey != strenv(S3_SECRET_KEY)))
-' "$externalsecret_mirror_root/observability/langfuse/externalsecret.yaml.j2"
+' "$externalsecret_mirror_root/observability/langfuse/externalsecret.yaml"
 set_fixture_layer_digest \
   "$externalsecret_mirror_root" "$externalsecret_mirror_fixture" observability/langfuse
 if externalsecret_mirror_output="$($CHECK --root "$externalsecret_mirror_root" \
@@ -308,7 +308,7 @@ if externalsecret_mirror_output="$($CHECK --root "$externalsecret_mirror_root" \
   exit 1
 fi
 printf '%s\n' "$externalsecret_mirror_output" | \
-  rg -q 'externalsecret.yaml.j2: missing projection for langfuse-app-secrets/LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY' || {
+  rg -q 'externalsecret.yaml: missing projection for langfuse-app-secrets/LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY' || {
     printf 'FAIL: ExternalSecret mirror mutation did not report the missing S3 projection\n' >&2
     exit 1
   }
@@ -321,7 +321,7 @@ S3_SECRET_KEY=LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID yq e -i '
   (select(.kind == "ExternalSecret" and .spec.target.name == "langfuse-app-secrets") |
     .spec.data[] | select(.secretKey == strenv(S3_SECRET_KEY)) |
     .remoteRef.property) = "secret_access_key"
-' "$externalsecret_remote_ref_root/observability/langfuse/externalsecret.yaml.j2"
+' "$externalsecret_remote_ref_root/observability/langfuse/externalsecret.yaml"
 set_fixture_layer_digest \
   "$externalsecret_remote_ref_root" "$externalsecret_remote_ref_fixture" observability/langfuse
 if externalsecret_remote_ref_output="$($CHECK --root "$externalsecret_remote_ref_root" \
@@ -330,7 +330,7 @@ if externalsecret_remote_ref_output="$($CHECK --root "$externalsecret_remote_ref
   exit 1
 fi
 printf '%s\n' "$externalsecret_remote_ref_output" | \
-  rg -q 'externalsecret.yaml.j2: remoteRef key/property mismatch for langfuse-app-secrets/LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID' || {
+  rg -q 'externalsecret.yaml: remoteRef key/property mismatch for langfuse-app-secrets/LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID' || {
     printf 'FAIL: ExternalSecret remoteRef mutation did not report the source projection drift\n' >&2
     exit 1
   }
