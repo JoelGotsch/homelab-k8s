@@ -90,3 +90,29 @@ replacements:
           - spec.rules.[name=verify-cosign-static-key].verifyImages.0.imageReferences.[=FORGEJO_FQDN/homelab/*]
           - spec.rules.[name=verify-cosign-static-key].verifyImages.0.imageReferences.[=FORGEJO_FQDN/forgejo-admin/*]
         options: { delimiter: '/', index: 0 }
+
+  # Same host into the imageVerify pull credential's `auths` map. Kyverno
+  # matches the apex glob above; go-containerregistry then looks the credential
+  # up by the host in the IMAGE REFERENCE, so without an entry keyed on the
+  # apex it goes anonymous and Forgejo refuses the private-repo token grant
+  # (`GET /v2/token …: UNAUTHORIZED`, measured 2026-08-20). Under
+  # `failureAction: Audit` that reads as a policy warning rather than an
+  # outage, so the apex tripwire silently verified nothing.
+  #
+  # The target is a JSON blob, and a replacement can substitute a
+  # delimiter-token of a blob but never a substring — so this is an INDEX, not
+  # a value selector, and it is index-fragile in a way the globs above are not.
+  # `delimiter: '"'` splits the whole `.dockerconfigjson` string on the quote
+  # character: token 1 is `auths`, token 3 is the first host key. Anything
+  # inserted BEFORE that key shifts it. `FORGEJO_FQDN` must therefore stay the
+  # FIRST entry in the `auths` object; re-verify the render if you reorder it.
+  #
+  # Verified by rendering: the emitted ExternalSecret's `auths` object carries
+  # `<forgejo_fqdn>` and `registry.homelab.internal`, and the live server-side
+  # dry-run of an apex-referenced Pod warns no more.
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_fqdn }
+    targets:
+      - select: { kind: ExternalSecret, name: registry-homelab-internal-pull }
+        fieldPaths:
+          - spec.target.template.data.[.dockerconfigjson]
+        options: { delimiter: '"', index: 3 }
