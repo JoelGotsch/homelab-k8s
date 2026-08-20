@@ -64,3 +64,29 @@ resources:
   # would require background-controller PVC/update RBAC we haven't
   # granted):
   - policies/homelab-mutate-openbao-pvc-retention.yaml
+
+# site-config: build-only ConfigMap for the imageReferences replacement below
+# (ADR 0045). Marked local-config, so it is used for substitution and never
+# emitted — the render is byte-identical apart from the value it resolves.
+components:
+  - ../../components/site-config
+
+# Resolve the apex Forgejo host in verify-first-party-image-signature's
+# imageReferences globs from the single site-config: `FORGEJO_FQDN/homelab/*`
+# -> `<forgejo_fqdn>/homelab/*`. Provenance is one hop: this rule ->
+# ConfigMap/site-config.data.forgejo_fqdn -> components/site-config/site-config.env.
+#
+# Each glob is selected BY ITS OWN VALUE, not by list index, so a later-added
+# imageReferences entry cannot silently shift the target: a selector that stops
+# matching is a hard `kustomize build` error ("unable to find field ... in
+# replacement target"), which is exactly the failure mode a render step lacks.
+# `delimiter: '/', index: 0` swaps only the host token, leaving the org and the
+# glob in the manifest where a reviewer can see them.
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_fqdn }
+    targets:
+      - select: { kind: ClusterPolicy, name: verify-first-party-image-signature }
+        fieldPaths:
+          - spec.rules.[name=verify-cosign-static-key].verifyImages.0.imageReferences.[=FORGEJO_FQDN/homelab/*]
+          - spec.rules.[name=verify-cosign-static-key].verifyImages.0.imageReferences.[=FORGEJO_FQDN/forgejo-admin/*]
+        options: { delimiter: '/', index: 0 }

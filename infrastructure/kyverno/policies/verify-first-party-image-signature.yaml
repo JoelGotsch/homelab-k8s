@@ -1,8 +1,3 @@
-# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
-# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
-#   ansible-playbook ansible/playbooks/00-render-static.yml
-# (from the homelab-infra repo root).
-# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # Kyverno ClusterPolicy — verify cosign signatures on every
 # first-party image. Per ADR 0019 D3.
 #
@@ -42,8 +37,8 @@
 #   imageReferences uses glob-syntax. The two patterns cover:
 #     - registry.homelab.internal/* — the ADR 0019 D1-option-b
 #       CNAME alias used by the CI pipeline today.
-#     - forgejo.lab.vyramo.com/homelab/* — the apex
-#       endpoint, for any manifest that bypasses the alias
+#     - FORGEJO_FQDN/homelab/* — the apex Forgejo endpoint,
+#       for any manifest that bypasses the alias
 #       (e.g. operator-pinned full path in a values.yaml).
 #       `homelab` is the org namespace since the 2026-07-30
 #       phase-2 package migration; the forgejo-admin pattern
@@ -148,7 +143,9 @@ metadata:
     policies.kyverno.io/subject: Pod
     policies.kyverno.io/description: |
       Every first-party container image (registry.homelab.internal/*
-      and forgejo.lab.vyramo.com/{homelab,forgejo-admin}/*) MUST be cosign-
+      and the Forgejo Packages registry under the homelab and
+      forgejo-admin orgs — this rule's imageReferences is the
+      authoritative list) MUST be cosign-
       signed by the homelab's signing key. The signature is
       produced by the cosign-sign step in each first-party
       .woodpecker.yml (template:
@@ -199,8 +196,14 @@ spec:
       verifyImages:
         - imageReferences:
             - "registry.homelab.internal/*"
-            - "forgejo.lab.vyramo.com/homelab/*"
-            - "forgejo.lab.vyramo.com/forgejo-admin/*"
+            # FORGEJO_FQDN is resolved at build time from
+            # ConfigMap/site-config.data.forgejo_fqdn by the `replacements:`
+            # block in ../../kustomization.yaml (ADR 0045). Each element is
+            # selected BY VALUE there, so a rename here without the matching
+            # rename there is a hard `kustomize build` error, never a silent
+            # no-op.
+            - "FORGEJO_FQDN/homelab/*"
+            - "FORGEJO_FQDN/forgejo-admin/*"
           # Wrapped-upstream images are DESIGN-EXCLUDED from signing:
           # "cosign keypair signs first-party code, not third-party clones"
           # (documented decision, homelab-infra/ansible/inventory/
