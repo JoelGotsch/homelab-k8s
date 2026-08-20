@@ -22,5 +22,19 @@ resources:
   - sa-default.yaml
 
 # ADR 0036: cluster-wide resource-governance baseline.
+# site-config: build-only ConfigMap for the GITEA__URL replacement below.
 components:
   - ../../components/first-party-namespace
+  - ../../components/site-config
+
+# Resolve the Forgejo API host from the single site-config (no hardcoded
+# domain): `https://FORGEJO_FQDN` -> `https://<forgejo_fqdn>`. Provenance:
+# this rule -> ConfigMap/site-config.data.forgejo_fqdn ->
+# components/site-config/site-config.env. Host token, not whole value, so the
+# scheme stays in the manifest where it is reviewable.
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_fqdn }
+    targets:
+      - select: { kind: ConfigMap, name: pr-agent-config }
+        fieldPaths: [data.GITEA__URL]
+        options: { delimiter: '/', index: 2 }

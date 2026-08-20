@@ -1,8 +1,3 @@
-# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
-# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
-#   ansible-playbook ansible/playbooks/00-render-static.yml
-# (from the homelab-infra repo root).
-# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # Non-secret PR-Agent configuration. Secrets (Forgejo PAT,
 # webhook secret, gateway virtual-key) come via ExternalSecret.
 #
@@ -18,9 +13,10 @@ data:
   # Provider selection — Forgejo speaks the Gitea API.
   CONFIG__GIT_PROVIDER: "gitea"
 
-  # Forgejo base URL. OPERATOR FILLS vyramo.com.
+  # Forgejo base URL. `FORGEJO_FQDN` is substituted by the site-config
+  # replacement in kustomization.yaml — do not type the domain here.
   # PR-Agent's Gitea provider uses the Forgejo HTTP API directly.
-  GITEA__URL: "https://forgejo.lab.vyramo.com"
+  GITEA__URL: "https://FORGEJO_FQDN"
 
   # LLM backend — point LiteLLM client at the in-cluster gateway.
   # Per ADR 0026 D6 the gateway issues per-app virtual keys; the
