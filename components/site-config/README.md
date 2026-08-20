@@ -100,6 +100,13 @@ Migrated onto replacements (`.j2` siblings deleted):
   Jinja was inside a comment (`observability/{crowdsec,langfuse}/networkpolicy`,
   `observability/{kube-prometheus-stack,langfuse}/externalsecret`), and
   `renovate.json5.j2` because it templated nothing at all.
+- **2026-08-20, ADR 0045 C2 (second pass)** —
+  `infrastructure/kyverno/policies/verify-first-party-image-signature.yaml`
+  (the two apex-Forgejo `imageReferences` globs, each selected by its own
+  value) and `bootstrap/argocd/patches/oidc-config.yaml` (the OIDC issuer,
+  staged commented-out alongside the patch it targets). The kyverno one also
+  needed the policy's `description` annotation reworded, because that
+  annotation named the host in prose and is itself rendered output.
 
 ### Two objections that were withdrawn, and why
 
@@ -126,17 +133,21 @@ The remaining reason is always the same one: **the value sits inside a
 free-text string**, and a replacement substitutes a whole field or a
 delimiter-token, never a substring of a blob.
 
-| File | Where the value sits |
+| File | Where the value sits, and what was measured |
 |---|---|
-| `infrastructure/cloudflare-tunnel/configmap.yaml.j2` | three public hostnames inside the `data.config\.yaml` blob |
-| `platform/renovate/configmap.yaml.j2` | `endpoint:` inside the `data.config\.js` JavaScript blob |
-| `observability/kube-prometheus-stack/values.yaml.j2` | five URLs inside the rendered `grafana.ini` blob |
-| `platform/forgejo/values.yaml.j2` | `DOMAIN`/`ROOT_URL`/`SSH_DOMAIN` inside the rendered app.ini `stringData`, plus the init-script blob |
-| `bootstrap/argocd/patches/oidc-config.yaml.j2` | issuer inside the `oidc.config` blob — **and** the patch is commented out in `bootstrap/argocd/kustomization.yaml`, so there is no rendered field for a replacement to target until it is enabled |
-| `infrastructure/kyverno/policies/verify-first-party-image-signature.yaml.j2` | the `imageReferences` are convertible (verified: byte-identical render). The blocker is the `policies.kyverno.io/description` **annotation**, which names the host in prose. Removing that literal changes the rendered annotation, so it needs a reviewed wording change, not a mechanical conversion |
+| `infrastructure/cloudflare-tunnel/configmap.yaml.j2` | three public hostnames inside the `data.config\.yaml` blob. **Not expressible at all**, not merely fragile: on `delimiter: '.'` the domain occupies TWO tokens (`vyramo` at indices 10/18/26/35, `com` after each), and a replacement rewrites one token — `vaultwarden.` + `vyramo.com` + `.com`. On `':'` each token is ` vaultwarden.vyramo.com\n    service`, i.e. the value plus the next line |
+| `platform/renovate/configmap.yaml.j2` | `endpoint:` inside the `data.config\.js` JavaScript blob. A `delimiter: '/', index: 13` replacement **does** render correctly today (verified). It was still refused: the blob is 72 `/`-tokens of which the first 13 are comment prose, so ONE added `//` comment line above the endpoint shifts it. Verified by doing exactly that — `kustomize build` exits 0, prints no warning, overwrites the new comment with the FQDN, and ships `endpoint: 'https://FORGEJO_FQDN/api/v1'` to a weekly CronJob. `'`-splitting isolates the whole URL at index 3 but counts apostrophes in prose the same way |
+| `observability/kube-prometheus-stack/values.yaml.j2` | five URLs inside the **chart-generated** `grafana.ini` blob. `delimiter: '/'` isolates the three Authentik URLs cleanly (indices 2, 8, 14) but never `domain`/`root_url` (tokens 32/34 carry the following INI section), so the fragile route covers 3 of 5. And the indices move on a chart bump, which is not hypothetical: the blob's own `[unified_storage] index_path = /var/lib/grafana-search/bleve` is a recently-added chart default sitting after them |
+| `platform/forgejo/values.yaml.j2` | `DOMAIN`/`ROOT_URL`/`SSH_DOMAIN` inside the chart-generated `server` field of the `forgejo-inline-config` Secret, plus the OIDC `autoDiscoverUrl` inside the chart's `configure_gitea.sh` init-script blob. Only `ROOT_URL`'s host is a clean token (`'/'` index 3); `DOMAIN` and `SSH_DOMAIN` split as `forgejo.lab.vyramo.com\nENABLE_PPROF` — value plus next key. Helm sorts the section alphabetically, so one added `server` key with a `/` in its value shifts index 3 |
 | `platform/authentik/blueprints/_blueprint.yaml.j2` | a generator over `homelab-infra/ansible/inventory/oidc-apps.yml`, not a projection — documented ADR 0045 exception |
 | `scripts/fixtures/retention-unparseable-default-storageclass.yaml.j2` | a deliberately unparseable test fixture on a non-Argo path — documented ADR 0045 exception |
-| `apps/*` (8 files) | superseded central copies. Every one of these apps reconciles from its OWN repo at `k8s/` per `bootstrap/applicationsets/apps.yaml`; these files are not rendered by anything and go with the guarded `apps/*` cleanup |
+| `apps/*` (8 files) | superseded central copies. Every one reconciles from its OWN repo at `k8s/` per `bootstrap/applicationsets/apps.yaml`; nothing renders these. They go with the guarded `apps/*` cleanup and **cannot be deleted ahead of it**: deleting a `.j2` removes the sibling exemption in `check-no-bare-domain.sh`, and five of the eight rendered siblings still carry a value-position domain literal (nextcloud 3, vaultwarden 2, immich-public-proxy / ntfy / paperless-values 1 each). That script's own comment says the same — do the directory cleanup first, or re-add them to `KNOWN_VIOLATIONS` for the interval |
+
+The four blob rows share one property worth stating plainly: a replacement can
+substitute a whole field or a whole delimiter-token, never a substring. Where
+the only reachable token is at a **hand-counted index**, converting is worse
+than leaving the literal — the literal is wrong loudly at another site, and the
+index is wrong silently at this one.
 
 Note that "still rendered" overstates it: `00-render-static.yml` has hard-failed
 on its own drift guard since 2026-07-17, so none of these can actually be
