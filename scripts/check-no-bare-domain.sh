@@ -113,7 +113,27 @@ REPO_NAME="$(basename "$(git rev-parse --show-toplevel)")"
 #               eight legacy `apps/*` files become live findings again unless
 #               the guarded `apps/*` cleanup has deleted them first. Do the
 #               cleanup first, or re-add them here for the interval.
-KNOWN_VIOLATIONS_REGEX='^nextcloud:k8s/values\.yaml$'
+#   2026-08-20  `^nextcloud:k8s/values\.yaml$` — the LAST entry. The two
+#               survivors were `trusted_domains` and `mail_domain`, which sit
+#               inside multi-line PHP blobs that the chart emits as ONE
+#               ConfigMap key each, so a replacement's whole target field is
+#               the entire blob and no delimiter/index isolates the domain.
+#               They were NOT fixed by finding a cleverer delimiter — a
+#               quote-index split renders and passes this check while leaving
+#               an unsubstituted domain that locks every user out. They were
+#               fixed by moving the substitutable surface OUT of the blob:
+#               both values now read an env var via getenv(), and the env var
+#               is what the replacement rewrites. Verified against the live
+#               cluster (values reproduce exactly) and under the image's
+#               apache2handler SAPI. This list is now EMPTY — ADR 0045
+#               phase 2 is complete for every repo this hook runs in.
+#
+# EMPTY LIST, READ THIS BEFORE ADDING ONE BACK: the value below must stay a
+# regex that matches NOTHING, and '' is not that. `grep -qE ''` matches every
+# line, so an empty string here would silently exempt EVERY file and turn this
+# hook into a check that reports green while checking nothing. The `[ -n ... ]`
+# guard at the call site is what makes emptiness safe; keep them together.
+KNOWN_VIOLATIONS_REGEX=''
 
 # Use staged files as a pre-commit hook; otherwise everything tracked. Both
 # lists are narrowed to SCOPE_REGEX — a file the cluster never reads cannot
@@ -148,7 +168,11 @@ while IFS= read -r f; do
     continue
   fi
 
-  if echo "$REPO_NAME:$f" | grep -qE "$KNOWN_VIOLATIONS_REGEX"; then
+  # The -n guard is load-bearing, not defensive noise: with an empty
+  # KNOWN_VIOLATIONS_REGEX, `grep -qE ''` matches every line and would mark
+  # every real violation "known". See the note at the list.
+  if [ -n "$KNOWN_VIOLATIONS_REGEX" ] \
+     && echo "$REPO_NAME:$f" | grep -qE "$KNOWN_VIOLATIONS_REGEX"; then
     known=$((known + 1))
     continue
   fi
