@@ -1,8 +1,3 @@
-# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
-# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
-#   ansible-playbook ansible/playbooks/00-render-static.yml
-# (from the homelab-infra repo root).
-# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # Authentik IdP helm values — server + worker, external CNPG
 # Postgres, Tailscale-only HTTPRoute via Cilium Gateway.
 #
@@ -19,8 +14,11 @@
 # factor for internal services) + ADR 0024 D3 (Tailscale-only
 # for internal services).
 
-# Operator-fillable cluster domain — Authentik bakes its
-# absolute URLs into emails + OIDC issuer URIs.
+# Authentik bakes its absolute URLs into emails + OIDC issuer URIs, so it
+# needs the canonical host. `AUTH_FQDN` below is NOT filled here: kustomize
+# replacements cannot reach inside a helmCharts valuesFile, so the placeholder
+# survives Helm inflation and the replacement in kustomization.yaml rewrites
+# the rendered container env on both Deployments. See that block.
 global:
   env:
     - name: AUTHENTIK_LOG_LEVEL
@@ -28,7 +26,7 @@ global:
     # Required by Authentik: canonical hostname for
     # links/emails/issuer URIs.
     - name: AUTHENTIK_HOST
-      value: "https://auth.lab.vyramo.com"
+      value: "https://AUTH_FQDN"
     # Disable Authentik's anonymous error reporting +
     # update telemetry — keep operator data in the cluster
     # per principle #2.

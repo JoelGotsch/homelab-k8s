@@ -46,6 +46,23 @@ replacements:
       - select: { kind: HTTPRoute, name: authentik-model-manager-proxy }
         fieldPaths: [spec.hostnames.0]
         options: { delimiter: '.', index: 1 }
+  # AUTHENTIK_HOST — values.yaml carries `https://AUTH_FQDN` and this rewrites
+  # it in the RENDERED container env. A replacement cannot reach inside a
+  # helmCharts valuesFile, so the placeholder must survive inflation and be
+  # fixed on the far side; both Deployments get it because global.env applies
+  # to server and worker, and the worker is what renders recovery emails.
+  # Container and env are selected by name, never by index — the chart
+  # reorders neither today, but a chart bump is exactly what would.
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.auth_fqdn }
+    targets:
+      - select: { kind: Deployment, name: authentik-server }
+        fieldPaths:
+          - spec.template.spec.containers.[name=server].env.[name=AUTHENTIK_HOST].value
+        options: { delimiter: '/', index: 2 }
+      - select: { kind: Deployment, name: authentik-worker }
+        fieldPaths:
+          - spec.template.spec.containers.[name=worker].env.[name=AUTHENTIK_HOST].value
+        options: { delimiter: '/', index: 2 }
 
 # Custom blueprints — one YAML per app, materialised as a
 # ConfigMap that the chart mounts at /blueprints/. Worker
