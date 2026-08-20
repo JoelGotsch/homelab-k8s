@@ -1,8 +1,3 @@
-# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
-# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
-#   ansible-playbook ansible/playbooks/00-render-static.yml
-# (from the homelab-infra repo root).
-# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # Langfuse v3 Helm values. Per ADR 0028.
 #
 # Wires Langfuse against EXTERNAL ClickHouse + Postgres:
@@ -21,9 +16,11 @@
 # favour of native k8s `secretKeyRef`. Update both at once if
 # bumping past 1.5.x.
 langfuse:
-  # Operator-fillable per the homelab convention.
+  # FQDN_SUFFIX survives Helm inflation and is rewritten in the rendered
+  # NEXTAUTH_URL env on both Deployments by the replacement in
+  # kustomization.yaml — a replacement cannot reach inside a valuesFile.
   nextauth:
-    url: "https://langfuse.lab.vyramo.com"
+    url: "https://langfuse.FQDN_SUFFIX"
     secret:
       secretKeyRef:
         name: langfuse-app-secrets

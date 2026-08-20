@@ -250,15 +250,20 @@ printf '%s\n' "$fallback_output" | rg -q 'credentials belong in a Secret' || {
   exit 1
 }
 
-mirror_root="$TEMP_ROOT/secret-mirror-drift"
+# Was "authoritative values mirror secret refs cannot drift", mutating
+# observability/langfuse/values.yaml.j2 until ADR 0045 C2 deleted it. values.yaml
+# is now the only declaration, so the same mutation is applied there — the
+# assertion (a secretKeyRef that stops matching the reviewed projection fails)
+# is unchanged, only the file it lives in.
+mirror_root="$TEMP_ROOT/secret-values-drift"
 make_repo_fixture "$mirror_root"
-mirror_fixture="$TEMP_ROOT/secret-mirror-drift.yaml"
+mirror_fixture="$TEMP_ROOT/secret-values-drift.yaml"
 cp "$FIXTURE" "$mirror_fixture"
 yq e -i '
   .s3.mediaUpload.secretAccessKey.secretKeyRef.name = "wrong-secret"
-' "$mirror_root/observability/langfuse/values.yaml.j2"
+' "$mirror_root/observability/langfuse/values.yaml"
 set_fixture_layer_digest "$mirror_root" "$mirror_fixture" observability/langfuse
-expect_fail "authoritative values mirror secret refs cannot drift" \
+expect_fail "authoritative values secret refs cannot drift" \
   --root "$mirror_root" --fixture "$mirror_fixture" --contract "$CONTRACT"
 
 default_removed_root="$TEMP_ROOT/default-removed"

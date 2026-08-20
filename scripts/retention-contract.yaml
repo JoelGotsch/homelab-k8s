@@ -282,8 +282,9 @@ entries:
       value_path: '.redis.primary.persistence.storageClass'
       document_index: 0
       selector_path: redis.primary.persistence.storageClass
-      mirrors:
-        - observability/langfuse/values.yaml.j2
+      # values.yaml.j2 was the render source until ADR 0045 C2 deleted it;
+      # values.yaml is now the only declaration, so there is no mirror to drift.
+      mirrors: []
     rendered_claim_id: langfuse-redis-primary/valkey-data
     current_storage_class: longhorn-replica2
     target_storage_class: longhorn-replica2

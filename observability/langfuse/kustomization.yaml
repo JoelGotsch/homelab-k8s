@@ -56,3 +56,17 @@ replacements:
       - select: { kind: HTTPRoute, name: langfuse }
         fieldPaths: [spec.hostnames.0]
         options: { delimiter: '.', index: 1 }
+      # NEXTAUTH_URL, from values.yaml's langfuse.nextauth.url, fixed up in the
+      # rendered env. Same source key as the route above on purpose: NextAuth
+      # rejects a callback whose host is not NEXTAUTH_URL, so a route and an
+      # app URL that can drift apart is a login that fails only after the IdP
+      # round-trip. Worker included — it reads the same env.
+      # Container and env by name, never index: a chart bump reorders env.
+      - select: { kind: Deployment, name: langfuse-web }
+        fieldPaths:
+          - spec.template.spec.containers.[name=langfuse-web].env.[name=NEXTAUTH_URL].value
+        options: { delimiter: '.', index: 1 }
+      - select: { kind: Deployment, name: langfuse-worker }
+        fieldPaths:
+          - spec.template.spec.containers.[name=langfuse-worker].env.[name=NEXTAUTH_URL].value
+        options: { delimiter: '.', index: 1 }
