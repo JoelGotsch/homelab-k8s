@@ -56,6 +56,13 @@ replacements:
       - select: { kind: HTTPRoute, name: woodpecker }
         fieldPaths: [spec.hostnames.0]
         options: { delimiter: '.', index: 1 }
+      # WOODPECKER_HOST, from values.yaml, fixed up in the rendered env. The
+      # route and the server's own idea of its public URL now come from one
+      # key, so they cannot drift apart into an OAuth callback mismatch.
+      - select: { kind: StatefulSet, name: woodpecker-server }
+        fieldPaths:
+          - spec.template.spec.containers.[name=server].env.[name=WOODPECKER_HOST].value
+        options: { delimiter: '.', index: 1 }
   # Forgejo host in the CI step-pod FQDN egress policy. Selected BY VALUE
   # (`[matchName=FORGEJO_FQDN]`), never by index and never by `*` over the
   # toFQDNs list: that list also holds pypi.org, ghcr.io and ~25 more, and a
@@ -67,3 +74,11 @@ replacements:
       - select: { kind: CiliumNetworkPolicy, name: ci-woodpecker-egress-fqdn }
         fieldPaths:
           - spec.egress.*.toFQDNs.[matchName=FORGEJO_FQDN].matchName
+      # WOODPECKER_FORGEJO_URL, from values.yaml. Same source key as the egress
+      # rule above on purpose: the FQDN the server clones from and the FQDN the
+      # step pods are allowed to reach must be the same host, or CI fails with a
+      # network timeout that looks like anything but a policy drop.
+      - select: { kind: StatefulSet, name: woodpecker-server }
+        fieldPaths:
+          - spec.template.spec.containers.[name=server].env.[name=WOODPECKER_FORGEJO_URL].value
+        options: { delimiter: '/', index: 2 }

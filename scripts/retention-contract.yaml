@@ -485,8 +485,9 @@ entries:
       value_path: '.server.persistentVolume.storageClass'
       document_index: 0
       selector_path: server.persistentVolume.storageClass
-      mirrors:
-        - platform/woodpecker/values.yaml.j2
+      # values.yaml.j2 was the render source until ADR 0045 C2 deleted it;
+      # values.yaml is now the only declaration, so there is no mirror to drift.
+      mirrors: []
     rendered_claim_id: woodpecker-server/data
     current_storage_class: longhorn-replica2
     target_storage_class: longhorn-replica2-retain
@@ -511,8 +512,10 @@ entries:
       value_path: '.agent.persistence.storageClass'
       document_index: 0
       selector_path: agent.persistence.storageClass
-      mirrors:
-        - platform/woodpecker/values.yaml.j2
+      # See woodpecker-sqlite: the .j2 mirror is gone. An implicit-default
+      # exception must now carry NO mirror at all — a second copy is exactly
+      # what could reintroduce an explicit class behind the exception's back.
+      mirrors: []
     rendered_claim_id: woodpecker-agent/agent-config
     current_storage_class: longhorn-replica2
     target_storage_class: longhorn-replica2

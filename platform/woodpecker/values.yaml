@@ -1,8 +1,3 @@
-# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
-# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
-#   ansible-playbook ansible/playbooks/00-render-static.yml
-# (from the homelab-infra repo root).
-# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # Woodpecker CI helm values — server + agent (Kubernetes
 # backend). Per ADR 0023 D2 + D5 + D6 + D8.
 #
@@ -36,7 +31,10 @@ server:
     pullPolicy: IfNotPresent
 
   env:
-    WOODPECKER_HOST: "https://woodpecker.lab.vyramo.com"
+    # FQDN_SUFFIX / FORGEJO_FQDN below survive Helm inflation and are rewritten
+    # in the RENDERED StatefulSet env by the replacements in kustomization.yaml
+    # — a replacement cannot reach inside a helmCharts valuesFile.
+    WOODPECKER_HOST: "https://woodpecker.FQDN_SUFFIX"
     WOODPECKER_OPEN: "false"  # closed registration; OAuth required
     # Comma-separated Forgejo usernames admitted as admin on first login
     # (bypasses the closed-registration gate). Was the unfilled
@@ -47,7 +45,7 @@ server:
     WOODPECKER_ADMIN: "forgejo-admin"
     # Forgejo integration (the only forge driver enabled).
     WOODPECKER_FORGEJO: "true"
-    WOODPECKER_FORGEJO_URL: "https://forgejo.lab.vyramo.com"
+    WOODPECKER_FORGEJO_URL: "https://FORGEJO_FQDN"
     # OAuth client_id + secret come from the woodpecker-oauth secret
     # (extraSecretNamesForEnvFrom below).
     WOODPECKER_LOG_LEVEL: "info"

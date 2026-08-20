@@ -118,17 +118,26 @@ expect_fail "render-source mirror drift" \
 implicit_source_explicit_root="$TEMP_ROOT/implicit-source-explicit"
 make_fixture "$implicit_source_explicit_root"
 yq e -i '.agent.persistence.storageClass = "longhorn-replica2"' \
-  "$implicit_source_explicit_root/platform/woodpecker/values.yaml" \
-  "$implicit_source_explicit_root/platform/woodpecker/values.yaml.j2"
+  "$implicit_source_explicit_root/platform/woodpecker/values.yaml"
 expect_fail "implicit exception cannot survive explicit source restoration" \
   --root "$implicit_source_explicit_root" --contract "$CONTRACT"
 
-implicit_mirror_drift_root="$TEMP_ROOT/implicit-mirror-drift"
-make_fixture "$implicit_mirror_drift_root"
-yq e -i '.agent.persistence.storageClass = "longhorn-replica2"' \
-  "$implicit_mirror_drift_root/platform/woodpecker/values.yaml.j2"
-expect_fail "Woodpecker implicit source mirror cannot drift" \
-  --root "$implicit_mirror_drift_root" --contract "$CONTRACT"
+# Was "Woodpecker implicit source mirror cannot drift", which mutated
+# platform/woodpecker/values.yaml.j2 until ADR 0045 C2 deleted it. The risk it
+# guarded — a second file setting a class behind the exception — is now
+# expressed as "there must be no second file", so the test re-adds one.
+# General mirror-drift coverage is unaffected: the forgejo case above still
+# exercises the mirror loop.
+implicit_mirror_readded_root="$TEMP_ROOT/implicit-mirror-readded"
+make_fixture "$implicit_mirror_readded_root"
+implicit_mirror_readded_contract="$TEMP_ROOT/implicit-mirror-readded-contract.yaml"
+cp "$CONTRACT" "$implicit_mirror_readded_contract"
+yq e -i '
+  (.entries[] | select(.id == "woodpecker-agent-config") | .source.mirrors) =
+    ["platform/woodpecker/values.yaml"]
+' "$implicit_mirror_readded_contract"
+expect_fail "implicit-default exception cannot acquire a mirror" \
+  --root "$implicit_mirror_readded_root" --contract "$implicit_mirror_readded_contract"
 
 expanded_exception_root="$TEMP_ROOT/expanded-implicit-exception"
 make_fixture "$expanded_exception_root"

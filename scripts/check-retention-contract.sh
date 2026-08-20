@@ -289,11 +289,16 @@ for ((entry_index = 0; entry_index < entry_count; entry_index++)); do
 
   mirror_count="$(yq e -r ".entries[$entry_index].source.mirrors // [] | length" "$CONTRACT")"
   if [ "$storage_class_selection" = "implicit-default" ]; then
-    [ "$mirror_count" -eq 1 ] || \
-      error "$CONTRACT: $id implicit-default exception requires exactly one authoritative mirror"
-    implicit_mirror="$(yq e -r ".entries[$entry_index].source.mirrors[0] // \"\"" "$CONTRACT")"
-    [ "$implicit_mirror" = "platform/woodpecker/values.yaml.j2" ] || \
-      error "$CONTRACT: $id implicit-default mirror must remain platform/woodpecker/values.yaml.j2"
+    # Until 2026-08-20 this required EXACTLY ONE mirror, named
+    # platform/woodpecker/values.yaml.j2 — because that .j2 was the render
+    # source and an explicit storageClass reappearing there would have been
+    # rendered straight over the exception. ADR 0045 C2 deleted the .j2, so
+    # values.yaml is the only declaration and the rule inverts: an
+    # implicit-default exception must carry NO mirror. Re-adding one means a
+    # second file can set a class behind the exception's back, which is the
+    # thing this entry exists to prevent, so it fails here.
+    [ "$mirror_count" -eq 0 ] || \
+      error "$CONTRACT: $id implicit-default exception must declare no mirror; a second declaration can reintroduce an explicit StorageClass"
   fi
   for ((mirror_index = 0; mirror_index < mirror_count; mirror_index++)); do
     mirror_rel="$(yq e -r ".entries[$entry_index].source.mirrors[$mirror_index]" "$CONTRACT")"
