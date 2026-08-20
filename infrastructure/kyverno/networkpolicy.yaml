@@ -196,11 +196,22 @@ spec:
     # The comment block above already diagnosed this exactly ("client-egress
     # evaluated at the proxy upstream hop") but only the registry-direct half
     # was implemented, and that half is inert until the unbound DNS cutover.
-    # Meanwhile every first-party image is referenced by the FORGEJO FQDN, so
-    # verification takes the gateway path: Envoy proxies to forgejo:3000
+    # Meanwhile verification reaches the apex host regardless of how the image
+    # is named, so it takes the gateway path: Envoy proxies to forgejo:3000
     # carrying THIS pod's identity, policy is evaluated a second time against
     # the backend endpoint, and with no rule for it Envoy answers a plaintext
     # 403 "Access denied" that reads exactly like a Forgejo permission error.
+    #
+    # CORRECTED 2026-08-20: this sentence used to read "every first-party image
+    # is referenced by the FORGEJO FQDN". That was true of the failing
+    # PolicyViolation being diagnosed, and false as a general claim — measured
+    # against the live cluster the same day, ZERO running first-party images use
+    # the apex path; all five resolve via registry.homelab.internal. The rule
+    # below is still correct and load-bearing for a different reason: the
+    # registry's token realm redirects to the apex whichever host the image
+    # names, so the backend hop happens either way. Keeping the wrong reason
+    # would invite someone to delete a rule that is still needed once they
+    # checked the image list and found it did not match.
     #
     # Observed 2026-08-20, still failing at that moment:
     #   PolicyViolation ... verify-first-party-image-signature ...
