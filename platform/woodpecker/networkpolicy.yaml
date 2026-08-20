@@ -215,11 +215,57 @@ spec:
         # fails as a TCP timeout, not a policy error, because the DNS
         # visibility rule keeps resolution working (see lessons.md).
         - matchName: "registry.homelab.internal"
-        # Upstream chart host for the vaultwarden lock entry. Each further repo
-        # the pipeline rolls out to adds its own: nextcloud.github.io and
-        # jellyfin.github.io are the next two; ghcr.io is already below, which
-        # covers immich, paperless and llm-gateway.
-        - matchName: "guerzon.github.io"
+        # ── Upstream Helm chart hosts ────────────────────────────────────
+        # Every `upstream:` in a charts.lock.yaml the A7 `mirror-charts`
+        # pipeline runs against: this repo's 26 entries plus one per app repo.
+        # mirror-chart.sh pulls from these and pushes to the mirror above.
+        #
+        # RESOLVED, NOT ASSUMED (2026-08-20): for most Helm indexes the host
+        # serving index.yaml is NOT the host serving the .tgz, so every index
+        # below was actually fetched and its pinned entry's `urls:` read. Three
+        # shapes came back.
+        #
+        # (a) RELATIVE urls — the index host serves the tarball too, and is the
+        #     only host needed.
+        - matchName: "charts.jetstack.io"        # cert-manager, trust-manager
+        - matchName: "helm.cilium.io"            # cilium
+        - matchName: "pkgs.tailscale.com"        # tailscale-operator
+        - matchName: "charts.min.io"             # minio
+        - matchName: "kyverno.github.io"         # kyverno
+        #
+        # (b) ABSOLUTE github.com urls — the index host is needed for
+        #     index.yaml AND github.com for the release asset, which 302s to
+        #     release-assets.githubusercontent.com. All three of those GitHub
+        #     hosts are already allowed further down; these are the index hosts.
+        - matchName: "guerzon.github.io"         # vaultwarden (pilot repo)
+        - matchName: "nextcloud.github.io"       # nextcloud-k8s
+        - matchName: "jellyfin.github.io"        # jellyfin-k8s
+        - matchName: "docs.altinity.com"         # altinity-clickhouse-operator
+        - matchName: "cloudnative-pg.github.io"  # cloudnative-pg, plugin-barman-cloud
+        - matchName: "charts.external-secrets.io"
+        - matchName: "charts.longhorn.io"        # longhorn
+        - matchName: "aquasecurity.github.io"    # trivy-operator
+        - matchName: "grafana.github.io"         # alloy, loki, tempo
+        - matchName: "crowdsecurity.github.io"   # crowdsec
+        - matchName: "prometheus-community.github.io"  # kube-prometheus-stack
+        - matchName: "langfuse.github.io"        # langfuse
+        - matchName: "open-telemetry.github.io"  # opentelemetry-collector
+        - matchName: "charts.goauthentik.io"     # authentik
+        - matchName: "openbao.github.io"         # openbao
+        - matchName: "woodpecker-ci.org"         # woodpecker
+        #
+        # (c) OCI — no index at all, just a registry. ghcr.io (csi-rclone,
+        #     spegel, immich, paperless-ngx, litellm-helm) and its blob host
+        #     pkg-containers.githubusercontent.com are already allowed below.
+        - matchName: "code.forgejo.org"          # forgejo chart
+        #
+        # csi-driver-nfs is the odd one out: its `upstream` already IS
+        # raw.githubusercontent.com, allowed below for other reasons.
+        #
+        # A host missing from this list fails as a TCP TIMEOUT rather than a
+        # policy error — the DNS visibility rule above keeps resolution working
+        # — so it reads as a slow upstream, not as a firewall. Add a new chart
+        # host HERE, in the same commit as the charts.lock.yaml entry.
         # Container registries
         - matchName: "registry-1.docker.io"
         - matchName: "auth.docker.io"

@@ -1,0 +1,376 @@
+# mirror-charts — make a chart bump reach the mirror and the layer, or fail.
+#
+# ROLLOUT PLAN A7 STEP 2. Copied from the vaultwarden-k8s pilot on 2026-08-20,
+# deliberately as a near-verbatim copy: everything from `when:` down is
+# byte-identical across all of them, so a fix to one is a fix to all and a
+# divergence is visible in a diff. Only the header below is per-repo.
+#
+# THE FAILURE THIS CLOSES (2026-08-19, cilium)
+#   A bump moved infrastructure/cilium/kustomization.yaml to 1.20.0 while
+#   charts.lock.yaml, the OCI mirror and the offline chart bundle all stayed at
+#   1.19.5. Production ran 1.20.0; a cold start from the bundle would have
+#   installed 1.19.5 — of the CNI. `check-chart-lock` sees that state, but it
+#   is a pre-commit hook and a pre-commit hook never runs on a bot commit,
+#   which is how every chart version arrives.
+#
+#   So A7 step 1 moved the bump onto charts.lock.yaml (the customManager in
+#   homelab-infra/renovate-presets/default.json5), and this workflow is the
+#   other half: on a PR that touches the lock it mirrors the bumped chart,
+#   records its digests, propagates the version into the layer's
+#   kustomization.yaml, and pushes that back onto the PR branch. The PR cannot
+#   go green until the lock, the mirror and the kustomization agree.
+#
+# STEP 3 OF A7 — THE BUNDLE — IS NOT IN THIS FILE, DELIBERATELY.
+#   The other staleness half is the offline chart bundle on the Storage Box.
+#   That is `homelab-k8s/scripts/publish-chart-bundle.sh` (which calls
+#   export-chart-bundle.sh), and it already exists and is already
+#   content-triggered: it digests every charts.lock.yaml, compares against the
+#   digest stored offsite, and does nothing when they match. Today it runs from
+#   a workstation launchd agent installed by
+#   `homelab-infra/scripts/install-chart-bundle-publisher.sh`, for the reasons
+#   that script's header gives — the in-cluster egress allowlist has no SMTP,
+#   no Forgejo and no registry, and no mirrored image in that layer carries
+#   helm. Moving it to a merge-to-main workflow here needs those three things
+#   first. Until then the bundle tracks merged locks on an interval, not on
+#   merge.
+#
+# EGRESS — THE BIG ONE, AND EVERY HOST BELOW WAS RESOLVED, NOT GUESSED.
+#   This repo's charts.lock.yaml carries 26 entries across 21 distinct upstream
+#   hosts — an order of magnitude more than an app repo — so
+#   `ci-woodpecker-egress-fqdn` (platform/woodpecker/networkpolicy.yaml) grew
+#   by 19 names in the same commit that added this file. Nineteen and not
+#   twenty-one, because ghcr.io and raw.githubusercontent.com were already
+#   there.
+#
+#   The trap, and why every index was actually fetched on 2026-08-20 instead
+#   of allowlisting the `upstream:` host and hoping: for most Helm indexes the
+#   host that serves index.yaml is NOT the host that serves the .tgz. Three
+#   shapes are present in this lock, and they need different things:
+#
+#     relative urls -> the index host serves the tarball too. Verified for
+#       charts.jetstack.io (`charts/cert-manager-v1.21.0.tgz`),
+#       helm.cilium.io (`cilium-1.20.0.tgz`),
+#       pkgs.tailscale.com (`tailscale-operator-1.98.9-<build>.tgz`),
+#       charts.min.io (`helm-releases/minio-5.4.0.tgz`) and
+#       kyverno.github.io (`kyverno/kyverno-3.8.2.tgz`).
+#
+#     absolute github.com urls -> the index host AND github.com are both
+#       needed, github.com 302s to release-assets.githubusercontent.com. This
+#       is the majority: altinity, cloudnative-pg (both charts),
+#       external-secrets, longhorn, aquasecurity, grafana (alloy/loki/tempo),
+#       crowdsec, prometheus-community, langfuse, open-telemetry, goauthentik,
+#       openbao and woodpecker-ci.org. github.com,
+#       release-assets.githubusercontent.com and
+#       objects.githubusercontent.com were already allowed.
+#
+#     OCI -> no index at all. ghcr.io (csi-rclone, spegel) was already allowed;
+#       code.forgejo.org (the forgejo chart) was NOT and is added.
+#
+#   csi-driver-nfs is the odd one out: its `upstream` is already
+#   raw.githubusercontent.com, which was allowed for other reasons.
+#
+#   A missing FQDN here fails as a TCP TIMEOUT, not as a policy error: the DNS
+#   visibility rule keeps resolution working, so the symptom looks like a slow
+#   upstream and not like a firewall. See lessons.md.
+#
+# THIS REPO RUNS ITS OWN SCRIPTS FROM THE CHECKOUT — the one deliberate
+# divergence from the copies in the app repos, and it is not a preference.
+#   mirror-chart.sh and check-chart-lock.sh LIVE HERE. Fetching a pinned copy
+#   of a file that is in the working tree would mean CI runs code the PR does
+#   not contain, and the pin would have to be bumped in this repo on every edit
+#   to those scripts — a self-referential pin that is stale by construction.
+#   So sections 1, 6 and 7 below use `scripts/…` directly. chart-lock-ci.py
+#   lives in homelab-infra and is still fetched by content hash.
+#
+# DEPENDENCY BUDGET — bigger than chart-pin.yml's, and here is the accounting.
+#   chart-pin.yml runs check-chart-lock OFFLINE and needs python3 + PyYAML.
+#   This one runs it --online and runs mirror-chart.sh, so it needs helm 3
+#   (pull/push OCI), git (commit/push), curl (Forgejo raw API), python3 +
+#   py3-yaml (both scripts parse YAML) and perl-utils (mirror-chart.sh hashes
+#   with `shasum`, which on Alpine ships in perl-utils and nowhere else). The
+#   image is helm 3, digest-pinned; `helm:latest` is v4 and would be wrong —
+#   mirror-chart.sh defaults HELM_BIN to `helm3` for exactly that reason.
+#
+# TOOLING IS FETCHED BY CONTENT HASH, NOT BY BRANCH.
+#   chart-lock-ci.py lives in homelab-infra, which carries no release tags, so
+#   it is pulled through the Forgejo raw API at a pinned commit and checked
+#   against a sha256 recorded below — a moved ref fails loudly instead of
+#   silently running different code. Bumping the pin is a one-line, reviewable
+#   diff, the same shape as the homelab-hooks `rev:` bump in
+#   .pre-commit-config.yaml. It is the SAME pin the vaultwarden-k8s pilot
+#   carries, on purpose.
+#
+#   NOTE on the step-6 comment below, which describes two mirror-chart.sh
+#   defects: `main` in THIS repo has already fixed both (the non-looping
+#   argument `case` and the `sha256:`-prefix digest comparison, both 2026-08-20).
+#   The two-call form is kept anyway because it is correct under either version
+#   and keeps this file in step with the app-repo copies, which still pin the
+#   pre-fix commit. Collapse it to one call when those pins move, in one commit
+#   across every repo carrying this file.
+#
+# TWO CREDENTIALS, TWO ACCOUNTS — see this repo's entry in
+# homelab-infra/ansible/inventory/woodpecker-repos.yml for why. Neither value
+# is ever echoed: both go from the Woodpecker secret store into an environment
+# variable and from there into a pipe.
+
+when:
+  - event: pull_request
+    path:
+      include:
+        - charts.lock.yaml
+
+steps:
+  mirror-and-pin:
+    # alpine/helm 3.21.4 — helm 3, multi-arch (amd64 present), digest-pinned
+    # per ADR 0019/0023. Renovate's `woodpecker` manager keeps the digest
+    # current (pinDigests: true in the central preset).
+    image: docker.io/alpine/helm:3.21.4@sha256:82c0ce1b4196539946ed01bdfd9345cf74ca999b95d3074ce3f2f5ea45c96e80
+    environment:
+      # kv/shared/forgejo-packages/ci — package:write. Chart mirror only.
+      REGISTRY_USER:
+        from_secret: registry_user
+      REGISTRY_TOKEN:
+        from_secret: registry_token
+      # kv/shared/forgejo-registry-bot — write:repository. Reads the pinned
+      # tooling and pushes the CI commit onto the PR branch.
+      GIT_BOT_USER:
+        from_secret: git_bot_user
+      GIT_BOT_TOKEN:
+        from_secret: git_bot_token
+    commands:
+      - set -eu
+
+      # ── 0. tooling ────────────────────────────────────────────────────────
+      - apk add --no-cache bash git python3 py3-yaml perl-utils curl >/dev/null
+      # Assumption-verification rather than hope (infra-apply rule 2): every
+      # one of these has a specific reason to be missing, and a missing one
+      # would otherwise surface as an unrelated error deep in a sub-script.
+      - |
+        for t in bash git python3 curl shasum helm; do
+          command -v "$t" >/dev/null 2>&1 || { echo "ERROR: $t not on PATH after apk add"; exit 1; }
+        done
+        case "$(helm version --short)" in
+          v3.*) : ;;
+          *) echo "ERROR: need helm 3, image provides $(helm version --short)"; exit 1 ;;
+        esac
+      - export HELM_BIN=helm
+      # An absent Woodpecker secret arrives as an empty string, and an empty
+      # credential fails later as an opaque 401 against the registry or the
+      # forge. Name it here instead.
+      - |
+        for v in REGISTRY_USER REGISTRY_TOKEN GIT_BOT_USER GIT_BOT_TOKEN; do
+          eval "val=\$$v"
+          [ -n "$val" ] || {
+            echo "ERROR: secret $v is empty. Declare it for this repo in"
+            echo "       homelab-infra/ansible/inventory/woodpecker-repos.yml and run"
+            echo "       scripts/provision-woodpecker-repo.sh --config <that file>."
+            exit 1
+          }
+        done
+
+      # Derive the forge base URL from the clone URL so no host is hardcoded
+      # here. Parameter expansion, not sed: busybox and GNU sed disagree about
+      # -E/-r and this needs neither.
+      - export CLONE_REST="$${CI_REPO_CLONE_URL#https://}"
+      - export FORGE_API="https://$${CLONE_REST%%/*}/api/v1"
+
+      # ── 1. pinned tooling, fetched by ref and verified by content ─────────
+      - mkdir -p /tmp/tools /tmp/bin
+      - |
+        fetch_pinned() {  # repo path ref sha256 dest
+          curl -sSf -H "Authorization: token $${GIT_BOT_TOKEN}" \
+               "$${FORGE_API}/repos/$1/raw/$2?ref=$3" -o "$5" \
+            || { echo "ERROR: cannot read $1:$2 at $3 from $${FORGE_API}"; exit 1; }
+          got="$(shasum -a 256 "$5" | cut -d' ' -f1)"
+          [ "$got" = "$4" ] || {
+            echo "ERROR: $1:$2 at $3 does not match its pin."
+            echo "       expected $4"
+            echo "       got      $got"
+            echo "       Either the ref moved or the pin in this file is stale."
+            exit 1
+          }
+          chmod +x "$5"
+        }
+        fetch_pinned homelab/homelab-infra scripts/ci/chart-lock-ci.py \
+          1913cd4abb59eaa21f658b141f74780014e3d122 \
+          b4f1c7424c58becc00a206d2e99a6382ce48e4c124df2124179d0239919a95e2 \
+          /tmp/tools/chart-lock-ci.py
+      # mirror-chart.sh and check-chart-lock.sh are NOT fetched — they are this
+      # repo's own files and the checkout already holds the PR's version of
+      # them. See the header. Verify they are there rather than discovering it
+      # three steps later as "bash: scripts/mirror-chart.sh: not found".
+      - |
+        for f in scripts/mirror-chart.sh scripts/check-chart-lock.sh; do
+          [ -r "$f" ] || { echo "ERROR: $f missing from the checkout"; exit 1; }
+        done
+
+      # ── 2. the OpenBao adapter ────────────────────────────────────────────
+      # mirror-chart.sh reads its push credential with `bao kv get`. There is no
+      # OpenBao token in this namespace and there should not be: a Vault token
+      # grants far more than the one credential this needs, and there is no
+      # k8s-auth role bound to ci-woodpecker. Woodpecker's secret store already
+      # holds exactly kv/shared/forgejo-packages/ci, projected by
+      # provision-woodpecker-repo.sh, so this adapter answers the only two
+      # calls the script makes and refuses everything else. It prints nothing.
+      #
+      # THE DURABLE FIX IS UPSTREAM, NOT HERE: mirror-chart.sh should accept
+      # the credential from the environment when one is set. That is a
+      # homelab-k8s change and is listed as an A7 follow-up. Delete this block
+      # the day it lands.
+      - |
+        cat > /tmp/bin/bao <<'ADAPTER'
+        #!/bin/sh
+        # CI adapter, not the OpenBao CLI. Answers only what mirror-chart.sh asks.
+        if [ "$1" = "kv" ] && [ "$2" = "get" ] && [ "$3" = "-mount=kv" ] \
+           && [ "$5" = "shared/forgejo-packages/ci" ]; then
+          case "$4" in
+            -field=username) printf '%s' "$REGISTRY_USER"; exit 0 ;;
+            -field=token)    printf '%s' "$REGISTRY_TOKEN"; exit 0 ;;
+          esac
+        fi
+        echo "bao adapter: unsupported call: $*" >&2
+        exit 1
+        ADAPTER
+        chmod +x /tmp/bin/bao
+      - export PATH="/tmp/bin:$PATH"
+
+      # ── 3. the internal CA ────────────────────────────────────────────────
+      # registry.homelab.internal is served by the Cilium Gateway with a cert
+      # from the homelab-internal-issuer (OpenBao PKI), so helm needs that root.
+      # Read at `main`, NOT at a pinned ref, on purpose: the CA must follow a
+      # rotation without a commit here, and a stale one fails loudly at the
+      # first pull with "certificate signed by unknown authority".
+      # Better answer later: label ci-woodpecker `homelab.lab/inject-ca: "true"`
+      # and mount trust-manager's ConfigMap — that needs trusted volumes.
+      - |
+        curl -sSf -H "Authorization: token $${GIT_BOT_TOKEN}" \
+          "$${FORGE_API}/repos/homelab/homelab-k8s/raw/infrastructure/trust-manager/bundles.yaml?ref=main" \
+          -o /tmp/bundles.yaml
+        python3 - <<'CA' > /tmp/ca.pem
+        import yaml
+        pems = []
+        for d in yaml.safe_load_all(open('/tmp/bundles.yaml')):
+            if not d:
+                continue
+            if d.get('kind') == 'Secret' and 'ca.crt' in (d.get('stringData') or {}):
+                pems.append(d['stringData']['ca.crt'])
+            if d.get('kind') == 'Bundle':
+                for s in d['spec']['sources']:
+                    if 'inLine' in s:
+                        pems.append(s['inLine'])
+        out = ''.join(p if p.endswith('\n') else p + '\n' for p in pems)
+        assert 'BEGIN CERTIFICATE' in out, 'no certificate found in bundles.yaml'
+        print(out, end='')
+        CA
+        export CA_FILE=/tmp/ca.pem
+        echo "CA bundle: $(grep -c 'BEGIN CERTIFICATE' /tmp/ca.pem) certificate(s)"
+
+      # ── 4. land on the PR head branch BEFORE editing anything ─────────────
+      # A pull_request pipeline checks out the PR ref, which is not the source
+      # branch. Editing first and sorting the branch out afterwards is how a
+      # merge commit ends up pushed to somebody's PR. So switch first.
+      - export AUTH_URL="https://$${GIT_BOT_USER}:$${GIT_BOT_TOKEN}@$${CLONE_REST}"
+      - git fetch --quiet "$${AUTH_URL}" "refs/heads/$${CI_COMMIT_SOURCE_BRANCH}"
+      - git checkout -q -B "$${CI_COMMIT_SOURCE_BRANCH}" FETCH_HEAD
+
+      # ── 5. what actually moved, against the PR's target branch ────────────
+      - |
+        curl -sSf -H "Authorization: token $${GIT_BOT_TOKEN}" \
+          "$${FORGE_API}/repos/$${CI_REPO}/raw/charts.lock.yaml?ref=$${CI_COMMIT_TARGET_BRANCH}" \
+          -o /tmp/base.lock.yaml
+        python3 /tmp/tools/chart-lock-ci.py plan \
+          --lock charts.lock.yaml --base-lock /tmp/base.lock.yaml > /tmp/plan.tsv
+        cat /tmp/plan.tsv
+      - |
+        if [ ! -s /tmp/plan.tsv ]; then
+          echo "No chart version moved against $${CI_COMMIT_TARGET_BRANCH}."
+          echo "The lock changed for some other reason (a digest, a comment) —"
+          echo "nothing to mirror. Running the online lock check anyway."
+          bash scripts/check-chart-lock.sh --online
+          exit 0
+        fi
+
+      # ── 6. mirror + record + propagate, one chart at a time ───────────────
+      # mirror-chart.sh is invoked TWICE per chart, and scoped by name, for two
+      # reasons that are both defects in that script rather than choices here:
+      #
+      #   * `--apply --update-lock` cannot work. Its argument parser is a single
+      #     non-looping `case` on "$1", so the second flag is consumed as a
+      #     chart-NAME filter and matches nothing — even though
+      #     check-chart-lock.sh prints exactly that command as the remedy.
+      #   * The lock stores `content_digest: sha256:<hex>` while the script's
+      #     content_digest() returns the bare `<hex>`, and it compares the two
+      #     strings directly. So EVERY entry that has ever been through
+      #     --update-lock reports "UPSTREAM CHANGED under a pinned version" and
+      #     the script exits 1. Reproduced 2026-08-20 on vaultwarden 0.44.0,
+      #     where the two values are the same hash.
+      #
+      # Nulling the digests of the entries whose version moved sidesteps the
+      # second one for the chart being bumped — and, more importantly, is
+      # correct on its own terms: those digests describe the OLD chart. Scoping
+      # by name keeps the alarm live for every entry that did NOT move, which
+      # is the case it exists for. Both defects are A7 follow-ups in
+      # homelab-k8s; when they are fixed this collapses to one call.
+      - |
+        while IFS="$(printf '\t')" read -r name layer old new; do
+          [ -n "$name" ] || continue
+          echo "── $name $old -> $new  (layer $layer)"
+          python3 /tmp/tools/chart-lock-ci.py null-digests \
+            --lock charts.lock.yaml --name "$name"
+          bash scripts/mirror-chart.sh --apply "$name"
+          bash scripts/mirror-chart.sh --update-lock "$name"
+          python3 /tmp/tools/chart-lock-ci.py set-pin \
+            --kustomization "$layer/kustomization.yaml" --name "$name" --version "$new"
+        done < /tmp/plan.tsv
+
+      # ── 7. the gate ───────────────────────────────────────────────────────
+      # Offline checks (pin has a lock entry, layer points at the mirror) plus
+      # the online one: the pinned version actually RESOLVES on the mirror.
+      # That last check is the one that catches a pin OCI cannot serve — the
+      # `v4.13.4` vs `4.13.4` class check-chart-lock.sh documents.
+      - bash scripts/check-chart-lock.sh --online
+
+      # ── 8. push the catch-up commit onto the PR branch ────────────────────
+      # Renovate treats a branch whose last commit is not its own as
+      # operator-modified and stops rewriting it, so this commit is not
+      # clobbered by the next Renovate run.
+      - |
+        if git diff --quiet; then
+          echo "Nothing to commit — lock, mirror and kustomization already agreed."
+          exit 0
+        fi
+        git --no-pager diff --stat
+        # Built before the here-document rather than inside it: a command
+        # substitution nested in an unquoted heredoc is one of the places
+        # /bin/sh dialects disagree, and this runs under busybox ash.
+        SUMMARY=""
+        while IFS="$(printf '\t')" read -r n l o v; do
+          [ -n "$n" ] || continue
+          SUMMARY="$SUMMARY  $n $o -> $v (layer $l)
+        "
+        done < /tmp/plan.tsv
+        # Identity via GIT_AUTHOR_*/GIT_COMMITTER_*, not `git -c user.email`.
+        # The env vars WIN over -c, so on any host that exports them the -c
+        # form silently attributes the bot's commit to whoever that host is —
+        # observed on the operator's workstation while rehearsing this step on
+        # 2026-08-20, where VS Code exports GIT_AUTHOR_EMAIL and the commit
+        # came out under the operator's name despite -c saying otherwise. A
+        # step Pod does not export them today; this makes that not matter.
+        GIT_AUTHOR_NAME="registry-reconcile" \
+        GIT_AUTHOR_EMAIL="registry-reconcile@invalid.local" \
+        GIT_COMMITTER_NAME="registry-reconcile" \
+        GIT_COMMITTER_EMAIL="registry-reconcile@invalid.local" \
+        git commit -q -a -F - <<COMMITMSG
+        chart-lock: mirror and pin catch up with the bump
+
+        The version bump landed on charts.lock.yaml alone. This records the
+        digests observed while pushing the chart to the OCI mirror, and moves
+        the layer's kustomization.yaml pin to match, so that the lock, the
+        mirror and the render all describe the same chart before this merges.
+
+        Charts handled in this run:
+        $SUMMARY
+        Made by .woodpecker/mirror-charts.yml (rollout plan A7 step 2).
+        COMMITMSG
+        git push --quiet "$${AUTH_URL}" "HEAD:refs/heads/$${CI_COMMIT_SOURCE_BRANCH}"
+        echo "Pushed to $${CI_COMMIT_SOURCE_BRANCH}."
