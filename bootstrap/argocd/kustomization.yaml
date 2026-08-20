@@ -102,15 +102,29 @@ patches:
   # OIDC patch is operator-un-commented when Authentik is up + the
   # argocd OIDC client is created. Until then, Argo CD admin
   # password lands as a Secret at first install.
+  #
+  # UN-COMMENT BOTH HALVES: this entry AND the `oidc.config` replacement at
+  # the top of `replacements:` below. The patch supplies a blob containing
+  # `AUTH_FQDN`; the replacement is what turns it into the real issuer host.
+  # Enabling this alone ships the literal placeholder as the OIDC issuer.
+  # (The replacement cannot be left enabled on its own: with the patch off,
+  # argocd-cm has no `data.oidc.config` and kustomize hard-fails with
+  # "unable to find field ... in replacement target".)
   # - path: patches/oidc-config.yaml
   #   target:
   #     kind: ConfigMap
   #     name: argocd-cm
 
-# Site-config phase 2 (see bootstrap/kustomization.yaml for the pattern).
-# NB oidc-config.yaml stays ansible-rendered: the issuer URL lives INSIDE the
-# `oidc.config` string blob, which replacements cannot reach into (documented
-# .j2 boundary — components/site-config/README.md).
+# Site-config (see bootstrap/kustomization.yaml for the pattern).
+#
+# This used to say oidc-config.yaml "stays ansible-rendered: the issuer URL
+# lives INSIDE the `oidc.config` string blob, which replacements cannot reach
+# into". Half right, and the wrong half was load-bearing. A replacement cannot
+# substitute a SUBSTRING of a blob, but it can substitute a delimiter-token of
+# one — and the issuer host is a clean '/'-token of that blob. Verified
+# 2026-08-20 by enabling the patch and rendering. What actually blocks it is
+# that the patch is commented out, so `data.oidc.config` does not exist for a
+# replacement to target; both halves are therefore staged together below.
 components:
   - ../../components/site-config
 
@@ -126,6 +140,23 @@ configMapGenerator:
         argocd.argoproj.io/sync-wave: "-1"
 
 replacements:
+  # Authentik OIDC issuer host, inside the `oidc.config` blob the patch above
+  # supplies. Verified 2026-08-20 by enabling both halves and rendering:
+  # `AUTH_FQDN` -> `auth.lab.vyramo.com` in
+  # `issuer: https://AUTH_FQDN/application/o/argocd/`. Un-comment together with
+  # patches/oidc-config.yaml; see the note there.
+  #
+  # `index: 2` counts '/'-separated tokens across the WHOLE blob, which is
+  # index-fragile in a way the value selectors elsewhere in this repo are not —
+  # a second URL added ABOVE the issuer line shifts it. Kustomize cannot select
+  # a substring of a string, so this is the only shape available here. Re-verify
+  # the render if you add a line to that blob.
+  # - source: { kind: ConfigMap, name: site-config, fieldPath: data.auth_fqdn }
+  #   targets:
+  #     - select: { kind: ConfigMap, name: argocd-cm }
+  #       fieldPaths: [data.oidc\.config]
+  #       options: { delimiter: '/', index: 2 }
+
   # Forgejo repo credential ExternalSecret: url host token.
   - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_fqdn }
     targets:

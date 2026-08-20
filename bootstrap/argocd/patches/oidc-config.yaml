@@ -1,13 +1,15 @@
-# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
-# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
-#   ansible-playbook ansible/playbooks/00-render-static.yml
-# (from the homelab-infra repo root).
-# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # Authentik OIDC for Argo CD operator login.
 # Operator UN-COMMENTS the patches[] reference in the parent
 # kustomization.yaml when Authentik is up + the argocd OIDC
 # client is created. Until then, Argo CD admin password lands
 # as a Secret at first install (per cold-start.md Step 13c).
+#
+# AUTH_FQDN below resolves from components/site-config — but ONLY once the
+# matching `replacements:` rule in the parent kustomization.yaml is
+# un-commented TOGETHER with the patches[] entry. They are two halves of one
+# change and the comment there says so. Enabling the patch alone ships the
+# literal string `https://AUTH_FQDN/application/o/argocd/` as the issuer, and
+# Argo CD login then fails at the IdP round-trip.
 
 apiVersion: v1
 kind: ConfigMap
@@ -16,7 +18,7 @@ metadata:
 data:
   oidc.config: |
     name: Authentik
-    issuer: https://auth.lab.vyramo.com/application/o/argocd/
+    issuer: https://AUTH_FQDN/application/o/argocd/
     clientID: <AUTHENTIK_CLIENT_ID_ARGOCD>
     clientSecret: $oidc.authentik.clientSecret  # ESO-synced from OpenBao
     requestedScopes: ["openid", "profile", "email", "groups"]
