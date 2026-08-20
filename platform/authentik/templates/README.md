@@ -15,9 +15,17 @@ adapts per app.
    Provider. Authentik produces `client_id` + `client_secret`.
 2. **OpenBao**: stage the secrets at
    `kv/prod/authentik/clients/<app-name>/{client_id,client_secret,issuer}`.
-3. **homelab-k8s/apps/<app-name>/**: copy `oidc-client.template.yaml`,
-   replace placeholders (`{{APP_NAME}}`, `{{REDIRECT_URI}}`,
-   `{{SCOPES}}`, `<HOMELAB-DOMAIN>`).
+3. **The app's own repo, `k8s/`** (ADR 0001; `homelab-k8s/apps/*` are
+   superseded central copies): copy `oidc-client.template.yaml`, replace
+   `{{APP_NAME}}`, `{{REDIRECT_URI}}` and `{{SCOPES}}`.
+
+   Do **not** replace `AUTH_FQDN`. It stays as written and resolves from
+   `components/site-config` via a `replacements:` block — the snippet is in
+   the template's header comment, and `check-site-config.sh` fails the commit
+   if the copy carries the token without the component. The template used to
+   carry the literal `auth.lab.vyramo.com` (and this step used to name a
+   `<HOMELAB-DOMAIN>` placeholder that the file had not contained for
+   months); ADR 0045 C2 replaced both with the one token.
 4. **App Helm values**: reference the Kubernetes Secret
    `<app-name>-oidc` for client credentials and the ConfigMap
    `<app-name>-oidc-config` for endpoint URLs.
