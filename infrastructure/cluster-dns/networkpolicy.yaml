@@ -4,10 +4,9 @@
 # SNAT'd as a node identity (`remote-node`/`host`), which a standard
 # NetworkPolicy cannot express.
 #
-# Egress: authoritative-only CoreDNS needs no upstream; kube-dns is
-# allowed solely so the pod can resolve should any plugin need it. If
-# the global resolver is later moved here (ADR 0044 D4), add the
-# upstream DoT egress alongside a `.:53 forward` block in the Corefile.
+# Egress: the `.:53 forward` block (ADR 0044 D4, 2026-08-20) needs DoT to
+# Quad9 — exactly the two anycast IPs on 853/tcp, nothing wider. kube-dns
+# is allowed solely so the pod can resolve should any plugin need it.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -30,3 +29,12 @@ spec:
       ports:
         - { port: 53, protocol: UDP }
         - { port: 53, protocol: TCP }
+    # DoT upstreams for the global-resolver block (configmap.yaml). Keep in
+    # lockstep with the `forward` line: an upstream added there without an
+    # allow here fails closed, and a CNP drop looks like a blackhole
+    # (lessons.md, "A CNP drop looks like a blackhole, not a refusal").
+    - to:
+        - ipBlock: { cidr: 9.9.9.9/32 }
+        - ipBlock: { cidr: 149.112.112.112/32 }
+      ports:
+        - { port: 853, protocol: TCP }

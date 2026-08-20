@@ -1,6 +1,8 @@
-# CoreDNS config for the in-cluster split-horizon authority (ADR 0044).
-# Ports Flint3's Unbound: a wildcard to the gateway VIP plus per-host
-# overrides for router/switch/nodes.
+# CoreDNS config for the in-cluster resolver (ADR 0044): the split-horizon
+# AUTHORITY for the internal zone (ports Flint3's Unbound: a wildcard to
+# the gateway VIP plus per-host overrides for router/switch/nodes) AND,
+# since 2026-08-20, the tailnet's GLOBAL resolver (ADR 0044 D4): a second
+# `.:53` server block forwards everything outside the zone over DoT.
 #
 # Implemented as an authoritative ZONE FILE (the `file` plugin), NOT
 # hosts+template: CoreDNS runs the `template` plugin BEFORE `hosts` in
@@ -26,6 +28,29 @@ data:
         ready    :8181
         prometheus :9153
         file /etc/coredns/db.zone
+    }
+    # Global resolver (ADR 0044 D4). Everything that is not the internal
+    # zone is forwarded over DNS-over-TLS. One provider per forward block
+    # is a CoreDNS constraint — `tls_servername` is global to the block, so
+    # two providers cannot share one — and Quad9 is the one kept (Swiss
+    # foundation; EU-first tie-breaker), a deliberate drift from Flint3's
+    # Unbound, which forwards to 1.1.1.1 AND 9.9.9.9 (and verifies neither
+    # name). health/ready/prometheus are process-wide and already declared
+    # in the zone block above; declaring them twice fails the config.
+    #
+    # No `log` here on purpose: this block sees every name every tailnet
+    # device resolves — `personal` data under ADR 0003 — and the zone block
+    # above is the one worth logging. Flint3's Unbound does not log queries
+    # either.
+    .:53 {
+        errors
+        cache 300 {
+            serve_stale 1h
+        }
+        forward . tls://9.9.9.9 tls://149.112.112.112 {
+            tls_servername dns.quad9.net
+            health_check 10s
+        }
     }
   # Relative-name zone (origin = the server-block zone = {$FQDN_SUFFIX}).
   # `*` = Unbound's redirect wildcard -> gateway VIP; explicit records
