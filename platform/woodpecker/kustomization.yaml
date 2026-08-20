@@ -56,3 +56,14 @@ replacements:
       - select: { kind: HTTPRoute, name: woodpecker }
         fieldPaths: [spec.hostnames.0]
         options: { delimiter: '.', index: 1 }
+  # Forgejo host in the CI step-pod FQDN egress policy. Selected BY VALUE
+  # (`[matchName=FORGEJO_FQDN]`), never by index and never by `*` over the
+  # toFQDNs list: that list also holds pypi.org, ghcr.io and ~25 more, and a
+  # `*` there rewrites every one of them to the Forgejo host — kustomize exits
+  # 0 and only a `pip install` timing out 28h later shows it (lessons.md,
+  # "A `*` in a `replacements` fieldPath overwrites the whole list").
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_fqdn }
+    targets:
+      - select: { kind: CiliumNetworkPolicy, name: ci-woodpecker-egress-fqdn }
+        fieldPaths:
+          - spec.egress.*.toFQDNs.[matchName=FORGEJO_FQDN].matchName

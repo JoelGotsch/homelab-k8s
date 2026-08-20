@@ -206,7 +206,7 @@ spec:
         # forgejo-ns shortcut, but Woodpecker hardcodes the
         # public clone URL from Forgejo's ROOT_URL, so we
         # also need it here for FQDN-based egress to work.
-        - matchName: "forgejo.lab.vyramo.com"
+        - matchName: "FORGEJO_FQDN"   # <- site-config replacement (kustomization.yaml)
         # Container registries
         - matchName: "registry-1.docker.io"
         - matchName: "auth.docker.io"
