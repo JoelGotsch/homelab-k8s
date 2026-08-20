@@ -1,8 +1,9 @@
 # Default-deny both directions for the resolver pods (ADR 0036).
 # Ingress on :53 is granted by the companion CiliumNetworkPolicy
-# (ciliumnetworkpolicy.yaml) because LoadBalancer traffic arrives
-# SNAT'd as a node identity (`remote-node`/`host`), which a standard
-# NetworkPolicy cannot express.
+# (ciliumnetworkpolicy.yaml) because LoadBalancer traffic arrives as a
+# node identity (remote backend, SNAT'd) or as the real client IP (backend
+# on the announcer node, no SNAT) — neither of which a standard
+# NetworkPolicy can express.
 #
 # Egress: the `.:53 forward` block (ADR 0044 D4, 2026-08-20) needs DoT to
 # Quad9 — exactly the two anycast IPs on 853/tcp, nothing wider. kube-dns

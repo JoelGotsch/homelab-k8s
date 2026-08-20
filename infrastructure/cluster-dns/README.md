@@ -29,8 +29,11 @@ for every tailnet client too).
   **no domain literal is committed** (no `.j2` needed). `{{ .Name }}` in
   the Corefile is CoreDNS's own `template`-plugin Go template, not Jinja.
 - **NetworkPolicy + CiliumNetworkPolicy** — default-deny (ADR 0036);
-  ingress on `:53` allowed from `remote-node`/`host` because the
-  LoadBalancer path arrives SNAT'd as a node identity.
+  ingress on `:53` allowed from `remote-node`/`host` **and `world`**: the
+  LoadBalancer path arrives SNAT'd as a node identity when the backend is
+  on another node, but as the real client IP (`world`) when the backend
+  sits on the L2-announcer node itself. Missing `world` meant the
+  announcer's own pod silently dropped half of all queries (2026-08-20).
 
 ## Scope
 
