@@ -207,6 +207,19 @@ spec:
         # public clone URL from Forgejo's ROOT_URL, so we
         # also need it here for FQDN-based egress to work.
         - matchName: "FORGEJO_FQDN"   # <- site-config replacement (kustomization.yaml)
+        # The internal chart mirror (ADR 0052). Needed by the ADR 0045/0052 A7
+        # `mirror-charts` pipeline: on a charts.lock.yaml bump it runs
+        # mirror-chart.sh, which pulls from upstream and pushes to the mirror,
+        # then check-chart-lock.sh --online resolves every pin against it.
+        # Without this the pipeline fails at its first `helm pull` — and it
+        # fails as a TCP timeout, not a policy error, because the DNS
+        # visibility rule keeps resolution working (see lessons.md).
+        - matchName: "registry.homelab.internal"
+        # Upstream chart host for the vaultwarden lock entry. Each further repo
+        # the pipeline rolls out to adds its own: nextcloud.github.io and
+        # jellyfin.github.io are the next two; ghcr.io is already below, which
+        # covers immich, paperless and llm-gateway.
+        - matchName: "guerzon.github.io"
         # Container registries
         - matchName: "registry-1.docker.io"
         - matchName: "auth.docker.io"

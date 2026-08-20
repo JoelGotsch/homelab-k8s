@@ -190,3 +190,33 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    # Forgejo backend pods on :3000 — NOT redundant with the `ingress` rule
+    # above, and the reason cosign verification has never actually worked.
+    #
+    # The comment block above already diagnosed this exactly ("client-egress
+    # evaluated at the proxy upstream hop") but only the registry-direct half
+    # was implemented, and that half is inert until the unbound DNS cutover.
+    # Meanwhile every first-party image is referenced by the FORGEJO FQDN, so
+    # verification takes the gateway path: Envoy proxies to forgejo:3000
+    # carrying THIS pod's identity, policy is evaluated a second time against
+    # the backend endpoint, and with no rule for it Envoy answers a plaintext
+    # 403 "Access denied" that reads exactly like a Forgejo permission error.
+    #
+    # Observed 2026-08-20, still failing at that moment:
+    #   PolicyViolation ... verify-first-party-image-signature ...
+    #   GET https://forgejo.lab.vyramo.com/v2/: unexpected status code
+    #   403 Forbidden: Access denied
+    #
+    # It was invisible because the policy's failureAction is Audit — nothing
+    # was blocked, so signature verification was simply never happening. Flip
+    # that policy to Enforce without this rule and every first-party workload
+    # stops admitting. Third occurrence of this trap: llm-gateway->Forgejo
+    # (2026-08-14), conversation-history->Nextcloud (2026-08-20), this.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: forgejo
+            app.kubernetes.io/name: forgejo
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
