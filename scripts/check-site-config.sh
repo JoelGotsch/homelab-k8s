@@ -38,14 +38,30 @@ if [ -n "$layer" ]; then
        echo "      '$fj_url' nor '$gh_url'"; fail=1 ;;
   esac
 fi
-# every FQDN_SUFFIX / FORGEJO_FQDN placeholder must sit in a kustomization
-# that pulls the site-config component (else it renders literally).
+# Every site-config placeholder must sit in a kustomization that pulls the
+# site-config component (else it renders literally — `https://FORGEJO_FQDN`
+# reaches a pod as a DNS failure, `OPERATOR_GITHUB_USER` reaches a paged
+# operator as a 404 runbook link).
+#
+# AUTH_FQDN and OPERATOR_GITHUB_USER joined the list on 2026-08-20 with the
+# ADR 0045 C2 `.j2` migration: they are site-config keys like the others, and
+# a token nothing checks is a token that renders literally.
 while IFS= read -r f; do
   dir=$(dirname "$f")
   k="$dir/kustomization.yaml"
   # bootstrap/argocd patches resolve via the parent kustomization
   [ -f "$k" ] || k="$(dirname "$dir")/kustomization.yaml"
-  grep -q 'components/site-config' "$k" 2>/dev/null || { echo "FAIL: $f has a placeholder but $k lacks the site-config component"; fail=1; }
-done < <(grep -rlE 'FQDN_SUFFIX|FORGEJO_FQDN|FORGEJO_LAYER_REPO_URL' --include='*.yaml' apps platform observability infrastructure bootstrap 2>/dev/null)
+  # Match a real `components:` LIST ENTRY, not any mention of the path.
+  # Until 2026-08-20 this was `grep -q 'components/site-config'`, which every
+  # converted layer now satisfies from the provenance comment above its
+  # `replacements:` block ("-> components/site-config/site-config.env").
+  # Deleting the component itself then left the check green while the
+  # placeholder rendered literally — proven by deleting it from
+  # infrastructure/backup-cronjobs and watching this script still say OK.
+  # Anchored to `site-config` at a path boundary so `site-config-example`
+  # cannot stand in for it either.
+  grep -qE '^[[:space:]]*-[[:space:]]+[^#]*components/site-config([[:space:]]|$)' "$k" 2>/dev/null \
+    || { echo "FAIL: $f has a placeholder but $k lacks the site-config component"; fail=1; }
+done < <(grep -rlE 'FQDN_SUFFIX|FORGEJO_FQDN|FORGEJO_LAYER_REPO_URL|AUTH_FQDN|OPERATOR_GITHUB_USER' --include='*.yaml' apps platform observability infrastructure bootstrap 2>/dev/null)
 [ "$fail" -eq 0 ] && echo "OK: site-config internally consistent; all placeholders component-backed."
 exit "$fail"
