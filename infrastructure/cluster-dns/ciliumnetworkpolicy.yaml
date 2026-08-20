@@ -1,12 +1,18 @@
 # Ingress allow for the LoadBalancer DNS path (ADR 0044).
 #
 # The Service (10.10.30.53) uses the default externalTrafficPolicy:
-# Cluster, so the elected L2-announcer node DNATs to the pod and SNATs
-# the client IP to a node IP. From the pod's view the source identity is
-# therefore `remote-node` (announcer on another node) or `host` (same
-# node as the pod) — never the real tailnet/LAN client. A standard
-# NetworkPolicy can't select node identities, hence this CCNP. Same
-# class of gotcha as forgejo-ssh (platform/forgejo/networkpolicy.yaml).
+# Cluster. The elected L2-announcer node DNATs to a backend pod and, when
+# that backend is on ANOTHER node, SNATs the client IP to its own node IP
+# — the pod then sees `remote-node`. When the backend is on the announcer
+# node itself there is NO SNAT: the pod sees the real client address
+# (Flint3's `10.10.30.1` for every masqueraded tailnet/VLAN client), which
+# is identity `world`. Until 2026-08-20 only `remote-node`/`host` were
+# allowed, so the announcer's own pod dropped every query as
+# "Policy denied" while the remote pod answered — ~50 % loss, invisible
+# in the pod logs, visible only in Hubble on the announcer node. A
+# standard NetworkPolicy can't select node identities, hence this CCNP.
+# Same class of gotcha as forgejo-ssh / registry-direct
+# (platform/forgejo/networkpolicy.yaml, which already lists `world`).
 #
 # Only `ingress:` is listed, so this policy does NOT add an egress
 # default-deny on top of the K8s NP's (feedback_cilium_ccnp_default_deny).
@@ -20,11 +26,16 @@ spec:
       app.kubernetes.io/name: cluster-dns
   ingress:
     # External LB path (LAN clients, and tailnet clients via the Flint3
-    # fallback route): externalTrafficPolicy=Cluster SNATs to the L2
-    # announcer node, so traffic arrives as a node identity.
+    # fallback route). `remote-node`: backend on a different node than the
+    # announcer (SNAT'd). `host`: same-node hairpin. `world`: backend on
+    # the announcer node itself (no SNAT — real client IP). All three
+    # occur in normal operation; which one a given query hits depends on
+    # where the L2 lease sits. :53 is the resolver's whole purpose and
+    # Flint3's firewall already gates which zones may reach this VLAN.
     - fromEntities:
         - remote-node
         - host
+        - world
       toPorts:
         - ports:
             - { port: "53", protocol: UDP }
