@@ -25,6 +25,17 @@ spec:
           # 2026-07-28). Skeleton entries still point at the central
           # homelab-k8s repo, which now also lives in the org.
           - {name: approval-channel,    owner: homelab,       repo: approval-channel, path: k8s, autoSync: "true"}
+          # ADR 0048 D1 — a repo whose entire content is deployment manifests
+          # carries the -k8s suffix. Renamed 2026-08-20: immich-public-proxy,
+          # immich, jellyfin, librechat, model-manager, nextcloud, ntfy,
+          # paperless, signal-bridge, vaultwarden.
+          #
+          # NOT renamed, because they ship code alongside their k8s/ and D2 is
+          # explicit that the suffix means "nothing but manifests":
+          # llm-gateway, approval-channel, ntfy-e2ee-relay.
+          #
+          # The Application NAME never takes the suffix — it names the deployed
+          # service, not the repository.
           # The message archive. This repo is MANIFESTS ONLY, hence the -k8s
           # suffix (ADR 0048 D1, renamed 2026-08-20). The CODE lives in
           # forgejo-admin/conversation-history and builds the image — deliberately
@@ -37,28 +48,28 @@ spec:
           # names the deployed service, not the repository.
           - {name: conversation-history, owner: homelab, repo: conversation-history-k8s, path: k8s, autoSync: "true"}
           - {name: frigate,             owner: homelab,       repo: homelab-k8s, path: apps/frigate,             autoSync: "true"}
-          - {name: immich,              owner: homelab,       repo: immich, path: k8s, autoSync: "true"}
-          - {name: immich-public-proxy, owner: homelab,       repo: immich-public-proxy, path: k8s, autoSync: "true"}
-          - {name: jellyfin,            owner: homelab,       repo: jellyfin, path: k8s, autoSync: "true"}
+          - {name: immich,              owner: homelab,       repo: immich-k8s, path: k8s, autoSync: "true"}
+          - {name: immich-public-proxy, owner: homelab,       repo: immich-public-proxy-k8s, path: k8s, autoSync: "true"}
+          - {name: jellyfin,            owner: homelab,       repo: jellyfin-k8s, path: k8s, autoSync: "true"}
           - {name: knowledge-graph,     owner: homelab,       repo: homelab-k8s, path: apps/knowledge-graph,     autoSync: "true"}
           # librechat: seeds + virtual key landed 2026-07-30 (attended session);
           # autoSync live. homelab/librechat pushed with full history.
-          - {name: librechat,           owner: homelab,       repo: librechat, path: k8s, autoSync: "true"}
+          - {name: librechat,           owner: homelab,       repo: librechat-k8s, path: k8s, autoSync: "true"}
           - {name: llm-gateway,         owner: homelab,       repo: llm-gateway, path: k8s, autoSync: "true"}
           # model-manager: thin nginx UI (no secrets/image/CI) — auth via
           # the Authentik proxy outpost. Added 2026-08-05.
-          - {name: model-manager,       owner: homelab,       repo: model-manager, path: k8s, autoSync: "true"}
-          - {name: nextcloud,           owner: homelab,       repo: nextcloud, path: k8s, autoSync: "true"}
-          - {name: ntfy,                owner: homelab,       repo: ntfy, path: k8s, autoSync: "true"}
+          - {name: model-manager,       owner: homelab,       repo: model-manager-k8s, path: k8s, autoSync: "true"}
+          - {name: nextcloud,           owner: homelab,       repo: nextcloud-k8s, path: k8s, autoSync: "true"}
+          - {name: ntfy,                owner: homelab,       repo: ntfy-k8s, path: k8s, autoSync: "true"}
           - {name: ntfy-e2ee-relay,     owner: homelab,       repo: ntfy-e2ee-relay, path: k8s, autoSync: "true"}
-          - {name: paperless,           owner: homelab,       repo: paperless, path: k8s, autoSync: "true"}
+          - {name: paperless,           owner: homelab,       repo: paperless-k8s, path: k8s, autoSync: "true"}
           - {name: personal-agent,      owner: homelab,       repo: homelab-k8s, path: apps/personal-agent,      autoSync: "true"}
           # roborock removed 2026-08-04: the vacuum server now runs LOCALLY on a
           # GL-MT6000 (Flint 2) at the remote site (Docker). The homelab servers
           # VLAN is hardened against the raw-L4 external access it needed, so the
           # in-cluster deployment was abandoned. See homelab/roborock repo README.
-          - {name: signal-bridge,       owner: homelab,       repo: signal-bridge, path: k8s, autoSync: "true"}
-          - {name: vaultwarden,         owner: homelab,       repo: vaultwarden, path: k8s, autoSync: "true"}
+          - {name: signal-bridge,       owner: homelab,       repo: signal-bridge-k8s, path: k8s, autoSync: "true"}
+          - {name: vaultwarden,         owner: homelab,       repo: vaultwarden-k8s, path: k8s, autoSync: "true"}
           - {name: website,             owner: homelab,       repo: homelab-k8s, path: apps/website,             autoSync: "true"}
           - {name: whatsapp-bridge,     owner: homelab,       repo: homelab-k8s, path: apps/whatsapp-bridge,     autoSync: "true"}
           - {name: windmill,            owner: homelab,       repo: homelab-k8s, path: apps/windmill,            autoSync: "true"}
