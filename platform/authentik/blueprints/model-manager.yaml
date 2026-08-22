@@ -44,11 +44,14 @@ entries:
       negate: false
 
   # Assign the provider to the EMBEDDED outpost (it serves proxy apps
-  # from inside authentik-server). Partial-attrs update; today this is
-  # the only proxy provider, so the list assignment is safe.
+  # from inside authentik-server). The `providers` list is a FULL
+  # REPLACEMENT: since 2026-08-21 chat-history.yaml is the second proxy
+  # provider, so both blueprints name both providers — whichever applies
+  # last must not drop the other. Keep the two lists identical.
   - model: authentik_outposts.outpost
     identifiers:
       managed: goauthentik.io/outposts/embedded
     attrs:
       providers:
         - !KeyOf model-manager-provider
+        - !Find [authentik_providers_proxy.proxyprovider, [name, chat-history]]

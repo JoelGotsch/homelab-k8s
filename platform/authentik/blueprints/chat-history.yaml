@@ -1,0 +1,66 @@
+# STATIC blueprint — chat-history PROXY provider (second proxy-outpost
+# app, 2026-08-21; model-manager was the first and this copies it).
+# The app (`chist serve`, conversation-history namespace) has no login
+# of its own and must not grow one: Authentik's EMBEDDED outpost
+# authenticates chat-history.<domain> and reverse-proxies to the app
+# Service. Operator-only — message history is `personal` (ADR 0003).
+#
+# /mcp on the same host: a proxy provider also accepts HTTP Basic with
+# an app password and Bearer with a client-credentials JWT (authentik
+# docs, "Header authentication"), so an MCP client on the tailnet
+# presents an app password and `chist` never learns about tokens.
+version: 1
+metadata:
+  name: chat-history-proxy
+  labels:
+    blueprints.goauthentik.io/instantiate: "true"
+entries:
+  - model: authentik_providers_proxy.proxyprovider
+    id: chat-history-provider
+    identifiers:
+      name: chat-history
+    attrs:
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      mode: proxy
+      external_host: "https://chat-history.lab.vyramo.com"
+      internal_host: "http://chist-web.conversation-history.svc.cluster.local:8000"
+      internal_host_ssl_validation: false
+      # Header auth for /mcp clients (app password / JWT); an invalid
+      # header is a 401 at the outpost rather than a login redirect.
+      intercept_header_auth: true
+
+  - model: authentik_core.application
+    id: chat-history-app
+    identifiers:
+      slug: chat-history
+    attrs:
+      name: Chat History
+      provider: !KeyOf chat-history-provider
+      meta_launch_url: "https://chat-history.lab.vyramo.com/"
+      meta_description: "Signal + WhatsApp archive — threads, search, voice notes"
+      group: "Personal"
+      policy_engine_mode: any
+
+  # Operator-only.
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf chat-history-app
+      group: !Find [authentik_core.group, [name, operator]]
+    attrs:
+      order: 10
+      enabled: true
+      negate: false
+
+  # Assign the provider to the EMBEDDED outpost. The `providers` list is
+  # a FULL REPLACEMENT, not an append: model-manager's blueprint sets it
+  # to [model-manager] and this one must carry both, or whichever
+  # blueprint applies last silently drops the other app's provider.
+  # Keep the two lists identical (model-manager.yaml names both too).
+  - model: authentik_outposts.outpost
+    identifiers:
+      managed: goauthentik.io/outposts/embedded
+    attrs:
+      providers:
+        - !Find [authentik_providers_proxy.proxyprovider, [name, model-manager]]
+        - !KeyOf chat-history-provider

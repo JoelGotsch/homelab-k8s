@@ -1,0 +1,31 @@
+# chat-history.<domain> → authentik-server: the Authentik EMBEDDED
+# OUTPOST host-matches the proxy provider's external_host, enforces the
+# operator login (or header auth for /mcp), and reverse-proxies to the
+# chist-web Service in conversation-history. Lives in platform/authentik
+# because it is authentik plumbing — the app never receives gateway
+# traffic directly; its NetworkPolicy admits the authentik namespace only.
+#
+# On the existing `https` listener (ADR 0053 D2: never a new listener).
+# Tailscale-only by virtue of where the gateway is reachable from; there
+# is no Cloudflare route for this host and there must never be one
+# (ADR 0024 — plaintext messages, no application-layer E2EE).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: authentik-chat-history-proxy
+  namespace: authentik
+spec:
+  parentRefs:
+    - name: homelab-gateway
+      namespace: ingress
+      sectionName: https
+  hostnames:
+    - "chat-history.FQDN_SUFFIX"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: authentik-server
+          port: 80

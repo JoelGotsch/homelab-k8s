@@ -26,6 +26,7 @@ resources:
   - externalsecret.yaml
   - httproute.yaml
   - httproute-model-manager.yaml
+  - httproute-chat-history.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml
 
@@ -44,6 +45,9 @@ replacements:
         fieldPaths: [spec.hostnames.0]
         options: { delimiter: '.', index: 1 }
       - select: { kind: HTTPRoute, name: authentik-model-manager-proxy }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }
+      - select: { kind: HTTPRoute, name: authentik-chat-history-proxy }
         fieldPaths: [spec.hostnames.0]
         options: { delimiter: '.', index: 1 }
   # AUTHENTIK_HOST — values.yaml carries `https://AUTH_FQDN` and this rewrites
@@ -92,6 +96,10 @@ configMapGenerator:
       # STATIC — model-manager PROXY provider + embedded-outpost
       # assignment (first proxy-outpost app, 2026-08-05).
       - blueprints/model-manager.yaml
+      # STATIC — chat-history PROXY provider (conversation-history's
+      # `chist serve`, 2026-08-21). Carries the embedded outpost's FULL
+      # providers list, model-manager included — see the file's header.
+      - blueprints/chat-history.yaml
       # Recovery / set-password flow (email link) — hand-written, instantiates
       # authentik's bundled recovery example + points the brand's flow_recovery
       # at it. Enables invite-onboarding + self-service password reset (2026-08-06).

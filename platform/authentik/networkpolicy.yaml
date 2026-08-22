@@ -85,6 +85,20 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
+    # chat-history: EMBEDDED-OUTPOST proxy upstream (second proxy-
+    # provider app, 2026-08-21) — chat-history.<domain> to the chist-web
+    # Service in conversation-history. The other side is that
+    # namespace's `chist-web-ingress` NetworkPolicy, which admits the
+    # authentik-server pods on :8000 and nothing else; both sides land
+    # in one change so the outpost never answers 502 for a policy gap.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: conversation-history
+            app.kubernetes.io/name: chist-web
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
     # kube-DNS.
     - toEndpoints:
         - matchLabels:
