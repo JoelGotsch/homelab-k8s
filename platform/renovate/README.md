@@ -31,7 +31,7 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 
 | Path | Field | Source |
 |---|---|---|
-| `kv/platform/renovate/forgejo-token` | `token` | Forgejo PAT for the `renovate-bot` user. Generated in Forgejo's web UI: Settings → Applications → Generate New Token. Required scopes: `read:repository`, `write:repository`, `write:issue`. Token is account-wide per Forgejo (see Caveat 1). |
+| `kv/platform/renovate/forgejo-token` | `token` | Forgejo PAT for the `renovate-bot` user. Generated in Forgejo's web UI: Settings → Applications → Generate New Token. Required scopes: `read:repository`, `write:repository`, `write:issue`, `read:user`, `read:organization`. **`read:user` is not optional** — Renovate calls `GET /api/v1/user` on platform init and aborts if it 403s; see Caveat 8. Token is account-wide per Forgejo (see Caveat 1). |
 
 ## Post-Forgejo activation (one-time)
 
@@ -53,7 +53,7 @@ homelab-infra/scripts/provision-forgejo-bot-pat.sh \
     --bot-email renovate-bot@invalid.local \
     --kv-path kv/platform/renovate/forgejo-token \
     --token-name renovate-runner-cluster \
-    --scopes "read:repository,write:repository,write:issue"
+    --scopes "read:repository,write:repository,write:issue,read:user,read:organization"
 ```
 
 The script creates the user, issues the PAT, and seeds OpenBao
@@ -185,6 +185,25 @@ updated in each scanned repo.
    subsequent Argo syncs will keep `suspend: false` —
    Argo reconciles the file as written. To re-suspend,
    edit `cronjob.yaml` and push.
+
+8. **A missing token scope surfaces as `FATAL: Authentication
+   failure`, not as a scope error.** Renovate calls `GET
+   /api/v1/user` during platform init; Forgejo answers a token
+   lacking `read:user` with 403 and the body `token does not have
+   at least one of required scope(s): [read:user]`, which Renovate
+   logs at info level only as "Error authenticating with Gitea.
+   Check your token". The token is valid — rotating it changes
+   nothing unless the scope list changes too. Broke the
+   2026-08-22 run this way; the scope list in "OpenBao paths to
+   seed" above had never included `read:user`, so every token this
+   README ever produced was missing it. It only started mattering
+   when the floating `renovate/renovate:38` tag rolled forward
+   (see Caveat 3 — which asks for a pinned image the CronJob does
+   not actually pin). Read the body, not the FATAL line:
+
+   ```sh
+   kubectl -n renovate logs <pod> | grep -A2 'required scope'
+   ```
 
 ## Related
 
