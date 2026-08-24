@@ -92,13 +92,26 @@ spec:
         - matchName: "registry-1.docker.io"
         - matchName: "index.docker.io"  # Docker Hub tag-list/metadata API — distinct host from the registry-1 pull path; ETIMEDOUT confirmed 2026-07-16 first live run
         - matchName: "auth.docker.io"
-        - matchName: "production.cloudflare.docker.com"
+        - matchName: "hub.docker.com"  # v2 tag/metadata API for docker.io images; 9 lookups timed out on it 2026-08-24 — distinct again from index.docker.io
+        # Docker's blob CDN moves between providers: the list carried only
+        # `production.cloudflare.docker.com`, and the 2026-08-24 run spent 6
+        # lookups timing out on `production.cloudfront.docker.com`. A pattern
+        # covers the next move too. Cilium `*` spans 0+ DNS characters but
+        # never the `.` separator, so this cannot widen past one label
+        # (docs.cilium.io/en/v1.20/security/policy/layer7/).
+        - matchPattern: "production.cloud*.docker.com"
         - matchName: "ghcr.io"
         - matchName: "pkg-containers.githubusercontent.com"
         - matchName: "registry.k8s.io"
         - matchName: "quay.io"
-        - matchName: "cdn03.quay.io"
+        # Same shard-rotation problem: the list pinned `cdn03` and the run hit
+        # `cdn01`. `quay.io` itself stays an explicit matchName — the pattern
+        # requires the `cdn` label and does not match the bare apex.
+        - matchPattern: "cdn*.quay.io"
         - matchName: "gcr.io"
+        # Ansible Galaxy — homelab-infra's collection requirements. 10 lookups
+        # timed out on it 2026-08-24; it had never been listed.
+        - matchName: "galaxy.ansible.com"
         # Helm chart repos referenced by homelab-k8s
         - matchName: "code.forgejo.org"  # oci://code.forgejo.org/forgejo-helm (platform/forgejo) — ETIMEDOUT confirmed 2026-07-16 first live run
         - matchName: "charts.bitnami.com"
