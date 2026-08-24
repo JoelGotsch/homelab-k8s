@@ -52,9 +52,17 @@ homelab-infra/scripts/provision-forgejo-bot-pat.sh \
     --bot-username renovate-bot \
     --bot-email renovate-bot@invalid.local \
     --kv-path kv/platform/renovate/forgejo-token \
-    --token-name renovate-runner-cluster \
-    --scopes "read:repository,write:repository,write:issue,read:user,read:organization"
+    --token-name renovate-runner-cluster
 ```
+
+**Do not pass `--scopes` here.** The script's built-in default is
+`read:user,read:organization,write:repository,write:issue` and it is
+authoritative — it carries the fix for the 2026-07-29 re-provisioning
+where a PAT without `read:user` made Renovate 403 at boot. This README
+used to override it with a list that omitted `read:user`, which
+re-introduced that exact failure on 2026-08-22 (Caveat 8). An override
+here can only drift from the script; the scope list in the seed table
+above is for the manual web-UI path.
 
 The script creates the user, issues the PAT, and seeds OpenBao
 (no `--org-name` — see above).
@@ -196,10 +204,14 @@ updated in each scanned repo.
    nothing unless the scope list changes too. Broke the
    2026-08-22 run this way; the scope list in "OpenBao paths to
    seed" above had never included `read:user`, so every token this
-   README ever produced was missing it. It only started mattering
-   when the floating `renovate/renovate:38` tag rolled forward
-   (see Caveat 3 — which asks for a pinned image the CronJob does
-   not actually pin). Read the body, not the FATAL line:
+   README ever produced was missing it — while
+   `provision-forgejo-bot-pat.sh`'s own default has had `read:user`
+   since 2026-07-29, when this same 403 was found and fixed there. The
+   README's `--scopes` override silently un-did that fix; it has been
+   removed rather than corrected. It only started mattering again when
+   the floating `renovate/renovate:38` tag rolled forward (see Caveat 3
+   — which asks for a pinned image the CronJob does not actually pin).
+   Read the body, not the FATAL line:
 
    ```sh
    kubectl -n renovate logs <pod> | grep -A2 'required scope'
