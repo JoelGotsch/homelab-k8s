@@ -393,6 +393,18 @@ spec:
         - ports:
             - port: "8443"
               protocol: TCP
+    # Renovate runner — reads first-party image TAGS to propose bumps.
+    # Missing until 2026-08-24, so every weekly scan timed out on
+    # registry.homelab.internal (6 lookups × 60s) and proposed nothing
+    # for first-party images, silently. Paired with the egress rule in
+    # platform/renovate/networkpolicy.yaml.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: renovate
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
     # registry-integrity-probe — daily `crane validate` blob-integrity
     # CronJob (infrastructure/registry-integrity-probe). Its egress CNP
     # was in place but this ingress side was missing at first deploy:

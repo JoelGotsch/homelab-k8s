@@ -87,6 +87,26 @@ spec:
     # OPERATOR EXTENDS this list when a new manifest source
     # surfaces (chart repo URL, alternate registry, etc.).
     # Add the hostname as a `matchName` line.
+    # registry.homelab.internal (ADR 0038) — first-party image tags.
+    # Deliberately NOT a toFQDNs entry: the name resolves to the LB VIP
+    # 10.10.30.52, and Cilium's socket-LB DNATs that to the backend pod
+    # on :8443 BEFORE egress policy is evaluated, so an FQDN rule for it
+    # can never match (ADR 0038 removed exactly such a rule for being
+    # dead). The destination to allow is the backend endpoint, matching
+    # what kyverno, trivy-operator and registry-integrity-probe already
+    # do. Without it Renovate cannot read first-party image tags at all:
+    # it burned 6 lookups × 60s timing out on this host on 2026-08-24 and
+    # reported nothing, so those images silently never had an update
+    # proposed. Needs the matching ingress rule in
+    # platform/forgejo/networkpolicy.yaml.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: forgejo
+            app.kubernetes.io/name: registry-direct
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
     - toFQDNs:
         # Container registries
         - matchName: "registry-1.docker.io"
@@ -117,6 +137,7 @@ spec:
         - matchName: "charts.bitnami.com"
         - matchName: "grafana.github.io"
         - matchName: "openbao.github.io"
+        - matchName: "openbao.org"  # the project moved its chart/release host off github.io; 1 lookup 2026-08-24
         - matchName: "helm.cilium.io"
         - matchName: "argoproj.github.io"
         - matchName: "charts.external-secrets.io"  # actual chart repo host — external-secrets.io (apex) doesn't match, FQDN rules are exact-host; "Failed to look up helm package" confirmed 2026-07-16
