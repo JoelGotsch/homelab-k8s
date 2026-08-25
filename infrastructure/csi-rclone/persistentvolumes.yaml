@@ -321,6 +321,18 @@ spec:
 # ─────────────────────────────────────────────────────────────────────────────
 # share: forgejo-lfs
 # ─────────────────────────────────────────────────────────────────────────────
+#
+# PREVENTIVE, not diagnosed. No LFS push has been observed to fail — but this
+# is the same driver, the same NAS, the same missing write cache and the same
+# shape of write (one large object, streamed) as the registry blobs below,
+# where it failed four times out of five on 2026-08-25. The two volumes are
+# mounted into the same pod and remount together, so fixing this one costs
+# nothing beyond the restart that one already needs. Left alone it would be a
+# known-broken mount waiting to be rediscovered by whoever next pushes a big
+# LFS object.
+#
+# 10G rather than the registry's 20G: LFS objects here are individually large
+# but pushed one at a time, and this share is quiet.
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -336,6 +348,10 @@ spec:
   accessModes: [ReadWriteMany]
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nas-crypt-forgejo-lfs
+  mountOptions:
+    - vfs-cache-mode=writes
+    - vfs-cache-max-size=10G
+    - vfs-cache-max-age=6h
   claimRef:
     apiVersion: v1
     kind: PersistentVolumeClaim
@@ -358,6 +374,39 @@ spec:
 # NOT covered by the NAS→Hetzner restic lane, deliberately: the blobs are
 # regenerable container images. See nas-personal-pvcs.yaml. That decision is
 # re-affirmed rather than inherited — ADR 0051 §Consequences.
+#
+# vfs-cache-mode=writes is load-bearing here too, for the same reason as the
+# vault above and with a different symptom. Without a VFS cache a write streams
+# straight at the remote and the file handle is only valid for an uninterrupted
+# sequential write; a stall on the NAS invalidates it and the next write(2)
+# returns EBADF. Forgejo surfaces that as
+#   Error saving package blob in content store:
+#   write /data/packages/tmp/upload-…: bad file descriptor
+# and answers the push with a 500, which buildx reports to CI as the bare word
+# `unknown`. Measured on 2026-08-25, when four of five image pushes failed:
+#
+#   144 blob PUTs succeeded — median 77ms, slowest 10.9s
+#    17 blob PUTs returned 500 — spanning 1.4s to 9.2s
+#
+# The ranges overlap and the slowest write of the day SUCCEEDED, which is what
+# rules out a gateway or proxy timeout: a timeout cuts at a duration, and this
+# cuts at none. Long writes are at risk and some of them survive, which is a
+# dropped FUSE handle. The 500 is raised writing Forgejo's own temporary file,
+# before any response is sent, so no client disconnect can explain it either.
+#
+# An earlier diagnosis cleared the content store by running `df` and `touch`
+# against /data — which is gitea-shared-storage on Longhorn. The blobs are on
+# /data/packages, which is THIS volume. A mount point inside a mounted path is
+# a different filesystem and `df /data` will not say so unless asked about the
+# child. Recorded because the wrong answer cost two release tags.
+#
+# 20G rather than the vault's 10G: the working set is one multi-arch image push
+# (~2-4 GB) and there is no reason to run it close. The node-local cache dir is
+# not under an ephemeral-storage limit, and worker3 had 823G free when this was
+# sized. Same durability note as the vault — a node lost inside the
+# --vfs-write-back window loses an acknowledged write — and it is easier to
+# accept here than anywhere else on this cluster: these blobs are content
+# addressed, verifiable, deliberately not backed up, and re-pushed by CI.
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -374,6 +423,10 @@ spec:
   accessModes: [ReadWriteMany]
   persistentVolumeReclaimPolicy: Retain
   storageClassName: nas-crypt-registry-blobs
+  mountOptions:
+    - vfs-cache-mode=writes
+    - vfs-cache-max-size=20G
+    - vfs-cache-max-age=6h
   claimRef:
     apiVersion: v1
     kind: PersistentVolumeClaim
