@@ -44,6 +44,43 @@ spec:
   monitoring:
     enablePodMonitor: true
 
+  # Explicit resources — required before this namespace can carry a ResourceQuota.
+  #
+  # Without these, the `postgres` container AND the operator's `bootstrap-controller`
+  # init container declare no requests or limits at all. A ResourceQuota that tracks a
+  # compute resource makes that resource MANDATORY on every container in the namespace,
+  # init containers included: the quota would not evict anything today, it would refuse
+  # the NEXT pod creation — a CNPG switchover, a minor-version bump, a node drain. The
+  # failure would arrive detached from the change that caused it, which is why the
+  # resources land in their own deployment ahead of the quota rather than beside it.
+  #
+  # One field covers both containers: CNPG copies `spec.resources` onto its
+  # bootstrap-controller (verified against authentik-pg, where both read 768Mi/2Gi).
+  #
+  # This does NOT retune Postgres. `shared_buffers` is set explicitly under
+  # `postgresql.parameters` below, so CNPG's "25% of the memory request" default never
+  # applies — the restart changes what the pod DECLARES, not how the database behaves.
+  # (conversation-history learned the other half of that lesson: its shared_buffers was
+  # 128MB because it was 25% of a 512Mi request nobody had chosen.)
+  #
+  # Sized from measurement, 2026-08-27, read from `memory.current` in each container's
+  # cgroup — the metrics API is not installed on this cluster, so `kubectl top` cannot
+  # answer this:
+  #
+  #   langfuse-pg-1 / postgres   75 Mi
+  #   langfuse-pg-2 / postgres   89 Mi
+  #   database `langfuse`        13 MB
+  #
+  # 512Mi of request comfortably holds the 128MB of shared_buffers plus backends; the
+  # 2Gi ceiling covers the worst case that is not steady state — max_connections is 100
+  # and work_mem is 4MB, so a fully-loaded server is ~530MB.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+
   postgresql:
     parameters:
       max_connections: "100"
