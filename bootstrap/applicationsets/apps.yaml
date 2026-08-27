@@ -70,6 +70,9 @@ spec:
           # in-cluster deployment was abandoned. See homelab/roborock repo README.
           - {name: signal-bridge,       owner: homelab,       repo: signal-bridge-k8s, path: k8s, autoSync: "true"}
           - {name: vaultwarden,         owner: homelab,       repo: vaultwarden-k8s, path: k8s, autoSync: "true"}
+          # Phase 3 offline render, production SSA admission, Authentik client,
+          # and dedicated backup credentials passed before registration.
+          - {name: vikunja,             owner: homelab,       repo: vikunja-k8s, path: k8s, autoSync: "true"}
           - {name: website,             owner: homelab,       repo: homelab-k8s, path: apps/website,             autoSync: "true"}
           - {name: whatsapp-bridge,     owner: homelab,       repo: homelab-k8s, path: apps/whatsapp-bridge,     autoSync: "true"}
           # Exact-revision comparison, restricted tagged smoke job, backup-lane
