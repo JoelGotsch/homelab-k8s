@@ -69,6 +69,10 @@ spec:
           # VLAN is hardened against the raw-L4 external access it needed, so the
           # in-cluster deployment was abandoned. See homelab/roborock repo README.
           - {name: signal-bridge,       owner: homelab,       repo: signal-bridge-k8s, path: k8s, autoSync: "true"}
+          # Phase 4 dark-mode service, signed images, server-side rehearsal and
+          # backup credentials passed before registration; runtime replicas are
+          # intentionally zero until Phase 5 identities exist.
+          - {name: todo-agents,         owner: homelab,       repo: todo-agents, path: k8s, autoSync: "true"}
           - {name: vaultwarden,         owner: homelab,       repo: vaultwarden-k8s, path: k8s, autoSync: "true"}
           # Phase 3 offline render, production SSA admission, Authentik client,
           # and dedicated backup credentials passed before registration.
