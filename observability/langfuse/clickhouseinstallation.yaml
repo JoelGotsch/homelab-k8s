@@ -116,15 +116,27 @@ spec:
             # of the five containers blocking langfuse from having a quota at all — the
             # other four were the CNPG cluster's, closed in the commit before this one.
             #
-            # Only `resources` is set. The operator supplies the image and command from
-            # its own default pod template and merges by container name, so restating
-            # them here would pin `ubi-minimal:latest` into this repo for no benefit and
-            # take on a Renovate obligation for a container that sleeps.
+            # Image and command are restated here, and that is NOT redundant. Naming a
+            # container in the podTemplate does not merge it with the operator's default
+            # for that name — the operator treats it as a NEW container. Setting only
+            # `resources` produced `Container{Name:"clickhouse-log", Image:"", ...}` in
+            # the operator's own diff, which is an invalid StatefulSet: the create fails,
+            # the operator still logs `reconcile completed successfully`, and ClickHouse
+            # stays down with its PVCs intact and no StatefulSet at all. Measured the
+            # hard way on 2026-08-27; ~10 minutes of downtime, no data lost.
             #
-            # 64Mi is ~20x what it uses. There is nothing here that can grow: if this
-            # container ever approaches its limit, the operator's default template has
-            # changed under us, and being OOMKilled is the right way to find that out.
+            # So this must reproduce the operator's default container exactly. `:latest`
+            # is what the operator itself pulls; pinning it by digest here would drift
+            # from the operator's default on its next release, which is a worse failure
+            # than the audit-only digest-pinning warning it avoids.
+            #
+            # 64Mi is ~20x what it uses. Nothing here can grow: the command is a sleep
+            # loop, so if it ever approaches the limit the operator's default template
+            # has changed under us, and being OOMKilled is the right way to find out.
             - name: clickhouse-log
+              image: registry.access.redhat.com/ubi8/ubi-minimal:latest
+              command: ["/bin/sh", "-c", "--"]
+              args: ["while true; do sleep 30; done;"]
               resources:
                 requests:
                   cpu: 10m
