@@ -119,3 +119,39 @@ patches:
         name: not-used
         labels:
           recurring-job-group.longhorn.io/internal: "enabled"
+
+  # Effective memory cap: 16Gi, not the component's 32Gi.
+  #
+  # ADR 0036's component ships 32Gi as a uniform runaway guard and documents this
+  # override route. The patch TIGHTENS rather than raises, and a strategic merge on
+  # `spec.hard` replaces only the key named here — the `count/*` fields are the
+  # component's real teeth and are deliberately untouched. `count/services.loadbalancers`
+  # especially: forgejo is the app whose SSH LoadBalancer the component's own comment
+  # cites as the reason that cap is 2 and not 0.
+  #
+  # Unlike the app repos, this layer references the component by relative path rather
+  # than vendoring a copy, so the component file is shared with authentik, woodpecker
+  # and every other platform/ app. Editing it would move all of them at once — hence a
+  # per-app patch even though the file is right there.
+  #
+  # forgejo sits on `homelab-generate-default-resourcequota`'s hardcoded exclusion list,
+  # so Kyverno never gave it the cluster-wide 16Gi default and the component's 32Gi was
+  # the only cap that applied.
+  #
+  # Measured 2026-08-27 from `.status.used`, never added up by hand:
+  #
+  #   limits.memory     5,248Mi of 32Gi     (16%)
+  #   requests.memory   1,056Mi of 16Gi
+  #   count/pods              4 of 40
+  #
+  # 16Gi is ~3x steady state, which leaves room for a rolling update's surge (a new pod
+  # is admitted before the old one terminates, so peak is above steady state and the
+  # quota is checked at admission).
+  - patch: |-
+      apiVersion: v1
+      kind: ResourceQuota
+      metadata:
+        name: homelab-namespace-quota
+      spec:
+        hard:
+          limits.memory: 16Gi

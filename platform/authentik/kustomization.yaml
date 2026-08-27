@@ -133,3 +133,46 @@ configMapGenerator:
       # rename the ConfigMap on every edit and break the static volume
       # reference in values.yaml.
       disableNameSuffixHash: true
+
+# ---- Effective memory cap: 20Gi, not the component's 32Gi and not the 16Gi default ----
+#
+# ADR 0036's component ships 32Gi as a uniform runaway guard and documents this override
+# route. A strategic merge on `spec.hard` replaces only the key named here; the `count/*`
+# fields are the component's real teeth and are deliberately untouched.
+#
+# This layer references the component by relative path rather than vendoring a copy, so
+# the file is shared with forgejo, woodpecker and every other platform/ app. Editing it
+# would move all of them at once — hence a per-app patch even though the file is local.
+#
+# **Why 20Gi and not the 16Gi every other first-party namespace is getting.** Steady
+# state is 9Gi, measured from `.status.used` and never added up by hand:
+#
+#   authentik-pg-1   3Gi    2Gi postgres + a 1Gi always-on barman sidecar
+#   authentik-pg-2   3Gi    same
+#   authentik-server 2Gi
+#   authentik-worker 1Gi
+#                    ---
+#                    9Gi
+#
+# A ResourceQuota is checked at ADMISSION, so what has to fit is the peak during a
+# rollout, not the steady state. Both Deployments are `RollingUpdate` with
+# `maxSurge: 25%` on `replicas: 1`, and maxSurge rounds UP — so each rolls by admitting a
+# second pod before terminating the first. Server and worker rolling together is +3Gi;
+# a CNPG instance being replaced (a switchover, a minor-version bump, a node drain) is
+# another +3Gi. That is a 15Gi worst case.
+#
+# Against a 16Gi cap that leaves 1Gi, and the failure mode is not a clean error — it is
+# a pod that is never admitted while the Deployment reports itself as progressing. This
+# cluster has already paid for that once: `enrich-video` in conversation-history sat
+# `active` with no pod until `activeDeadlineSeconds` killed it, reporting
+# `DeadlineExceeded`, which reads as a slow lane and was a lane that never started.
+# 20Gi leaves 5Gi over the worst realistic case.
+patches:
+  - patch: |-
+      apiVersion: v1
+      kind: ResourceQuota
+      metadata:
+        name: homelab-namespace-quota
+      spec:
+        hard:
+          limits.memory: 20Gi
