@@ -325,6 +325,13 @@ repos:
         # python3 or (non-vendored chart) the repo is unreachable: an env/network
         # blip must never wedge a commit. Bypass: SKIP_HELM_VALUES_KEYS_CHECK=1.
 
+      - id: check-authentik-security-context
+        name: Authentik security context keys survive the pinned chart render
+        entry: scripts/check-authentik-security-context.sh
+        language: script
+        pass_filenames: false
+        files: '^(platform/authentik/(values|kustomization)\.yaml|scripts/check-authentik-security-context\.sh)$'
+
       - id: check-retention-contract
         name: cluster-owned Longhorn selectors match the finite lifecycle contract
         entry: scripts/check-retention-contract.sh

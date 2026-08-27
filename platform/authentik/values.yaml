@@ -196,7 +196,9 @@ server:
   startupProbe:
     timeoutSeconds: 10
 
-  podSecurityContext:
+  # Chart 2026.5.4 calls this `securityContext`; the older
+  # `podSecurityContext` key is accepted by YAML but ignored by the templates.
+  securityContext:
     runAsNonRoot: true
     runAsUser: 1000
     runAsGroup: 1000
@@ -239,7 +241,8 @@ worker:
     limits:
       memory: 1Gi
 
-  podSecurityContext:
+  # Chart 2026.5.4 calls this `securityContext`; keep in lockstep with server.
+  securityContext:
     runAsNonRoot: true
     runAsUser: 1000
     runAsGroup: 1000

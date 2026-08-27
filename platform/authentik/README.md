@@ -24,7 +24,7 @@ copies + adapts that template into its own manifests.
 
 | File | Purpose |
 |---|---|
-| `namespace.yaml` | `authentik` ns; PSA restricted. |
+| `namespace.yaml` | `authentik` ns; PSA baseline. Server and worker still declare restricted-style uid-1000 pod/container contexts, asserted by `scripts/check-authentik-security-context.sh`. |
 | `kustomization.yaml` | Authentik helm chart `2026.2.0`; resource list below. |
 | `values.yaml` | Server + worker, external CNPG (Postgres-backed cache + queue — no Redis), JSON logs, telemetry/error-reporting disabled, readonly rootfs, dropped caps. |
 | `cnpg-cluster.yaml` | 2-instance CNPG `authentik-pg` on `longhorn-replica3`; barman → MinIO; **90d retention** (longer than other apps — operator-identity data warrants longer recovery window). |
