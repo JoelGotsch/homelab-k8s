@@ -1,0 +1,114 @@
+# Replacement for the stock kube-prometheus-stack `KubeJobFailed` alert
+# (disabled via `defaultRules.disabled.KubeJobFailed: true` in values.yaml).
+#
+# Root cause of the false positives (investigated 2026-08-24, 13 stale
+# `KubeJobFailed`/`BackupCronJobFailed` alerts found firing via ntfy):
+# the stock expr is `kube_job_failed{...} > 0` with no notion of
+# "did a LATER run of the same CronJob succeed." Kubernetes intentionally
+# keeps old Job objects around after they finish
+# (failedJobsHistoryLimit/successfulJobsHistoryLimit/ttlSecondsAfterFinished,
+# for debuggability), and each retained Failed Job keeps emitting its
+# `kube_job_failed{condition="true"}` series forever — so the alert never
+# self-resolves until the old Job object happens to get garbage collected,
+# even though the CronJob itself has been healthy for days.
+#
+# Fix: for a CronJob-owned Job, only keep firing while no LATER run of the
+# same CronJob has succeeded. Two cases, OR'd together:
+#   A. the owning CronJob HAS a recorded success (kube_cronjob_status_
+#      last_successful_time exists) — fire only if this Job's start_time
+#      predates that success (i.e. this exact failure hasn't been
+#      superseded yet).
+#   B. the owning CronJob has NEVER succeeded — last_successful_time has
+#      NO series at all (kube-state-metrics only emits it once
+#      .status.lastSuccessfulTime is first set). A bare `>` against an
+#      absent series silently drops the match in PromQL rather than
+#      treating it as unbounded, so this needs its own `unless` clause —
+#      verified live against contacts-sync's first-ever (pre-any-success)
+#      failure on 2026-08-18, which the naive comparison silently missed.
+# Standalone Jobs (no CronJob owner) fire unconditionally, same as stock.
+#
+# Live-validated 2026-08-24 against Prometheus (both point-in-time and
+# query_range): quiet at present, fires for the historical
+# restic-minio-to-hetzner-29780775 failure (case A), fires for the
+# historical contacts-sync-29783777 first-ever failure (case B), and
+# correctly stops firing once contacts-sync's first later success lands.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kube-job-failed-corrected
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: kube-job-failed-corrected
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: kube-job-failed-corrected
+      interval: 1m
+      rules:
+        - alert: KubeJobFailed
+          expr: |
+            (
+              kube_job_failed{job="kube-state-metrics", condition="true"} == 1
+              unless on(namespace, job_name)
+                kube_job_owner{job="kube-state-metrics", owner_kind="CronJob"}
+            )
+            or
+            (
+              (
+                (
+                  kube_job_status_start_time{job="kube-state-metrics"}
+                  and on(namespace, job_name)
+                    (kube_job_failed{job="kube-state-metrics", condition="true"} == 1)
+                )
+                * on(namespace, job_name) group_left(owner_name)
+                  kube_job_owner{job="kube-state-metrics", owner_kind="CronJob"}
+              )
+              and (
+                (
+                  (
+                    (
+                      kube_job_status_start_time{job="kube-state-metrics"}
+                      and on(namespace, job_name)
+                        (kube_job_failed{job="kube-state-metrics", condition="true"} == 1)
+                    )
+                    * on(namespace, job_name) group_left(owner_name)
+                      kube_job_owner{job="kube-state-metrics", owner_kind="CronJob"}
+                  )
+                  > on(namespace, owner_name) group_left()
+                    label_replace(
+                      kube_cronjob_status_last_successful_time{job="kube-state-metrics"},
+                      "owner_name", "$1", "cronjob", "(.*)"
+                    )
+                )
+                or
+                (
+                  (
+                    (
+                      kube_job_status_start_time{job="kube-state-metrics"}
+                      and on(namespace, job_name)
+                        (kube_job_failed{job="kube-state-metrics", condition="true"} == 1)
+                    )
+                    * on(namespace, job_name) group_left(owner_name)
+                      kube_job_owner{job="kube-state-metrics", owner_kind="CronJob"}
+                  )
+                  unless on(namespace, owner_name)
+                    label_replace(
+                      kube_cronjob_status_last_successful_time{job="kube-state-metrics"},
+                      "owner_name", "$1", "cronjob", "(.*)"
+                    )
+                )
+              )
+            )
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Job failed to complete.
+            description: >-
+              Job {{ $labels.namespace }}/{{ $labels.job_name }} failed to
+              complete, and no later run of its owning CronJob (if any) has
+              succeeded since. Standalone Jobs (no CronJob owner) fire
+              unconditionally; CronJob-owned Jobs self-resolve once a later
+              scheduled run succeeds — removing the failed Job object also
+              clears this alert immediately, same as stock KubeJobFailed.
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/observability/alert-routing.md"

@@ -82,12 +82,72 @@ spec:
       interval: 1m
       rules:
         - alert: BackupCronJobFailed
-          # `kube_job_status_failed` (from kube-state-metrics)
-          # increments per failed completion. A non-zero value
-          # for >1m = the most recent run failed and isn't
-          # being retried by backoffLimit.
+          # Corrected 2026-08-24 (13 stale false-positives found via ntfy
+          # investigation). Two bugs in the prior expr, both root-caused
+          # and live-validated against Prometheus:
+          #
+          # 1. Wrong metric: `kube_job_status_failed` is a COUNT OF FAILED
+          #    PODS during a Job's lifetime, not its terminal outcome — a
+          #    Job that failed once then succeeded on retry (within
+          #    backoffLimit) still shows this >0 forever after. Confirmed
+          #    live: `enrich-backfill` shows kube_job_status_failed=1 while
+          #    status=Complete. `kube_job_failed{condition="true"}` is the
+          #    correct terminal-condition metric (matches upstream
+          #    KubeJobFailed's own choice).
+          # 2. No CronJob-awareness: Kubernetes intentionally retains old
+          #    Job objects (failedJobsHistoryLimit/ttlSecondsAfterFinished),
+          #    so a retained Failed Job keeps emitting its failure metric
+          #    forever, even after a LATER run of the same CronJob has
+          #    succeeded. Fixed the same way as kube-job-failed-rules.yaml
+          #    in observability/kube-prometheus-stack (see that file's
+          #    header for the full case A/case B derivation, including the
+          #    "CronJob has never succeeded" edge case): only keep firing
+          #    while no later run of the owning CronJob has succeeded.
           expr: |
-            kube_job_status_failed{namespace="backup-cronjobs"} > 0
+            (
+              (
+                kube_job_status_start_time{namespace="backup-cronjobs"}
+                and on(namespace, job_name)
+                  (kube_job_failed{namespace="backup-cronjobs", condition="true"} == 1)
+              )
+              * on(namespace, job_name) group_left(owner_name)
+                kube_job_owner{namespace="backup-cronjobs", owner_kind="CronJob"}
+            )
+            and (
+              (
+                (
+                  (
+                    kube_job_status_start_time{namespace="backup-cronjobs"}
+                    and on(namespace, job_name)
+                      (kube_job_failed{namespace="backup-cronjobs", condition="true"} == 1)
+                  )
+                  * on(namespace, job_name) group_left(owner_name)
+                    kube_job_owner{namespace="backup-cronjobs", owner_kind="CronJob"}
+                )
+                > on(namespace, owner_name) group_left()
+                  label_replace(
+                    kube_cronjob_status_last_successful_time{namespace="backup-cronjobs"},
+                    "owner_name", "$1", "cronjob", "(.*)"
+                  )
+              )
+              or
+              (
+                (
+                  (
+                    kube_job_status_start_time{namespace="backup-cronjobs"}
+                    and on(namespace, job_name)
+                      (kube_job_failed{namespace="backup-cronjobs", condition="true"} == 1)
+                  )
+                  * on(namespace, job_name) group_left(owner_name)
+                    kube_job_owner{namespace="backup-cronjobs", owner_kind="CronJob"}
+                )
+                unless on(namespace, owner_name)
+                  label_replace(
+                    kube_cronjob_status_last_successful_time{namespace="backup-cronjobs"},
+                    "owner_name", "$1", "cronjob", "(.*)"
+                  )
+              )
+            )
           for: 1m
           labels:
             severity: warning

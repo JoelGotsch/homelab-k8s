@@ -394,3 +394,14 @@ defaultRules:
     # (separate commit): first-party PrometheusRule that
     # ships the single-instance-safe variants back.
     alertmanager: false
+  # Per-alert disable (distinct from the whole-family toggles
+  # above). KubeJobFailed's stock expr (`kube_job_failed > 0`,
+  # no `for:` decay) fires forever on a Failed Job object that
+  # Kubernetes intentionally retains for debugging
+  # (failedJobsHistoryLimit/ttlSecondsAfterFinished), even after
+  # a LATER run of the same CronJob has succeeded — 13 stale
+  # alerts confirmed 2026-08-24. Replaced by the CronJob-aware
+  # rule in kube-job-failed-rules.yaml, which self-resolves once
+  # a later run of the owning CronJob succeeds.
+  disabled:
+    KubeJobFailed: true
