@@ -104,6 +104,33 @@ spec:
                 allowPrivilegeEscalation: false
                 capabilities:
                   drop: [ALL]
+            # The Altinity operator appends this container to every ClickHouse pod
+            # whether or not the CHI asks for it. It is a placeholder: its command is
+            # literally `while true; do sleep 30; done`, it tails nothing, and it exists
+            # so `kubectl exec -c clickhouse-log` has somewhere to land. Measured at
+            # 3 Mi.
+            #
+            # It is named here for one reason: it shipped with NO requests and NO
+            # limits, and a ResourceQuota that tracks a compute resource makes that
+            # resource mandatory on every container in the namespace. This was the last
+            # of the five containers blocking langfuse from having a quota at all — the
+            # other four were the CNPG cluster's, closed in the commit before this one.
+            #
+            # Only `resources` is set. The operator supplies the image and command from
+            # its own default pod template and merges by container name, so restating
+            # them here would pin `ubi-minimal:latest` into this repo for no benefit and
+            # take on a Renovate obligation for a container that sleeps.
+            #
+            # 64Mi is ~20x what it uses. There is nothing here that can grow: if this
+            # container ever approaches its limit, the operator's default template has
+            # changed under us, and being OOMKilled is the right way to find that out.
+            - name: clickhouse-log
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 64Mi
                 # Cannot be readOnlyRootFilesystem: true here — ClickHouse
                 # writes config + temporary files to the rootfs at startup.
                 # Volume mounts cover /var/lib/clickhouse + /var/log/clickhouse.
