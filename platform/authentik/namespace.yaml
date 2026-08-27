@@ -2,6 +2,17 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: authentik
+  annotations:
+    # Opts out of the cluster-wide 16Gi `default-quota` that
+    # `homelab-generate-default-resourcequota` generates. authentik is also on that
+    # policy's hardcoded exclusion list today, so this is belt-and-braces — but that
+    # list is precisely the thing we want to be able to shrink, and the moment
+    # authentik came off it Kyverno would generate a 16Gi quota which, being tighter
+    # than the 20Gi in kustomization.yaml, would become the binding one and start
+    # refusing pods mid-rollout. This makes the 20Gi survive that cleanup.
+    bypass.homelab.internal/homelab-generate-default-resourcequota:
+      "Sized in kustomization.yaml: 9Gi steady state plus a 6Gi rollout surge
+      (server, worker and a CNPG instance) does not fit the 16Gi default."
   labels:
     # ADR 0036: first-party namespace enrolment.
     homelab.internal/first-party: "true"
