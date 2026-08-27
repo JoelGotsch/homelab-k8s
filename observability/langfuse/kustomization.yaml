@@ -46,6 +46,20 @@ resources:
 # Build-only ConfigMap for the HTTPRoute-hostname replacement below.
 components:
   - ../../components/site-config
+  # ADR 0036's governance floor: a LimitRange and a ResourceQuota. langfuse has
+  # carried `homelab.internal/first-party: "true"` since it was created and never had
+  # either — it was the only first-party namespace in the cluster with NO quota at all,
+  # so nothing bounded a runaway here.
+  #
+  # It could not simply be added. A ResourceQuota that tracks a compute resource makes
+  # that resource MANDATORY on every container in the namespace, init containers
+  # included, and five containers here declared neither requests nor limits: the
+  # `postgres` and `bootstrap-controller` containers in both CNPG instances, and the
+  # operator-injected `clickhouse-log`. Adding the quota first would not have evicted
+  # anything — it would have refused the NEXT pod creation, at a switchover or a node
+  # drain, arriving detached from the change that caused it. b1a0cd8 and 49bf81b closed
+  # all five first, which is why this component arrives third.
+  - ../../components/first-party-namespace
 
 # Resolve the HTTPRoute hostname from the single site-config (no hardcoded
 # domain): `langfuse.FQDN_SUFFIX` -> `langfuse.<fqdn_suffix>`. Provenance: this rule
@@ -70,3 +84,44 @@ replacements:
         fieldPaths:
           - spec.template.spec.containers.[name=langfuse-worker].env.[name=NEXTAUTH_URL].value
         options: { delimiter: '.', index: 1 }
+
+# ---- Effective memory cap: 20Gi, not the component's 32Gi and not the 16Gi default ----
+#
+# A strategic merge on `spec.hard` replaces only the key named here; the `count/*`
+# fields are the component's real teeth and are untouched.
+#
+# **Why 20Gi.** A quota is checked at ADMISSION, so what must fit is the rollout peak,
+# not the steady state. Declared limits, after the two commits above:
+#
+#   chi-langfuse-langfuse-0-0-0   4,160Mi   4Gi clickhouse + 64Mi clickhouse-log
+#   langfuse-pg-1                 3,072Mi   2Gi postgres + a 1Gi always-on barman sidecar
+#   langfuse-pg-2                 3,072Mi   same
+#   langfuse-web                  2,048Mi
+#   langfuse-worker               1,024Mi
+#   langfuse-redis-primary-0        256Mi
+#                                --------
+#                                13,632Mi
+#
+# Both Deployments are RollingUpdate with maxSurge 25% on replicas 1, and maxSurge
+# rounds UP, so each admits a second pod before terminating the first: +2Gi and +1Gi.
+# The clickhouse-createdb Job can be running through any of it: +128Mi. Peak 16,832Mi,
+# which a 16Gi cap would refuse.
+#
+# The StatefulSets and the CNPG cluster do NOT surge, and that is a property of their
+# storage rather than their strategy: every volume here is ReadWriteOnce, so a second
+# pod for the same instance could never attach and the controllers delete before they
+# create.
+#
+# Note how far the declared numbers are from the real ones — actual usage across the
+# whole namespace is about 1.6Gi, against 13.6Gi of declared ceilings. That is what a
+# limits quota governs: the sum of ceilings, reserving nothing. `requests.memory` is the
+# reservation, and it is left at the component's 16Gi against ~3.4Gi in use.
+patches:
+  - patch: |-
+      apiVersion: v1
+      kind: ResourceQuota
+      metadata:
+        name: homelab-namespace-quota
+      spec:
+        hard:
+          limits.memory: 20Gi

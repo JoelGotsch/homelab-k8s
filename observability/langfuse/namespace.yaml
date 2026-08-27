@@ -7,6 +7,17 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: langfuse
+  annotations:
+    # Opts out of the cluster-wide 16Gi `default-quota` that
+    # `homelab-generate-default-resourcequota` generates. langfuse is also on that
+    # policy's hardcoded exclusion list today, so this is belt-and-braces — but that
+    # list is exactly what we want to be able to shrink, and 16Gi would not merely be
+    # tight here: the rollout peak is 16,832Mi, so a generated default would refuse
+    # the surge pod of any web or worker rollout while reporting the Deployment as
+    # progressing.
+    bypass.homelab.internal/homelab-generate-default-resourcequota:
+      "Sized in kustomization.yaml: 13,632Mi of declared ceilings plus a 3,200Mi
+      rollout surge exceeds the 16Gi default."
   labels:
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/audit: restricted

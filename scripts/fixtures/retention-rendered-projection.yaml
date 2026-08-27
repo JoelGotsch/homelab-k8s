@@ -17,7 +17,7 @@ cluster_defaults:
     chart_default_enabled: false
 layers:
 - path: observability/langfuse
-  input_digest_sha256: fa0691900c005a466b52c987ad1a7893b7a357bbf3380c0e50b8bdefa8db83e7
+  input_digest_sha256: 6f60d6db2ea7cbe1115f3063779de2aa2e8eeddb9dac3b97d0cb7bbf4c5fceb2
   chart:
     name: langfuse
     repository: oci://registry.homelab.internal/homelab
