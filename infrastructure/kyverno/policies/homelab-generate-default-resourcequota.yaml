@@ -96,15 +96,29 @@ spec:
               - kube-system
               - argocd
               - openbao
-              - approval-channel
-              - authentik
-              - forgejo
+              # Application namespaces are deliberately no longer listed here
+              # (2026-08-27). Being named above is not a decision about a
+              # workload's memory — it is a decision to skip the default and let
+              # whatever else exists become the cap. What existed was the ADR-0036
+              # component's `homelab-namespace-quota`: 32Gi, byte-identical in all
+              # 21 namespaces that carry it, tuned for none of them. Nine apps were
+              # governed by an untuned number nobody chose for them.
+              #
+              # An app that genuinely needs more than the default now says so in
+              # its own repo, with the bypass annotation above and a quota sized
+              # from `.status.used`. Two do: `immich` (24Gi — immich-server is 8Gi
+              # by itself) and `conversation-history` (20Gi — two 4Gi CNPG pods
+              # plus a 3Gi video lane).
+              #
+              # The seven removed were measured against the default first: all fit
+              # on all four dimensions, the largest being authentik at 9Gi of 16Gi
+              # and 1200m of 4 CPU. `langfuse` went with them — no such namespace
+              # exists.
+              #
+              # `immich` stays for one more cycle, until its bypass annotation has
+              # been observed live. The annotation is what protects it; this entry
+              # only stops the two changes having to land in the same instant.
               - immich
-              - langfuse
-              - llm-gateway
-              - nextcloud
-              - paperless
-              - vaultwarden
       generate:
         apiVersion: v1
         kind: ResourceQuota
