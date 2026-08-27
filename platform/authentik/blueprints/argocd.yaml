@@ -1,7 +1,7 @@
 # BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
-# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
-#   ansible-playbook ansible/playbooks/00-render-static.yml
-# (from the homelab-infra repo root).
+# RENDERED FILE — DO NOT EDIT. Edit the inventory/template and run:
+#   ansible-playbook ansible/playbooks/01-render-authentik-blueprints.yml
+# (from the homelab-infra repo root; add `-e oidc_slug=<slug>` to narrow).
 # END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
 # Authentik blueprint — Argo CD OIDC client.
 #
@@ -44,6 +44,12 @@ entries:
       client_type: confidential
       client_id: !Env AUTHENTIK_BOOTSTRAP_ARGOCD_CLIENT_ID
       client_secret: !Env AUTHENTIK_BOOTSTRAP_ARGOCD_CLIENT_SECRET
+      # Authentik 2026.5 defaults new providers to an empty grant allowlist.
+      # Browser OIDC then fails with `Invalid grant_type for provider` even
+      # though the provider, application, client ID, and redirect all exist.
+      grant_types:
+        - authorization_code
+        - refresh_token
       redirect_uris:
         - matching_mode: strict
           url: "https://argocd.lab.vyramo.com/auth/callback"

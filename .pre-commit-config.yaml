@@ -332,6 +332,13 @@ repos:
         pass_filenames: false
         files: '^(platform/authentik/(values|kustomization)\.yaml|scripts/check-authentik-security-context\.sh)$'
 
+      - id: check-authentik-oidc-grant-types
+        name: generated Authentik OIDC providers have usable grant allowlists
+        entry: scripts/check-authentik-oidc-grant-types.sh
+        language: script
+        pass_filenames: false
+        files: '^(platform/authentik/blueprints/|scripts/check-authentik-oidc-grant-types\.sh)$'
+
       - id: check-retention-contract
         name: cluster-owned Longhorn selectors match the finite lifecycle contract
         entry: scripts/check-retention-contract.sh

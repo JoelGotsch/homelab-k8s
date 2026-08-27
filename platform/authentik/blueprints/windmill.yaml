@@ -33,6 +33,12 @@ entries:
       client_type: confidential
       client_id: "windmill-homelab"
       client_secret: !Env AUTHENTIK_BOOTSTRAP_WINDMILL_CLIENT_SECRET
+      # Authentik 2026.5 defaults new providers to an empty grant allowlist.
+      # Browser OIDC then fails with `Invalid grant_type for provider` even
+      # though the provider, application, client ID, and redirect all exist.
+      grant_types:
+        - authorization_code
+        - refresh_token
       redirect_uris:
         - matching_mode: strict
           url: "https://windmill.lab.vyramo.com/user/login_callback/authentik"

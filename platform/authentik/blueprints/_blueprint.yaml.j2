@@ -28,6 +28,9 @@
                                OAuth2Provider section's inline
                                comment block. ArgoCD uses this to
                                document the `groups`-scope rationale.
+     - app.extra_redirect_uris — additional strict callback URLs after the
+                                 canonical web callback. Immich uses this for
+                                 its mobile custom-scheme deep link.
 #}
 {%- set _display = app.display_name | default(app.name) -%}
 {%- set _desc = app.description -%}
@@ -64,9 +67,19 @@ entries:
       client_id: !Env AUTHENTIK_BOOTSTRAP_{{ app.slug | upper }}_CLIENT_ID
 {% endif %}
       client_secret: !Env AUTHENTIK_BOOTSTRAP_{{ app.slug | upper }}_CLIENT_SECRET
+      # Authentik 2026.5 defaults new providers to an empty grant allowlist.
+      # Browser OIDC then fails with `Invalid grant_type for provider` even
+      # though the provider, application, client ID, and redirect all exist.
+      grant_types:
+        - authorization_code
+        - refresh_token
       redirect_uris:
         - matching_mode: strict
           url: "https://{{ app.slug }}.{{ homelab_internal_subdomain }}.{{ homelab_domain }}{{ app.redirect_path }}"
+{% for redirect_uri in app.extra_redirect_uris | default([]) %}
+        - matching_mode: strict
+          url: "{{ redirect_uri }}"
+{% endfor %}
       signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
       sub_mode: hashed_user_id
       include_claims_in_id_token: true
