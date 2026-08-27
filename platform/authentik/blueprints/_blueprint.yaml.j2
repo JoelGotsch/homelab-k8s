@@ -58,7 +58,11 @@ entries:
       authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
       client_type: confidential
+{% if app.client_id is defined %}
+      client_id: "{{ app.client_id }}"
+{% else %}
       client_id: !Env AUTHENTIK_BOOTSTRAP_{{ app.slug | upper }}_CLIENT_ID
+{% endif %}
       client_secret: !Env AUTHENTIK_BOOTSTRAP_{{ app.slug | upper }}_CLIENT_SECRET
       redirect_uris:
         - matching_mode: strict

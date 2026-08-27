@@ -57,6 +57,13 @@ repos:
         pass_filenames: false
         files: '(externalsecret.*\.ya?ml|README\.md)$'
 
+      - id: check-windmill-workers-rendered
+        name: external Windmill worker resources match todo-agents projects.yaml
+        entry: scripts/check-windmill-workers-rendered.sh
+        language: script
+        pass_filenames: false
+        files: '^(bootstrap/applicationsets/apps\.yaml|scripts/check-windmill-workers-rendered\.sh)$'
+
       - id: check-openbao-snapshot-auth
         name: OpenBao snapshot auth is short-lived, scoped, and static-token-free
         entry: scripts/check-openbao-snapshot-auth.sh
@@ -214,7 +221,9 @@ repos:
         # MEDIUM-3, checklist E): once a namespace running a CNPG cluster
         # opts into an egress default-deny, its DB pods MUST get egress to
         # kube-apiserver (443+6443), DNS, MinIO, and their replication
-        # peer — or the instance manager CrashLoopBackOffs. Local script.
+        # peer — or the instance manager CrashLoopBackOffs. It discovers
+        # locally checked-out app-owned repos from apps.yaml, so repository
+        # cutovers cannot silently move a CNPG layer outside its scan. Local script.
 
       - id: check-registry-critical-path
         name: first-party registry ownership and dynamic upstream invariants

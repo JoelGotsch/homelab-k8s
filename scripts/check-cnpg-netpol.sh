@@ -44,6 +44,26 @@ yq --version 2>&1 | grep -q 'mikefarah\|version v[4-9]' \
 
 fail=0
 checked=0
+roots=(apps platform observability)
+
+# App manifests increasingly live in app-owned sibling repositories. Discover
+# those roots from the same explicit ApplicationSet registry Argo consumes, so
+# this guard cannot report green while checking only the legacy central copies.
+# Missing sibling checkouts are skipped: a standalone homelab-k8s clone must
+# remain usable. Extra directories may be passed for a pre-cutover rehearsal.
+while IFS=$'\t' read -r repo path; do
+  candidate="../$repo/$path"
+  [ -d "$candidate" ] && roots+=("$candidate")
+done < <(yq -r '.spec.generators[].list.elements[]
+  | select(.repo != "homelab-k8s") | [.repo, .path] | @tsv' \
+  bootstrap/applicationsets/apps.yaml)
+for candidate in "$@"; do
+  [ -d "$candidate" ] || {
+    echo "FAIL: requested manifest root does not exist: $candidate"
+    exit 1
+  }
+  roots+=("$candidate")
+done
 
 # Every dir that ships a CNPG cluster manifest.
 while IFS= read -r cluster; do
@@ -127,7 +147,8 @@ while IFS= read -r cluster; do
     echo "      -> model on apps/paperless/networkpolicy.yaml (the correct template)."
     fail=1
   fi
-done < <(grep -rl "postgresql.cnpg.io" --include='cnpg-cluster*.yaml' apps platform observability 2>/dev/null)
+done < <(find "${roots[@]}" -type f -name 'cnpg-cluster*.yaml' -exec \
+  grep -l "postgresql.cnpg.io" {} + 2>/dev/null | sort -u)
 
 if [ "$fail" -eq 0 ]; then
   echo "OK: $checked CNPG namespace(s) with an egress default-deny carry the full DB egress rule set."

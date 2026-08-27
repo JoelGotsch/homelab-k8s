@@ -45,6 +45,7 @@ err()  { printf 'ERROR: %s\n' "$*" >&2; }
 note() { printf '  %s\n' "$*"; }
 
 HELM_BIN="${HELM_BIN:-helm3}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 REGISTRY="${REGISTRY:-registry.homelab.internal}"
 ORG="${ORG:-homelab}"
 CA_FILE="${CA_FILE:-$HOME/.config/homelab/ca.pem}"
@@ -79,7 +80,8 @@ usage: $0 [--dry-run | --apply] [chart-name ...]
                  one, or the lock would launder a mismatch into the record)
 
 Reads charts.lock.yaml in the current repo. env: HELM_BIN (default helm3),
-REGISTRY, ORG, CA_FILE, BAO_ADDR/BAO_CACERT for the push credential.
+PYTHON_BIN (default python3; must provide PyYAML), REGISTRY, ORG, CA_FILE,
+BAO_ADDR/BAO_CACERT for the push credential.
 EOF
     exit 2 ;;
   *) break ;;                # first non-flag: the rest are chart-name filters
@@ -87,9 +89,14 @@ esac
 done
 ONLY=("$@")
 
-for t in "$HELM_BIN" python3 bao; do
+for t in "$HELM_BIN" "$PYTHON_BIN" bao; do
   command -v "$t" >/dev/null 2>&1 || { err "required tool missing: $t"; exit 1; }
 done
+"$PYTHON_BIN" -c 'import yaml' >/dev/null 2>&1 || {
+  err "$PYTHON_BIN is present but cannot import yaml (PyYAML required)"
+  err "select a prepared interpreter with PYTHON_BIN=<path-or-name>"
+  exit 1
+}
 [ -f charts.lock.yaml ] || { err "no charts.lock.yaml in $(pwd)"; exit 1; }
 [ -f "$CA_FILE" ] || { err "CA bundle not found at $CA_FILE.
       Get it with (it is a PUBLIC value):
@@ -123,7 +130,7 @@ registry_login() {
   logged_in=true
 }
 
-python3 - charts.lock.yaml "${ONLY[@]:-}" <<'PY' > "$work/entries.tsv"
+"$PYTHON_BIN" - charts.lock.yaml "${ONLY[@]:-}" <<'PY' > "$work/entries.tsv"
 import sys, yaml
 lock = yaml.safe_load(open(sys.argv[1])) or []
 only = {a for a in sys.argv[2:] if a}
@@ -199,7 +206,7 @@ while IFS=$'\t' read -r name version upstream want_digest; do
 done < "$work/entries.tsv"
 
 if [ "$UPDATE_LOCK" = true ] && [ -s "$work/verified.tsv" ]; then
-  python3 - charts.lock.yaml "$work/verified.tsv" <<'PY2'
+  "$PYTHON_BIN" - charts.lock.yaml "$work/verified.tsv" <<'PY2'
 import sys, yaml
 lockf, tsv = sys.argv[1], sys.argv[2]
 seen = {}
