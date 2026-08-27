@@ -153,7 +153,25 @@ k get backups.postgresql.cnpg.io -n "$NS" \
   | tail -5
 
 say "6. recoverability"
-k get clusters.postgresql.cnpg.io -n "$NS" "$CLUSTER" \
-  -o jsonpath='lastSuccessfulBackup={.status.lastSuccessfulBackup}{"\n"}firstRecoverabilityPoint={.status.firstRecoverabilityPoint}{"\n"}'
+if [ -n "$plugin" ]; then
+  # CNPG-I plugins own backup status. The legacy Cluster fields remain empty;
+  # the ObjectStore maps each server name to its recovery window.
+  last_successful_backup="$(k get objectstores.barmancloud.cnpg.io -n "$NS" "$plugin" \
+    -o "jsonpath={.status.serverRecoveryWindow.$CLUSTER.lastSuccessfulBackupTime}")"
+  first_recoverability_point="$(k get objectstores.barmancloud.cnpg.io -n "$NS" "$plugin" \
+    -o "jsonpath={.status.serverRecoveryWindow.$CLUSTER.firstRecoverabilityPoint}")"
+  status_source="ObjectStore/$plugin"
+else
+  last_successful_backup="$(k get clusters.postgresql.cnpg.io -n "$NS" "$CLUSTER" \
+    -o jsonpath='{.status.lastSuccessfulBackup}')"
+  first_recoverability_point="$(k get clusters.postgresql.cnpg.io -n "$NS" "$CLUSTER" \
+    -o jsonpath='{.status.firstRecoverabilityPoint}')"
+  status_source="Cluster/$CLUSTER"
+fi
+echo "status source: $status_source"
+echo "lastSuccessfulBackup=$last_successful_backup"
+echo "firstRecoverabilityPoint=$first_recoverability_point"
+[ -n "$last_successful_backup" ] || fail "$status_source has no last successful backup timestamp"
+[ -n "$first_recoverability_point" ] || fail "$status_source has no first recoverability point"
 
 printf '\nOK: %s/%s backup lane verified against S3.\n' "$NS" "$CLUSTER"
