@@ -87,6 +87,7 @@ configMapGenerator:
       - blueprints/paperless.yaml
       - blueprints/argocd.yaml
       - blueprints/windmill.yaml
+      - blueprints/todo.yaml
       # STATIC (not rendered from _blueprint.yaml.j2) — access binding +
       # email scope mapping; vaultwarden's provider/app are UI-managed
       # (see the file's header).
