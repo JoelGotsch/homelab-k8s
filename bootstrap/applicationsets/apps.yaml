@@ -72,9 +72,9 @@ spec:
           - {name: vaultwarden,         owner: homelab,       repo: vaultwarden-k8s, path: k8s, autoSync: "true"}
           - {name: website,             owner: homelab,       repo: homelab-k8s, path: apps/website,             autoSync: "true"}
           - {name: whatsapp-bridge,     owner: homelab,       repo: homelab-k8s, path: apps/whatsapp-bridge,     autoSync: "true"}
-          # First external-repo sync stays manual until the exact-revision
-          # Argo comparison, restricted smoke worker, and restore gate pass.
-          - {name: windmill,            owner: homelab,       repo: windmill-k8s, path: k8s, autoSync: "false"}
+          # Exact-revision comparison, restricted tagged smoke job, backup-lane
+          # proof, and disposable restore all passed on 2026-08-27.
+          - {name: windmill,            owner: homelab,       repo: windmill-k8s, path: k8s, autoSync: "true"}
   template:
     metadata:
       name: 'app-{{.name}}'
