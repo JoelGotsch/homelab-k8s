@@ -5,6 +5,37 @@
 # Numbers tuned for homelab scale (4 concurrent workflows ×
 # 2 steps each = ~8 step Pods at once). Resize as the
 # operator's pipeline mix grows.
+#
+# ─────────────────────────────────────────────────────────────
+# READ THIS BEFORE TRUSTING THE NUMBERS BELOW (2026-08-28)
+#
+# This namespace has TWO ResourceQuotas, not one. Kyverno's
+# `homelab-generate-default-quota` also generates `default-quota`
+# here, and when several quotas name the same resource the
+# TIGHTEST binds. So half of what this file says is overridden:
+#
+#   resource         this file   default-quota   EFFECTIVE
+#   requests.cpu     8           4               4
+#   requests.memory  16Gi        8Gi             8Gi
+#   limits.memory    32Gi        16Gi            16Gi
+#   limits.cpu       32          (unset)         32
+#   pods             20          50 (count/pods) 20
+#
+# Only limits.cpu and pods are actually this file's to set.
+# Editing requests.cpu or limits.memory here changes nothing —
+# it changes a number nobody reads, which is worse than leaving
+# it, because the next person sizes a pipeline against it.
+#
+# Always read `.status.hard` off BOTH quotas:
+#   kubectl -n ci-woodpecker get resourcequota -o yaml
+#
+# The same double-object pattern exists for the LimitRange below
+# (Kyverno also generates `default-limits` with a 512Mi memory
+# default) and in the conversation-history namespace. Two
+# objects setting a default for one resource has no documented
+# tiebreak; do not build on which one currently wins. This is
+# worth an ADR rather than a comment in each namespace.
+# ─────────────────────────────────────────────────────────────
 
 apiVersion: v1
 kind: ResourceQuota
@@ -13,9 +44,25 @@ metadata:
   namespace: ci-woodpecker
 spec:
   hard:
+    # Both overridden by default-quota (4 / 8Gi). Kept so this object still
+    # declares an intent, but they are not the operative values — see above.
     requests.cpu: "8"
     requests.memory: "16Gi"
-    limits.cpu: "16"
+    # 16 -> 32 on 2026-08-28. This IS operative: nothing else caps limits.cpu.
+    #
+    # conversation-history's pipeline now declares per-step CPU limits (up to
+    # the LimitRange max of 4) because 84% of its 1,492s was CPU-bound work
+    # metered at the 500m default, and it fans four steps out in parallel
+    # rather than running eight serially. That peaks near 11 limits.cpu for a
+    # single pipeline, so 16 admitted exactly one — and a second concurrent
+    # pipeline would have had its step Pods REJECTED at admission, which
+    # surfaces as a failed step and reads like a code failure.
+    #
+    # Limits do not reserve, they throttle; the cluster has ~95 allocatable
+    # CPU across six nodes, and requests.cpu (effectively 4) is what actually
+    # bounds how much of it CI can hold. So this is a ceiling on burst, not an
+    # allocation.
+    limits.cpu: "32"
     limits.memory: "32Gi"
     pods: "20"
     persistentvolumeclaims: "20"
@@ -25,6 +72,21 @@ spec:
 # resources. Forces every step to declare requests/limits
 # (or accept these defaults), preventing zero-bound steps
 # from squeezing other workloads.
+#
+# `default.cpu: 500m` is the number that made every pipeline in
+# the homelab slow, and it is deliberately NOT being raised here.
+# A repo that knows a step is CPU-bound can now say so per step
+# (`backend_options.kubernetes.resources`, Woodpecker v3), which
+# is bounded by `max` below and affects only that repo.
+# Raising the default instead would silently multiply every
+# step's quota charge across every pipeline, and the quota above
+# would then admit far fewer Pods than the `pods: 20` this file
+# advertises. If the per-step approach proves out and every repo
+# ends up copying it, revisit — that is the point at which a
+# default is the honest place for it.
+#
+# `max.cpu: 4` is what bounds a per-step declaration, so it is
+# load-bearing now in a way it was not before.
 apiVersion: v1
 kind: LimitRange
 metadata:
