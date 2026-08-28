@@ -170,6 +170,40 @@ spec:
             - port: "3000"
               protocol: TCP
 ---
+# todo-agents Windmill deploy: Cilium Gateway traffic is evaluated twice.
+# The client-to-Gateway hop carries the reserved `ingress` identity; Envoy's
+# upstream hop to windmill-app is then evaluated against the original CI pod's
+# identity.  Missing either rule produces Envoy's plaintext HTTP 403 before a
+# request reaches Windmill.  Scope this exception to Woodpecker 3.15's built-in
+# repo + step labels rather than granting every CI pod Windmill access.  The
+# backend sanitizes `homelab/todo-agents` to `homelabtodo-agents` for the
+# Kubernetes label value (pipeline/backend/kubernetes.toDNSName).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: ci-woodpecker-todo-agents-windmill
+  namespace: ci-woodpecker
+spec:
+  endpointSelector:
+    matchLabels:
+      woodpecker-ci.org/repo-full-name: homelabtodo-agents
+      woodpecker-ci.org/step: wmill-push
+  egress:
+    - toEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: windmill
+            app.kubernetes.io/name: windmill-app
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+---
 # CCNP for ci-woodpecker step Pods: FQDN-based egress to
 # upstream package registries. Same shape as the renovate
 # layer's CCNP — operator extends the toFQDNs list when a

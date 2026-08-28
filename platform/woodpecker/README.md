@@ -10,7 +10,8 @@ spawn in the `ci-woodpecker` namespace, isolated by:
 - Separate ServiceAccount (`ci-woodpecker-runner`) with NO
   kube-API permissions.
 - Restrictive NetworkPolicy: default-deny ingress; egress
-  to kube-DNS + Forgejo + curated CCNP toFQDNs (registries).
+  to kube-DNS + Forgejo + curated CCNP toFQDNs (registries), plus narrowly
+  labeled per-repository deployment paths such as todo-agents → Windmill.
 - ResourceQuota + LimitRange capping CPU/memory/pod-count
   per namespace.
 - Pod-per-step lifecycle: each pipeline step gets a fresh
@@ -187,6 +188,16 @@ steps:
    includes the steps), not server config. Skeleton
    pipeline templates land alongside the first first-party
    app pipeline (out of scope for this layer).
+
+9. **Gateway egress is a two-hop Cilium policy path.** A CI pod calling an
+   HTTPRoute needs `toEntities: [ingress]` on listener port 443 and a second
+   allow to the selected backend endpoint/port; Envoy evaluates the upstream
+   hop against the original pod identity and answers plaintext HTTP 403 when
+   that second allow is absent. The todo-agents deploy exception selects only
+   Woodpecker's built-in sanitized repository label `homelabtodo-agents` and
+   step label `wmill-push`, then permits `ingress:443` and
+   `windmill/windmill-app:8000`. Do not widen the namespace-wide default policy
+   to reach application backends.
 
 ## Related
 

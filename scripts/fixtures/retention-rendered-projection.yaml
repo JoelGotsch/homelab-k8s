@@ -224,7 +224,7 @@ layers:
     storage_class_mode: explicit
   secret_references: []
 - path: platform/woodpecker
-  input_digest_sha256: 71e7efdbd67d579a957fbeac66ec835296a764200c18f03b8a348f5e8ca8fbd2
+  input_digest_sha256: fdd32a7a25dd8a756eb6f24da063652959590de129e392ed178436fa262de8e1
   chart:
     name: woodpecker
     repository: oci://registry.homelab.internal/homelab

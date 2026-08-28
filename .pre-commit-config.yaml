@@ -64,6 +64,14 @@ repos:
         pass_filenames: false
         files: '^(bootstrap/applicationsets/apps\.yaml|scripts/check-windmill-workers-rendered\.sh)$'
 
+      - id: check-woodpecker-app-egress
+        name: app-specific Woodpecker egress is narrow and two-hop complete
+        entry: python3 scripts/check-woodpecker-app-egress.py
+        language: python
+        additional_dependencies: [PyYAML==6.0.2]
+        pass_filenames: false
+        files: '^(platform/woodpecker/networkpolicy\.yaml|scripts/check-woodpecker-app-egress\.py)$'
+
       - id: check-openbao-snapshot-auth
         name: OpenBao snapshot auth is short-lived, scoped, and static-token-free
         entry: scripts/check-openbao-snapshot-auth.sh
