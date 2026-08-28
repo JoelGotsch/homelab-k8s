@@ -25,9 +25,9 @@ spec:
           # 2026-07-28). Skeleton entries still point at the central
           # homelab-k8s repo, which now also lives in the org.
           - {name: approval-channel,    owner: homelab,       repo: approval-channel, path: k8s, autoSync: "true"}
-          # First rollout stays manual until Argo comparison, exact-revision
-          # sync, runtime RBAC, and MCP protocol checks have all passed.
-          - {name: cluster-mcp,         owner: homelab,       repo: cluster-mcp, path: k8s, autoSync: "false"}
+          # Exact-revision sync, runtime RBAC and MCP protocol checks passed
+          # during the controlled first rollout on 2026-08-28.
+          - {name: cluster-mcp,         owner: homelab,       repo: cluster-mcp, path: k8s, autoSync: "true"}
           # ADR 0048 D1 — a repo whose entire content is deployment manifests
           # carries the -k8s suffix. Renamed 2026-08-20: immich-public-proxy,
           # immich, jellyfin, librechat, model-manager, nextcloud, ntfy,
