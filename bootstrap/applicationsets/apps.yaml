@@ -28,6 +28,9 @@ spec:
           # Exact-revision sync, runtime RBAC and MCP protocol checks passed
           # during the controlled first rollout on 2026-08-28.
           - {name: cluster-mcp,         owner: homelab,       repo: cluster-mcp, path: k8s, autoSync: "true"}
+          # P4 read plane: read:issue-only bot, exact two-tool runtime and
+          # credential-aware readiness passed before registration.
+          - {name: forgejo-mcp,         owner: homelab,       repo: forgejo-mcp, path: k8s, autoSync: "true"}
           # ADR 0048 D1 — a repo whose entire content is deployment manifests
           # carries the -k8s suffix. Renamed 2026-08-20: immich-public-proxy,
           # immich, jellyfin, librechat, model-manager, nextcloud, ntfy,
