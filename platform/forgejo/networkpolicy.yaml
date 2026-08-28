@@ -64,6 +64,17 @@ spec:
         - ports:
             - port: "3000"
               protocol: TCP
+    # First-party Forgejo MCP read plane. Its pod holds a read:issue-only PAT;
+    # this reciprocal ingress rule is paired with that app's exact Forgejo
+    # egress rule. LiteLLM reaches the MCP Service, never Forgejo directly.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: forgejo-mcp
+            app.kubernetes.io/name: forgejo-mcp
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
     # Renovate runner — autodiscover + PR creation.
     - fromEndpoints:
         - matchLabels:
