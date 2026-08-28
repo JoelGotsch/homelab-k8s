@@ -64,6 +64,13 @@ repos:
         pass_filenames: false
         files: '^(bootstrap/applicationsets/apps\.yaml|scripts/check-windmill-workers-rendered\.sh)$'
 
+      - id: check-app-entries-render
+        name: every app entry renders resources or is an explicit placeholder
+        entry: scripts/check-app-entries-render.sh
+        language: script
+        pass_filenames: false
+        files: '^(bootstrap/applicationsets/apps\.yaml|scripts/check-app-entries-render\.sh)$'
+
       - id: check-woodpecker-app-egress
         name: app-specific Woodpecker egress is narrow and two-hop complete
         entry: python3 scripts/check-woodpecker-app-egress.py

@@ -52,20 +52,37 @@ if [ ! -f "$PLANNED" ]; then
 fi
 
 python3 - "$APPSET" "$WS" "$PLANNED" <<'PY'
-import sys, pathlib, yaml, re
+import pathlib
+import re
+import sys
 
 appset, ws, planned_f = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
 planned = planned_f.read_text().lower()
 
+# apps.yaml deliberately uses one inline mapping per explicit list entry. Parse
+# that narrow, reviewable format without PyYAML so the repository-local guard
+# works under the same plain Python promised by its preflight and in pre-commit.
 els = []
-for doc in yaml.safe_load_all(appset.read_text()):
-    if not doc:
+for line_number, line in enumerate(appset.read_text().splitlines(), start=1):
+    if not re.match(r'^\s*-\s*\{name:', line):
         continue
-    for g in doc.get('spec', {}).get('generators', []) or []:
-        els += (g.get('list', {}) or {}).get('elements', []) or []
+    match = re.match(r'^\s*-\s*\{(?P<body>[^{}]+)\}\s*$', line)
+    if not match:
+        els.append({'name': f'line {line_number}', '_parse_error': 'malformed inline mapping'})
+        continue
+    fields = {}
+    for item in match.group('body').split(','):
+        if ':' not in item:
+            fields['_parse_error'] = f'malformed field at line {line_number}'
+            break
+        key, value = item.split(':', 1)
+        fields[key.strip()] = value.strip().strip('"').strip("'")
+    els.append(fields)
 
 real, declared, broken, uncheckable = [], [], [], []
 for e in els:
+    if e.get('_parse_error'):
+        broken.append((e.get('name', '?'), e['_parse_error'])); continue
     name, repo, path = e.get('name'), e.get('repo'), e.get('path')
     if not (name and repo and path):
         broken.append((name or '?', 'entry missing name/repo/path')); continue
