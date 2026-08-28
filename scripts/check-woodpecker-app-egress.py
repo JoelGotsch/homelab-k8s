@@ -24,12 +24,17 @@ def main() -> int:
     if len(matches) != 1:
         raise SystemExit(f"expected exactly one CiliumNetworkPolicy/{NAME}")
     policy: dict[str, Any] = matches[0]
-    selector = policy["spec"]["endpointSelector"].get("matchLabels", {})
-    if selector != {
+    endpoint_selector = policy["spec"]["endpointSelector"]
+    if endpoint_selector.get("matchLabels") != {
         "woodpecker-ci.org/repo-full-name": "homelabtodo-agents",
-        "woodpecker-ci.org/step": "wmill-push",
-    }:
-        raise SystemExit(f"{NAME} must select only the todo-agents wmill-push pod")
+    } or endpoint_selector.get("matchExpressions") != [
+        {
+            "key": "woodpecker-ci.org/step",
+            "operator": "In",
+            "values": ["wmill-push", "wmill-drift"],
+        }
+    ]:
+        raise SystemExit(f"{NAME} must select only todo-agents Windmill sync pods")
 
     egress = policy["spec"].get("egress", [])
     gateway = [rule for rule in egress if rule.get("toEntities") == ["ingress"]]
@@ -51,7 +56,7 @@ def main() -> int:
         {"ports": [{"port": "8000", "protocol": "TCP"}]}
     ]:
         raise SystemExit(f"{NAME} backend rule must allow only windmill-app:8000/TCP")
-    print("Woodpecker todo-agents egress is repo/step-scoped and two-hop complete")
+    print("Woodpecker todo-agents sync egress is repo/step-scoped and two-hop complete")
     return 0
 
 

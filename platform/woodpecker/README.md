@@ -193,9 +193,9 @@ steps:
    HTTPRoute needs `toEntities: [ingress]` on listener port 443 and a second
    allow to the selected backend endpoint/port; Envoy evaluates the upstream
    hop against the original pod identity and answers plaintext HTTP 403 when
-   that second allow is absent. The todo-agents deploy exception selects only
+   that second allow is absent. The todo-agents sync exception selects only
    Woodpecker's built-in sanitized repository label `homelabtodo-agents` and
-   step label `wmill-push`, then permits `ingress:443` and
+   step labels `wmill-push` / `wmill-drift`, then permits `ingress:443` and
    `windmill/windmill-app:8000`. Do not widen the namespace-wide default policy
    to reach application backends.
 
