@@ -20,44 +20,62 @@
 # gives mirror headroom; the >80% PrometheusRule stays the
 # early-warning signal (it is %-based, no threshold edit).
 #
-# 80Gi→150Gi 2026-08-29: ENOSPC again, three consecutive
+# 80Gi→150Gi→250Gi 2026-08-29: ENOSPC again, three consecutive
 # nights. The 2026-07-30 model sized this volume from the
 # longhorn-backups lane ALONE and carried cronjob.yaml's
-# "~120 MiB" figure for CNPG. That figure is wrong by three
-# orders of magnitude: CNPG is 61Gi of the 79Gi in use, and
-# the longhorn lane came in UNDER budget at 19Gi. So the lane
-# that was modelled is fine and the lane that was assumed
-# negligible is the whole problem.
+# "~120 MiB" figure for CNPG. That figure is wrong by nearly
+# three orders of magnitude: on the complete mirror CNPG is
+# 96Gi of the 119Gi staged, and the longhorn lane came in at
+# 23Gi — under its own 55-60Gi budget. So the lane that was
+# modelled is fine and the lane that was assumed negligible is
+# the whole problem.
 #
-# Barman retention is NOT the fault and was verified healthy:
-# the 30d clusters prune exactly on time (forgejo, crowdsec,
-# llm-gateway all hold oldest base = 2026-07-30). The 90d
-# clusters are only ~45 days old, so they are at roughly HALF
-# their eventual footprint and this volume would have filled
-# on the current design with no new app added.
+# Barman retention is NOT the fault and was verified healthy
+# against live MinIO: the 30d clusters prune exactly on time
+# (forgejo, crowdsec, llm-gateway all hold oldest base =
+# 2026-07-30). The 90d clusters are only ~45 days old, so they
+# sit at roughly a third of their eventual footprint and this
+# volume would have filled on the current design with no new
+# app added.
 #
-# Measured daily accrual (per-cluster base size × 1/day, plus
-# WAL rate) and the resulting 90d steady state:
-#   conversation-history  1249 MiB/d  → ~110Gi   (see below)
-#   immich                 652 MiB/d  →  ~57Gi
-#   authentik              291 MiB/d  →  ~26Gi
-#   nextcloud              118 MiB/d  →  ~10Gi
-#   all other CNPG          ~40 MiB/d →   ~6Gi
-#   longhorn-backups (retain 14, at steady state) ~19Gi
-# True steady state is therefore ~230Gi, NOT 150Gi. 150Gi is
-# a deliberate ~4-week unblock, not the end state, because two
-# open decisions can each remove a large share of that number:
-#   1. conversation-history emits 1016 MiB/day of WAL against
-#      a 233 MiB base — ~4x its own size, daily. That is a
-#      churn defect to diagnose, not capacity to buy. It is
-#      48% of the projected total.
+# MEASURE THE MIRROR ONLY WHEN IT IS COMPLETE. The first cut
+# of this comment sized from a staging tree left behind by
+# three consecutive FAILED runs, so every per-cluster figure
+# was an undercount and the projection came out at ~230Gi. The
+# first successful run reported `mirror complete: 119G staged`
+# — the tree was 40Gi short of reality. Numbers below are from
+# that complete mirror (2026-08-29), and a future resize should
+# be computed the same way: after a green run, never from a
+# volume whose last write failed.
+#
+# Complete-mirror measurement, and the 90d steady state each
+# implies (base size × 1/day + measured WAL rate × 90):
+#   conversation-history  3175 MiB/d  → ~278Gi   (see below)
+#   immich                 669 MiB/d  →  ~59Gi
+#   authentik              285 MiB/d  →  ~25Gi
+#   nextcloud              121 MiB/d  →  ~11Gi
+#   all other CNPG          ~50 MiB/d →   ~4Gi
+#   longhorn-backups (retain 14, already at steady state) ~23Gi
+# True steady state is ~400Gi. Current accrual is ~4.3Gi/day.
+#
+# 250Gi therefore buys roughly 30 days, not a solution. It is
+# sized to leave room to answer the real question rather than
+# to hold the current design forever:
+#   1. conversation-history is ~70% of the projection on its
+#      own. It emits 2180 MiB/day of WAL against a 995 MiB
+#      base — it rewrites about twice its own size, every day.
+#      That is a churn defect to diagnose in the application,
+#      not capacity to buy. Nothing else on this list is
+#      anywhere near it.
 #   2. Whether `personal`/`secret` need 90-day PITR at tier-1
 #      at all, given tier-2/3 already hold GFS copies out to
 #      years (backup-and-dr.md §Retention schedules). 90d→30d
-#      on the WAL-heavy clusters takes ~230Gi to ~75Gi. That
+#      on the WAL-heavy clusters takes ~400Gi to ~135Gi. That
 #      is a posture call and is the operator's, not a resize.
-# Revisit this number once both are settled; do not keep
-# growing the volume in place of answering them.
+# Do not keep growing the volume in place of answering these.
+# The >80% PrometheusRule is the tripwire; if it fires again
+# before either is settled, that is the signal to escalate the
+# decision, not to add another 100Gi.
 #
 # Storage class: longhorn-replica1 — this PVC's contents are
 # disposable (re-derivable from MinIO). Replica1 keeps cluster
@@ -72,4 +90,4 @@ spec:
   storageClassName: longhorn-replica1
   resources:
     requests:
-      storage: 150Gi
+      storage: 250Gi
