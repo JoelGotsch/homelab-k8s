@@ -7,8 +7,16 @@
 # stored in OpenBao at kv/prod/restic/cluster-tier-3/password
 # AND in the offline-recovery archive per ADR 0011).
 #
-# Sources mirrored: homelab-backups-cluster (CNPG WAL+base, ~120 MiB) +
+# Sources mirrored: homelab-backups-cluster (CNPG WAL+base) +
 # longhorn-backups (the SELECTIVE Longhorn volume backups).
+#
+# CNPG size: 61Gi measured 2026-08-29, growing ~2.35Gi/day toward a
+# ~210Gi steady state at the current 90d/30d retention split. This
+# line read "~120 MiB" from bring-up until 2026-08-29 and was the
+# stated basis for the 80Gi staging PVC; that stale figure is what
+# broke the tier-3 lane three nights running. Re-measure it here
+# when you touch retention or add a CNPG cluster — pvc.yaml sizes
+# itself off this number. See pvc.yaml for the full breakdown.
 #
 # longhorn-backups was REMOVED on 2026-07-15 because it held ~7.8 TB (the old
 # blanket backup-daily backed up ALL ~54 volumes at retain 90) — impossible to
