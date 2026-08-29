@@ -208,6 +208,49 @@ spec:
             - port: "8000"
               protocol: TCP
 ---
+# homelab-skills eval gate: the corpus calls a real model before CI may move a
+# skill's Langfuse `production` label (plan §5.10).
+#
+# ONE hop, not two, unlike the todo-agents rule above. That rule crosses the
+# Cilium Gateway, so its traffic is evaluated twice and needs both the
+# client-to-Gateway (`ingress` identity) and Envoy-to-backend rules. This one
+# goes pod-to-pod to the in-cluster LiteLLM Service, so there is no Gateway in
+# the path and a second rule would be dead policy.
+#
+# That is also the answer to plan §5.10's open question "how CI reaches a
+# model", whose premise was wrong: it assumed the Woodpecker runner had to be
+# on the tailnet to reach the Mac Studio. It does not. The runner talks to
+# llm-gateway, and llm-gateway talks to the Mac Studio — CI never needs a route
+# to the Mac at all, and never holds a credential for one. The whole
+# requirement collapses to this single in-cluster rule.
+#
+# Scoped to the `evals` step of one repository, same as the todo-agents
+# exception: the backend sanitizes `homelab/homelab-skills` to
+# `homelabhomelab-skills` for the label value
+# (pipeline/backend/kubernetes.toDNSName).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: ci-woodpecker-homelab-skills-evals
+  namespace: ci-woodpecker
+spec:
+  endpointSelector:
+    matchLabels:
+      woodpecker-ci.org/repo-full-name: homelabhomelab-skills
+    matchExpressions:
+      - key: woodpecker-ci.org/step
+        operator: In
+        values: [evals]
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: llm-gateway
+            app.kubernetes.io/name: litellm
+      toPorts:
+        - ports:
+            - port: "4000"
+              protocol: TCP
+---
 # CCNP for ci-woodpecker step Pods: FQDN-based egress to
 # upstream package registries. Same shape as the renovate
 # layer's CCNP — operator extends the toFQDNs list when a
