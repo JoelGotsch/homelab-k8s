@@ -156,199 +156,194 @@ data:
   probe.py: |
     """Append-integrity probe for a csi-rclone mount. See conformance.yaml.
 
-    WHAT THIS TESTS, precisely: reopening a LARGE, COLD remote object for append.
+    Two phases, so every mount ages for the SAME wall-clock duration:
 
-    The failure needs a RE-FETCH. The object must leave the VFS cache and be
-    pulled back before it can fail to come back whole. So the probe is shaped
-    around the gap, not around volume:
+        prepare <mount> <label>   bulk write, drain write-back, append #1,
+                                  apply cache pressure, record state to a sidecar
+        (run.sh sleeps ONCE, for all mounts together)
+        verify  <mount> <label>   append #2, TIMED READ-BACK, classify
 
-        1. write a bulk file of BULK_MB in one open()      (never itself at risk)
-        2. append ONE record                                (cache now hot)
-        3. force the entry cold -- age it out AND evict by size pressure
-        4. append a SECOND record                           (this is the re-fetch)
-        5. read back; assert zero NULs and every region intact
+    WHY THE READ-BACK IS THE TIMED OPERATION (v4, and the v3 bug it fixes)
 
-    The v1 probe (2026-08-31) wrote 6,000 records in a tight loop and BOTH mounts
-    passed. A tight loop keeps the file continuously hot: nothing is ever
-    re-fetched, so nothing can fail to re-fetch. It reproduced the access pattern
-    (many opens) but not the timing (long gaps), and the timing is the part that
-    matters -- production appended once per blob across hours, against
-    vfs-cache-max-age=6h. Two writes separated by a real gap test more than six
-    thousand back-to-back ones do.
+    v3 timed append #2 and required it to exceed a floor, reasoning that rclone
+    must materialise the whole object before appending to it. That is wrong: an
+    append at EOF is satisfied WITHOUT the preceding bytes resident, so the write
+    never blocks on materialisation and the floor can never be crossed. v3 would
+    therefore report INCONCLUSIVE forever -- and did so on a run where the eviction
+    had demonstrably happened (the node's cache subtree was observed empty 2.5
+    minutes before the append). v2 asserted an eviction that never occurred; v3
+    denied one that did. Both were confidently wrong in opposite directions.
+
+    A read-back cannot be faked: pulling ~45 MiB back through crypt-over-SMB has to
+    block. So that is the precondition -- and it is also the operation through which
+    the real failure surfaced, since the ledger was being READ when the NULs were
+    found.
+
+    WHY TWO PHASES
+
+    v3 ran each mount to completion in turn, so the last mount was sampled seconds
+    after its write while the first had minutes for the 60s cache cleaner. Run order
+    was confounded with remote, which manufactured a per-remote-looking signal out
+    of pure ordering. Preparing all mounts, sleeping once, then verifying all mounts
+    removes that.
 
     Deliberately does NOT hold one long-lived handle: a single open() with many
     writes is the pattern that never broke.
     """
+    import json
     import os
     import sys
     import time
 
-    MOUNT = sys.argv[1]
-    LABEL = sys.argv[2]
+    PHASE, MOUNT, LABEL = sys.argv[1], sys.argv[2], sys.argv[3]
+
     RECSIZE = int(os.environ.get("PROBE_RECORD_BYTES", "8192"))
     BULK_MB = int(os.environ.get("PROBE_BULK_MB", "45"))
-    SETTLE = int(os.environ.get("PROBE_SETTLE_SECONDS", "150"))
     EVICT_MB = int(os.environ.get("PROBE_EVICT_MB", "48"))
     WRITEBACK = int(os.environ.get("PROBE_WRITEBACK_SETTLE", "45"))
-    # A cold re-materialisation of BULK_MB over SMB-behind-crypt cannot be instant.
-    # If append #2 returns faster than this, the object was still cached and the
-    # experiment did not happen. The local cache answers in sub-milliseconds; the
-    # remote runs at tens of MiB/s, so 45 MiB cannot come back in under ~0.4s.
+    # Reading BULK_MB back through crypt-over-SMB cannot be instant. Below this the
+    # object was still resident and no re-fetch was exercised.
     MIN_COLD_SECONDS = float(os.environ.get("PROBE_MIN_COLD_SECONDS", "0.40"))
 
     EXIT_PASS, EXIT_FAIL, EXIT_INCONCLUSIVE = 0, 1, 2
 
     path = os.path.join(MOUNT, "append-probe.dat")
     evict_path = os.path.join(MOUNT, "cache-pressure.tmp")
-    bulk_bytes = BULK_MB * 1024 * 1024
+    state_path = "/tmp/probe-state-" + LABEL + ".json"
+    filler = b"F" * RECSIZE
 
 
-    def record(n: int) -> bytes:
-        # Self-describing: the sequence number is recoverable from the record, so a
-        # survivor can be told from a duplicate or a shifted read.
-        head = f"REC{n:09d}".encode()
+    def record(n):
+        head = ("REC%09d" % n).encode()
         return head + b"." * (RECSIZE - len(head) - 1) + b"\n"
 
 
     def emit(msg):
-        print(f"[{LABEL}] {msg}", flush=True)
+        print("[%s] %s" % (LABEL, msg), flush=True)
 
 
     def timed(what, fn):
         t0 = time.monotonic()
         out = fn()
         dt = time.monotonic() - t0
-        emit(f"{what}: {dt:.3f}s")
+        emit("%s: %.3fs" % (what, dt))
         return out, dt
 
 
-    filler = b"F" * RECSIZE
+    if PHASE == "prepare":
+        def _bulk():
+            with open(path, "wb") as fh:
+                for _ in range(BULK_MB * 1024 * 1024 // RECSIZE):
+                    fh.write(filler)
+            return os.path.getsize(path)
 
-    # --- 1. bulk file, written whole. This write is never the thing at risk.
-    def _bulk():
-        with open(path, "wb") as fh:
-            for _ in range(bulk_bytes // RECSIZE):
-                fh.write(filler)
-        return os.path.getsize(path)
+        base, t_bulk = timed("bulk write (%d MiB, whole)" % BULK_MB, _bulk)
+        emit("  -> %d bytes at %.1f MiB/s" % (base, (base / 1048576) / max(t_bulk, 1e-9)))
 
+        # Drain the write-back queue before evicting: you cannot evict what has not
+        # been uploaded. v2 skipped this and read back its own un-uploaded cache.
+        emit("draining write-back for %ds" % WRITEBACK)
+        time.sleep(WRITEBACK)
 
-    base, t_bulk = timed(f"bulk write ({BULK_MB} MiB, whole)", _bulk)
-    emit(f"  -> {base:,} bytes at {(base / 1048576) / max(t_bulk, 1e-9):,.1f} MiB/s")
+        def _a1():
+            with open(path, "ab") as fh:
+                fh.write(record(0))
+        _, t_hot = timed("append #1 (hot)", _a1)
 
-    # --- 1b. Drain the write-back queue BEFORE trying to evict. v2 skipped this and
-    # it was fatal: at unmount the driver still logged "Waiting for VFS cache
-    # uploads (queued: 1)" AFTER the probe had read the file back and declared PASS.
-    # The bytes had never reached the remote, so the read-back came from local cache
-    # and could not possibly have observed remote corruption. You cannot evict what
-    # has not been uploaded.
-    emit(f"waiting {WRITEBACK}s for the write-back queue to drain")
-    time.sleep(WRITEBACK)
+        def _pressure():
+            with open(evict_path, "wb") as fh:
+                for _ in range(EVICT_MB * 1024 * 1024 // RECSIZE):
+                    fh.write(filler)
+            os.unlink(evict_path)
+        timed("cache pressure (%d MiB, same mount)" % EVICT_MB, _pressure)
 
-    # --- 2. first append, object hot. Also the baseline for "what does an append
-    # cost when no re-fetch is needed".
-    def _a1():
-        with open(path, "ab") as fh:
-            fh.write(record(0))
+        with open(state_path, "w") as fh:
+            json.dump({"base": base, "t_hot": t_hot}, fh)
+        emit("prepared; waiting for the shared cold gap")
+        sys.exit(EXIT_PASS)
 
+    elif PHASE == "verify":
+        with open(state_path) as fh:
+            st = json.load(fh)
+        base, t_hot = st["base"], st["t_hot"]
 
-    _, t_hot = timed("append #1 (hot, no re-fetch expected)", _a1)
+        def _a2():
+            with open(path, "ab") as fh:
+                fh.write(record(1))
+        _, t_append = timed("append #2 (cold; does NOT block on materialise)", _a2)
 
-    # --- 3. force the entry COLD two ways at once: age it past vfs-cache-max-age,
-    # and push more than vfs-cache-max-size of unrelated bytes through the SAME
-    # mount to provoke a size eviction.
-    emit(f"sleeping {SETTLE}s to age the entry past vfs-cache-max-age")
-    time.sleep(SETTLE)
+        # THE measurement. This must pull the whole object back.
+        def _read():
+            with open(path, "rb") as fh:
+                return fh.read()
+        data, t_read = timed("read-back (%d MiB, must materialise)" % BULK_MB, _read)
 
+        expected = base + 2 * RECSIZE
+        nul = data.count(0)
+        emit("expected %d / read %d bytes / %d NUL" % (expected, len(data), nul))
+        emit("timing: hot_append=%.3fs cold_append=%.3fs read_back=%.3fs (%.1f MiB/s)"
+             % (t_hot, t_append, t_read,
+                (len(data) / 1048576) / max(t_read, 1e-9)))
 
-    def _pressure():
-        with open(evict_path, "wb") as fh:
-            for _ in range(EVICT_MB * 1024 * 1024 // RECSIZE):
-                fh.write(filler)
-        os.unlink(evict_path)
+        problems = []
+        if nul:
+            problems.append("%d NUL bytes, first at offset %d" % (nul, data.index(0)))
+        if len(data) != expected:
+            problems.append("size %d != expected %d" % (len(data), expected))
+        for off in (0, base // 2, base - RECSIZE):
+            if data[off:off + 64] != filler[:64]:
+                problems.append("bulk region corrupt at offset %d" % off)
+        for n in (0, 1):
+            off = base + n * RECSIZE
+            if data[off:off + 12] != record(n)[:12]:
+                problems.append("record %d corrupt at offset %d" % (n, off))
 
+        if problems:
+            emit("FAIL: " + "; ".join(problems))
+            sys.exit(EXIT_FAIL)
 
-    _, t_press = timed(f"cache pressure ({EVICT_MB} MiB through the same mount)", _pressure)
-    time.sleep(15)   # let the cache cleaner act on the pressure
+        if t_read < MIN_COLD_SECONDS:
+            emit("INCONCLUSIVE: read-back of %d MiB took %.3fs, under the %.2fs floor. "
+                 "The object was still resident, so no re-fetch was exercised and "
+                 "nothing could fail to re-fetch. Data is intact but this run tested "
+                 "NOTHING. Not a pass." % (BULK_MB, t_read, MIN_COLD_SECONDS))
+            sys.exit(EXIT_INCONCLUSIVE)
 
+        emit("PASS: materialised %d MiB from cold (%.3fs) and every byte survived"
+             % (BULK_MB, t_read))
+        sys.exit(EXIT_PASS)
 
-    # --- 4. second append. THIS is the operation under test: rclone must
-    # re-materialise the whole object before it can append to it.
-    def _a2():
-        with open(path, "ab") as fh:
-            fh.write(record(1))
-
-
-    _, t_cold = timed("append #2 (cold, re-fetch REQUIRED)", _a2)
-
-    emit(f"timing: hot={t_hot:.3f}s cold={t_cold:.3f}s "
-         f"(need cold >= {MIN_COLD_SECONDS}s for a real re-fetch)")
-
-    # --- 5. verify the bytes. A FAIL is meaningful whether or not we forced the
-    # eviction; a PASS is not, which is what step 6 is for.
-    expected = base + 2 * RECSIZE
-    with open(path, "rb") as fh:
-        data = fh.read()
-    nul = data.count(0)
-    emit(f"expected {expected:,} bytes / read {len(data):,} bytes / {nul:,} NUL bytes")
-
-    problems = []
-    if nul:
-        problems.append(f"{nul:,} NUL bytes, first at offset {data.index(0):,}")
-    if len(data) != expected:
-        problems.append(f"size {len(data):,} != expected {expected:,}")
-    # The bulk region must still be filler. A zeroed prefix with an intact tail is
-    # exactly the shape the vault ledger died in, and a size-only check misses it
-    # entirely -- the corrupt ledger was very nearly the right size.
-    for off in (0, base // 2, base - RECSIZE):
-        if data[off:off + 64] != filler[:64]:
-            problems.append(f"bulk region corrupt at offset {off:,}")
-    for n in (0, 1):
-        off = base + n * RECSIZE
-        if data[off:off + 12] != record(n)[:12]:
-            problems.append(f"record {n} corrupt at offset {off:,}")
-
-    if problems:
-        emit("FAIL: " + "; ".join(problems))
+    else:
+        emit("unknown phase %r; expected 'prepare' or 'verify'" % PHASE)
         sys.exit(EXIT_FAIL)
-
-    # --- 6. Did the experiment actually happen? Assert the precondition before
-    # reporting a verdict. This is the whole difference between v3 and v2: v2
-    # asserted an eviction it never measured, so a green result was
-    # indistinguishable from an experiment that never ran.
-    if t_cold < MIN_COLD_SECONDS:
-        emit(f"INCONCLUSIVE: append #2 took {t_cold:.3f}s, under the "
-             f"{MIN_COLD_SECONDS}s floor for materialising {BULK_MB} MiB from the "
-             f"remote. The object was still cached, so no re-fetch happened and "
-             f"nothing could fail to re-fetch. The data is intact but this run "
-             f"tested NOTHING. Do not record it as a pass.")
-        sys.exit(EXIT_INCONCLUSIVE)
-
-    emit(f"PASS: forced a cold re-fetch ({t_cold:.3f}s) and every byte survived")
-    sys.exit(EXIT_PASS)
 
   run.sh: |
     #!/bin/sh
-    # Runs the probe against both mounts and interprets the PAIR of results.
-    # See the header of conformance.yaml for the decision table.
+    # Prepares all three mounts, sleeps ONCE, then verifies all three, so every
+    # mount ages the same. v3 ran each mount to completion in turn, confounding run
+    # order with remote and manufacturing a per-remote-looking signal from ordering.
     #
-    # Three outcomes per mount, not two:
-    #   0 PASS          bytes intact AND a cold re-fetch was demonstrably forced
-    #   1 FAIL          bytes corrupted (meaningful regardless of the re-fetch)
-    #   2 INCONCLUSIVE  bytes intact but the object never went cold -- the run
-    #                   tested nothing. v2 had no such state, which is why a run
-    #                   that proved nothing was reported as a pass.
+    # Three outcomes per mount:
+    #   0 PASS          bytes intact AND a cold materialisation was demonstrated
+    #   1 FAIL          bytes corrupted (meaningful regardless)
+    #   2 INCONCLUSIVE  bytes intact but never went cold -- tested nothing
     set -u
-    python3 /probe/probe.py /probe-full       full       ; RC_FULL=$?
-    python3 /probe/probe.py /probe-writes     writes     ; RC_WRITES=$?
-    # C: same declared mode as B, but on a DIFFERENT remote. See ADR 0058 Q2.
-    python3 /probe/probe.py /probe-writes-alt writes-alt ; RC_ALT=$?
+    SETTLE="${PROBE_SETTLE_SECONDS:-150}"
+
+    python3 /probe/probe.py prepare /probe-full       full       || exit 1
+    python3 /probe/probe.py prepare /probe-writes     writes     || exit 1
+    python3 /probe/probe.py prepare /probe-writes-alt writes-alt || exit 1
+
+    echo "=== shared cold gap: ${SETTLE}s, all mounts aging together ==="
+    sleep "$SETTLE"
+
+    python3 /probe/probe.py verify /probe-full       full       ; RC_FULL=$?
+    python3 /probe/probe.py verify /probe-writes     writes     ; RC_WRITES=$?
+    python3 /probe/probe.py verify /probe-writes-alt writes-alt ; RC_ALT=$?
 
     name() {
       case "$1" in
-        0) echo PASS ;;
-        1) echo FAIL ;;
-        2) echo INCONCLUSIVE ;;
-        *) echo "ERROR(rc=$1)" ;;
+        0) echo PASS ;; 1) echo FAIL ;; 2) echo INCONCLUSIVE ;; *) echo "ERROR(rc=$1)" ;;
       esac
     }
 
@@ -358,87 +353,51 @@ data:
     echo "B  writes @ internal-archive  -> $(name $RC_WRITES)"
     echo "C  writes @ registry-blobs    -> $(name $RC_ALT)   <- different remote"
     echo
-    # --- ADR 0058 Q2: is the VFS keyed by remote or by volume?
-    # B and C declare the SAME mode on DIFFERENT remotes. A and B declare
-    # DIFFERENT modes on the SAME remote. Comparing those tells us which.
-    echo "--- Q2 (per-remote vs per-volume VFS) ---"
-    if [ $RC_WRITES -eq $RC_ALT ] && [ $RC_WRITES -ne $RC_FULL ]; then
-      echo "B == C and B != A: the declared mode tracks the VOLUME, not the remote."
-      echo "Per-volume keying. ADR 0058 D2 holds as written and the vault's"
-      echo "vfs-cache-mode=full is genuinely in effect on its own merits."
-    elif [ $RC_WRITES -eq $RC_FULL ] && [ $RC_WRITES -ne $RC_ALT ]; then
-      echo "B == A but B != C: two volumes on ONE remote behaved identically"
-      echo "despite declaring different modes, while the same declared mode on"
-      echo "ANOTHER remote behaved differently. That is per-REMOTE keying."
-      echo "CONSEQUENCE: the vault (full) and nextcloud (writes) share one"
-      echo "effective mode. The vault's fix is contingent on an app-owned PV in"
-      echo "another namespace. Migrate nas-internal-archive-nextcloud urgently"
-      echo "and re-read ADR 0058 D2 -- it is weaker than it reads."
-    else
-      echo "Indeterminate this run (A=$RC_FULL B=$RC_WRITES C=$RC_ALT)."
-      echo "Q2 needs at least one mount to reach a decisive state; if everything"
-      echo "is INCONCLUSIVE the probe still is not forcing an eviction and that"
-      echo "must be fixed before Q2 can be read at all."
-    fi
-    echo
 
-    # 1. Corruption on `full` is an incident: every real volume uses it.
     if [ $RC_FULL -eq 1 ]; then
-      echo 'VERDICT: FAIL - vfs-cache-mode=full lost data. This is the mode every real'
-      echo 'volume now uses. Treat as an incident: read ADR 0058 and do not assume any'
-      echo 'nas-crypt volume is safe to append to.'
+      echo 'VERDICT: FAIL - vfs-cache-mode=full lost data. Every real volume uses this'
+      echo 'mode. Treat as an incident: read ADR 0058 and assume no nas-crypt volume'
+      echo 'is safe to append to.'
       exit 1
     fi
 
-    # 2. The calibrated case the suite exists to produce.
     if [ $RC_WRITES -eq 1 ] && [ $RC_FULL -eq 0 ]; then
       echo 'VERDICT: PASS - full intact, writes corrupted as ADR 0058 predicts.'
-      echo 'The control is calibrated: this run genuinely discriminates between modes,'
-      echo 'and the ADR 0058 mechanism is REPRODUCED rather than inferred. Record this.'
+      echo 'The control is calibrated and the mechanism is REPRODUCED, not inferred.'
+      echo 'Record this: three earlier probe versions failed to get here.'
       exit 0
     fi
 
-    # 3. Neither mount went cold: the experiment did not run.
-    if [ $RC_WRITES -eq 2 ] || [ $RC_FULL -eq 2 ]; then
-      echo 'VERDICT: INCONCLUSIVE - the probe could not force a cold re-fetch.'
+    if [ $RC_FULL -eq 2 ] || [ $RC_WRITES -eq 2 ] || [ $RC_ALT -eq 2 ]; then
+      echo 'VERDICT: INCONCLUSIVE - a mount never went cold, so it tested nothing.'
       echo
-      echo 'The data is intact, but the object never left the VFS cache, so nothing'
-      echo 'was ever re-fetched and nothing could fail to re-fetch. This run tested'
-      echo 'NOTHING about the ADR 0058 mechanism. It is NOT evidence that'
-      echo 'vfs-cache-mode=writes is safe, and it is NOT a regression pass.'
+      echo 'NOT a regression pass, and NOT evidence that writes mode is safe.'
       echo
-      echo 'This is the failure v2 could not report: it had no inconclusive state, so'
-      echo 'an experiment that never happened came back green. Both mounts passed'
-      echo 'byte-identically on 2026-08-31 while the driver logged zero evictions and'
-      echo 'still had a queued upload at unmount -- the read-back was served from'
-      echo 'local cache and had never round-tripped to the remote.'
+      echo 'Read the read_back timing before touching any knob:'
+      echo '  read-back FAST  -> the object was still resident; eviction pressure is'
+      echo '                     too weak. Raise PROBE_EVICT_MB, or lower'
+      echo '                     vfs-cache-max-age on the conformance PVs.'
+      echo '  read-back SLOW  -> the floor is mis-set for this link speed. Raise'
+      echo '                     PROBE_MIN_COLD_SECONDS to match observed throughput.'
+      echo '                     Do NOT lower it to force a green.'
       echo
-      echo 'What to try next, cheapest first:'
-      echo '  - raise PROBE_EVICT_MB well above vfs-cache-max-size'
-      echo '  - raise PROBE_WRITEBACK_SETTLE so the upload demonstrably drains'
-      echo '  - lower vfs-cache-max-age on the two conformance PVs'
-      echo '  - if none of these ever force an eviction, the combination may be'
-      echo '    untestable from inside a pod; escalate to T11 (two volumes on'
-      echo '    DIFFERENT remotes), which tests the per-remote question instead.'
+      echo 'History: v2 asserted an eviction that never happened; v3 timed the append,'
+      echo 'which never blocks on materialisation, and so denied evictions that did.'
       exit 0
     fi
 
-    # 4. Both genuinely cold, both intact.
     echo 'VERDICT: PASS (control uncalibrated).'
     echo
-    echo 'Both mounts forced a cold re-fetch and both kept every byte. The regression'
-    echo 'test passed and the eviction precondition was met -- so unlike an'
-    echo 'INCONCLUSIVE run, this one did test something.'
+    echo 'All mounts materialised from cold and all kept every byte, so unlike an'
+    echo 'INCONCLUSIVE run this one genuinely tested something.'
     echo
-    echo 'But `writes` survived a cold re-fetch too, so this run does not reproduce'
-    echo 'the 2026-08-29/30 failure and cannot show `full` is BETTER than `writes`.'
-    echo 'Do NOT read a passing control as evidence that vfs-cache-mode=writes is'
-    echo 'safe. The remaining hypothesis is that the driver accounts the VFS cache'
-    echo 'PER REMOTE ("Waiting for VFS cache sync (remote: ...)"), so two volumes on'
-    echo 'one remote share a single VFS instance and one mode wins regardless of'
-    echo 'per-volume mount_flags -- meaning this probe compared a mount against'
-    echo 'itself, and the vault fix is contingent on the nextcloud PV. Distinguishing'
-    echo 'that needs two volumes on DIFFERENT remotes. See ADR 0058 Q2, ticket T11.'
+    echo 'But writes survived a cold re-fetch too, so this does not reproduce the'
+    echo '2026-08-29/30 failure and cannot show full is BETTER than writes.'
+    echo 'Caveat: the conformance PVs run 16M/60s against the vault-class 10G/6h, so'
+    echo 'eviction here is far more eager and a result may not transfer to a real'
+    echo 'volume. ADR 0058 Q2 is settled (per-volume VFS, confirmed from source and'
+    echo 'from the on-disk cache layout), so a symmetric result can no longer be'
+    echo 'explained by the probe comparing a mount against itself.'
     exit 0
 ---
 apiVersion: batch/v1
