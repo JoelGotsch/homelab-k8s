@@ -30,6 +30,13 @@ repos:
         pass_filenames: false
         files: '\.(yaml|yml|j2)$'
 
+      - id: check-rclone-cache-mode
+        name: no csi-rclone PV uses vfs-cache-mode=writes without a reasoned exemption
+        entry: scripts/check-rclone-cache-mode.sh
+        language: script
+        pass_filenames: false
+        files: '^infrastructure/csi-rclone/persistentvolumes\.ya?ml$|^scripts/check-rclone-cache-mode\.sh$'
+
       - id: check-nas-crypt-dataset-paths
         name: every nas-crypt dataset has a unique remotePath, a claimRef, and a bound PVC (ADR 0051)
         entry: scripts/check-nas-crypt-dataset-paths.sh

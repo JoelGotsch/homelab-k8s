@@ -54,27 +54,49 @@
 # share: internal-archive        (the one share with two unrelated tenants)
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# conversation-history's L0 vault. Append-only message archive whose whole
+# conversation-history's L0 vault. A WRITE-ONCE message archive whose whole
 # value is that nothing else writes to it — which was not true until this file
 # landed.
 #
-# vfs-cache-mode=writes is LOAD-BEARING here, not tuning. Without a VFS cache
-# an rclone mount cannot append to an existing file: measured 2026-08-15 on
-# this cluster, `open(path, "a")` on an existing file failed 8/8 with
-# `PermissionError [Errno 1]` on this class and succeeded 8/8 on
-# `personal-photos` (which has `vfs-cache-mode=full`). That broke this
-# service's nightly `seal` and `contacts-sync` from the moment its archive
-# moved into the cluster, leaving half-written state each time.
+# CORRECTED 2026-08-31. This block used to say `vfs-cache-mode=writes` was
+# "LOAD-BEARING here, not tuning", and chose it over `full` on the grounds that
+# `full` would needlessly cache reads of a 14 GiB archive. The first half was
+# right about the symptom and wrong about the remedy; the second half was a
+# real trade-off that has now been settled the other way by evidence.
 #
-# `writes` rather than `full`: the vault needs write caching, and `full` would
-# also cache reads of a 14 GiB archive that is read rarely (a `vault verify`
-# would pull the whole thing through the cache for no benefit).
+# The measurement that motivated `writes` still stands and is worth keeping:
+# on 2026-08-15, `open(path, "a")` on an existing file failed 8/8 with
+# `PermissionError [Errno 1]` on a cache-less mount of this class, and
+# succeeded 8/8 on `personal-photos` (`vfs-cache-mode=full`). Appends genuinely
+# do need a VFS cache, and without one the nightly `seal` and `contacts-sync`
+# broke, leaving half-written state.
 #
-# DURABILITY NOTE: with a write cache, `close()` returns once the data is in
-# the node-local cache; the upload follows within `--vfs-write-back` (5s
-# default). A node lost inside that window loses an acknowledged write. That is
-# a real change to the guarantee and it is accepted here — the alternative is
-# appends that fail outright.
+# What that measurement could not show is what `writes` does to a LARGE file
+# appended OFTEN. On 2026-08-29 and again on 2026-08-30 this volume's 45 MB
+# `blob-origins.jsonl` was destroyed: 45,895,680 of 45,909,540 bytes replaced
+# by NUL, 29 lines surviving out of 84,447. Both corrupt copies carried a
+# byte-identical NUL prefix of 45,895,680 = 11,205 x 4096 exactly, on files of
+# different total size — so not a partial fetch, but the whole prior object
+# zeroed with only the freshly-appended tail left. `manifest.jsonl`, on the
+# same mount and appended once per night rather than once per blob, was
+# untouched at 49,734 lines and 0 NULs.
+#
+# So the option was never "cache writes or lose appends". It was "cache writes
+# and eventually lose the file". The volume is now `full`, which keeps a
+# chunk-presence map instead of treating absent regions as zeros, and the
+# read-cache cost the old comment worried about is bounded by
+# `vfs-cache-max-size=10G` — a price worth paying twice over.
+#
+# `full` is MITIGATION, NOT A CURE. The read-modify-write is still there. The
+# cure is that nothing on this volume is reopened for write at all: files are
+# created whole and never modified. See
+# `homelab/plans/conversation-history-ledger-durability.md` §6 and
+# `scripts/check-rclone-cache-mode.sh`.
+#
+# DURABILITY NOTE (unchanged, and it applies to `full` too): `close()` returns
+# once the data is in the node-local cache; the upload follows within
+# `--vfs-write-back` (5s default). A node lost inside that window loses an
+# acknowledged write.
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -83,7 +105,11 @@ metadata:
     homelab.internal/nas-share: internal-archive
     homelab.internal/data-class: internal
   annotations:
-    homelab.internal/dataset: "conversation-history L0 vault (append-only message archive)"
+    # NOT "append-only" any more, and the old wording was load-bearing in the
+    # wrong direction: it described the access pattern that destroyed this
+    # volume's ledger twice (2026-08-29, 2026-08-30). Files here are written
+    # WHOLE and never reopened for write. See the mountOptions note below.
+    homelab.internal/dataset: "conversation-history L0 vault (write-once message archive)"
 spec:
   capacity:
     # Nominal. rclone does not enforce capacity — the real constraint is the
@@ -97,7 +123,29 @@ spec:
     - allow-other=true
     - file-perms=0666
     - dir-perms=0777
-    - vfs-cache-mode=writes
+    # `full`, NOT `writes`. Changed 2026-08-31 after `writes` destroyed this
+    # volume's 45 MB blob-origins.jsonl twice in three days.
+    #
+    # Under `writes`, opening an existing remote object for append makes rclone
+    # materialise the WHOLE object in its cache — fetch, modify, upload it all
+    # back on close. The remote is a crypt wrapper over SMB, so that is 45 MB
+    # decrypted across the network per append, and `append_origin` ran once per
+    # blob. When the cache entry is evicted and the re-fetch does not complete,
+    # the un-fetched region reads as zeros and close() uploads those zeros back
+    # as the authoritative object.
+    #
+    # The evidence: both corrupt copies had a byte-identical NUL prefix of
+    # 45,895,680 bytes = 11,205 x 4096 exactly, on files of DIFFERENT total
+    # size. Not a partial fetch — the whole prior object replaced by zeros with
+    # only the freshly-appended tail surviving. manifest.jsonl on the same
+    # mount, appended once per seal instead of once per blob, was untouched.
+    #
+    # `full` maintains a proper chunk-presence map instead of treating absent
+    # regions as zeros, which is why it is the cluster default (ADR 0030 §D4).
+    # It is MITIGATION, NOT A FIX: the read-modify-write is still there. The fix
+    # is that nothing writes this volume that way any more — see
+    # `homelab/plans/conversation-history-ledger-durability.md` §6.
+    - vfs-cache-mode=full
     - vfs-cache-max-size=10G
     - vfs-cache-max-age=6h
   claimRef:
@@ -134,6 +182,14 @@ metadata:
     homelab.internal/data-class: internal
   annotations:
     homelab.internal/dataset: "Nextcloud Group Folder: internal-archive"
+    # HIGHEST-RISK of the three remaining `writes` mounts. Nextcloud does
+    # reopen existing objects for write (versioning, chunked-upload assembly,
+    # office-document saves), which is the exact pattern that destroyed the
+    # conversation-history ledger. Not migrated in the 2026-08-31 incident
+    # window because flipping the mode requires restarting Nextcloud, and a
+    # live service belonging to more than one person is not a minimal-blast-
+    # radius first apply. Audit + migration tracked as T6.
+    homelab.internal/rclone-cache-mode-exemption: "Not yet migrated: needs a Nextcloud restart window. Highest risk of the three — Nextcloud reopens existing objects for write. Tracked as T6 in plans/conversation-history-ledger-durability.md."
 spec:
   capacity:
     storage: 1Ti
@@ -342,6 +398,11 @@ metadata:
     homelab.internal/data-class: internal
   annotations:
     homelab.internal/dataset: "Forgejo Git LFS objects (content-addressed, WORM-shape)"
+    # LOWER RISK, but unproven rather than safe. LFS objects are
+    # content-addressed and written once, so nothing should reopen one for
+    # write — that is a claim about Forgejo's write path, not something this
+    # repository has measured. Verify before relying on it. Tracked as T6.
+    homelab.internal/rclone-cache-mode-exemption: "Believed write-once (content-addressed LFS objects), so the read-modify-write hazard should not arise — claimed, not measured. Verify under T6 before treating as safe."
 spec:
   capacity:
     storage: 200Gi
@@ -417,6 +478,15 @@ metadata:
   annotations:
     homelab.internal/dataset: "Forgejo Packages blobs (OCI / PyPI / Helm artefacts)"
     homelab.internal/offsite-backup: "none — regenerable, snapshot-only (deliberate)"
+    # This mount ALREADY produced write failures on 2026-08-07: "transport
+    # endpoint is not connected" and blob-write "bad file descriptor" during a
+    # ~1 GB registry push, reproducibly. That was diagnosed as a cgroup OOM of
+    # the rclone mounter and closed by raising the node limit to 3Gi. The
+    # symptom stopped, so the diagnosis was never falsified — but the same
+    # cache mode implicated here is present, and `vfs-cache-mode=writes`
+    # buffering a whole ~1 GB object is also a plausible cause of that OOM.
+    # Re-examine both together under T6; do not assume 2026-08-07 is closed.
+    homelab.internal/rclone-cache-mode-exemption: "Not migrated, and deliberately flagged: the 2026-08-07 registry-push write failures on this mount were attributed to a mounter OOM, but vfs-cache-mode=writes buffering a whole ~1 GB object is an untested alternative cause. Re-open under T6."
 spec:
   capacity:
     storage: 200Gi
