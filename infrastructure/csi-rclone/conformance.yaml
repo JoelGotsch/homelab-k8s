@@ -23,17 +23,41 @@
 #
 # The interesting output is the DIFFERENCE between the two mounts:
 #
-#   writes fails, full passes   → expected. ADR 0058 D2 is doing its job.
-#   both pass                   → the probe is not reaching the failure any
-#                                 more. Tighten it; do NOT conclude the class
-#                                 is safe.
-#   both fail                   → the cache mode is not the whole story.
+#   writes fails, full passes   → the calibrated case. The probe discriminates
+#                                 between modes and ADR 0058 D2 is confirmed.
+#   both pass                   → PASS, control uncalibrated. `full` is not
+#                                 broken, but this run cannot show it is BETTER
+#                                 than `writes`. Not evidence that `writes` is
+#                                 safe. **This is what the first run returned,
+#                                 2026-08-31 — see below.**
+#   full fails                  → FAIL, exit 1. Every real volume uses `full`.
 #   writes passes, full fails   → something changed upstream; read the release
 #                                 notes before touching any PV.
 #
-# `writes` failing is the SUCCESS condition for that half of the probe, so the
-# job exits non-zero only when reality disagrees with ADR 0058 — never merely
-# because the known-bad mount misbehaved as documented.
+# FIRST RUN, 2026-08-31: both mounts passed cleanly — 6,000 records,
+# 49,152,000 bytes, 0 NUL, on both. So the probe did NOT reproduce the failure
+# that motivated it. Recorded here rather than quietly tuned away, because a
+# conformance suite that cannot fail is the thing this incident was about.
+#
+# What the first run DID establish, from the CSI driver logs: per-PV
+# `mountOptions` genuinely reach the driver as distinct `mount_flags` per
+# volume, and the vault's flip to `full` took effect on its next mount
+# (11:22 `writes` → 11:37 `full`). So the mechanism by which a PV asks for a
+# cache mode works.
+#
+# LEADING HYPOTHESIS for why the control did not fail: the driver logs
+# "Waiting for VFS cache sync (remote: nas-crypt-internal-archive)" — cache
+# state is accounted PER REMOTE, not per volume. If a single VFS instance is
+# shared by every mount of a remote, then two volumes on one remote cannot
+# actually run different cache modes, whatever their mount_flags say, and this
+# probe compared a mount against itself. That would ALSO mean the vault
+# (`full`) and nextcloud (`writes`) share one effective mode, which would make
+# the vault's fix contingent on nextcloud's setting. **Unresolved and
+# important** — see ADR 0058 open questions and plan §14.7.
+#
+# The other candidate is simply scale: the real failure needed an eviction from
+# a 10 GiB cache shared with Immich, Nextcloud and the registry under load, over
+# two weeks. An isolated probe with no competing tenants may never evict.
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -172,14 +196,25 @@ data:
       exit 1
     fi
     if [ $RC_WRITES -eq 0 ]; then
-      echo 'VERDICT: INCONCLUSIVE - vfs-cache-mode=writes did NOT lose data, so this'
-      echo 'probe no longer reproduces the 2026-08-29/30 failure. Either rclone fixed'
-      echo 'it upstream, or the probe stopped probing (cache sizes, record count or'
-      echo 'settle time no longer force an eviction). Tighten it.'
-      echo 'Do NOT read this as evidence that vfs-cache-mode=writes is safe.'
-      exit 1
+      echo 'VERDICT: PASS (control uncalibrated).'
+      echo
+      echo 'The regression test passed: vfs-cache-mode=full kept every byte.'
+      echo
+      echo 'But the vfs-cache-mode=writes control ALSO passed, so this probe is not'
+      echo 'reproducing the 2026-08-29/30 failure and cannot currently prove that'
+      echo '`full` is better than `writes` — only that `full` is not broken today.'
+      echo 'First observed 2026-08-31 on the very first run. Do NOT read a passing'
+      echo 'control as evidence that vfs-cache-mode=writes is safe.'
+      echo
+      echo 'Leading hypothesis: the driver accounts the VFS cache PER REMOTE'
+      echo '("Waiting for VFS cache sync (remote: ...)"), so two volumes on one'
+      echo 'remote may share a single VFS instance and one cache mode wins,'
+      echo 'regardless of the per-volume mount_flags the CSI call carries. If so,'
+      echo 'this probe compared a mount against itself. See ADR 0058 open questions.'
+      exit 0
     fi
     echo 'VERDICT: PASS - full intact, writes corrupted as ADR 0058 predicts.'
+    echo 'The control is calibrated: this run genuinely discriminates between modes.'
     exit 0
 ---
 apiVersion: batch/v1
