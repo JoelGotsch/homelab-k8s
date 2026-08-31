@@ -36,6 +36,11 @@ resources:
   # above no longer hand out the share root.
   - persistentvolumes.yaml
   - networkpolicy.yaml
+  # Storage-class conformance probe — ADR 0058 D4. Two probe datasets and a
+  # nightly job that asserts the append contract these classes are relied on
+  # for. Lands here rather than in observability because the thing under test
+  # is this layer's own storage classes.
+  - conformance.yaml
 
 # Post-render patch: both this node DaemonSet AND nfs-csi's csi-nfs-node
 # run hostNetwork=true and the chart defaults their CSI liveness-probe to

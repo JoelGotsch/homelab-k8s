@@ -811,3 +811,114 @@ spec:
     nodePublishSecretRef:
       name: nas-crypt-registry-blobs-config
       namespace: csi-rclone
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# share: internal-archive        (conformance probes — ADR 0058 D4)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# A storage class is an interface with a contract, and until 2026-08-31 this
+# workspace tested none of them. These two datasets exist so that the contract
+# is exercised on a schedule instead of being discovered by an application.
+#
+# THE POINT OF THE ODD CACHE SIZES. The vault's ledger took two weeks to die
+# because the failure needs a cache EVICTION between two appends, and the real
+# mounts have a 10 GiB cache with a 6 h age. Reproducing that honestly would
+# take a 10 GiB test file and six hours. So these probes are deliberately
+# configured to make the same failure reachable in minutes: a 16 MiB cache and
+# a 60 s age, against a file the probe grows past both. If
+# `vfs-cache-mode=writes` can zero an object on this class, the writes-probe
+# finds out tonight rather than in a fortnight.
+#
+# `_conformance/` is a distinct remotePath, per ADR 0051 — the whole reason
+# that ADR exists is that a scratch volume on this class once landed inside
+# conversation-history's live vault. These do not share a directory with any
+# dataset.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-internal-archive-conformance-writes
+  labels:
+    homelab.internal/nas-share: internal-archive
+    homelab.internal/data-class: internal
+  annotations:
+    homelab.internal/dataset: "csi-rclone conformance probe — vfs-cache-mode=writes (ADR 0058 D4)"
+    # This one is SUPPOSED to be on `writes`. It is the control that proves the
+    # failure mode is still detectable; if it ever stops failing, either rclone
+    # fixed it upstream or the probe stopped probing, and both are worth
+    # knowing. Holds no real data — the probe truncates it every run.
+    homelab.internal/rclone-cache-mode-exemption: "Deliberate: this volume exists to exercise the vfs-cache-mode=writes failure described in ADR 0058, on a 16Mi/60s cache so it surfaces in minutes. Holds no real data."
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-internal-archive
+  mountOptions:
+    - allow-other=true
+    - file-perms=0666
+    - dir-perms=0777
+    - vfs-cache-mode=writes
+    - vfs-cache-max-size=16M
+    - vfs-cache-max-age=60s
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: csi-rclone
+    name: conformance-writes
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-internal-archive#conformance-writes
+    volumeAttributes:
+      remote: "nas-crypt-internal-archive"
+      remotePath: "_conformance/writes-probe"
+      allow_other: "true"
+      uid: "0"
+      gid: "0"
+    nodePublishSecretRef:
+      name: nas-crypt-internal-archive-config
+      namespace: csi-rclone
+---
+# The same probe on `full`, at the same cache sizes. Two volumes rather than
+# one because the interesting result is the DIFFERENCE: if both survive, the
+# probe is not reaching the failure and needs tightening; if both fail, the
+# problem is not the cache mode. Only `writes` failing is the expected shape
+# and the one that keeps ADR 0058 D2 honest.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-internal-archive-conformance-full
+  labels:
+    homelab.internal/nas-share: internal-archive
+    homelab.internal/data-class: internal
+  annotations:
+    homelab.internal/dataset: "csi-rclone conformance probe — vfs-cache-mode=full (ADR 0058 D4)"
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-internal-archive
+  mountOptions:
+    - allow-other=true
+    - file-perms=0666
+    - dir-perms=0777
+    - vfs-cache-mode=full
+    - vfs-cache-max-size=16M
+    - vfs-cache-max-age=60s
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: csi-rclone
+    name: conformance-full
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-internal-archive#conformance-full
+    volumeAttributes:
+      remote: "nas-crypt-internal-archive"
+      remotePath: "_conformance/full-probe"
+      allow_other: "true"
+      uid: "0"
+      gid: "0"
+    nodePublishSecretRef:
+      name: nas-crypt-internal-archive-config
+      namespace: csi-rclone

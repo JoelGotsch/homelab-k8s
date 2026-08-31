@@ -1,0 +1,242 @@
+# csi-rclone storage-class conformance probe — ADR 0058 D4.
+#
+# WHY
+#
+# A storage class is an interface with a contract. Until 2026-08-31 this
+# workspace tested none of them, and the contract was discovered to be broken by
+# an application losing a 45 MB ledger twice in three days.
+#
+# Application CI could not have caught that. `open(path, "a")` is guaranteed to
+# append on a POSIX filesystem, the code was correct, and every unit test on
+# tmpfs passed. The defect lived in the assumption that the production
+# filesystem honours the contract the test filesystem honours. So the thing that
+# has to be tested is the SUBSTRATE.
+#
+# WHAT IT DOES
+#
+# Two volumes, identical except for `vfs-cache-mode` (see persistentvolumes.yaml
+# — both are on a deliberately tiny 16Mi/60s cache so that an eviction happens
+# in minutes rather than the fortnight the real 10G/6h mounts took). The probe
+# appends to a file on each, one open()/close() per record, in rounds separated
+# by long enough for the cache entry to age out, then re-reads and checks that
+# every byte it wrote is still there.
+#
+# The interesting output is the DIFFERENCE between the two mounts:
+#
+#   writes fails, full passes   → expected. ADR 0058 D2 is doing its job.
+#   both pass                   → the probe is not reaching the failure any
+#                                 more. Tighten it; do NOT conclude the class
+#                                 is safe.
+#   both fail                   → the cache mode is not the whole story.
+#   writes passes, full fails   → something changed upstream; read the release
+#                                 notes before touching any PV.
+#
+# `writes` failing is the SUCCESS condition for that half of the probe, so the
+# job exits non-zero only when reality disagrees with ADR 0058 — never merely
+# because the known-bad mount misbehaved as documented.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: conformance-writes
+  namespace: csi-rclone
+  annotations:
+    retention.homelab.internal/reason: "Conformance probe scratch. Holds no data; truncated every run."
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: nas-crypt-internal-archive
+  volumeName: nas-internal-archive-conformance-writes
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: conformance-full
+  namespace: csi-rclone
+  annotations:
+    retention.homelab.internal/reason: "Conformance probe scratch. Holds no data; truncated every run."
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: nas-crypt-internal-archive
+  volumeName: nas-internal-archive-conformance-full
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rclone-conformance-probe
+  namespace: csi-rclone
+data:
+  probe.py: |
+    """Append-integrity probe for a csi-rclone mount. See conformance.yaml.
+
+    Writes fixed-width records, one open()/close() per record, in rounds
+    separated by a sleep past `vfs-cache-max-age`. Then re-reads and asserts
+    that every record is intact and that the file contains no NUL bytes.
+
+    Deliberately does NOT use one long-lived file handle: a single open() with
+    many writes is the pattern that never broke. The pattern that destroyed the
+    vault ledger is many separate opens of an existing, growing object.
+    """
+    import os
+    import sys
+    import time
+
+    MOUNT = sys.argv[1]
+    LABEL = sys.argv[2]
+    ROUNDS = int(os.environ.get("PROBE_ROUNDS", "3"))
+    PER_ROUND = int(os.environ.get("PROBE_RECORDS_PER_ROUND", "2000"))
+    RECSIZE = int(os.environ.get("PROBE_RECORD_BYTES", "8192"))
+    SETTLE = int(os.environ.get("PROBE_SETTLE_SECONDS", "70"))
+
+    path = os.path.join(MOUNT, "append-probe.dat")
+
+    def record(n: int) -> bytes:
+        # Self-describing: the sequence number is recoverable from the record,
+        # so a survivor can be told from a duplicate or a shifted read.
+        head = f"REC{n:09d}".encode()
+        return head + b"." * (RECSIZE - len(head) - 1) + b"\n"
+
+    def emit(msg):
+        print(f"[{LABEL}] {msg}", flush=True)
+
+    # Start clean. This volume holds nothing else, by design.
+    with open(path, "wb"):
+        pass
+
+    written = 0
+    for r in range(ROUNDS):
+        for _ in range(PER_ROUND):
+            with open(path, "ab") as fh:      # one open/close per record
+                fh.write(record(written))
+            written += 1
+        size = os.path.getsize(path)
+        emit(f"round {r + 1}/{ROUNDS}: {written} records, {size:,} bytes on disk")
+        if r < ROUNDS - 1:
+            emit(f"sleeping {SETTLE}s to age the VFS cache entry out")
+            time.sleep(SETTLE)
+
+    expected = written * RECSIZE
+    data = open(path, "rb").read()
+    nul = data.count(0)
+    lines = data.count(b"\n")
+
+    emit(f"expected {expected:,} bytes / {written} records")
+    emit(f"read     {len(data):,} bytes / {lines} newlines / {nul:,} NUL bytes")
+
+    problems = []
+    if nul:
+        first = data.index(b"\x00")
+        problems.append(f"{nul:,} NUL bytes, first at offset {first:,}")
+    if len(data) != expected:
+        problems.append(f"size {len(data):,} != expected {expected:,}")
+    if lines != written:
+        problems.append(f"{lines} newlines != {written} records")
+    # Spot-check record identity at the head, middle and tail — a zeroed prefix
+    # with an intact tail is exactly the shape the vault ledger died in, and a
+    # size-only check would miss it.
+    for n in (0, written // 2, written - 1):
+        got = data[n * RECSIZE : n * RECSIZE + 12]
+        want = record(n)[:12]
+        if got != want:
+            problems.append(f"record {n} corrupt: {got!r} != {want!r}")
+
+    if problems:
+        emit("FAIL: " + "; ".join(problems))
+        sys.exit(1)
+    emit("PASS: every byte written is still there")
+    sys.exit(0)
+
+  run.sh: |
+    #!/bin/sh
+    # Runs the probe against both mounts and interprets the PAIR of results.
+    # See the header of conformance.yaml for the decision table.
+    set -u
+    python3 /probe/probe.py /probe-full   full   ; RC_FULL=$?
+    python3 /probe/probe.py /probe-writes writes ; RC_WRITES=$?
+
+    echo
+    echo "=== conformance verdict (ADR 0058) ==="
+    echo "vfs-cache-mode=full   -> $([ $RC_FULL   -eq 0 ] && echo PASS || echo FAIL)"
+    echo "vfs-cache-mode=writes -> $([ $RC_WRITES -eq 0 ] && echo PASS || echo FAIL)"
+    echo
+
+    if [ $RC_FULL -ne 0 ]; then
+      echo 'VERDICT: FAIL - vfs-cache-mode=full lost data. This is the mode every real'
+      echo 'volume now uses. Treat as an incident: read ADR 0058 and do not assume'
+      echo 'any nas-crypt volume is safe to append to.'
+      exit 1
+    fi
+    if [ $RC_WRITES -eq 0 ]; then
+      echo 'VERDICT: INCONCLUSIVE - vfs-cache-mode=writes did NOT lose data, so this'
+      echo 'probe no longer reproduces the 2026-08-29/30 failure. Either rclone fixed'
+      echo 'it upstream, or the probe stopped probing (cache sizes, record count or'
+      echo 'settle time no longer force an eviction). Tighten it.'
+      echo 'Do NOT read this as evidence that vfs-cache-mode=writes is safe.'
+      exit 1
+    fi
+    echo 'VERDICT: PASS - full intact, writes corrupted as ADR 0058 predicts.'
+    exit 0
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: rclone-conformance
+  namespace: csi-rclone
+spec:
+  # 03:10 — after the 00:xx enrichment lanes and well before the 04:30 offsite
+  # backup, so the probe's scratch writes are not mid-flight when restic walks
+  # the share.
+  schedule: "10 3 * * *"
+  # Explicitly false, not absent: removing the field leaves Argo reporting
+  # Synced while the live CronJob keeps whatever it had.
+  suspend: false
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: rclone-conformance
+            app.kubernetes.io/part-of: csi-rclone
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: probe
+              image: python:3.12-slim
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                requests: { cpu: 100m, memory: 128Mi }
+                limits: { memory: 512Mi }
+              command: ["/bin/sh", "/probe/run.sh"]
+              volumeMounts:
+                - { name: probe, mountPath: /probe }
+                - { name: conformance-writes, mountPath: /probe-writes }
+                - { name: conformance-full, mountPath: /probe-full }
+          volumes:
+            - name: probe
+              configMap:
+                name: rclone-conformance-probe
+                defaultMode: 493
+            - name: conformance-writes
+              persistentVolumeClaim: { claimName: conformance-writes }
+            - name: conformance-full
+              persistentVolumeClaim: { claimName: conformance-full }
