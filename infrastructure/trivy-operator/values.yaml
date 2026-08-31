@@ -103,13 +103,30 @@ service:
 # drop ALL caps, no privilege escalation. We leave that intact
 # (don't merge `securityContext: {}` over it) and just add
 # resource bounds.
+#
+# Memory raised 512Mi -> 1Gi and requests 128Mi -> 256Mi on 2026-08-31 after
+# an OOMKill. This was chronic under-sizing, not a spike: Prometheus shows the
+# killed container peaking at 511.7 MiB against the 512Mi limit (i.e. it hit
+# the ceiling exactly), and 63 minutes above 450Mi over the preceding 7 days.
+# The operator holds every VulnerabilityReport it reconciles in memory --
+# 79 reports here -- so demand tracks workload count, which only grows.
+#
+# The 128Mi request was the more misleading half: steady-state is 400-500Mi,
+# so the scheduler was placing this pod as if it were a third of its real
+# size. Note the scan jobs this operator SPAWNS were already limited to 1Gi
+# (see scanJob.resources below) -- the operator was sized tighter than its
+# own children, which is backwards.
+#
+# If this OOMs again, do not just raise the number: check whether report
+# count has grown, and consider trivy-operator's report TTL / compression
+# settings instead. Unbounded growth is the failure mode to watch for.
 resources:
   requests:
     cpu: 50m
-    memory: 128Mi
+    memory: 256Mi
   limits:
     cpu: 500m
-    memory: 512Mi
+    memory: 1Gi
 
 # ----------------------------------------------------------------
 # Trivy (the scanner itself) settings.
