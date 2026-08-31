@@ -31,8 +31,39 @@ defaultSettings:
   # the guarded automated equivalent of the manual taint flow.
   # Drain-path safety is separately guarded by
   # nodeDrainPolicy=block-if-contains-last-replica (live default
-  # we rely on; not overridden here).
+  # we rely on; not overridden here) TOGETHER WITH the setting
+  # below — see it for why the pair is required.
   nodeDownPodDeletionPolicy: delete-both-statefulset-and-deployment-pod
+  # 2026-08-31 worker2 drain: `kubectl drain` hung forever on
+  #   Cannot evict pod as it would violate the pod's disruption budget
+  # for instance-manager-c6333079c4a6a3743989dbb9574e3e84 (worker2's).
+  #
+  # Cause is the interaction of two things, neither wrong alone.
+  # (1) Longhorn's backup-controller leaks one attachmentTicket per
+  # backup and never reclaims it: measured 1182 orphaned tickets over
+  # 40 volumes, ALL referencing a Backup CR that no longer exists. A
+  # ticket holds its volume `attached`, so a volume with no consumer
+  # still counts as in use. (2) nodeDrainPolicy=block-if-contains-
+  # last-replica then pins the node's instance-manager PDB to
+  # disruptionsAllowed=0 for any such volume whose only running
+  # replica lives there. backup-cronjobs/restic-staging qualifies by
+  # design — it is longhorn-replica1 because its contents are
+  # disposable — so a disposable volume nothing was reading blocked
+  # the drain indefinitely.
+  #
+  # This setting is upstream's answer to exactly that: "Longhorn will
+  # automatically detach volumes that are manually attached to the
+  # nodes which are cordoned", whose stated purpose is to "prevent the
+  # draining process stuck by the PDB of instance-manager which still
+  # has running engine on the node" (longhorn.io/docs/1.11.3 settings
+  # reference). "Manually attached" covers exactly our case: attached
+  # with no csi-attacher ticket.
+  #
+  # It does NOT loosen nodeDrainPolicy — a volume with a live consumer
+  # is untouched, and last-replica protection still blocks a drain that
+  # would strand real data. It only releases volumes nothing is using,
+  # on a node the operator has already cordoned. Keep both keys.
+  detachManuallyAttachedVolumesWhenCordoned: true
 
 # Backup target: MinIO-on-NAS `longhorn-backups` bucket per
 # ADR 0016 D4 + ADR 0006 (warm tier). Restic CronJob at
