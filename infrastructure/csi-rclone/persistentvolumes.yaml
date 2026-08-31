@@ -922,3 +922,74 @@ spec:
     nodePublishSecretRef:
       name: nas-crypt-internal-archive-config
       namespace: csi-rclone
+---
+# THIRD conformance volume, and the only one that answers ADR 0058 Q2.
+#
+# The other two probe volumes are both carved from `nas-crypt-internal-archive`,
+# which is precisely the problem: if the driver keys its VFS (and therefore its
+# cache mode) by REMOTE rather than by volume, those two share one instance,
+# one mode wins, and the probe compares a mount against itself. That would
+# explain the byte-identical symmetric results on 2026-08-31 without anything
+# else being wrong.
+#
+# This volume is on a DIFFERENT remote and declares `writes`. It is the control
+# that the same-remote pair cannot provide:
+#
+#   B (internal-archive, writes) behaves like C  → modes are per-VOLUME; the
+#                                                  earlier symmetry needs another
+#                                                  explanation (Q1 / probe design)
+#   B behaves like A (full) and NOT like C       → modes are per-REMOTE; first
+#                                                  mount wins, ADR 0058 D2 is
+#                                                  weakened, and the vault's fix
+#                                                  is contingent on the nextcloud
+#                                                  PV rather than on its own
+#
+# `registry-blobs` was chosen deliberately over the `personal-*` shares: it is
+# `internal` per ADR 0003, so probe scratch may live here, and it is the share
+# whose 2026-08-07 write failures were closed as a mounter OOM without the cache
+# mode ever being considered (ADR 0058 Consequences). Exercising it has value
+# beyond answering Q2.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nas-registry-blobs-conformance-writes
+  labels:
+    homelab.internal/nas-share: registry-blobs
+    homelab.internal/data-class: internal
+  annotations:
+    homelab.internal/dataset: "csi-rclone conformance probe \u2014 vfs-cache-mode=writes on a SECOND remote (ADR 0058 D4 / Q2)"
+    homelab.internal/rclone-cache-mode-exemption: 'Deliberate: this volume exists to
+      exercise vfs-cache-mode=writes on a remote OTHER than internal-archive, which is
+      the only way to distinguish a per-remote VFS from a per-volume one (ADR 0058 Q2).
+      Holds no real data; truncated every run.'
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: nas-crypt-registry-blobs
+  mountOptions:
+  - allow-other=true
+  - file-perms=0666
+  - dir-perms=0777
+  - vfs-cache-mode=writes
+  - vfs-cache-max-size=16M
+  - vfs-cache-max-age=60s
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: csi-rclone
+    name: conformance-writes-alt-remote
+  csi:
+    driver: rclone.csi.veloxpack.io
+    volumeHandle: nas-crypt-registry-blobs#conformance-writes-alt-remote
+    volumeAttributes:
+      remote: nas-crypt-registry-blobs
+      remotePath: _conformance/writes-probe
+      allow_other: 'true'
+      uid: '0'
+      gid: '0'
+    nodePublishSecretRef:
+      name: nas-crypt-registry-blobs-config
+      namespace: csi-rclone

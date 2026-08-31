@@ -129,6 +129,24 @@ spec:
     requests:
       storage: 1Gi
 ---
+# The cross-remote control. See the PV comment in persistentvolumes.yaml: this is
+# the only volume that can distinguish a per-remote VFS from a per-volume one,
+# because it declares `writes` on a remote the other two probes never touch.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: conformance-writes-alt-remote
+  namespace: csi-rclone
+  annotations:
+    retention.homelab.internal/reason: "Conformance probe scratch. Holds no data; truncated every run."
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: nas-crypt-registry-blobs
+  volumeName: nas-registry-blobs-conformance-writes
+  resources:
+    requests:
+      storage: 1Gi
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -320,8 +338,10 @@ data:
     #                   tested nothing. v2 had no such state, which is why a run
     #                   that proved nothing was reported as a pass.
     set -u
-    python3 /probe/probe.py /probe-full   full   ; RC_FULL=$?
-    python3 /probe/probe.py /probe-writes writes ; RC_WRITES=$?
+    python3 /probe/probe.py /probe-full       full       ; RC_FULL=$?
+    python3 /probe/probe.py /probe-writes     writes     ; RC_WRITES=$?
+    # C: same declared mode as B, but on a DIFFERENT remote. See ADR 0058 Q2.
+    python3 /probe/probe.py /probe-writes-alt writes-alt ; RC_ALT=$?
 
     name() {
       case "$1" in
@@ -334,8 +354,32 @@ data:
 
     echo
     echo "=== conformance verdict (ADR 0058) ==="
-    echo "vfs-cache-mode=full   -> $(name $RC_FULL)"
-    echo "vfs-cache-mode=writes -> $(name $RC_WRITES)"
+    echo "A  full   @ internal-archive  -> $(name $RC_FULL)"
+    echo "B  writes @ internal-archive  -> $(name $RC_WRITES)"
+    echo "C  writes @ registry-blobs    -> $(name $RC_ALT)   <- different remote"
+    echo
+    # --- ADR 0058 Q2: is the VFS keyed by remote or by volume?
+    # B and C declare the SAME mode on DIFFERENT remotes. A and B declare
+    # DIFFERENT modes on the SAME remote. Comparing those tells us which.
+    echo "--- Q2 (per-remote vs per-volume VFS) ---"
+    if [ $RC_WRITES -eq $RC_ALT ] && [ $RC_WRITES -ne $RC_FULL ]; then
+      echo "B == C and B != A: the declared mode tracks the VOLUME, not the remote."
+      echo "Per-volume keying. ADR 0058 D2 holds as written and the vault's"
+      echo "vfs-cache-mode=full is genuinely in effect on its own merits."
+    elif [ $RC_WRITES -eq $RC_FULL ] && [ $RC_WRITES -ne $RC_ALT ]; then
+      echo "B == A but B != C: two volumes on ONE remote behaved identically"
+      echo "despite declaring different modes, while the same declared mode on"
+      echo "ANOTHER remote behaved differently. That is per-REMOTE keying."
+      echo "CONSEQUENCE: the vault (full) and nextcloud (writes) share one"
+      echo "effective mode. The vault's fix is contingent on an app-owned PV in"
+      echo "another namespace. Migrate nas-internal-archive-nextcloud urgently"
+      echo "and re-read ADR 0058 D2 -- it is weaker than it reads."
+    else
+      echo "Indeterminate this run (A=$RC_FULL B=$RC_WRITES C=$RC_ALT)."
+      echo "Q2 needs at least one mount to reach a decisive state; if everything"
+      echo "is INCONCLUSIVE the probe still is not forcing an eviction and that"
+      echo "must be fixed before Q2 can be read at all."
+    fi
     echo
 
     # 1. Corruption on `full` is an incident: every real volume uses it.
@@ -451,6 +495,7 @@ spec:
                 - { name: probe, mountPath: /probe }
                 - { name: conformance-writes, mountPath: /probe-writes }
                 - { name: conformance-full, mountPath: /probe-full }
+                - { name: conformance-alt, mountPath: /probe-writes-alt }
           volumes:
             - name: probe
               configMap:
@@ -460,3 +505,5 @@ spec:
               persistentVolumeClaim: { claimName: conformance-writes }
             - name: conformance-full
               persistentVolumeClaim: { claimName: conformance-full }
+            - name: conformance-alt
+              persistentVolumeClaim: { claimName: conformance-writes-alt-remote }
