@@ -16,10 +16,18 @@
 #
 # Two volumes, identical except for `vfs-cache-mode` (see persistentvolumes.yaml
 # — both are on a deliberately tiny 16Mi/60s cache so that an eviction happens
-# in minutes rather than the fortnight the real 10G/6h mounts took). The probe
-# appends to a file on each, one open()/close() per record, in rounds separated
-# by long enough for the cache entry to age out, then re-reads and checks that
-# every byte it wrote is still there.
+# in minutes rather than the fortnight the real 10G/6h mounts took). On each, the
+# probe writes a ~45 MB file whole, appends ONE record, forces that object out of
+# the cache, appends a SECOND record, and then checks that every byte survived.
+#
+# The gap is the entire test. The failure needs a RE-FETCH — the object has to
+# leave the cache and be pulled back before it can fail to come back whole — so
+# the probe forces the entry cold two ways at once: it sleeps past
+# `vfs-cache-max-age`, and it pushes 48 MiB of unrelated bytes through the same
+# mount to provoke a size eviction against a 16Mi cache. Note that the 45 MB
+# subject file already exceeds that cache on its own, which is the pressure the
+# real 10 GiB cache only reached when Immich, Nextcloud and the registry were
+# competing for it.
 #
 # The interesting output is the DIFFERENCE between the two mounts:
 #
@@ -34,30 +42,35 @@
 #   writes passes, full fails   → something changed upstream; read the release
 #                                 notes before touching any PV.
 #
-# FIRST RUN, 2026-08-31: both mounts passed cleanly — 6,000 records,
-# 49,152,000 bytes, 0 NUL, on both. So the probe did NOT reproduce the failure
-# that motivated it. Recorded here rather than quietly tuned away, because a
+# HISTORY — v1 (2026-08-31) COULD NOT FAIL, AND THAT IS WHY THIS IS v2
+#
+# v1 wrote 6,000 records in a tight loop and both mounts passed cleanly —
+# 49,152,000 bytes, 0 NUL, on `full` AND on `writes`. It did not reproduce the
+# failure that motivated it. Recorded rather than quietly tuned away, because a
 # conformance suite that cannot fail is the thing this incident was about.
 #
-# What the first run DID establish, from the CSI driver logs: per-PV
-# `mountOptions` genuinely reach the driver as distinct `mount_flags` per
-# volume, and the vault's flip to `full` took effect on its next mount
-# (11:22 `writes` → 11:37 `full`). So the mechanism by which a PV asks for a
-# cache mode works.
+# The reason, identified in peer review the same day: **a tight loop keeps the
+# file continuously hot, so nothing is ever re-fetched and nothing can fail to
+# re-fetch.** v1 reproduced the access pattern (many opens) but not the timing
+# (long gaps) — and the timing is the part that matters. Production appended
+# once per blob across hours, against `vfs-cache-max-age=6h`. Hence v2's shape:
+# two writes with a forced-cold gap beat six thousand back-to-back ones.
 #
-# LEADING HYPOTHESIS for why the control did not fail: the driver logs
-# "Waiting for VFS cache sync (remote: nas-crypt-internal-archive)" — cache
-# state is accounted PER REMOTE, not per volume. If a single VFS instance is
-# shared by every mount of a remote, then two volumes on one remote cannot
-# actually run different cache modes, whatever their mount_flags say, and this
-# probe compared a mount against itself. That would ALSO mean the vault
-# (`full`) and nextcloud (`writes`) share one effective mode, which would make
-# the vault's fix contingent on nextcloud's setting. **Unresolved and
-# important** — see ADR 0058 open questions and plan §14.7.
+# What v1 DID establish, from the CSI driver logs: per-PV `mountOptions` reach
+# the driver as distinct `mount_flags` per volume, and the vault's flip to
+# `full` took effect on its next mount (11:22 `writes` → 11:37 `full`). The
+# mechanism by which a PV asks for a cache mode works.
 #
-# The other candidate is simply scale: the real failure needed an eviction from
-# a 10 GiB cache shared with Immich, Nextcloud and the registry under load, over
-# two weeks. An isolated probe with no competing tenants may never evict.
+# STILL OPEN, and NOT settled by v2 reproducing: the driver logs "Waiting for
+# VFS cache sync (remote: nas-crypt-internal-archive)" — cache state is
+# accounted PER REMOTE. If a single VFS instance is shared by every mount of a
+# remote, two volumes on one remote cannot really run different cache modes
+# whatever their mount_flags say, and this probe compares a mount against
+# itself. That would also mean the vault (`full`) and nextcloud (`writes`) share
+# one effective mode, making the vault's fix contingent on nextcloud's setting.
+# A v2 reproduction does not falsify this — both can be true. Only two volumes
+# on DIFFERENT remotes distinguish them. See ADR 0058 open questions, plan
+# §14.7, and ticket T11.
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -98,13 +111,28 @@ data:
   probe.py: |
     """Append-integrity probe for a csi-rclone mount. See conformance.yaml.
 
-    Writes fixed-width records, one open()/close() per record, in rounds
-    separated by a sleep past `vfs-cache-max-age`. Then re-reads and asserts
-    that every record is intact and that the file contains no NUL bytes.
+    WHAT THIS TESTS, precisely: reopening a LARGE, COLD remote object for append.
 
-    Deliberately does NOT use one long-lived file handle: a single open() with
-    many writes is the pattern that never broke. The pattern that destroyed the
-    vault ledger is many separate opens of an existing, growing object.
+    The failure needs a RE-FETCH. The object must leave the VFS cache and be
+    pulled back before it can fail to come back whole. So the probe is shaped
+    around the gap, not around volume:
+
+        1. write a bulk file of BULK_MB in one open()      (never itself at risk)
+        2. append ONE record                                (cache now hot)
+        3. force the entry cold -- age it out AND evict by size pressure
+        4. append a SECOND record                           (this is the re-fetch)
+        5. read back; assert zero NULs and every region intact
+
+    The v1 probe (2026-08-31) wrote 6,000 records in a tight loop and BOTH mounts
+    passed. A tight loop keeps the file continuously hot: nothing is ever
+    re-fetched, so nothing can fail to re-fetch. It reproduced the access pattern
+    (many opens) but not the timing (long gaps), and the timing is the part that
+    matters -- production appended once per blob across hours, against
+    vfs-cache-max-age=6h. Two writes separated by a real gap test more than six
+    thousand back-to-back ones do.
+
+    Deliberately does NOT hold one long-lived handle: a single open() with many
+    writes is the pattern that never broke.
     """
     import os
     import sys
@@ -112,12 +140,14 @@ data:
 
     MOUNT = sys.argv[1]
     LABEL = sys.argv[2]
-    ROUNDS = int(os.environ.get("PROBE_ROUNDS", "3"))
-    PER_ROUND = int(os.environ.get("PROBE_RECORDS_PER_ROUND", "2000"))
     RECSIZE = int(os.environ.get("PROBE_RECORD_BYTES", "8192"))
-    SETTLE = int(os.environ.get("PROBE_SETTLE_SECONDS", "70"))
+    BULK_MB = int(os.environ.get("PROBE_BULK_MB", "45"))
+    SETTLE = int(os.environ.get("PROBE_SETTLE_SECONDS", "150"))
+    EVICT_MB = int(os.environ.get("PROBE_EVICT_MB", "48"))
 
     path = os.path.join(MOUNT, "append-probe.dat")
+    evict_path = os.path.join(MOUNT, "cache-pressure.tmp")
+    bulk_bytes = BULK_MB * 1024 * 1024
 
     def record(n: int) -> bytes:
         # Self-describing: the sequence number is recoverable from the record,
@@ -128,51 +158,70 @@ data:
     def emit(msg):
         print(f"[{LABEL}] {msg}", flush=True)
 
-    # Start clean. This volume holds nothing else, by design.
-    with open(path, "wb"):
-        pass
+    filler = b"F" * RECSIZE
 
-    written = 0
-    for r in range(ROUNDS):
-        for _ in range(PER_ROUND):
-            with open(path, "ab") as fh:      # one open/close per record
-                fh.write(record(written))
-            written += 1
-        size = os.path.getsize(path)
-        emit(f"round {r + 1}/{ROUNDS}: {written} records, {size:,} bytes on disk")
-        if r < ROUNDS - 1:
-            emit(f"sleeping {SETTLE}s to age the VFS cache entry out")
-            time.sleep(SETTLE)
+    # --- 1. bulk file, written whole. This write is never the thing at risk.
+    with open(path, "wb") as fh:
+        for _ in range(bulk_bytes // RECSIZE):
+            fh.write(filler)
+    base = os.path.getsize(path)
+    emit(f"bulk file written whole: {base:,} bytes")
 
-    expected = written * RECSIZE
-    data = open(path, "rb").read()
+    # --- 2. first append. Object is hot in cache; this one is expected to work.
+    with open(path, "ab") as fh:
+        fh.write(record(0))
+    emit(f"append #1 (hot): {os.path.getsize(path):,} bytes")
+
+    # --- 3. force the entry COLD. Age alone is not enough if the cache is under
+    # its size limit and the cleaner has not run, so do both: sleep past
+    # vfs-cache-max-age, then push more than vfs-cache-max-size of unrelated
+    # bytes through the SAME mount to provoke a size-based eviction. The scratch
+    # file is deleted afterwards; the bytes only have to pass through the cache.
+    emit(f"sleeping {SETTLE}s to age the entry past vfs-cache-max-age")
+    time.sleep(SETTLE)
+
+    emit(f"pushing {EVICT_MB} MiB through the cache to force a size eviction")
+    with open(evict_path, "wb") as fh:
+        for _ in range(EVICT_MB * 1024 * 1024 // RECSIZE):
+            fh.write(filler)
+    os.unlink(evict_path)
+    time.sleep(15)   # let the cache cleaner act on the pressure
+
+    # --- 4. second append. THIS is the operation under test: rclone must
+    # re-materialise a ~45 MB object it no longer holds before it can append.
+    with open(path, "ab") as fh:
+        fh.write(record(1))
+    emit(f"append #2 (cold, re-fetch required): {os.path.getsize(path):,} bytes")
+
+    # --- 5. verify.
+    expected = base + 2 * RECSIZE
+    with open(path, "rb") as fh:
+        data = fh.read()
     nul = data.count(0)
-    lines = data.count(b"\n")
 
-    emit(f"expected {expected:,} bytes / {written} records")
-    emit(f"read     {len(data):,} bytes / {lines} newlines / {nul:,} NUL bytes")
+    emit(f"expected {expected:,} bytes")
+    emit(f"read     {len(data):,} bytes / {nul:,} NUL bytes")
 
     problems = []
     if nul:
-        first = data.index(b"\x00")
-        problems.append(f"{nul:,} NUL bytes, first at offset {first:,}")
+        problems.append(f"{nul:,} NUL bytes, first at offset {data.index(0):,}")
     if len(data) != expected:
         problems.append(f"size {len(data):,} != expected {expected:,}")
-    if lines != written:
-        problems.append(f"{lines} newlines != {written} records")
-    # Spot-check record identity at the head, middle and tail — a zeroed prefix
-    # with an intact tail is exactly the shape the vault ledger died in, and a
-    # size-only check would miss it.
-    for n in (0, written // 2, written - 1):
-        got = data[n * RECSIZE : n * RECSIZE + 12]
-        want = record(n)[:12]
-        if got != want:
-            problems.append(f"record {n} corrupt: {got!r} != {want!r}")
+    # The bulk region must still be filler. A zeroed prefix with an intact tail
+    # is exactly the shape the vault ledger died in, and a size-only check
+    # misses it entirely -- the corrupt ledger was very nearly the right size.
+    for off in (0, base // 2, base - RECSIZE):
+        if data[off:off + 64] != filler[:64]:
+            problems.append(f"bulk region corrupt at offset {off:,}")
+    for n in (0, 1):
+        off = base + n * RECSIZE
+        if data[off:off + 12] != record(n)[:12]:
+            problems.append(f"record {n} corrupt at offset {off:,}")
 
     if problems:
         emit("FAIL: " + "; ".join(problems))
         sys.exit(1)
-    emit("PASS: every byte written is still there")
+    emit("PASS: cold re-fetch preserved every byte")
     sys.exit(0)
 
   run.sh: |
@@ -202,15 +251,19 @@ data:
       echo
       echo 'But the vfs-cache-mode=writes control ALSO passed, so this probe is not'
       echo 'reproducing the 2026-08-29/30 failure and cannot currently prove that'
-      echo '`full` is better than `writes` — only that `full` is not broken today.'
-      echo 'First observed 2026-08-31 on the very first run. Do NOT read a passing'
-      echo 'control as evidence that vfs-cache-mode=writes is safe.'
+      echo '`full` is better than `writes` - only that `full` is not broken today.'
+      echo 'Do NOT read a passing control as evidence that writes mode is safe.'
       echo
-      echo 'Leading hypothesis: the driver accounts the VFS cache PER REMOTE'
-      echo '("Waiting for VFS cache sync (remote: ...)"), so two volumes on one'
-      echo 'remote may share a single VFS instance and one cache mode wins,'
-      echo 'regardless of the per-volume mount_flags the CSI call carries. If so,'
-      echo 'this probe compared a mount against itself. See ADR 0058 open questions.'
+      echo 'v1 of this probe failed to reproduce because it wrote 6,000 records in'
+      echo 'a tight loop, keeping the file hot: nothing was re-fetched, so nothing'
+      echo 'could fail to re-fetch. v2 forces the object cold between two appends.'
+      echo 'If v2 ALSO shows a symmetric result, the remaining hypothesis is that'
+      echo 'the driver accounts the VFS cache PER REMOTE ("Waiting for VFS cache'
+      echo 'sync (remote: ...)"), so two volumes on one remote share a single VFS'
+      echo 'instance and one cache mode wins regardless of per-volume mount_flags -'
+      echo 'meaning this probe compared a mount against itself, and the vault fix'
+      echo 'is contingent on the nextcloud PV. Distinguishing that needs two'
+      echo 'volumes on DIFFERENT remotes. See ADR 0058 open questions, T11.'
       exit 0
     fi
     echo 'VERDICT: PASS - full intact, writes corrupted as ADR 0058 predicts.'
@@ -237,6 +290,11 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 0
+      # v2 sleeps 150s + 15s per mount and moves ~93 MB per mount over SMB, so a
+      # normal run is minutes, not seconds. The deadline exists to bound a mount
+      # that has gone catatonic — the 2026-08-07 registry incident produced
+      # "transport endpoint is not connected", which hangs rather than errors.
+      activeDeadlineSeconds: 2700
       template:
         metadata:
           labels:
