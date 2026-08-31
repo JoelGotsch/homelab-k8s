@@ -90,11 +90,33 @@ spegel:
   containerdRegistryConfigPath: /etc/cri/conf.d/hosts
   containerdContentPath: /var/lib/containerd/io.containerd.content.v1.content
 
-  # Spegel writes only the explicitly listed third-party registry subdirs.
-  # Talos machine.registries owns the two first-party subdirs; the scopes
-  # must remain disjoint because Spegel moves pre-existing entries it owns
-  # under `_backup` during initialization.
-  containerdMirrorAdd: true
+  # Spegel does NOT write containerd registry config at all (2026-08-31).
+  #
+  # The "keep the scopes disjoint" assumption this key used to carry was
+  # wrong, and it cost worker2 its first-party registry trust. Spegel's
+  # `configuration` initContainer does not confine itself to the registries
+  # in `mirroredRegistries`: on every start it moves EVERY pre-existing
+  # subdir of containerdRegistryConfigPath into `_backup/`
+  # (pkg/oci/containerd.go `backupConfig`) and only writes back the ones it
+  # mirrors. Disjoint scopes therefore do not protect the first-party dirs —
+  # being out of scope is exactly what leaves them in `_backup`.
+  #
+  # /etc/cri/conf.d/hosts is tmpfs, so Talos rebuilds it correctly at every
+  # boot and Spegel clobbers it ~30 s later. Proven on worker2's
+  # 2026-08-29 17:58:42Z reboot, from Spegel's own log:
+  #   17:58:26  Talos writes registry.homelab.internal + forgejo.lab.vyramo.com
+  #   17:58:57  "backing up containerd host configuration" for BOTH of them
+  # Nodes that were repaired by scripts/restore-spegel-registry-hosts.sh on
+  # 2026-07-30 only stayed healthy because none of them had rebooted since —
+  # the repair lives on tmpfs. Every node was one reboot from this.
+  #
+  # false disables the initContainer AND the post-delete hook (chart 0.7.4
+  # daemonset.yaml:42, post-delete-hook.yaml:1). The five third-party mirrors
+  # now live in Talos machine.registries.mirrors
+  # (homelab-infra/talos/patches/containerd-registry.yaml), which is the only
+  # writer of that directory. Spegel still serves and discovers peers exactly
+  # as before — this key governs only who writes containerd's config.
+  containerdMirrorAdd: false
 
   # THIRD-PARTY registries only (2026-07-19). The earlier "mirror all"
   # setting rested on the false assumption that no Talos
@@ -108,6 +130,13 @@ spegel:
   # ADR 0038 direct path — P2P caching buys nothing there; scoping
   # Spegel to the big third-party registries restores the Talos config
   # for everything first-party.
+  # STILL REQUIRED with containerdMirrorAdd: false — do not delete. This list
+  # feeds the main `registry` container's `--mirrored-registries`
+  # (chart daemonset.yaml:102), which governs what Spegel advertises and
+  # serves in the P2P mesh. Only the *containerd config writing* moved to
+  # Talos; this list must stay in lockstep with the mirrors block in
+  # homelab-infra/talos/patches/containerd-registry.yaml, or a registry will
+  # be mirrored by containerd but not served by Spegel (or vice versa).
   mirroredRegistries:
     - https://docker.io
     - https://ghcr.io
