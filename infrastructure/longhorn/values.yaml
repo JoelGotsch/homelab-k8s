@@ -42,14 +42,21 @@ defaultSettings:
   # (1) Longhorn's backup-controller leaks one attachmentTicket per
   # backup and never reclaims it: measured 1182 orphaned tickets over
   # 40 volumes, ALL referencing a Backup CR that no longer exists. A
-  # ticket holds its volume `attached`, so a volume with no consumer
-  # still counts as in use. (2) nodeDrainPolicy=block-if-contains-
-  # last-replica then pins the node's instance-manager PDB to
-  # disruptionsAllowed=0 for any such volume whose only running
-  # replica lives there. backup-cronjobs/restic-staging qualifies by
-  # design — it is longhorn-replica1 because its contents are
-  # disposable — so a disposable volume nothing was reading blocked
-  # the drain indefinitely.
+  # ticket holds its volume `attached`, which keeps a running engine
+  # on that node. (2) syncInstanceManagerPDB
+  # (instance_manager_controller.go:1032) removes a node's
+  # instance-manager PDB ONLY when that node has zero running
+  # engines — otherwise it logs "removing <node> PDB is blocked:
+  # some volumes are still attached InstanceEngines count N …". A
+  # drain normally reaches zero by evicting workload pods, which
+  # detaches their volumes. A volume held by an orphaned ticket has
+  # NO pod to evict, so its engine never stops and the PDB is never
+  # released. backup-cronjobs/restic-staging was exactly that: a
+  # disposable longhorn-replica1 volume nothing was reading, holding
+  # the drain open indefinitely.
+  #
+  # NOTE: disruptionsAllowed=0 is NOT the signal — it is the steady
+  # state (minAvailable:1 over a single pod) on every healthy worker.
   #
   # This setting is upstream's answer to exactly that: "Longhorn will
   # automatically detach volumes that are manually attached to the
