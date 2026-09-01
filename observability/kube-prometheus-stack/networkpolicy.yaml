@@ -146,6 +146,20 @@ spec:
         # post-migration `barman_cloud_cloudnative_pg_io_*` family.
         - port: 9187
           protocol: TCP
+        # OTel Collector self-metrics (agent DaemonSet + gateway).
+        # 6th recurrence, and the one that hid all the others: the
+        # collector's ServiceMonitor has existed since the stack
+        # landed in May 2026 and produced `up == 0` on all five
+        # targets for 100 days, so `otelcol_receiver_accepted_spans`
+        # and `otelcol_exporter_sent_spans` were never in Prometheus
+        # at all. That is precisely the pair of counters that would
+        # have shown the tracing pipeline carrying zero spans, so
+        # the missing port kept its own diagnostic off the screen.
+        # Confirmed 2026-09-01 from the targets API: every collector
+        # target `down` with "context deadline exceeded", while a
+        # port-forward to the same pod's :8888 answered instantly.
+        - port: 8888
+          protocol: TCP
     # External hosts via additional-scrape-configs (Mac Studio
     # node-exporter on inference VLAN per
     # observability/prometheus/external-hosts/).
