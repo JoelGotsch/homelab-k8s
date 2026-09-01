@@ -227,6 +227,16 @@ s3:
   # The chart deploys a bundled MinIO dependency by default. Disabled
   # 2026-08-16: KST-03 proved the bundled instance held zero objects (bucket
   # created 2026-05-24, never written) and nothing referenced it — every
+  # The endpoints below are ABSOLUTE (trailing dot). Langfuse's Node
+  # resolver fails every relative in-cluster name from this namespace
+  # with EAI_AGAIN — the search list is walked before the name itself,
+  # and one suffix hangs rather than answering NXDOMAIN. Proven
+  # 2026-09-01 from langfuse-web: `minio.minio-on-nas.svc.cluster.local`
+  # => EAI_AGAIN, the same name with a trailing dot => 10.98.111.115.
+  # Symptom was OTLP spans reaching Langfuse and dying at
+  # `publishToOtelIngestionQueue` with HTTP 503 "Storage service
+  # temporarily unavailable". Same failure and same fix as
+  # todo-agents 2c4c724.
   # Langfuse S3 endpoint below targets minio-on-nas. Its render-time random
   # root password also re-rolled the pod on every commit (Argo generation 566).
   deploy: false
@@ -234,7 +244,7 @@ s3:
   eventUpload:
     bucket: "langfuse-blobs"
     region: "auto"
-    endpoint: "http://minio.minio-on-nas.svc.cluster.local:9000"
+    endpoint: "http://minio.minio-on-nas.svc.cluster.local.:9000"
     forcePathStyle: true
     accessKeyId:
       secretKeyRef:
@@ -251,7 +261,7 @@ s3:
     enabled: true
     bucket: "langfuse-blobs"
     region: "auto"
-    endpoint: "http://minio.minio-on-nas.svc.cluster.local:9000"
+    endpoint: "http://minio.minio-on-nas.svc.cluster.local.:9000"
     forcePathStyle: true
     accessKeyId:
       secretKeyRef:
@@ -265,7 +275,7 @@ s3:
   mediaUpload:
     bucket: "langfuse-blobs"
     region: "auto"
-    endpoint: "http://minio.minio-on-nas.svc.cluster.local:9000"
+    endpoint: "http://minio.minio-on-nas.svc.cluster.local.:9000"
     forcePathStyle: true
     accessKeyId:
       secretKeyRef:

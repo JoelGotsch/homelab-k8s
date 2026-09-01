@@ -5,13 +5,20 @@ metadata:
   namespace: monitoring
   labels:
     app.kubernetes.io/name: opentelemetry-collector
-    app.kubernetes.io/component: gateway
+    app.kubernetes.io/instance: opentelemetry-collector-gateway
     release: kube-prometheus-stack
 spec:
+  # Selects the SERVICE by label. The chart labels its Service with
+  # `name` + `instance` and an unprefixed `component:
+  # standalone-collector`; it never sets `app.kubernetes.io/component`.
+  # The old selector therefore matched no Service, so the collector's
+  # own metrics — including `otelcol_exporter_sent_spans`, the one
+  # series that would have shown this pipeline was dead — were never
+  # scraped. Found 2026-09-01.
   selector:
     matchLabels:
       app.kubernetes.io/name: opentelemetry-collector
-      app.kubernetes.io/component: gateway
+      app.kubernetes.io/instance: opentelemetry-collector-gateway
   endpoints:
     - port: metrics
       path: /metrics
@@ -25,13 +32,15 @@ metadata:
   namespace: monitoring
   labels:
     app.kubernetes.io/name: opentelemetry-collector
-    app.kubernetes.io/component: agent
+    app.kubernetes.io/instance: opentelemetry-collector-agent
     release: kube-prometheus-stack
 spec:
+  # Same correction as the gateway monitor above; the agent Service
+  # additionally did not exist until 2026-09-01.
   selector:
     matchLabels:
       app.kubernetes.io/name: opentelemetry-collector
-      app.kubernetes.io/component: agent
+      app.kubernetes.io/instance: opentelemetry-collector-agent
   endpoints:
     - port: metrics
       path: /metrics
