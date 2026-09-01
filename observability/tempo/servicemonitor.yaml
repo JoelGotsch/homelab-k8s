@@ -11,7 +11,15 @@ spec:
     matchLabels:
       app.kubernetes.io/name: tempo
   endpoints:
-    - port: http-metrics
+    # The Service names this port `tempo-prom-metrics`, not
+    # `http-metrics`. A ServiceMonitor whose `port` matches no port on
+    # the selected Service produces ZERO targets — not a failing target
+    # — so `up{namespace="observability-tempo"}` returned no series at
+    # all rather than 0, and nothing about Tempo has ever been scraped.
+    # Found 2026-09-01: an absent target is invisible to TargetDown,
+    # which alerts on `up == 0` and therefore requires a target to
+    # exist before it can fire.
+    - port: tempo-prom-metrics
       path: /metrics
       interval: 60s
       scrapeTimeout: 30s
