@@ -260,7 +260,14 @@ grafana:
     - name: Tempo
       type: tempo
       access: proxy
-      url: http://tempo.monitoring.svc.cluster.local:3200
+      # Tempo runs in `observability-tempo`, and its HTTP API is on
+      # 3100 — the Service exposes no 3200 at all. This datasource had
+      # named a Service that has never existed on a port Tempo has never
+      # listened on, so no trace was ever readable from Grafana. Same
+      # family as the collector's exporter endpoint (2026-09-01): a
+      # Grafana datasource reports "no data", not "no such host".
+      # Absolute name (trailing dot) for the ndots:5 search-list trap.
+      url: http://tempo.observability-tempo.svc.cluster.local.:3100
       isDefault: false
       jsonData:
         httpMethod: GET

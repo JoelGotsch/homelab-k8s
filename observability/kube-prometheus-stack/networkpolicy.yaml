@@ -361,6 +361,20 @@ spec:
         - ports:
             - port: "3100"
               protocol: TCP
+    # Tempo data source. Cross-namespace, unlike Loki: Tempo lives in
+    # `observability-tempo`, so the rule needs the namespace label —
+    # a bare podSelector here means `monitoring` and would permit
+    # nothing that exists. This rule was simply absent, which is why
+    # the Tempo datasource has never returned a trace even leaving
+    # aside its wrong URL (2026-09-01).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: observability-tempo
+            app.kubernetes.io/name: tempo
+      toPorts:
+        - ports:
+            - port: "3100"
+              protocol: TCP
     # Authentik OIDC server-to-server (token + userinfo).
     - toEndpoints:
         - matchLabels:
