@@ -44,6 +44,40 @@ config:
     batch:
       timeout: 200ms
       send_batch_size: 8192
+    # Strip LLM message content on the TEMPO path only.
+    #
+    # ADR 0003 gates location by classification, and the namespace
+    # labels are explicit: `langfuse` is `personal`, while
+    # `observability-tempo` and `monitoring` are `internal`. A
+    # gateway span carries the full prompt and completion —
+    # `llm.openai.messages` held a verbatim user prompt in the first
+    # traced request on 2026-09-01 — so exporting the same span to
+    # both backends would put `personal` content into an `internal`
+    # store, and Tempo persists to its own object storage with its
+    # own retention and DR path.
+    #
+    # So the fan-out is asymmetric by design: Langfuse gets the
+    # content (that is what it is for, and its namespace is
+    # classified for it), Tempo gets the shape — service, model,
+    # latency, token counts, status — and none of the text. This is
+    # exactly the backend-specific shaping ADR 0028 D5 says belongs
+    # in the COLLECTOR rather than in workload config.
+    #
+    # Denylist, not allowlist, because the attribute set grows with
+    # every LiteLLM release; it covers today's `llm.openai.*` names,
+    # the `gen_ai.*` semantic conventions LiteLLM emits once the
+    # StandardLoggingPayload is intact, and the span EVENTS used by
+    # the collector-convention capture mode (`EVENT_ONLY` /
+    # `SPAN_AND_EVENT`), which carry the same text somewhere else.
+    transform/strip-llm-content:
+      error_mode: ignore
+      trace_statements:
+        - context: span
+          statements:
+            - delete_matching_keys(attributes, "^(gen_ai\\.(prompt|completion|input|output|system_instructions)|llm\\.(openai\\.(messages|choices|extra_body)|prompts|completions)|input|output)")
+        - context: spanevent
+          statements:
+            - delete_matching_keys(attributes, "^(gen_ai\\.(prompt|completion|input|output|system_instructions)|llm\\.(openai\\.(messages|choices|extra_body)|prompts|completions)|input|output)")
   exporters:
     # Tempo receives OTLP gRPC on 4317.
     otlp/tempo:
@@ -87,10 +121,26 @@ config:
   service:
     extensions: [health_check, basicauth/langfuse]
     pipelines:
+      # Two pipelines over one receiver, because the two backends are
+      # classified differently (see transform/strip-llm-content).
+      # Splitting here rather than at the workload keeps the emitter
+      # unaware of either backend, per ADR 0028 D5.
+      #
+      # The Tempo path keeps the plain `traces` name deliberately: the
+      # chart ships its OWN `traces` pipeline (otlp+jaeger+zipkin ->
+      # `debug`) and values merge key-by-key, so a pipeline map named
+      # anything else leaves that default in place — which would print
+      # every span, prompt text included, to the collector's stdout and
+      # from there to Loki in the `internal` monitoring namespace.
+      # Naming one of ours `traces` replaces it outright.
       traces:
         receivers: [otlp]
+        processors: [memory_limiter, transform/strip-llm-content, batch]
+        exporters: [otlp/tempo]
+      traces/langfuse:
+        receivers: [otlp]
         processors: [memory_limiter, batch]
-        exporters: [otlp/tempo, otlphttp/langfuse]
+        exporters: [otlphttp/langfuse]
     telemetry:
       metrics:
         address: 0.0.0.0:8888
