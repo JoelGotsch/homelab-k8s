@@ -44,6 +44,47 @@ config:
     batch:
       timeout: 200ms
       send_batch_size: 8192
+    # Keep only LLM-shaped spans on the LANGFUSE path.
+    #
+    # Langfuse is an LLM-observability store, not a general trace store
+    # — that is Tempo's job, and Tempo keeps everything. Without this
+    # filter every span the gateway emits becomes a Langfuse
+    # observation, and most of them are not about a model at all.
+    # Measured 2026-09-01, an hour after the pipeline first carried a
+    # span: ~1020 spans/hour, dominated by `auth` spans from LiteLLM's
+    # MCP tool-list polling (`call_type: /mcp-rest/tools/list`, one per
+    # server per poll, no LLM call involved) plus `postgres`,
+    # `batch_write_to_db`, `router`, `self` and `proxy_pre_call`. That
+    # is ~24k observations a day of pure infrastructure noise in the
+    # store meant for reading prompts.
+    #
+    # The filter processor DROPS a span when a condition is true, so
+    # this reads as "drop unless". What survives:
+    #
+    #   * anything carrying a `gen_ai.*` model attribute — today the
+    #     `litellm_request` GENERATION, tomorrow Pydantic-AI's
+    #     `model.request` spans from todo-agents, without an edit here;
+    #   * `litellm_request` by name as well, so a call that failed
+    #     before a model was chosen still shows up rather than
+    #     vanishing (a silent drop of the error case would be the worst
+    #     possible filter bug);
+    #   * the proxy's root span, but ONLY for `/v1/…` routes, so a
+    #     Langfuse trace keeps its name, route and HTTP status while the
+    #     `/mcp-rest/…` polls — the actual volume — are dropped whole.
+    #
+    # `raw_gen_ai_request` is deliberately NOT kept: it is a second copy
+    # of the same prompt and completion, and the generation already
+    # carries both as its input/output.
+    filter/langfuse-llm-only:
+      error_mode: ignore
+      traces:
+        span:
+          - >-
+            attributes["gen_ai.request.model"] == nil
+            and attributes["gen_ai.response.model"] == nil
+            and name != "litellm_request"
+            and not (name == "Received Proxy Server Request"
+                     and IsMatch(attributes["url.path"], "^/v1/"))
     # Strip LLM message content on the TEMPO path only.
     #
     # ADR 0003 gates location by classification, and the namespace
@@ -139,7 +180,7 @@ config:
         exporters: [otlp/tempo]
       traces/langfuse:
         receivers: [otlp]
-        processors: [memory_limiter, batch]
+        processors: [memory_limiter, filter/langfuse-llm-only, batch]
         exporters: [otlphttp/langfuse]
     telemetry:
       metrics:
