@@ -25,6 +25,19 @@ spec:
   ingress:
     # OTel Collector gateway pushes OTLP to Langfuse's
     # /api/public/otel endpoint on the web pod.
+    #
+    # The selector is `instance`, not `component`. The
+    # opentelemetry-collector chart does not set
+    # `app.kubernetes.io/component` at all — its pods carry the
+    # unprefixed `component: standalone-collector` (gateway) and
+    # `component: agent-collector` (DaemonSet). The original
+    # `app.kubernetes.io/component: gateway` matched no pod, so
+    # every collector→Langfuse export was silently dropped and
+    # surfaced only as `context deadline exceeded` on the exporter.
+    # Nothing noticed for 92 days because no workload emitted a
+    # span. `instance` is the Helm release name, so this keeps the
+    # rule gateway-only (the DaemonSet's instance is
+    # `opentelemetry-collector-agent`) and survives chart bumps.
     - from:
         - namespaceSelector:
             matchLabels:
@@ -32,7 +45,7 @@ spec:
           podSelector:
             matchLabels:
               app.kubernetes.io/name: opentelemetry-collector
-              app.kubernetes.io/component: gateway
+              app.kubernetes.io/instance: opentelemetry-collector-gateway
       ports:
         - port: 3000
           protocol: TCP

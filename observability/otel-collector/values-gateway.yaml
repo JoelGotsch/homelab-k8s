@@ -47,7 +47,12 @@ config:
   exporters:
     # Tempo receives OTLP gRPC on 4317.
     otlp/tempo:
-      endpoint: tempo.monitoring.svc.cluster.local:4317
+      # Tempo runs in `observability-tempo`, not `monitoring`. The
+      # original `tempo.monitoring.svc.cluster.local` resolved to
+      # nothing; gRPC reported it as "name resolver error: produced
+      # zero addresses" only once a span actually arrived
+      # (2026-09-01 preflight).
+      endpoint: tempo.observability-tempo.svc.cluster.local:4317
       tls:
         insecure: true   # cluster-internal HTTP
     # Langfuse OTLP — receives spans at /api/public/otel.
@@ -58,6 +63,13 @@ config:
     # kv/langfuse/otel-ingest at first install.
     otlphttp/langfuse:
       endpoint: http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/otel
+      # Langfuse ingests in real time only when the request declares
+      # the ingestion version; without it the span is accepted and
+      # processed on the slower legacy path. The exporter appends
+      # the signal path, so the effective URL is
+      # …/api/public/otel/v1/traces.
+      headers:
+        x-langfuse-ingestion-version: "4"
       auth:
         authenticator: basicauth/langfuse
   extensions:

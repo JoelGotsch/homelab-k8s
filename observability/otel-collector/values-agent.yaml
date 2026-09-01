@@ -55,6 +55,17 @@ config:
       metrics:
         address: 0.0.0.0:8888
 
+# The chart creates no Service in daemonset mode unless this is
+# explicitly enabled, so ADR 0028 D5's documented workload endpoint
+# resolved to nothing: there was no `opentelemetry-collector-agent*`
+# Service at all, and any workload configured against it would have
+# failed DNS resolution rather than emitting. Found 2026-09-01 while
+# wiring the first producer. In daemonset mode the chart also sets
+# `internalTrafficPolicy: Local`, which is what makes the emit
+# node-local as ADR 0028 D5 intends.
+service:
+  enabled: true
+
 serviceMonitor:
   enabled: false
 

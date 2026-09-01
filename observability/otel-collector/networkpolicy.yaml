@@ -1,7 +1,18 @@
 # OTel Collector NetworkPolicies.
 #
 # Two policies — gateway and agent — selecting on the chart's
-# `app.kubernetes.io/component` labels (gateway / agent).
+# `app.kubernetes.io/instance` label (the Helm release name).
+#
+# NOT `app.kubernetes.io/component`: the opentelemetry-collector
+# chart never sets it. Its pods carry `app.kubernetes.io/name:
+# opentelemetry-collector`, `app.kubernetes.io/instance: <release>`
+# and an unprefixed `component: standalone-collector` (gateway) or
+# `component: agent-collector` (DaemonSet). Every selector here
+# used to name a label that does not exist, so BOTH policies
+# selected zero pods and enforced nothing, while reading as if the
+# collectors were confined. Found 2026-09-01, when the first span
+# ever pushed through this pipeline was dropped by Langfuse's
+# ingress rule — which had the same defect and did apply.
 #
 # Gateway:
 #   Ingress: from agents (4317/4318); from Prometheus (metrics).
@@ -21,7 +32,7 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: opentelemetry-collector
-      app.kubernetes.io/component: gateway
+      app.kubernetes.io/instance: opentelemetry-collector-gateway
   policyTypes: [Ingress, Egress]
   ingress:
     # OTel agents (DaemonSet) push OTLP to gateway.
@@ -29,7 +40,7 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: opentelemetry-collector
-              app.kubernetes.io/component: agent
+              app.kubernetes.io/instance: opentelemetry-collector-agent
       ports:
         - port: 4317
           protocol: TCP
@@ -57,9 +68,15 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # Tempo (OTLP gRPC + HTTP) in same ns.
+    # Tempo (OTLP gRPC + HTTP). It runs in `observability-tempo`;
+    # this rule had no namespaceSelector, which means "same
+    # namespace", so it permitted nothing that exists. The
+    # exporter endpoint carried the same wrong namespace.
     - to:
-        - podSelector:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability-tempo
+          podSelector:
             matchLabels:
               app.kubernetes.io/name: tempo
       ports:
@@ -91,7 +108,7 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: opentelemetry-collector
-      app.kubernetes.io/component: agent
+      app.kubernetes.io/instance: opentelemetry-collector-agent
   policyTypes: [Ingress, Egress]
   ingress:
     # Workloads in any namespace can push OTLP to the local
@@ -131,7 +148,7 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: opentelemetry-collector
-              app.kubernetes.io/component: gateway
+              app.kubernetes.io/instance: opentelemetry-collector-gateway
       ports:
         - port: 4317
           protocol: TCP
