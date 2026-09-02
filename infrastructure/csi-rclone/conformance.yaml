@@ -94,6 +94,16 @@
 # falsify this — both can be true. Only two volumes on DIFFERENT remotes
 # distinguish them. See ADR 0058 Q1/Q2, plan §14.7, and ticket T11.
 #
+# **v4 never ran.** It split the run into prepare/verify phases and parked the
+# per-mount state in the container's `/tmp` -- under `readOnlyRootFilesystem:
+# true`, with no volume there. Both scheduled runs (2026-09-01, 09-02) died 49s in
+# with `OSError: [Errno 30] Read-only file system` after the first mount's
+# prepare phase, and `infra-csi-rclone` sat Degraded for two days. v4 was pushed
+# without a manual run; the first scheduled one was the test. v4.1 mounts an
+# emptyDir at `/tmp` and makes the probe identify itself (PROBE_VERSION below),
+# so a stale ConfigMap or CronJob refuses to run instead of answering an old
+# question convincingly.
+#
 # A LATENT RACE, seen 2026-08-31 and not yet ticketed anywhere else: unmounting
 # `conformance-full` logged `Deleted 2 remotes from config` while the `writes`
 # mount was still live and still flushing a queued upload. It survived, but two
@@ -194,6 +204,16 @@ data:
     import os
     import sys
     import time
+
+    # Bump on every behavioural change. run.sh refuses to run unless this equals
+    # the PROBE_EXPECTED_VERSION the CronJob passes in, so a ConfigMap that did
+    # not reconcile cannot masquerade as the version under test (lessons.md,
+    # 2026-08-31: "a stale deploy answers the old question convincingly").
+    PROBE_VERSION = "4.1"
+
+    if len(sys.argv) == 2 and sys.argv[1] == "version":
+        print(PROBE_VERSION)
+        sys.exit(0)
 
     PHASE, MOUNT, LABEL = sys.argv[1], sys.argv[2], sys.argv[3]
 
@@ -330,6 +350,18 @@ data:
     set -u
     SETTLE="${PROBE_SETTLE_SECONDS:-150}"
 
+    # Identify the artifact before testing anything with it. The expected
+    # version comes from the CronJob env, not from this ConfigMap, so the two
+    # objects must agree; a run against a stale probe exits 3 instead of PASS.
+    ACTUAL="$(python3 /probe/probe.py version)"
+    echo "probe version: ${ACTUAL} (expected: ${PROBE_EXPECTED_VERSION:-unset})"
+    if [ "${ACTUAL}" != "${PROBE_EXPECTED_VERSION:-}" ]; then
+      echo "VERDICT: ERROR - probe ConfigMap is v${ACTUAL} but the CronJob expects" \
+           "v${PROBE_EXPECTED_VERSION:-unset}. Refusing to run a version that is not" \
+           "the one under test; check that infra-csi-rclone reconciled the commit."
+      exit 3
+    fi
+
     python3 /probe/probe.py prepare /probe-full       full       || exit 1
     python3 /probe/probe.py prepare /probe-writes     writes     || exit 1
     python3 /probe/probe.py prepare /probe-writes-alt writes-alt || exit 1
@@ -450,8 +482,15 @@ spec:
                 requests: { cpu: 100m, memory: 128Mi }
                 limits: { memory: 512Mi }
               command: ["/bin/sh", "/probe/run.sh"]
+              env:
+                # Must equal PROBE_VERSION in probe.py; run.sh refuses otherwise.
+                - { name: PROBE_EXPECTED_VERSION, value: "4.1" }
               volumeMounts:
                 - { name: probe, mountPath: /probe }
+                # prepare/verify hand state across the shared sleep through
+                # /tmp. The root filesystem is read-only, so this must be a
+                # volume -- v4 forgot it and never got past the first mount.
+                - { name: tmp, mountPath: /tmp }
                 - { name: conformance-writes, mountPath: /probe-writes }
                 - { name: conformance-full, mountPath: /probe-full }
                 - { name: conformance-alt, mountPath: /probe-writes-alt }
@@ -460,6 +499,9 @@ spec:
               configMap:
                 name: rclone-conformance-probe
                 defaultMode: 493
+            - name: tmp
+              emptyDir:
+                sizeLimit: 8Mi
             - name: conformance-writes
               persistentVolumeClaim: { claimName: conformance-writes }
             - name: conformance-full
