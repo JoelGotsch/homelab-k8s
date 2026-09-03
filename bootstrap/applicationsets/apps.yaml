@@ -75,6 +75,10 @@ spec:
           # VLAN is hardened against the raw-L4 external access it needed, so the
           # in-cluster deployment was abandoned. See homelab/roborock repo README.
           - {name: signal-bridge,       owner: homelab,       repo: signal-bridge-k8s, path: k8s, autoSync: "true"}
+          # Google Sheets MCP for the LibreChat agent (2026-09-03): pinned
+          # third-party server behind supergateway; only network client is the
+          # LLM gateway. Activation checklist in the repo README.
+          - {name: sheets-mcp,          owner: homelab,       repo: sheets-mcp, path: k8s, autoSync: "true"}
           # Phase 4 dark-mode service, signed images, server-side rehearsal and
           # backup credentials passed before registration; runtime replicas are
           # intentionally zero until Phase 5 identities exist.
