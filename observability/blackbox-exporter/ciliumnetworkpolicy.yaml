@@ -1,0 +1,78 @@
+# Egress allowlist for the prober, and an ingress allowlist onto :9115.
+#
+# WHY CiliumNetworkPolicy and not a vanilla NetworkPolicy: `toFQDNs`. The
+# target is a DNS name whose A record Hetzner may change, and the whole
+# point of this pod is that its egress is narrower than "the internet".
+# Vanilla NetworkPolicy can only express an ipBlock.
+#
+# THE TRAP THIS SHAPE EXISTS TO AVOID (copied from
+# platform/openbao/snapshot-networkpolicy.yaml, which paid for it):
+# Cilium only learns the IP behind a `toFQDNs` selector if the pod's DNS
+# query goes through the L7 DNS proxy. A `toFQDNs` rule WITHOUT an
+# accompanying DNS `toPorts` rule carrying `rules.dns` fails closed — and
+# the resulting symptom is the probe reporting the Storage Box unreachable
+# forever, i.e. a monitoring component confidently reporting a fabricated
+# outage. The `matchPattern: "*"` DNS rule below is what makes the FQDN
+# rule work at all, not a widening of it.
+#
+# Kyverno homelab-disallow-open-egress-cnp (ADR 0036 D4) audits for
+# `toEntities: [world]` and /0,/1 CIDRs. A toFQDNs allowlist satisfies it
+# with no bypass annotation.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: blackbox-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: blackbox-exporter
+    app.kubernetes.io/component: networkpolicy
+    app.kubernetes.io/part-of: observability
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: blackbox-exporter
+  ingress:
+    # Prometheus only. Nothing else has any business asking this pod to
+    # open a connection to a named host on the internet — /probe takes its
+    # target from the query string, so an unrestricted :9115 is a
+    # general-purpose outbound connect primitive (bounded here by the
+    # egress rules below, but bounded twice is correct).
+    #
+    # NOT declared: ingress from the `host` entity for the kubelet's
+    # liveness/readiness probes. Cilium's `allow-localhost` is unset in
+    # cilium-config, i.e. the default `auto`, which always permits the
+    # local host to reach local endpoints precisely so health checks keep
+    # working under policy. Verified 2026-09-06. If that flag is ever set
+    # to `policy`, this pod CrashLoops on failed probes and this comment is
+    # the reason why.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: prometheus
+      toPorts:
+        - ports:
+            - { port: "9115", protocol: TCP }
+  egress:
+    # L7-proxied DNS. Required for toFQDNs to resolve at all — see header.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - { port: "53", protocol: UDP }
+            - { port: "53", protocol: TCP }
+          rules:
+            dns:
+              - matchPattern: "*"
+    # The one external dependency this layer probes today. Host and port are
+    # public routing config already committed in
+    # platform/openbao/raft-snapshot-cronjob.yaml (HSB_HOST/HSB_PORT); the
+    # SSH key is `secret` and is deliberately absent from this layer.
+    # Adding a probe target means adding its FQDN here too — a Probe whose
+    # target is not in this allowlist reports a permanent outage.
+    - toFQDNs:
+        - matchName: u609156.your-storagebox.de
+      toPorts:
+        - ports:
+            - { port: "23", protocol: TCP }

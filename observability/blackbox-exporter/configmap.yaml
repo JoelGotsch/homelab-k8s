@@ -1,0 +1,46 @@
+# blackbox_exporter module map.
+#
+# One module today. Adding an external dependency to the probe set is a new
+# `Probe` CR plus (only if the check shape is new) a module here — that
+# reusability is the argument ADR 0062 D1 rests on.
+#
+# `prober: tcp` is the PROBER KEY; `tcp_connect` is only the conventional
+# MODULE NAME. `prober: tcp_connect` is not a valid prober and the exporter
+# refuses the config at start-up. Verified against the v0.28.0 surface
+# 2026-09-06 — do not write this from memory.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blackbox-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: blackbox-exporter
+    app.kubernetes.io/component: prober
+    app.kubernetes.io/part-of: observability
+data:
+  config.yml: |
+    modules:
+      # Unauthenticated TCP connect. No banner exchange, no query_response
+      # block: the SSH banner is not read and no credential is presented.
+      # This is strictly less privileged than the backup jobs that share the
+      # dependency, which is why the Storage Box SSH key is not involved
+      # here and must never be (ADR 0062 D3).
+      tcp_connect:
+        prober: tcp
+        # 5s < the Probe's 10s scrapeTimeout < the 30s interval, so a slow
+        # connect is recorded as a failed probe rather than as a scrape
+        # timeout that produces no probe_success sample at all.
+        timeout: 5s
+        tcp:
+          # THE IP-FAMILY PIN. blackbox defaults to preferred_ip_protocol:
+          # ip6 with ip_protocol_fallback: true. The cluster is IPv4
+          # single-stack (every node's podCIDRs is one 10.244.x.0/24) and
+          # u609156.your-storagebox.de publishes an A record and no AAAA
+          # (confirmed 2026-09-06), so the default would work today by
+          # falling back. The moment Hetzner publishes an AAAA, the default
+          # would silently start probing a path the backup pods never use —
+          # a green probe measuring the wrong thing. Pinned to ip4 with
+          # fallback off so the probe tests the same family the lanes do,
+          # and fails loudly if that stops being possible.
+          preferred_ip_protocol: ip4
+          ip_protocol_fallback: false

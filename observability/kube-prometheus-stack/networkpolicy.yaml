@@ -169,6 +169,17 @@ spec:
         # correct -- so the scrape died on egress from Prometheus, here.
         - port: 3456
           protocol: TCP
+        # blackbox_exporter (observability/blackbox-exporter, ADR 0062).
+        # 8th recurrence of the trap this comment block warns about, and
+        # the first one caught BEFORE it shipped rather than after: without
+        # 9115 here, the Probe CR renders a target, Argo syncs green, the
+        # Deployment runs, and the scrape dies on egress from Prometheus as
+        # "context deadline exceeded" — so a component whose entire purpose
+        # is to stop an outage from being invisible would itself have been
+        # invisible. Any new Probe reusing this prober needs no further
+        # change here; a DIFFERENT prober would need its own port.
+        - port: 9115
+          protocol: TCP
     # External hosts via additional-scrape-configs (Mac Studio
     # node-exporter on inference VLAN per
     # observability/prometheus/external-hosts/).

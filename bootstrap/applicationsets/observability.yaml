@@ -31,7 +31,7 @@ spec:
         path: '{{.path.path}}'
       destination:
         server: https://kubernetes.default.svc
-        # Default: observability-<layer>. Three layers deploy elsewhere
+        # Default: observability-<layer>. Four layers deploy elsewhere
         # (their manifests pin the namespace) — see templatePatch below.
         namespace: 'observability-{{.path.basename}}'
       syncPolicy:
@@ -89,7 +89,7 @@ spec:
     spec:
       destination:
         namespace: langfuse
-    {{- else if or (eq .path.basename "kube-prometheus-stack") (eq .path.basename "falco-stack") }}
+    {{- else if or (eq .path.basename "kube-prometheus-stack") (eq .path.basename "falco-stack") (eq .path.basename "blackbox-exporter") }}
     spec:
       destination:
         namespace: monitoring

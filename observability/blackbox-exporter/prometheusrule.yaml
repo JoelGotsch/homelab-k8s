@@ -1,0 +1,196 @@
+# Alert rules for the Hetzner Storage Box reachability probe (ADR 0062).
+#
+# Three alerts and one recording rule, in one group so the recording rule is
+# evaluated before the alert that consumes it (rules inside a group run in
+# order; rules in different groups do not).
+#
+# The `release: kube-prometheus-stack` label is what makes this file
+# LOADED. The Prometheus CR's ruleSelector is
+# `{matchLabels: {release: kube-prometheus-stack}}` with
+# `ruleNamespaceSelector: {}` — it is NOT "all PrometheusRules in the
+# monitoring namespace", which is what the mac-studio rules file claimed for
+# ~105 days while none of its six alerts were ever loaded (found and fixed
+# 2026-09-06 in the same change as this file).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: blackbox-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: blackbox-exporter
+    app.kubernetes.io/component: prober
+    app.kubernetes.io/part-of: observability
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: hetzner-storagebox.reachability
+      interval: 30s
+      rules:
+        # ---------------------------------------------------------------
+        # Recording rule — the post-outage attribution primitive.
+        #
+        # 0 means "there was at least one failed probe in the last 6h".
+        # It exists because ALERTMANAGER INHIBITION IS NOT SUFFICIENT for
+        # this problem, and the reason is structural rather than a tuning
+        # matter: inhibition only suppresses a target while the SOURCE is
+        # firing. ResticSnapshotStale (for: 1h) and the OpenBao snapshot
+        # staleness alerts keep firing long after Hetzner recovers, because
+        # they stay firing until the next successful run — which is correct
+        # behaviour, a missed backup is worth knowing about, but it leaves
+        # them unattributed exactly when the operator is reading them.
+        #
+        # The obvious fix — put "check probe_success" in the staleness
+        # alert's own description — does not work either: Prometheus
+        # annotations are templated against the alert's OWN sample, and
+        # there is no way to interpolate the result of a different query
+        # into them. Attribution therefore has to be a joined EXPRESSION,
+        # which is what this recording rule plus the companion alert below
+        # are for.
+        #
+        # 6h covers the gap between a night-time blip and the operator
+        # reading alerts in the morning, and is longer than the longest
+        # staleness `for:` in play (1h).
+        - record: hsb:probe_success:min6h
+          expr: min_over_time(probe_success{instance="u609156.your-storagebox.de:23"}[6h])
+
+        # ---------------------------------------------------------------
+        # The direct signal. This is the alert whose absence made the
+        # 2026-09-06 incident a guessing exercise.
+        #
+        # Selected on `instance`, not `job`: `instance` IS the target
+        # string, so the selector cannot break if the operator's rendering
+        # of the job label changes. If it breaks anyway, the absent() guard
+        # below fires rather than the signal disappearing quietly.
+        #
+        # for: 3m = six consecutive failed probes at the 30s interval. That
+        # catches a several-minute blip (the incident was ~25 min) without
+        # flapping on one dropped packet, and it fires BEFORE
+        # BackupCronJobFailed becomes visible — that ordering is what makes
+        # the inhibit rule in alertmanager-config.yaml work at all, since
+        # Alertmanager only suppresses a target while the source is already
+        # firing.
+        #
+        # severity: warning, deliberately. Hetzner being briefly
+        # unreachable is not itself a page; it is the EXPLANATION for
+        # pages. The backup criticals remain the page.
+        - alert: HetznerStorageBoxUnreachable
+          expr: probe_success{instance="u609156.your-storagebox.de:23"} == 0
+          for: 3m
+          labels:
+            severity: warning
+            component: backup-offsite
+          annotations:
+            summary: "Hetzner Storage Box u609156 is not accepting TCP connections on port 23"
+            description: |
+              An unauthenticated TCP connect to
+              u609156.your-storagebox.de:23 from inside the cluster has
+              failed for more than 3 minutes. Every off-site backup lane
+              shares this dependency, so expect Job failures in the
+              `openbao` and `backup-cronjobs` namespaces shortly; those are
+              consequences, not independent faults.
+
+              This alert says nothing about whether the fault is Hetzner's
+              or ours. Distinguish:
+                # is it just us? probe from a second vantage
+                nc -vz u609156.your-storagebox.de 23
+                # did DNS move under us?
+                dig +short A u609156.your-storagebox.de
+                # what does the prober itself say
+                kubectl -n monitoring logs deploy/blackbox-exporter
+              Hetzner status: https://status.hetzner.com/
+
+              No operator action is required if it self-resolves: the
+              backup lanes retry, and their staleness alerts are the
+              backstop if they do not recover.
+
+        # ---------------------------------------------------------------
+        # The fail-loud guard. Without it, a dead prober pod, a lost
+        # `release:` label, a broken prober.url or a renamed target makes
+        # this entire capability evaporate with no error anywhere — which
+        # is precisely the failure mode this layer was built to end. An
+        # absent probe is reported as absent, not as healthy.
+        #
+        # 15m absorbs a Deployment rollout (image bump, node drain) without
+        # noise. severity: info routes to the Tier-3 silent sink per ADR
+        # 0039 and surfaces in the weekly digest — appropriate for "the
+        # monitoring is broken but nothing is on fire".
+        - alert: HetznerStorageBoxProbeAbsent
+          expr: absent(probe_success{instance="u609156.your-storagebox.de:23"})
+          for: 15m
+          labels:
+            severity: info
+            component: backup-offsite
+          annotations:
+            summary: "The Hetzner Storage Box reachability probe is reporting no data"
+            description: |
+              `probe_success{instance="u609156.your-storagebox.de:23"}` has
+              had no samples for 15 minutes, so off-site reachability is
+              currently UNMEASURED — not known-good.
+
+              Walk the chain in this order; each step has failed silently
+              in this repo before:
+                kubectl -n monitoring get deploy blackbox-exporter
+                kubectl -n monitoring get probe hetzner-storagebox -o yaml   # release: label present?
+                # is the target registered at all?
+                curl -sG https://prometheus.lab.<fqdn>/api/v1/targets \
+                  | grep -o 'hetzner-storagebox[^,]*'
+                # 9115 must be in the prometheus-allow egress port allowlist
+                kubectl -n monitoring get netpol prometheus-allow -o yaml
+
+        # ---------------------------------------------------------------
+        # Post-outage attribution. Fires while a critical backup alert is
+        # up AND the Storage Box was unreachable at some point in the last
+        # 6h, and says so in words.
+        #
+        # Targeted by `component`, not by alertname: the OpenBao snapshot
+        # lane is being reshaped from a daily to an hourly convergent
+        # design in a parallel change, so its alert NAMES are in motion
+        # while `component: openbao-backup` is stable. Same for
+        # `component: backup-cronjobs`. This rule therefore needs no edit
+        # to either of those files and does not break when they are
+        # renamed.
+        #
+        # `and on()` with an empty label set: the right-hand side is
+        # aggregated to a single label-less sample, so it acts as a global
+        # gate over every matching ALERTS series while preserving the left
+        # side's identifying labels (namespace, cronjob, job_name).
+        # `severity: warning` here overrides the inherited `critical` — the
+        # criticals have already been delivered; this is the footnote.
+        #
+        # Reading ALERTS from a rule is deliberate and safe here because
+        # the source alerts live in other groups, so their ALERTS samples
+        # are always from a completed prior evaluation.
+        - alert: HetznerOutageExplainsBackupStaleness
+          expr: |
+            ALERTS{alertstate="firing", severity="critical", component=~"backup-cronjobs|openbao-backup"}
+              and on()
+            (max(hsb:probe_success:min6h) == 0)
+          labels:
+            severity: warning
+            attribution: hetzner-storagebox
+          annotations:
+            summary: "{{ $labels.alertname }} is firing and the Hetzner Storage Box was unreachable in the last 6h"
+            description: |
+              `{{ $labels.alertname }}` in namespace
+              `{{ $labels.namespace }}` is firing, and
+              `probe_success{instance="u609156.your-storagebox.de:23"}` hit
+              0 at some point in the last 6 hours. The most likely reading
+              is THE OFF-SITE DEPENDENCY WAS DOWN, NOT THAT THIS BACKUP
+              LANE IS BROKEN.
+
+              This is a hypothesis, not a verdict — it will also fire if a
+              genuinely broken lane happens to coincide with a Hetzner
+              blip, and both lanes share the dependency so one outage
+              attributes both. Confirm and then clear the backlog:
+                # when was it actually down?
+                curl -sG https://prometheus.lab.<fqdn>/api/v1/query_range \
+                  --data-urlencode 'query=probe_success{instance="u609156.your-storagebox.de:23"}' \
+                  --data-urlencode "start=$(date -u -v-6H +%s)" \
+                  --data-urlencode "end=$(date -u +%s)" --data-urlencode 'step=60'
+                # is it reachable now?
+                kubectl -n monitoring logs deploy/blackbox-exporter --tail=20
+
+              If reachability has recovered, re-run the affected lane so a
+              real success clears the staleness alert; the staleness alerts
+              are deliberately NOT suppressed by the Hetzner outage, so a
+              lane that fails to recover still pages.

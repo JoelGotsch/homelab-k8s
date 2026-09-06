@@ -1,0 +1,44 @@
+# blackbox-exporter — the cluster's synthetic-probe endpoint.
+#
+# Per ADR 0062 (external dependency reachability is measured, not inferred).
+# Exists because on 2026-09-06 a ~25 min outage of
+# u609156.your-storagebox.de:23 took out two independent backup lanes in two
+# namespaces and produced no signal naming the cause. See README.md.
+#
+# HAND-WRITTEN MANIFESTS, DELIBERATELY NOT THE HELM CHART (ADR 0062 D2).
+# A chart pin here would drag in the whole ADR 0052 surface: a
+# charts.lock.yaml entry with three digests, a mirror-chart.sh push to
+# registry.homelab.internal, an offline-bundle refresh, and the
+# check-chart-lock / check-bundle-installable / check-patch-targets-match
+# hooks. blackbox-exporter is a single static Go binary and the chart's
+# only real feature — templating the module map — is one ConfigMap here.
+#
+# NAMESPACE: `monitoring`, not the ApplicationSet's default
+# `observability-blackbox-exporter`. Three reasons:
+#   1. Prometheus lives here, and `monitoring` runs allowlist-per-workload
+#      NetworkPolicies rather than a namespace default-deny — same as
+#      otel-collector and talos-log-sink, which also pin it.
+#   2. A new first-party namespace would pick up Kyverno's generated
+#      default-deny NetPol + LimitRange + ResourceQuota triple and a
+#      data-class declaration (check-data-class), for one 32Mi pod.
+#   3. The Probe and PrometheusRule are selected cluster-wide anyway
+#      (probeNamespaceSelector/ruleNamespaceSelector are both `{}`), so
+#      the namespace buys nothing for discovery.
+# Known cost: the observability ApplicationSet's templatePatch does not
+# name this layer, so CreateNamespace=true will mint an EMPTY
+# `observability-blackbox-exporter` beside the real one, exactly as it did
+# for langfuse/kube-prometheus-stack/falco-stack before 2026-08-17. The
+# fix is one clause in bootstrap/applicationsets/observability.yaml.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: monitoring
+
+resources:
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - ciliumnetworkpolicy.yaml
+  - probe.yaml
+  - prometheusrule.yaml

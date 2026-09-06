@@ -1,0 +1,104 @@
+# blackbox_exporter, one replica.
+#
+# One replica is deliberate. This measures a THIRD PARTY's reachability from
+# inside the cluster; two replicas would double the probe traffic against
+# Hetzner and produce two `probe_success` series per target that disagree
+# during a partial outage, which is harder to alert on, not easier. The
+# failure mode "the prober itself is gone" is covered explicitly by
+# HetznerStorageBoxProbeAbsent in prometheusrule.yaml rather than by
+# redundancy — a signal that vanishes silently is the failure this repo has
+# already paid for twice (the Windmill PodMonitor that was never selected,
+# and the mac-studio rules that were never loaded).
+#
+# Image: upstream tag + digest. Third-party images pulled straight from
+# upstream and digest-pinned are already the norm here (restic/restic,
+# timberio/vector, cloudflare/cloudflared) and satisfy Kyverno's
+# audit-third-party-image-digest. `monitoring` is not yet in the
+# enforce-digest-pinning-allowlist; the pin is convention, not admission.
+# Renovate keeps the tag+digest pair in sync (pinDigests).
+#
+# Resources per ADR 0036 D5 / ADR 0042: memory request AND limit always
+# (Kyverno homelab-disallow-unlimited-containers), CPU request only — no
+# CPU limit, because CFS throttling on a latency-measuring process would
+# corrupt the very number this pod exists to report.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blackbox-exporter
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: blackbox-exporter
+    app.kubernetes.io/component: prober
+    app.kubernetes.io/part-of: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: blackbox-exporter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: blackbox-exporter
+        app.kubernetes.io/component: prober
+        app.kubernetes.io/part-of: observability
+      annotations:
+        # Roll the pod when the module map changes. Without this a
+        # ConfigMap edit is a no-op until something else restarts the pod —
+        # the module would be "deployed" in git and absent in the process.
+        checksum/config: "tcp_connect-ip4-nofallback-v1"
+    spec:
+      # No serviceAccount permissions are needed: targets are static, the
+      # exporter never talks to the API server.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: blackbox-exporter
+          image: quay.io/prometheus/blackbox-exporter:v0.28.0@sha256:e753ff9f3fc458d02cca5eddab5a77e1c175eee484a8925ac7d524f04366c2fc
+          args:
+            - --config.file=/etc/blackbox_exporter/config.yml
+            - --web.listen-address=:9115
+          ports:
+            - name: http
+              containerPort: 9115
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/blackbox_exporter
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          readinessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              # NET_RAW would be required for the `icmp` prober. Only the
+              # `tcp` prober is configured, which uses an ordinary socket,
+              # so the container keeps no capabilities at all. Adding an
+              # ICMP module later is a capability change and therefore a
+              # reviewable decision, not a config tweak.
+              drop: ["ALL"]
+      volumes:
+        - name: config
+          configMap:
+            name: blackbox-exporter

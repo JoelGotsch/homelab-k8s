@@ -308,6 +308,42 @@ spec:
           matchType: "=~"
           value: "KubePodNotReady|KubeDaemonSetRolloutStuck|KubeStatefulSetReplicasMismatch|KubeStatefulSetUpdateNotRolledOut|KubeDeploymentReplicasMismatch|KubePdbNotEnoughHealthyPods|KubeCPUQuotaOvercommit|KubeMemoryQuotaOvercommit|KubeletInstanceUnreachable|KubeNodeUnreachable"
 
+    # ===== Hetzner Storage Box outage attribution (ADR 0062, 2026-09-06) =====
+    # On 2026-09-06 a ~25 min outage of u609156.your-storagebox.de:23 failed
+    # two independent backup lanes in two namespaces and produced no signal
+    # naming the cause. HetznerStorageBoxUnreachable is now that signal, and
+    # while it fires the mechanical "the Job died" alerts carry no extra
+    # information.
+    #
+    # SCOPED TO THE JOB-FAILURE CLASS ONLY, ON PURPOSE. The staleness /
+    # missing-backup criticals (ResticSnapshotStale, BackupCronJobMissing24h,
+    # the OpenBao snapshot staleness alerts) are deliberately NOT suppressed:
+    # they are the backstop that still pages if a lane fails to recover after
+    # Hetzner comes back, which is the case where suppression would be
+    # genuinely dangerous. They get ATTRIBUTED instead of silenced, by
+    # HetznerOutageExplainsBackupStaleness in
+    # observability/blackbox-exporter/prometheusrule.yaml — inhibition alone
+    # cannot do that job, because it only suppresses while the source is
+    # firing and those alerts outlive the outage by design.
+    #
+    # Targeted by alertname SHAPE plus component, not by exact alertname:
+    # `.*JobFailed` (Alertmanager matchers are fully anchored) covers
+    # BackupCronJobFailed and OpenBaoRaftSnapshotJobFailed and any future
+    # sibling, while structurally excluding the staleness names. The
+    # `component` matcher is what keeps the chart's own KubeJobFailed — which
+    # carries no `component` label — out of scope, so an unrelated Job
+    # failing during a Hetzner outage still reports.
+    - sourceMatch:
+        - name: alertname
+          value: HetznerStorageBoxUnreachable
+      targetMatch:
+        - name: alertname
+          matchType: "=~"
+          value: ".*JobFailed"
+        - name: component
+          matchType: "=~"
+          value: "backup-cronjobs|openbao-backup"
+
     # InstanceDown / NodeNotReady inhibit other alerts for
     # that instance — the instance being down explains the
     # secondaries.

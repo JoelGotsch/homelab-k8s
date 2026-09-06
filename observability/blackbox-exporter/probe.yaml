@@ -1,0 +1,51 @@
+# Probe: Hetzner Storage Box, SSH/SFTP port.
+#
+# The expensive plumbing for this already existed and was unused: the
+# Prometheus CR carries `probeSelector: {matchLabels: {release:
+# kube-prometheus-stack}}` and `probeNamespaceSelector: {}`, so a labelled
+# Probe in any namespace is picked up with no chart-values change. Before
+# this file there were zero Probe objects in the cluster and zero
+# `probe_success` series.
+#
+# THE `release:` LABEL IS LOAD-BEARING. A monitoring CR without it is
+# silently not selected — no error, no event, just no data. That is how the
+# Windmill PodMonitor collected nothing for an unknown window
+# (99-journal/2026-09-05-the-monitor-that-was-never-selected.md), and how
+# the mac-studio PrometheusRule went unloaded (fixed in the same change as
+# this file). Acceptance for this layer is a non-empty `probe_success`, NOT
+# a green Argo sync.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: hetzner-storagebox
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: blackbox-exporter
+    app.kubernetes.io/component: probe
+    app.kubernetes.io/part-of: observability
+    release: kube-prometheus-stack
+spec:
+  # `jobName` sets the `job` label via a generated relabel. The alerts in
+  # prometheusrule.yaml deliberately select on `instance` instead, because
+  # `instance` is the target string itself and cannot depend on how the
+  # operator chooses to render the job label. jobName is here for
+  # readability in the targets UI.
+  jobName: hetzner-storagebox
+  module: tcp_connect
+  # 30s so a several-minute blip produces several samples. The 2026-09-06
+  # outage was ~25 min, i.e. ~50 samples; a 5-minute cadence could have
+  # resolved it to a handful and a coarser one could have missed a shorter
+  # blip entirely.
+  interval: 30s
+  # > the module's own 5s timeout, so a slow connect is a recorded FAILURE
+  # (probe_success 0) rather than a scrape timeout that writes no sample.
+  scrapeTimeout: 10s
+  prober:
+    # REQUIRED. An empty prober.url means the target is silently not probed.
+    url: blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - u609156.your-storagebox.de:23
