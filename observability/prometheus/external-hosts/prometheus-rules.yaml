@@ -1,9 +1,25 @@
 # Alert rules for the Mac Studio inference host.
 # Companion to additional-scrape-configs.yaml in this directory.
 #
-# Picked up by the Prometheus operator via the chart's
-# ruleSelector (default: all PrometheusRule in the monitoring
-# namespace).
+# Selected by the Prometheus CR's `ruleSelector`, which is
+# `{matchLabels: {release: kube-prometheus-stack}}` with
+# `ruleNamespaceSelector: {}`.
+#
+# IT IS NOT "all PrometheusRule in the monitoring namespace", which is what
+# this comment claimed until 2026-09-06 — and because of that claim the
+# `release:` label was never set and NONE of the six alerts below were ever
+# loaded. Measured that day against the live rules API: 293 rules present,
+# zero of them MacStudio*, zero mac-studio groups. The Mac Studio inference
+# host has therefore been unmonitored since this file landed, while the file
+# read as coverage. Same failure as the Windmill PodMonitor
+# (99-journal/2026-09-05-the-monitor-that-was-never-selected.md); the label
+# below is the fix, and the check is a non-empty result from the rules API,
+# not a green Argo sync.
+#
+# Verified before adopting the label: both targets up, and mlx_server_up,
+# ollama_server_up and up{job=~"mac-studio.*"} all == 1, so no alert fired on
+# adoption. All six are live-capable; the check that they are actually loaded
+# is a non-empty MacStudio* result from the rules API, not a green Argo sync.
 
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -13,6 +29,8 @@ metadata:
   labels:
     app.kubernetes.io/component: prometheus
     role: alert-rules
+    # Load-bearing: without this the whole file is inert. See header.
+    release: kube-prometheus-stack
 spec:
   groups:
     - name: mac-studio.exporters
