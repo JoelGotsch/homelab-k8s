@@ -183,3 +183,84 @@ tests:
       - eval_time: 150m
         alertname: OpenBaoRaftSnapshotJobFailed
         exp_alerts: []
+
+  # ── OpenBaoDailyRaftSnapshotStale ─────────────────────────────────────────
+  # Added 2026-09-06 when the threshold moved 25 h -> 4 h for the hourly
+  # convergent lane. The alert had no coverage at all before that, which is how
+  # a 36 h threshold survived review twice.
+  #
+  # (g) A lane recording hourly successes never alerts. `time()` here runs to
+  #     360m, well past the 4 h threshold, so a constant-lag success series is
+  #     the honest shape: last_successful_time tracks time() minus a few minutes.
+  - interval: 1m
+    name: "hourly convergent successes keep the staleness alert quiet"
+    input_series:
+      - series: 'kube_cronjob_created{namespace="openbao", cronjob="openbao-raft-snapshot"}'
+        values: "0+0x400"
+      # Advances 60s per minute, i.e. stays ~120s behind time() forever.
+      - series: 'kube_cronjob_status_last_successful_time{namespace="openbao", cronjob="openbao-raft-snapshot"}'
+        values: "-120+60x400"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: OpenBaoDailyRaftSnapshotStale
+        exp_alerts: []
+      - eval_time: 360m
+        alertname: OpenBaoDailyRaftSnapshotStale
+        exp_alerts: []
+
+  # (h) The lane goes dark: last successful run at t=0, nothing after. Must stay
+  #     quiet at 3 h (inside the tolerated gap) and fire once past 4 h + `for`.
+  - interval: 1m
+    name: "lane dark for over four hours fires; three hours does not"
+    input_series:
+      - series: 'kube_cronjob_created{namespace="openbao", cronjob="openbao-raft-snapshot"}'
+        values: "0+0x400"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="openbao", cronjob="openbao-raft-snapshot"}'
+        values: "0+0x400"
+    alert_rule_test:
+      # 180m < 240m threshold.
+      - eval_time: 180m
+        alertname: OpenBaoDailyRaftSnapshotStale
+        exp_alerts: []
+      # 250m is past the threshold but inside `for: 15m`.
+      - eval_time: 250m
+        alertname: OpenBaoDailyRaftSnapshotStale
+        exp_alerts: []
+      - eval_time: 270m
+        alertname: OpenBaoDailyRaftSnapshotStale
+        exp_alerts:
+          - exp_labels:
+              alertname: OpenBaoDailyRaftSnapshotStale
+              cronjob: openbao-raft-snapshot
+              namespace: openbao
+              severity: critical
+              component: openbao-backup
+            exp_annotations:
+              summary: "OpenBao off-site Raft snapshot lane has not recorded a success in 4 hours"
+              runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/openbao/restore-drill.md"
+
+  # (i) A CronJob that has existed for over 4 h and has NEVER succeeded fires
+  #     through the `unless` branch. Without that branch a lane that never once
+  #     worked would be silent, because branch 1 compares against a series that
+  #     does not exist.
+  - interval: 1m
+    name: "cronjob that has never succeeded fires via the never-succeeded branch"
+    input_series:
+      - series: 'kube_cronjob_created{namespace="openbao", cronjob="openbao-raft-snapshot"}'
+        values: "0+0x400"
+    alert_rule_test:
+      - eval_time: 180m
+        alertname: OpenBaoDailyRaftSnapshotStale
+        exp_alerts: []
+      - eval_time: 270m
+        alertname: OpenBaoDailyRaftSnapshotStale
+        exp_alerts:
+          - exp_labels:
+              alertname: OpenBaoDailyRaftSnapshotStale
+              cronjob: openbao-raft-snapshot
+              namespace: openbao
+              severity: critical
+              component: openbao-backup
+            exp_annotations:
+              summary: "OpenBao off-site Raft snapshot lane has not recorded a success in 4 hours"
+              runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/openbao/restore-drill.md"

@@ -1,0 +1,144 @@
+# Off-site retention for the OpenBao Raft snapshot directory.
+#
+# Separate from the upload CronJob on purpose: a prune fault must never be able
+# to fail a run that successfully published a snapshot. Folding this into the
+# upload pod as a second container would do exactly that, because a Job pod is
+# only Complete when every container exits 0.
+#
+# This workload needs NO OpenBao identity. It never talks to OpenBao and never
+# reads a snapshot's contents — it lists names, decides which to keep, and
+# removes the rest. So unlike the upload lane there is no projected JWT, no
+# workload token and no OpenBao TLS here; the Storage Box SSH key is the only
+# credential, and it arrives through the same ExternalSecret the uploader uses.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: openbao-raft-snapshot-prune
+  namespace: openbao
+spec:
+  # Weekly. Retention is a slow-moving property — the policy's tightest class is
+  # 14 daily, so letting at most 7 extra snapshots accumulate between runs costs
+  # a few MB and keeps this job far away from the daily backup traffic. Sunday
+  # 06:10 is clear of restic-minio (02:15-~04:10), longhorn backup-daily (03:35),
+  # restic-nas-personal (04:30-~05:01) and Longhorn's Sunday 05:37
+  # filesystem-trim.
+  schedule: "10 6 * * 0"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      # Generous relative to the work (one listing, then one ssh per removed
+      # object) because each `rm` is its own session against a remote that
+      # allows no pipelining. 600s covers a full first prune of ~35 objects
+      # with room for retries.
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: openbao-raft-snapshot
+            app.kubernetes.io/component: offsite-prune
+            app.kubernetes.io/part-of: openbao
+        spec:
+          restartPolicy: Never
+          # No ServiceAccount token: this pod has no business with the
+          # Kubernetes or OpenBao APIs.
+          automountServiceAccountToken: false
+          # Same musl resolver constraint as the uploader: the restic image
+          # resolves the dotted Storage Box name through musl, and Kubernetes'
+          # default ndots:5 would walk the cluster search suffixes first.
+          dnsConfig:
+            options:
+              - { name: ndots, value: "1" }
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: prune
+              image: restic/restic:0.17.3@sha256:8f5a62b422a2cb1277ea0dd6e826fe1acf649e5b9f02d60e5268d5fd1976255a
+              imagePullPolicy: IfNotPresent
+              command: [/bin/sh, -c, /app/snapshot-prune.sh]
+              env:
+                - { name: HOME, value: /tmp }
+                - { name: HSB_HOST, value: u609156.your-storagebox.de }
+                - { name: HSB_USER, value: u609156 }
+                - { name: HSB_PORT, value: "23" }
+                # REPORT-ONLY until an operator has read a real plan and armed
+                # it. Deleting backups is the one irreversible action in this
+                # layer, so it does not get a default that acts. Flip to "true"
+                # in a reviewed commit — not with `kubectl set env`, which Argo
+                # would revert.
+                - { name: SNAPSHOT_PRUNE_APPLY, value: "false" }
+                # `secret`-class GFS from backup-and-dr.md. Stated explicitly so
+                # the running policy is readable here rather than inferred from
+                # the script's defaults.
+                - { name: SNAPSHOT_KEEP_DAILY, value: "14" }
+                - { name: SNAPSHOT_KEEP_WEEKLY, value: "8" }
+                - { name: SNAPSHOT_KEEP_MONTHLY, value: "12" }
+                - { name: SNAPSHOT_KEEP_YEARLY, value: "3" }
+              envFrom:
+                - secretRef: { name: hetzner-sb-creds }
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: { drop: [ALL] }
+                readOnlyRootFilesystem: true
+              resources:
+                requests: { cpu: 10m, memory: 64Mi }
+                limits: { cpu: 100m, memory: 128Mi }
+              volumeMounts:
+                - { name: snapshot-scripts, mountPath: /app, readOnly: true }
+                - { name: uploader-config, mountPath: /etc/openbao-snapshot-ssh, readOnly: true }
+                - { name: uploader-config, mountPath: /etc/passwd, subPath: passwd, readOnly: true }
+                - { name: uploader-config, mountPath: /etc/group, subPath: group, readOnly: true }
+                - { name: prune-tmp, mountPath: /tmp }
+          volumes:
+            - name: snapshot-scripts
+              configMap:
+                name: openbao-snapshot-scripts
+                defaultMode: 0555
+            - name: uploader-config
+              configMap: { name: openbao-snapshot-uploader-config }
+            # Memory-backed: holds the private key for the life of the run plus a
+            # listing of a few hundred filenames.
+            - name: prune-tmp
+              emptyDir: { medium: Memory, sizeLimit: 16Mi }
+---
+# The prune pod carries its own component label, so neither the hourly nor the
+# off-site upload policy selects it — and under this namespace's default-deny it
+# would otherwise have no egress at all. Same shape as the upload lane's policy:
+# L7-proxied DNS so Cilium can learn the address behind toFQDNs, then the exact
+# Storage Box name on tcp/23. No `world` entity.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: openbao-raft-snapshot-prune
+  namespace: openbao
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbao-raft-snapshot
+      app.kubernetes.io/component: offsite-prune
+  ingress: []
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - { port: "53", protocol: UDP }
+            - { port: "53", protocol: TCP }
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchName: u609156.your-storagebox.de
+      toPorts:
+        - ports:
+            - { port: "23", protocol: TCP }

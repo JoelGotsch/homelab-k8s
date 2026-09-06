@@ -22,21 +22,30 @@ metadata:
   name: openbao-raft-snapshot
   namespace: openbao
 spec:
-  # 01:20, moved off 03:05 on 2026-09-06. Two independent lanes ship to the same
-  # Hetzner Storage Box, and 03:05 had drifted inside the other one: the
-  # `restic-minio-to-hetzner` job starts 02:15 and its runtime has grown from
-  # ~25 min in August to ~115 min (finishing 04:10 on 2026-09-06), so the two
-  # now overlap. They failed together that morning, which is the shape to avoid
-  # — one remote fault should not be able to take out both off-site paths at
-  # once. Hetzner also allows only 10 simultaneous connections per Storage Box
-  # account, so overlap is a standing contention risk even without a fault.
+  # Hourly, at :40 — and hourly is NOT "24 uploads a day". The uploader is a
+  # convergence script (ADR 0018 D6, revised 2026-09-06): it asks whether the
+  # Storage Box already holds a snapshot younger than 23 h and does nothing else
+  # in the ~23 runs a day when it does. Steady state stays at ~1 upload/day of
+  # ~211 KiB; what hourly buys is that a transient remote fault costs one hour
+  # instead of a whole day. On 2026-09-06 a ~25 min Storage Box outage at 03:05
+  # cost this lane 37 h, because a once-daily job that fails has no next attempt
+  # until tomorrow. The sibling restic lane hit the same outage and survived only
+  # because its retry happened to land 20 min later.
   #
-  # 01:20 is clear of every other scheduled consumer: restic-minio 02:15-~04:10,
-  # longhorn-system/backup-daily 03:35, restic-nas-personal 04:30-~05:01, the
-  # OpenBao *hourly* snapshot at every :05, and the Longhorn snapshot jobs at
-  # :25/:35. Worst-case retry exhaustion (activeDeadlineSeconds below) still
-  # finishes by ~01:50, 25 min before restic-minio starts.
-  schedule: "20 1 * * *"
+  # Consequence of hourly, accepted deliberately: the lane now overlaps
+  # `restic-minio-to-hetzner` (02:15-~04:10) for two or three runs a day, which
+  # the 2026-09-06 fix had just moved away from. That is fine *because* the lane
+  # converges — those overlapping runs are freshness checks of ~24 KB over two
+  # short sequential sessions, not uploads, and a check lost to contention is
+  # retried an hour later. Hetzner allows 10 simultaneous connections per
+  # account; both restic lanes pin `sftp.connections=1`, so peak concurrency
+  # across every lane stays at 3-4.
+  #
+  # :40 keeps the OpenBao leader to itself: the *local* hourly snapshot runs at
+  # :05 and the Longhorn snapshot jobs at :25/:35. Uploads self-stabilise rather
+  # than wander — with a 23 h threshold and hourly checks the publishing hour
+  # walks ~1 h earlier per day.
+  schedule: "40 * * * *"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 60
   successfulJobsHistoryLimit: 3
@@ -136,6 +145,14 @@ spec:
                 - { name: HSB_HOST, value: u609156.your-storagebox.de }
                 - { name: HSB_USER, value: u609156 }
                 - { name: HSB_PORT, value: "23" }
+                # The convergence threshold, stated here rather than left to the
+                # script's default so it is reviewable beside the alert that
+                # depends on it. 23 h (not 24 h) so the "off-site copy no older
+                # than a day" objective keeps an hour of margin. This value and
+                # OpenBaoDailyRaftSnapshotStale in snapshot-prometheusrule.yaml
+                # are a pair: the alert is only meaningful because a run that
+                # cannot establish this invariant exits non-zero.
+                - { name: SNAPSHOT_MAX_REMOTE_AGE_SECONDS, value: "82800" }
               envFrom:
                 - secretRef: { name: hetzner-sb-creds }
               securityContext:

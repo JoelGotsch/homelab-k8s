@@ -112,7 +112,10 @@ repos:
         entry: scripts/test-openbao-snapshot-workload.sh
         language: script
         pass_filenames: false
-        files: '(platform/openbao/snapshot-(auth|upload)\.sh|scripts/test-openbao-snapshot-workload\.sh$)'
+        # snapshot-prune.sh added 2026-09-06. It is the only script here that
+        # deletes data and it now has offline coverage, so leaving it out of this
+        # pattern would mean editing the delete path without running its tests.
+        files: '(platform/openbao/snapshot-(auth|upload|prune)\.sh|scripts/test-openbao-snapshot-workload\.sh$)'
 
       - id: test-openbao-snapshot-auth-guard
         name: OpenBao snapshot auth guard rejects scope mutations

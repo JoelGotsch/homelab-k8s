@@ -26,6 +26,7 @@ resources:
   - snapshot-serviceaccount.yaml
   - raft-snapshot-cronjob.yaml
   - raft-snapshot-hourly.yaml
+  - raft-snapshot-prune.yaml
   - snapshot-uploader-config.yaml
   - snapshot-networkpolicy.yaml
   - snapshot-prometheusrule.yaml
@@ -43,6 +44,7 @@ configMapGenerator:
     files:
       - snapshot-auth.sh
       - snapshot-upload.sh
+      - snapshot-prune.sh
 # ADR 0036: cluster-wide resource-governance baseline.
 # NOTE: the openbao namespace itself is bootstrapped by
 # homelab-k8s/bootstrap/bootstrap-namespaces.yaml (ansible

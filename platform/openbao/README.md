@@ -5,8 +5,8 @@ authoritative store for everything classified `secret` per
 [ADR 0003](../../../homelab-docs/02-decisions/0003-data-classification.md).
 Per [ADR 0018](../../../homelab-docs/02-decisions/0018-openbao-deployment-shape.md):
 in-cluster 3-replica Raft, manual Shamir 2-of-3 unseal,
-cert-manager TLS, daily Raft snapshot to Hetzner Storage
-Box.
+cert-manager TLS, hourly convergent off-site Raft snapshot to
+Hetzner Storage Box.
 
 ## Layout
 
@@ -17,14 +17,15 @@ Box.
 | `httproute.yaml` | Internal HTTPRoute (Tailscale-only — operator reaches the UI / API via tailnet). |
 | `snapshot-serviceaccount.yaml`, `snapshot-auth.sh` | Dedicated, no-automount workload identity. Each Job exchanges a 15-minute, `audience=openbao` projected JWT for a fixed-TTL batch token carrying only the `snapshot` policy. |
 | `snapshot-token-rollback-bridge.yaml` | Temporary, unused rollback bridge retaining the already-issued static token while rollout evidence accrues. Remove only after the one-off, natural hourly/daily, remote-checksum, and restore gates pass; never issue a replacement. |
-| `raft-snapshot-cronjob.yaml`, `snapshot-upload.sh` | Daily 03:05 UTC snapshot, SHA-256 verification, atomic SCP publish, and remote checksum comparison on Hetzner Storage Box port 23. Snapshot and upload run in separate containers; only the verified snapshot and checksum cross their shared fsGroup at mode `0640`, while the uploader cannot read the OpenBao JWT/token or init-only scratch. Its pod-level `ndots: "1"` override makes the musl uploader try the dotted external hostname before Kubernetes search suffixes. |
+| `raft-snapshot-cronjob.yaml`, `snapshot-upload.sh` | Hourly convergent off-site lane (`40 * * * *`) — ensures the Storage Box holds a snapshot newer than 23 h and is a no-op otherwise; SHA-256 verification, atomic SCP publish, and remote checksum comparison on Hetzner Storage Box port 23. Snapshot and upload run in separate containers; only the verified snapshot and checksum cross their shared fsGroup at mode `0640`, while the uploader cannot read the OpenBao JWT/token or init-only scratch. Its pod-level `ndots: "1"` override makes the musl uploader try the dotted external hostname before Kubernetes search suffixes. |
+| `raft-snapshot-prune.yaml`, `snapshot-prune.sh` | Weekly `secret`-class GFS retention (14d/8w/12m/3y) on the off-site directory. **Report-only until armed** via `SNAPSHOT_PRUNE_APPLY`. Needs no OpenBao identity — it lists names and removes files, so it carries no projected JWT and no OpenBao TLS. |
 | `raft-snapshot-hourly.yaml` | Hourly snapshot to a local Longhorn PVC (`openbao-raft-snapshots`, 10Gi, replica2), 168 retain (= 7d), with an owner-only (`0600`) checksum sidecar per file. |
 | `snapshot-networkpolicy.yaml`, `snapshot-prometheusrule.yaml` | No-ingress and exact egress policy plus failed/stale snapshot alerts. The daily policy sends only kube-dns TCP/UDP 53 through Cilium's L7 DNS proxy so its Storage Box `toFQDNs` rule can learn the resolved IP; hourly has no FQDN rule and remains L3/L4-only. Jobs and redacted termination evidence are retained for 24 hours. |
 
 ## OpenBao paths to seed
 
 Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
-The daily CronJob projects the Storage Box credential into the
+The off-site CronJobs project the Storage Box credential into the
 openbao namespace; without it only the off-site tier stays in
 `CreateContainerConfigError`. Snapshot authentication itself
 does not use an ExternalSecret. The separate rollback bridge keeps the old
@@ -66,15 +67,69 @@ shred -u /tmp/hetzner-sb /tmp/hetzner-sb.pub
 
 ## Raft snapshot retention
 
-Two-tier shape per ADR 0018 D5 + backup-and-dr.md §"OpenBao":
+Two-tier shape per ADR 0018 **D6** (not D5 — D5 is about
+cluster-recovery secrets) + backup-and-dr.md §"OpenBao":
 
 - **Tier-1 (hourly, local)** — `raft-snapshot-hourly.yaml`
   saves to PVC `openbao-raft-snapshots`, retains 168 (= 7d).
   Recovery floor for cluster-internal incidents (accidental
   delete, transient corruption); no network round-trip.
-- **Tier-3 (daily, remote)** — `raft-snapshot-cronjob.yaml`
-  scps a fresh snapshot to Hetzner Storage Box. Recovery floor
-  for cluster-loss / DR scenarios.
+- **Tier-3 (hourly convergent, remote)** — `raft-snapshot-cronjob.yaml`
+  ensures Hetzner Storage Box holds a snapshot newer than 23 h,
+  taking and publishing its own fresh one only when it does not.
+  Recovery floor for cluster-loss / DR scenarios.
+
+**This is the only off-site copy of the vault.** The snapshot PVC
+carries just `recurring-job-group.longhorn.io/secret-personal`,
+which is a *snapshot*-only Longhorn group, and Longhorn's backup
+target is MinIO on the NAS — on-site. So nothing but this lane
+puts OpenBao state off the premises; `scripts/label-backup-volumes.sh`
+excludes the PVC deliberately for that reason.
+
+### Why hourly, and why that is not 24 uploads
+
+Until 2026-09-06 this lane ran once daily. A ~25 min Storage Box
+outage at 03:05 consumed the whole retry budget (three pod
+attempts in 4 min 09 s) and the next attempt was 24 h away, so
+the off-site recovery point aged to 37 h. The lane now runs hourly
+and *converges*: it reads a fixed-name `LATEST` marker naming the
+newest verified snapshot, and returns immediately when that is
+younger than `SNAPSHOT_MAX_REMOTE_AGE_SECONDS` (23 h). Steady
+state is still ~1 upload/day; a transient fault now costs an hour.
+
+The marker exists because the Storage Box has **no shell** — no
+pipes, no redirects — so there is no remote `ls | tail` and a bare
+`ls` returns the entire directory (~14.7 KB today, growing with
+retention). `cat` of the marker is a constant ~12 KB.
+
+**The safety property to preserve if you touch `snapshot-upload.sh`:**
+a successful exit means *a remote snapshot newer than the threshold
+now exists*. It must never exit 0 because it could not find out.
+A convergent success refreshes
+`kube_cronjob_status_last_successful_time`, which is what
+`OpenBaoDailyRaftSnapshotStale` watches — so an exit 0 on an
+indeterminate remote state would silence the only alert guarding
+the off-site copy. Every indeterminate path exits non-zero;
+`scripts/test-openbao-snapshot-workload.sh` asserts it.
+
+### Off-site retention
+
+`raft-snapshot-prune.yaml` applies backup-and-dr.md's
+`secret`-class GFS policy (14 daily / 8 weekly / 12 monthly /
+3 yearly) weekly. Before this existed nothing had ever deleted
+anything: 49 snapshots had accumulated in an unbroken daily chain
+since 2026-07-21, 3.4x the stated daily retention, because the
+mechanism the policy names is `restic forget` and this lane has no
+restic repository.
+
+It **defaults to report-only** (`SNAPSHOT_PRUNE_APPLY=false`).
+Arming it is a reviewed commit, not `kubectl set env` — Argo would
+revert that. A first real prune against the current directory
+keeps 20 and removes 29. Guards: never removes the newest
+snapshot, aborts rather than acting on a listing shorter than
+`SNAPSHOT_PRUNE_MIN_PLAUSIBLE` or on a filename it cannot date,
+and removes each `.sha256` sidecar before its snapshot so the
+directory never holds a snapshot that cannot be verified.
 
 `snapshot-auth.sh` keeps its token, partial output, and all scratch owner-only under
 `umask 077`. After local SHA-256 verification, the daily init container publishes
@@ -83,9 +138,13 @@ only the final snapshot and sidecar as `0640`; producer UID 100 and uploader UID
 its final files at `0600`.
 
 Tier-2 (friend's NAS) intentionally does **not** receive
-OpenBao snapshots — the seal already makes them opaque-and-
-encrypted, so tier-2's dedup buys nothing. Direct `scp` to
-Hetzner SB only.
+OpenBao snapshots — the barrier already makes the secret *values*
+ciphertext, so tier-2's dedup and client-side encryption buy
+nothing for confidentiality. Direct `scp` to Hetzner SB only.
+Note the bound, corrected in ADR 0018 D6 on 2026-09-06: only
+`SHA256SUMS` is sealed, `state.bin` is not, so the storage key
+space (mount layout, KV path names, version counts) is plaintext
+in the uploaded artifact even though the values are not.
 
 The Restic CronJob in [infrastructure/backup-cronjobs/](../../infrastructure/backup-cronjobs/)
 also writes to Hetzner SB but at a different path

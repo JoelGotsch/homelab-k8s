@@ -62,19 +62,65 @@ FAKE
 cat >"$test_tmp/bin/ssh" <<'FAKE'
 #!/usr/bin/env bash
 set -euo pipefail
+# FAKE_UNREACHABLE=1 simulates the 2026-09-06 outage. 255 is what real ssh
+# returns for its own failures, and the convergence path must treat that as
+# "remote state unknown" rather than as any statement about freshness.
+[[ "${FAKE_UNREACHABLE:-0}" == 1 ]] && exit 255
 args=("$@")
 for ((i=0; i<${#args[@]}; i++)); do
   case "${args[$i]}" in
-    mkdir|mv|sha256sum) cmd=("${args[@]:$i}"); break ;;
+    mkdir|mv|sha256sum|stat|cat|ls|rm) cmd=("${args[@]:$i}"); break ;;
   esac
 done
 case "${cmd[0]:-}" in
   mkdir) mkdir -p "$FAKE_REMOTE/${cmd[2]}" ;;
   mv) mv "$FAKE_REMOTE/${cmd[1]}" "$FAKE_REMOTE/${cmd[2]}" ;;
   sha256sum) sha256sum "$FAKE_REMOTE/${cmd[1]}" | sed "s#$FAKE_REMOTE/##" ;;
+  # The Storage Box restricted shell offers both. The uploader uses `stat` on the
+  # directory purely as a reachability probe, and `cat` to read the marker.
+  # `.` is the connectivity probe and must answer whenever reachable, even
+  # before the snapshot directory exists.
+  stat) [[ "${cmd[1]}" == "." || -e "$FAKE_REMOTE/${cmd[1]}" ]] || exit 1 ;;
+  cat) [[ -f "$FAKE_REMOTE/${cmd[1]}" ]] || exit 1; cat "$FAKE_REMOTE/${cmd[1]}" ;;
+  # The prune lane's two verbs. `ls` of a missing directory fails as it does on
+  # the real Storage Box, so a failed listing stays distinguishable from an empty
+  # one. `rm` is strict: a removal that does not happen must surface.
+  ls) ls "$FAKE_REMOTE/${cmd[1]}" ;;
+  rm) rm "$FAKE_REMOTE/${cmd[1]}" ;;
   *) printf 'unexpected ssh invocation\n' >&2; exit 90 ;;
 esac
 FAKE
+
+# The uploader dates the off-site marker with busybox's explicit-format parser
+# (`date -D`), which the pinned restic image provides and macOS BSD date does
+# not. Without a shim that parse fails on an operator laptop, the script falls
+# back to "marker unusable -> upload", and every freshness branch below silently
+# never executes: a test that passes while checking nothing. Shim exactly the two
+# forms these scripts use, and only when the host date cannot do it.
+if ! date -u -D '%Y%m%dT%H%M%SZ' -d 20260721T000000Z +%s >/dev/null 2>&1; then
+  command -v python3 >/dev/null 2>&1 \
+    || fail 'need a date(1) supporting -D, or python3, to test the freshness logic'
+  cat >"$test_tmp/bin/date" <<'FAKEDATE'
+#!/usr/bin/env python3
+# Minimal busybox-date shim: handles `-u -D FMT -d STAMP +%s` and `-u +%s`,
+# and delegates anything else to the real /bin/date.
+import datetime, os, sys
+a = sys.argv[1:]
+if "-D" in a and "-d" in a and "+%s" in a:
+    fmt = a[a.index("-D") + 1]
+    stamp = a[a.index("-d") + 1]
+    try:
+        dt = datetime.datetime.strptime(stamp, fmt).replace(tzinfo=datetime.timezone.utc)
+    except ValueError:
+        sys.exit(1)
+    print(int(dt.timestamp()))
+elif a == ["-u", "+%s"]:
+    print(int(datetime.datetime.now(datetime.timezone.utc).timestamp()))
+else:
+    os.execv("/bin/date", ["/bin/date"] + a)
+FAKEDATE
+  chmod +x "$test_tmp/bin/date"
+fi
 chmod +x "$test_tmp/bin/"*
 
 export PATH="$test_tmp/bin:$PATH"
@@ -142,8 +188,14 @@ TERMINATION_LOG="$test_tmp/upload.term" \
   "$repo_root/platform/openbao/snapshot-upload.sh" >"$test_tmp/upload.log" 2>&1
 [ -s "$test_tmp/remote/openbao-snapshots/bao-20260721T000000Z.snap" ] \
   || fail 'remote snapshot was not published'
-grep -Fq 'openbao_snapshot_upload_ok' "$test_tmp/upload.term" \
+grep -Fq 'openbao_snapshot_converged outcome=published' "$test_tmp/upload.term" \
   || fail 'upload success evidence missing'
+# The marker is the freshness check's only input, so a publish that does not
+# leave one behind would make every subsequent run re-upload.
+[ -s "$test_tmp/remote/openbao-snapshots/LATEST" ] \
+  || fail 'publish did not leave an off-site LATEST marker'
+grep -Fqx 'bao-20260721T000000Z.snap' "$test_tmp/remote/openbao-snapshots/LATEST" \
+  || fail 'off-site marker does not name the snapshot just published'
 grep -Fq 'attempts=1' "$test_tmp/upload.term" \
   || fail 'a first-attempt success must report attempts=1'
 
@@ -196,12 +248,216 @@ if ! FAKE_SCP_ATTEMPTS="$test_tmp/scp-attempts" \
     >"$test_tmp/upload-recovers.log" 2>&1; then
   fail 'upload did not recover from a single transient remote failure'
 fi
-grep -Fq 'openbao_snapshot_upload_ok' "$test_tmp/upload-recovers.term" \
+grep -Fq 'openbao_snapshot_converged outcome=published' "$test_tmp/upload-recovers.term" \
   || fail 'recovered upload lacks success evidence'
 grep -Fq 'attempts=2' "$test_tmp/upload-recovers.term" \
   || fail 'recovered upload should report the attempt it succeeded on'
 [ -s "$test_tmp/remote/openbao-snapshots/bao-20260721T000000Z.snap" ] \
   || fail 'recovered upload did not publish the remote snapshot'
+
+# ── Convergence contract (2026-09-06) ─────────────────────────────────────────
+# The lane runs hourly and is a no-op when the off-site copy is already young
+# enough. These three cases are the whole reason that is safe.
+#
+# Restore the plain scp stub first; the transient-failure one above is stateful.
+cat >"$test_tmp/bin/scp" <<'FAKE'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${FAKE_UNREACHABLE:-0}" == 1 ]] && exit 255
+args=("$@")
+src="${args[$((${#args[@]} - 2))]}"
+dest="${args[$((${#args[@]} - 1))]}"
+remote_path="${dest#*:}"
+mkdir -p "$FAKE_REMOTE/$(dirname "$remote_path")"
+cp "$src" "$FAKE_REMOTE/$remote_path"
+FAKE
+chmod +x "$test_tmp/bin/scp"
+
+# (1) A marker young enough must converge WITHOUT uploading. Proven by removing
+#     the remote snapshot and asserting the run does not put it back.
+mkdir -p "$test_tmp/remote/openbao-snapshots"
+rm -f "$test_tmp/remote/openbao-snapshots/bao-20260721T000000Z.snap"
+fresh_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+printf 'bao-%s.snap\n' "$fresh_stamp" >"$test_tmp/remote/openbao-snapshots/LATEST"
+if ! SNAPSHOT_WORK_DIR="$test_tmp/work" \
+    STORAGEBOX_KNOWN_HOSTS="$test_tmp/known_hosts" \
+    SNAPSHOT_UPLOAD_BACKOFFS='0 0' \
+    TERMINATION_LOG="$test_tmp/upload-fresh.term" \
+    "$repo_root/platform/openbao/snapshot-upload.sh" \
+    >"$test_tmp/upload-fresh.log" 2>&1; then
+  fail 'a fresh off-site copy should converge successfully, not fail'
+fi
+grep -Fq 'openbao_snapshot_converged outcome=already-fresh' "$test_tmp/upload-fresh.term" \
+  || fail 'fresh off-site copy did not report the already-fresh outcome'
+[ ! -e "$test_tmp/remote/openbao-snapshots/bao-20260721T000000Z.snap" ] \
+  || fail 'converged run uploaded anyway; the freshness gate is not working'
+
+# (2) A marker older than the threshold must upload.
+rm -f "$test_tmp/remote/openbao-snapshots/bao-20260721T000000Z.snap"
+printf 'bao-20200101T000000Z.snap\n' >"$test_tmp/remote/openbao-snapshots/LATEST"
+if ! SNAPSHOT_WORK_DIR="$test_tmp/work" \
+    STORAGEBOX_KNOWN_HOSTS="$test_tmp/known_hosts" \
+    SNAPSHOT_UPLOAD_BACKOFFS='0 0' \
+    TERMINATION_LOG="$test_tmp/upload-stale.term" \
+    "$repo_root/platform/openbao/snapshot-upload.sh" \
+    >"$test_tmp/upload-stale.log" 2>&1; then
+  fail 'a stale off-site copy should have been refreshed'
+fi
+grep -Fq 'openbao_snapshot_converged outcome=published' "$test_tmp/upload-stale.term" \
+  || fail 'stale off-site copy was not republished'
+[ -s "$test_tmp/remote/openbao-snapshots/bao-20260721T000000Z.snap" ] \
+  || fail 'stale off-site copy did not result in an upload'
+
+# (3) THE LOAD-BEARING CASE. When the remote cannot be reached the run must FAIL,
+#     even though a fresh marker is sitting there — because it cannot read it. An
+#     exit 0 here would refresh kube_cronjob_status_last_successful_time every
+#     hour and permanently silence OpenBaoDailyRaftSnapshotStale, which is the
+#     only alert guarding the off-site copy. This is the hourly lane's equivalent
+#     of the 2026-09-06 bug: reporting health without having checked.
+printf 'bao-%s.snap\n' "$fresh_stamp" >"$test_tmp/remote/openbao-snapshots/LATEST"
+if FAKE_UNREACHABLE=1 SNAPSHOT_WORK_DIR="$test_tmp/work" \
+    STORAGEBOX_KNOWN_HOSTS="$test_tmp/known_hosts" \
+    SNAPSHOT_UPLOAD_MAX_ATTEMPTS=2 \
+    SNAPSHOT_UPLOAD_BACKOFFS='0 0' \
+    TERMINATION_LOG="$test_tmp/upload-unreachable.term" \
+    "$repo_root/platform/openbao/snapshot-upload.sh" \
+    >"$test_tmp/upload-unreachable.log" 2>&1; then
+  fail 'an undeterminable remote state must not report success'
+fi
+grep -Fq 'stage=remote-state' "$test_tmp/upload-unreachable.term" \
+  || fail 'unreachable remote did not report the remote-state stage'
+if grep -Fq 'openbao_snapshot_converged' "$test_tmp/upload-unreachable.term"; then
+  fail 'unreachable remote emitted a convergence success message'
+fi
+
+# ── Off-site retention ─────────────────────────────────────────────────────
+# snapshot-prune.sh is the only script here that deletes data, so its guards are
+# tested rather than reviewed. A separate fixture directory keeps these cases
+# from touching the convergence fixtures above.
+prune_remote="$test_tmp/remote/prune-fixture"
+mkdir -p "$prune_remote"
+# 40 consecutive daily snapshots ending 2026-09-06, each with a checksum
+# sidecar — the real shape of the directory on that date (49 snapshots, unbroken
+# daily chain since 2026-07-21, nothing ever deleted).
+for offset in $(seq 0 39); do
+  day="$(python3 -c 'import datetime,sys; print((datetime.date(2026,9,6) - datetime.timedelta(days=int(sys.argv[1]))).strftime("%Y%m%d"))' "$offset")"
+  printf 'snapshot-fixture\n' >"$prune_remote/bao-${day}T031500Z.snap"
+  printf 'deadbeef  bao-%sT031500Z.snap\n' "$day" \
+    >"$prune_remote/bao-${day}T031500Z.snap.sha256"
+done
+printf 'bao-20260906T031500Z.snap\n' >"$prune_remote/LATEST"
+before_prune="$(find "$prune_remote" -name 'bao-*.snap' | wc -l | tr -d ' ')"
+[ "$before_prune" -eq 40 ] || fail 'prune fixture was not built'
+
+# Report-only is the shipped default, so it is the first thing asserted: an
+# unarmed run must produce a full plan and delete nothing.
+SNAPSHOT_REMOTE_DIR=prune-fixture \
+STORAGEBOX_KNOWN_HOSTS="$test_tmp/known_hosts" \
+SNAPSHOT_PRUNE_APPLY=false \
+TERMINATION_LOG="$test_tmp/prune-report.term" \
+  "$repo_root/platform/openbao/snapshot-prune.sh" \
+  >"$test_tmp/prune-report.log" 2>&1 \
+  || fail 'report-only prune failed'
+grep -Fq 'openbao_snapshot_prune_ok mode=report-only' "$test_tmp/prune-report.term" \
+  || fail 'report-only prune lacks its evidence line'
+grep -Fq 'openbao_snapshot_prune_plan total=40' "$test_tmp/prune-report.log" \
+  || fail 'report-only prune did not print a plan over the whole listing'
+[ "$(find "$prune_remote" -name 'bao-*.snap' | wc -l | tr -d ' ')" -eq "$before_prune" ] \
+  || fail 'report-only prune deleted something'
+
+# Armed. 40 consecutive dailies under 14d/8w/12m/3y keep the 14 newest days plus
+# one per earlier week and month, so the outcome is checked as properties rather
+# than as one brittle number: the newest survives, the daily floor is met, every
+# survivor still has its sidecar, and something was actually removed.
+SNAPSHOT_REMOTE_DIR=prune-fixture \
+STORAGEBOX_KNOWN_HOSTS="$test_tmp/known_hosts" \
+SNAPSHOT_PRUNE_APPLY=true \
+TERMINATION_LOG="$test_tmp/prune-apply.term" \
+  "$repo_root/platform/openbao/snapshot-prune.sh" \
+  >"$test_tmp/prune-apply.log" 2>&1 \
+  || fail 'armed prune failed'
+grep -Fq 'openbao_snapshot_prune_ok mode=apply' "$test_tmp/prune-apply.term" \
+  || fail 'armed prune lacks its evidence line'
+[ -e "$prune_remote/bao-20260906T031500Z.snap" ] \
+  || fail 'prune deleted the newest off-site snapshot'
+for kept_snapshot in "$prune_remote"/bao-*.snap; do
+  [ -e "${kept_snapshot}.sha256" ] \
+    || fail "prune left $(basename "$kept_snapshot") without its checksum sidecar"
+done
+for orphan_sidecar in "$prune_remote"/bao-*.snap.sha256; do
+  [ -e "${orphan_sidecar%.sha256}" ] \
+    || fail "prune left $(basename "$orphan_sidecar") without its snapshot"
+done
+after_prune="$(find "$prune_remote" -name 'bao-*.snap' | wc -l | tr -d ' ')"
+[ "$after_prune" -lt "$before_prune" ] || fail 'armed prune removed nothing'
+[ "$after_prune" -ge 14 ] \
+  || fail "armed prune kept only $after_prune snapshots, below the 14-daily floor"
+
+# Re-running immediately must be a no-op: the previous run already converged the
+# directory onto the policy. A prune that keeps finding work to do is deleting
+# something it should have kept.
+SNAPSHOT_REMOTE_DIR=prune-fixture \
+STORAGEBOX_KNOWN_HOSTS="$test_tmp/known_hosts" \
+SNAPSHOT_PRUNE_APPLY=true \
+TERMINATION_LOG="$test_tmp/prune-again.term" \
+  "$repo_root/platform/openbao/snapshot-prune.sh" \
+  >"$test_tmp/prune-again.log" 2>&1 \
+  || fail 'second prune run failed'
+grep -Fq 'removed=0' "$test_tmp/prune-again.term" \
+  || fail 'prune is not idempotent; a second run removed more'
+
+# A listing shorter than the min-plausible floor must abort untouched. This is
+# the guard against acting on a truncated or lying remote read — the difference
+# between "retention converged" and "the backups are gone".
+short_remote="$test_tmp/remote/prune-short"
+mkdir -p "$short_remote"
+printf 'snapshot-fixture\n' >"$short_remote/bao-20260906T031500Z.snap"
+if SNAPSHOT_REMOTE_DIR=prune-short \
+    STORAGEBOX_KNOWN_HOSTS="$test_tmp/known_hosts" \
+    SNAPSHOT_PRUNE_APPLY=true \
+    TERMINATION_LOG="$test_tmp/prune-short.term" \
+    "$repo_root/platform/openbao/snapshot-prune.sh" \
+    >"$test_tmp/prune-short.log" 2>&1; then
+  fail 'prune acted on an implausibly short listing'
+fi
+[ -e "$short_remote/bao-20260906T031500Z.snap" ] \
+  || fail 'prune deleted from a listing it should have refused outright'
+grep -Fq 'refusing to prune a listing this short' "$test_tmp/prune-short.log" \
+  || fail 'short-listing refusal lacks an explicit diagnostic'
+
+# Names outside the snapshot pattern are not prune candidates at all. The
+# directory legitimately holds the LATEST marker and one .sha256 per snapshot,
+# and the plan above reported total=40 over a directory of 81 objects, which is
+# that filter working. A name that PASSES the pattern but is not a real date is
+# the dangerous case — it reaches the bucketing arithmetic — and it must abort
+# the whole run rather than be skipped: a snapshot we cannot date is one we must
+# not reason about deleting.
+bad_remote="$test_tmp/remote/prune-bad"
+mkdir -p "$bad_remote"
+for offset in $(seq 0 19); do
+  day="$(python3 -c 'import datetime,sys; print((datetime.date(2026,9,6) - datetime.timedelta(days=int(sys.argv[1]))).strftime("%Y%m%d"))' "$offset")"
+  printf 'snapshot-fixture\n' >"$bad_remote/bao-${day}T031500Z.snap"
+  printf 'deadbeef  bao-%sT031500Z.snap\n' "$day" >"$bad_remote/bao-${day}T031500Z.snap.sha256"
+done
+# Month 13, day 52: eight digits, so it clears the pattern, and rejected by
+# busybox `date -D`, which is exactly the seam being tested.
+printf 'snapshot-fixture\n' >"$bad_remote/bao-20261352T031500Z.snap"
+# Retention squashed to 1/1/1/1 so that a run which did NOT abort would delete
+# almost everything; the assertion below would then be unmissable.
+if SNAPSHOT_REMOTE_DIR=prune-bad \
+    STORAGEBOX_KNOWN_HOSTS="$test_tmp/known_hosts" \
+    SNAPSHOT_PRUNE_APPLY=true \
+    SNAPSHOT_KEEP_DAILY=1 SNAPSHOT_KEEP_WEEKLY=1 \
+    SNAPSHOT_KEEP_MONTHLY=1 SNAPSHOT_KEEP_YEARLY=1 \
+    TERMINATION_LOG="$test_tmp/prune-bad.term" \
+    "$repo_root/platform/openbao/snapshot-prune.sh" \
+    >"$test_tmp/prune-bad.log" 2>&1; then
+  fail 'prune completed over a listing containing an undatable snapshot name'
+fi
+[ "$(find "$bad_remote" -name 'bao-*.snap' | wc -l | tr -d ' ')" -eq 21 ] \
+  || fail 'prune deleted something before aborting on an undatable name'
+grep -Fq 'cannot parse timestamp in bao-20261352T031500Z.snap' "$test_tmp/prune-bad.log" \
+  || fail 'undatable-name abort lacks an explicit diagnostic naming the file'
 
 # When Docker and the already-pinned uploader image are locally available, use a
 # real Linux filesystem to prove the Kubernetes UID/GID handoff. No image is
@@ -274,4 +530,4 @@ if rg 'TESTTOKENMUSTNEVERAPPEAR|TEST-PRIVATE-KEY-MUST-NEVER-APPEAR' \
   fail 'credential reached workload logs or termination evidence'
 fi
 
-printf '%s\n' 'PASS: snapshot login, integrity, upload, failures, and log hygiene are enforced.'
+printf '%s\n' 'PASS: snapshot login, integrity, convergence, retention, failures, and log hygiene are enforced.'

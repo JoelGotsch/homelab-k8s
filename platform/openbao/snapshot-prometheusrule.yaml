@@ -130,27 +130,50 @@ spec:
           annotations:
             summary: OpenBao hourly Raft snapshot has not succeeded in two hours
             runbook_url: https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/openbao/restore-drill.md
-        # 90000s = 25 h. Was 129600s (36 h), which meant a single missed daily run
-        # paged ~12 h after the fact: the 2026-09-06 run failed at 03:09 and this
-        # alert did not fire until 15:35. 25 h pages within ~1.5 h of a missed run
-        # while still tolerating the largest legitimate gap between two
-        # successes — the daily is scheduled at 01:20 and may now spend up to
-        # activeDeadlineSeconds (1800s) retrying, so consecutive successes can sit
-        # at most ~24 h 30 m apart, leaving ~1 h of margin including `for`.
+        # 14400s = 4 h, tracking the lane's cadence rather than its objective.
+        # History: 129600 (36 h) until 2026-09-06, which paged ~12 h after the
+        # fact; then 90000 (25 h) while the lane was still once-daily; now 4 h
+        # because the lane runs hourly.
+        #
+        # READ THIS BEFORE RETUNING — the alert name still says "Daily", and the
+        # threshold no longer does, because the two now measure different things.
+        # The objective is still an off-site copy no older than a day, but that
+        # objective is enforced by the JOB, not by this alert: snapshot-upload.sh
+        # exits non-zero whenever it cannot establish "a remote snapshot newer
+        # than SNAPSHOT_MAX_REMOTE_AGE_SECONDS (23 h) now exists", including when
+        # it cannot determine the remote state at all. A convergent run that
+        # merely observes a fresh copy still counts as a success and refreshes
+        # `kube_cronjob_status_last_successful_time` — which is exactly why the
+        # job's fail path has to be airtight, and why this threshold can be
+        # tightened rather than left at a day.
+        #
+        # The chain that makes 4 h cover the real invariant:
+        #   off-site copy older than 23 h -> the hourly run exits non-zero
+        #   -> last_successful_time stops advancing -> this fires within ~4h15m.
+        # What this alert uniquely catches is the case with no failing Job to
+        # alert on at all: the CronJob stopped being scheduled (controller
+        # wedged, Argo pruned it, sustained node pressure).
+        #
+        # Why not tighter: successive successes can legitimately sit ~2h30m apart
+        # (hourly schedule, activeDeadlineSeconds 1800s of retry, plus one run
+        # skipped by startingDeadlineSeconds). Two consecutive hourly failures
+        # produce a ~3 h gap and are already covered by
+        # OpenBaoRaftSnapshotJobFailed within 5 m, so this stays a backstop
+        # instead of duplicating it.
         - alert: OpenBaoDailyRaftSnapshotStale
           expr: |
             (
               time() - kube_cronjob_status_last_successful_time{
                 namespace="openbao",
                 cronjob="openbao-raft-snapshot"
-              } > 90000
+              } > 14400
             )
             or
             (
               (time() - kube_cronjob_created{
                 namespace="openbao",
                 cronjob="openbao-raft-snapshot"
-              } > 90000)
+              } > 14400)
               unless kube_cronjob_status_last_successful_time{
                 namespace="openbao",
                 cronjob="openbao-raft-snapshot"
@@ -161,12 +184,13 @@ spec:
               namespace="openbao",
               cronjob="openbao-raft-snapshot"
             })
-          # Kept at 30m: guards against a kube-state-metrics restart briefly
-          # dropping the series and tripping the `absent()` branch.
-          for: 30m
+          # 15m, down from 30m: still long enough that a kube-state-metrics
+          # restart cannot trip the `absent()` branch, but no longer sized for a
+          # once-daily lane.
+          for: 15m
           labels:
             severity: critical
             component: openbao-backup
           annotations:
-            summary: OpenBao off-site Raft snapshot has not succeeded in 25 hours
+            summary: OpenBao off-site Raft snapshot lane has not recorded a success in 4 hours
             runbook_url: https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/openbao/restore-drill.md

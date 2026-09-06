@@ -238,4 +238,132 @@ yq ea -e '
 ' "$layer/snapshot-networkpolicy.yaml" >/dev/null \
   || fail 'hourly egress must remain L3/L4 DNS plus OpenBao only, without an unnecessary DNS proxy'
 
+# ── Convergence contract (added 2026-09-06) ────────────────────────────────
+# The off-site lane went from a once-daily upload to an hourly convergence run.
+# That trade is only safe while a run that CANNOT establish "a fresh off-site
+# snapshot exists" fails, because a success refreshes
+# kube_cronjob_status_last_successful_time and that metric is the sole input to
+# OpenBaoDailyRaftSnapshotStale. An exit 0 on an unknown remote state would make
+# the alert permanently green while checking nothing — strictly worse than the
+# 2026-09-06 bug it replaced. These assertions pin the parts of that contract
+# that a well-meaning edit could quietly remove.
+prune="$layer/raft-snapshot-prune.yaml"
+[ -e "$prune" ] || fail 'off-site retention CronJob is missing'
+
+max_age="$(yq ea -r -N '
+  select(.kind == "CronJob" and .metadata.name == "openbao-raft-snapshot") |
+  .spec.jobTemplate.spec.template.spec.containers[]
+  | select(.name == "upload") | .env[]
+  | select(.name == "SNAPSHOT_MAX_REMOTE_AGE_SECONDS") | .value
+' "$daily")"
+[ -n "$max_age" ] \
+  || fail 'the off-site CronJob must state SNAPSHOT_MAX_REMOTE_AGE_SECONDS explicitly, not inherit the script default'
+[[ "$max_age" =~ ^[0-9]+$ ]] \
+  || fail "SNAPSHOT_MAX_REMOTE_AGE_SECONDS must be an integer number of seconds, got '$max_age'"
+# Strictly under a day: the objective is an off-site copy no older than 24 h, so
+# a threshold at or above 86400 would only publish once the objective is already
+# missed. Also floored, because a threshold below the schedule period would
+# upload on every run and turn an hourly check into 24 real uploads a day.
+[ "$max_age" -lt 86400 ] \
+  || fail "SNAPSHOT_MAX_REMOTE_AGE_SECONDS ($max_age) must be under 86400 or it cannot meet a 24h objective"
+[ "$max_age" -ge 3600 ] \
+  || fail "SNAPSHOT_MAX_REMOTE_AGE_SECONDS ($max_age) below one hour would upload on every scheduled run"
+unset max_age
+
+# The reachability probe must target the account home, never the snapshot
+# directory. Probing the directory conflates "host unreachable" with "directory
+# absent", and since `mkdir -p` lives inside the publish path a first-ever run
+# would then fail forever instead of creating it.
+rg -q 'ssh \$ssh_opts "\$ssh_target" stat \. ' "$layer/snapshot-upload.sh" \
+  || fail 'convergence must probe reachability with stat on the account home, not on the snapshot directory'
+# Both successful outcomes must stay distinguishable in the termination message:
+# "already-fresh" for ~23 runs a day and "published" for the one that uploads.
+# Collapsing them loses the only signal that says whether an upload ever happens.
+for outcome in 'outcome=published' 'outcome=already-fresh'; do
+  rg -Fq "openbao_snapshot_converged $outcome" "$layer/snapshot-upload.sh" \
+    || fail "convergence must report $outcome distinctly"
+done
+unset outcome
+rg -Fq 'converged with an unrecognised outcome' "$layer/snapshot-upload.sh" \
+  || fail 'an unrecognised convergence outcome must exit non-zero, never fall through to success'
+
+# ── Off-site retention (added 2026-09-06) ──────────────────────────────────
+# Deleting backups is the only irreversible action in this layer.
+yq -e '
+  .kind == "CronJob" and
+  .metadata.name == "openbao-raft-snapshot-prune" and
+  .spec.jobTemplate.spec.template.spec.automountServiceAccountToken == false and
+  (.spec.jobTemplate.spec.template.spec | has("serviceAccountName") | not) and
+  ([.spec.jobTemplate.spec.template.spec.volumes[] | select(.projected)] | length == 0) and
+  ([.spec.jobTemplate.spec.template.spec.containers[].image
+    | select(test("openbao"))] | length == 0)
+' <(yq ea 'select(.kind == "CronJob")' "$prune") >/dev/null \
+  || fail 'the prune workload must carry no OpenBao identity: no ServiceAccount, no projected JWT, no OpenBao image'
+
+# Report-only in BOTH places, because either one alone silently arms it: the
+# script default protects an ad-hoc run, the manifest value protects the cluster.
+rg -Fq 'apply="${SNAPSHOT_PRUNE_APPLY:-false}"' "$layer/snapshot-prune.sh" \
+  || fail 'snapshot-prune.sh must default to report-only'
+[ "$(yq ea -r -N '
+  select(.kind == "CronJob") | .spec.jobTemplate.spec.template.spec.containers[].env[]
+  | select(.name == "SNAPSHOT_PRUNE_APPLY") | .value
+' "$prune")" = false ] \
+  || fail 'the prune CronJob must ship report-only; arming it is a reviewed commit, not a default'
+
+# Two independent floors under the delete path. Both have to be named here or a
+# refactor can drop one without any test noticing, and the failure mode is
+# deleted backups.
+rg -Fq 'keep[newest] = 1' "$layer/snapshot-prune.sh" \
+  || fail 'the newest snapshot must be kept unconditionally, independent of the quota logic'
+rg -q 'min_plausible="\$\{SNAPSHOT_PRUNE_MIN_PLAUSIBLE:-[0-9]+\}"' "$layer/snapshot-prune.sh" \
+  || fail 'a truncated listing must abort rather than be pruned; the min-plausible floor is missing'
+rg -q 'aborting without deleting anything' "$layer/snapshot-prune.sh" \
+  || fail 'an unparseable snapshot name must abort the prune, not be skipped'
+# The sidecar is removed before the snapshot: a sidecar without its snapshot is
+# inert, whereas a snapshot without its checksum looks restorable and is not
+# verifiable.
+rg -B2 -Fq 'rm "$remote_dir/${name}.sha256"' "$layer/snapshot-prune.sh" \
+  || fail 'each pruned snapshot must have its checksum sidecar removed with it'
+
+# The script is only reachable in-cluster if kustomize ships it and the pod
+# mounts it. Both are easy to forget when adding a second consumer of the
+# generated ConfigMap.
+yq -e '[.configMapGenerator[] | select(.name == "openbao-snapshot-scripts") |
+  .files[] | select(. == "snapshot-prune.sh")] | length == 1' \
+  "$layer/kustomization.yaml" >/dev/null \
+  || fail 'snapshot-prune.sh must be in the openbao-snapshot-scripts configMapGenerator'
+yq -e '[.resources[] | select(. == "raft-snapshot-prune.yaml")] | length == 1' \
+  "$layer/kustomization.yaml" >/dev/null \
+  || fail 'raft-snapshot-prune.yaml must be a kustomize resource'
+
+# Under this namespace's default-deny the prune pod has no egress unless its own
+# policy selects it, and it carries a distinct component label precisely so the
+# upload lane's policy does not. Same exact shape as that policy: L7-proxied DNS
+# so Cilium can resolve toFQDNs, then the pinned Storage Box on TCP/23. Nothing
+# else, and never the `world` entity.
+yq ea -e '
+  select(.kind == "CiliumNetworkPolicy" and
+    .metadata.name == "openbao-raft-snapshot-prune") |
+  [
+    (.spec.endpointSelector.matchLabels."app.kubernetes.io/component" == "offsite-prune"),
+    (.spec.egress | length == 2),
+    ([.spec.egress[] | select(
+      .toEndpoints[0].matchLabels."k8s:k8s-app" == "kube-dns" and
+      .toPorts[0].rules.dns[0].matchPattern == "*"
+    )] | length == 1),
+    ([.spec.egress[] | select(
+      ([.toFQDNs[]? | select(.matchName == "u609156.your-storagebox.de")] | length == 1) and
+      ([.toPorts[].ports[]? | select(.port == "23" and .protocol == "TCP")] | length == 1) and
+      (.toPorts[0].ports | length == 1)
+    )] | length == 1),
+    ([.spec.egress[].toEntities[]? | select(. == "world")] | length == 0)
+  ] | all
+' "$prune" >/dev/null \
+  || fail 'prune egress needs exact kube-dns L7 observation and the pinned Storage Box FQDN on TCP/23'
+[ "$(yq ea -r -N 'select(.kind == "CronJob") |
+  .spec.jobTemplate.spec.template.metadata.labels."app.kubernetes.io/component"' \
+  "$prune")" = offsite-prune ] \
+  || fail 'the prune pod label must match its own policy selector, or it gets no egress at all'
+unset prune
+
 printf '%s\n' 'OpenBao snapshot authentication and delivery contract: PASS'

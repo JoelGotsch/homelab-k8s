@@ -48,6 +48,19 @@ if [ ! -s "$TEST_LIST" ]; then
   exit 0
 fi
 
+# yq is a hard dependency of the sibling checks in this directory, so it is the
+# right tool for the extraction below. It replaced a `python3 -c "import yaml"`
+# heredoc on 2026-09-06: PyYAML is not in macOS system python and not in
+# Homebrew's, and the hook only worked because an unrelated project's direnv venv
+# happened to be first on PATH. Under `pre-commit` (its own environment) or on
+# any other machine it would have died on ModuleNotFoundError — a hook whose
+# dependency is satisfied by accident is a hook that will stop working without
+# anyone changing it.
+if ! command -v yq >/dev/null 2>&1; then
+  echo "check-prometheusrule-tests: yq is required to extract .spec.groups" >&2
+  exit 1
+fi
+
 if ! command -v promtool >/dev/null 2>&1; then
   # Fail loudly rather than skipping silently: a check that quietly
   # passes when its tool is absent is the exact "green while checking
@@ -88,18 +101,18 @@ while IFS= read -r test_file; do
   case_dir="$WORK_DIR/$tested"
   mkdir -p "$case_dir"
 
-  # Extract .spec.groups. A PrometheusRule with no groups is a bug in
-  # the manifest, not an empty test run, so fail on it.
-  if ! python3 -c '
-import sys, yaml
-manifest, out = sys.argv[1], sys.argv[2]
-doc = yaml.safe_load(open(manifest))
-groups = (doc or {}).get("spec", {}).get("groups")
-if not groups:
-    sys.exit(f"{manifest}: no .spec.groups to test")
-yaml.safe_dump({"groups": groups}, open(out, "w"),
-               default_flow_style=False, sort_keys=False, width=10000)
-' "$manifest" "$case_dir/rules.yaml"; then
+  # Extract .spec.groups into the bare `groups:` document promtool wants. A
+  # PrometheusRule with no groups is a bug in the manifest, not an empty test
+  # run, so it fails rather than producing an empty rules file that every test
+  # would then vacuously not match.
+  if ! yq -e '.spec.groups | select(. != null and length > 0)' "$manifest" \
+      >/dev/null 2>&1; then
+    echo "FAIL $manifest: no .spec.groups to test" >&2
+    rc=1
+    continue
+  fi
+  if ! yq '{"groups": .spec.groups}' "$manifest" > "$case_dir/rules.yaml"; then
+    echo "FAIL $manifest: could not extract .spec.groups" >&2
     rc=1
     continue
   fi

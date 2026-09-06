@@ -19,11 +19,20 @@ make_fixture() {
     "$fixture/infrastructure/backup-cronjobs/"
 }
 
+# A mutation that is rejected for the WRONG reason proves nothing about the
+# assertion it was written for, and reads as a pass. The optional second argument
+# pins the diagnostic, so each case demonstrates its own guard firing.
 expect_rejected() {
   name="$1"
+  expected="${2:-}"
   if "$test_tmp/$name/scripts/check-openbao-snapshot-auth.sh" \
       >"$test_tmp/$name.out" 2>&1; then
     fail "mutation $name unexpectedly passed"
+  fi
+  if [ -n "$expected" ] && ! grep -Fq "$expected" "$test_tmp/$name.out"; then
+    fail "mutation $name was rejected, but not by the assertion it targets;
+  expected a diagnostic containing: $expected
+  got: $(tr '\n' '|' <"$test_tmp/$name.out" | tail -c 400)"
   fi
 }
 
@@ -123,4 +132,118 @@ yq -i '(select(.kind == "ExternalSecret" and
   "$test_tmp/secret-routing/platform/openbao/raft-snapshot-cronjob.yaml"
 expect_rejected secret-routing
 
-printf '%s\n' 'PASS: identity, token isolation, artifact modes/groups, secret routing, DNS observation/resolver scope, and egress mutations are rejected.'
+# ── Convergence and retention mutations (added 2026-09-06) ─────────────────
+# The assertions these exercise were added with the hourly convergent lane and
+# the off-site prune. Both introduce a way to be silently wrong rather than
+# loudly broken — a run that reports success without checking, and a run that
+# deletes backups — so each new assertion gets a mutation that must be caught.
+
+# The threshold must be stated in the manifest, not inherited. Inheriting it
+# would move production behaviour into a script default where no reviewer of the
+# CronJob can see it.
+make_fixture convergence-threshold-absent
+yq -i 'del(select(.kind == "CronJob") |
+  .spec.jobTemplate.spec.template.spec.containers[] |
+  select(.name == "upload") | .env[] |
+  select(.name == "SNAPSHOT_MAX_REMOTE_AGE_SECONDS"))' \
+  "$test_tmp/convergence-threshold-absent/platform/openbao/raft-snapshot-cronjob.yaml"
+expect_rejected convergence-threshold-absent \
+  'must state SNAPSHOT_MAX_REMOTE_AGE_SECONDS explicitly'
+
+# 86400 is the boundary that matters: at exactly a day the lane only publishes
+# once the "no older than 24 h" objective has already been missed.
+make_fixture convergence-threshold-at-a-day
+yq -i '(select(.kind == "CronJob") |
+  .spec.jobTemplate.spec.template.spec.containers[] |
+  select(.name == "upload") | .env[] |
+  select(.name == "SNAPSHOT_MAX_REMOTE_AGE_SECONDS") | .value) = "86400"' \
+  "$test_tmp/convergence-threshold-at-a-day/platform/openbao/raft-snapshot-cronjob.yaml"
+expect_rejected convergence-threshold-at-a-day \
+  'must be under 86400'
+
+# Probing the snapshot directory instead of the account home reintroduces the
+# bug found on 2026-09-06: "host unreachable" and "directory absent" become
+# indistinguishable, and since `mkdir -p` lives past that point a first-ever run
+# fails forever.
+make_fixture convergence-probe-widened
+# shellcheck disable=SC2016 # this is a sed program; the $ must stay literal
+sed -i.bak 's#"\$ssh_target" stat \. #"$ssh_target" stat "$remote_dir" #' \
+  "$test_tmp/convergence-probe-widened/platform/openbao/snapshot-upload.sh"
+expect_rejected convergence-probe-widened \
+  'must probe reachability with stat on the account home'
+
+# Collapsing the two success outcomes removes the only signal that says whether
+# the lane is still actually uploading, as opposed to reporting a stale marker
+# fresh forever.
+make_fixture convergence-outcomes-collapsed
+sed -i.bak 's#outcome=already-fresh remote_age#outcome=published remote_age#' \
+  "$test_tmp/convergence-outcomes-collapsed/platform/openbao/snapshot-upload.sh"
+expect_rejected convergence-outcomes-collapsed \
+  'convergence must report outcome=already-fresh distinctly'
+
+# Arming the prune must be a reviewed commit. Either default alone is enough to
+# arm it in practice, so both are asserted and both are mutated.
+make_fixture prune-armed-in-cluster
+yq -i '(select(.kind == "CronJob") |
+  .spec.jobTemplate.spec.template.spec.containers[0].env[] |
+  select(.name == "SNAPSHOT_PRUNE_APPLY") | .value) = "true"' \
+  "$test_tmp/prune-armed-in-cluster/platform/openbao/raft-snapshot-prune.yaml"
+expect_rejected prune-armed-in-cluster \
+  'prune CronJob must ship report-only'
+
+make_fixture prune-armed-by-default
+sed -i.bak 's#SNAPSHOT_PRUNE_APPLY:-false#SNAPSHOT_PRUNE_APPLY:-true#' \
+  "$test_tmp/prune-armed-by-default/platform/openbao/snapshot-prune.sh"
+expect_rejected prune-armed-by-default \
+  'snapshot-prune.sh must default to report-only'
+
+# The two independent floors under the delete path. Losing either one is how a
+# quota refactor turns into deleted backups.
+make_fixture prune-newest-floor-removed
+sed -i.bak '/keep\[newest\] = 1/d' \
+  "$test_tmp/prune-newest-floor-removed/platform/openbao/snapshot-prune.sh"
+expect_rejected prune-newest-floor-removed \
+  'newest snapshot must be kept unconditionally'
+
+make_fixture prune-min-plausible-removed
+sed -i.bak '/^min_plausible=/d' \
+  "$test_tmp/prune-min-plausible-removed/platform/openbao/snapshot-prune.sh"
+expect_rejected prune-min-plausible-removed \
+  'min-plausible floor is missing'
+
+# The prune pod has no business with the Kubernetes or OpenBao APIs; it lists
+# names and removes files.
+make_fixture prune-gains-identity
+yq -i '(select(.kind == "CronJob") |
+  .spec.jobTemplate.spec.template.spec.serviceAccountName) = "openbao-raft-snapshot"' \
+  "$test_tmp/prune-gains-identity/platform/openbao/raft-snapshot-prune.yaml"
+expect_rejected prune-gains-identity \
+  'prune workload must carry no OpenBao identity'
+
+make_fixture prune-broad-egress
+yq -i '(select(.kind == "CiliumNetworkPolicy" and
+  .metadata.name == "openbao-raft-snapshot-prune") | .spec.egress) +=
+  [{"toEntities":["world"]}]' \
+  "$test_tmp/prune-broad-egress/platform/openbao/raft-snapshot-prune.yaml"
+expect_rejected prune-broad-egress \
+  'prune egress needs exact kube-dns L7 observation'
+
+# The pod label and the policy selector are a pair. Under this namespace's
+# default-deny a mismatch is not a loose policy — it is a pod with no egress at
+# all, which fails as a DNS timeout rather than as anything mentioning policy.
+make_fixture prune-label-drift
+yq -i '(select(.kind == "CronJob") |
+  .spec.jobTemplate.spec.template.metadata.labels."app.kubernetes.io/component") = "daily-offsite"' \
+  "$test_tmp/prune-label-drift/platform/openbao/raft-snapshot-prune.yaml"
+expect_rejected prune-label-drift \
+  'prune pod label must match its own policy selector'
+
+# The script is inert unless kustomize ships it into the shared ConfigMap.
+make_fixture prune-script-unshipped
+yq -i 'del(.configMapGenerator[] | select(.name == "openbao-snapshot-scripts") |
+  .files[] | select(. == "snapshot-prune.sh"))' \
+  "$test_tmp/prune-script-unshipped/platform/openbao/kustomization.yaml"
+expect_rejected prune-script-unshipped \
+  'snapshot-prune.sh must be in the openbao-snapshot-scripts configMapGenerator'
+
+printf '%s\n' 'PASS: identity, token isolation, artifact modes/groups, secret routing, DNS observation/resolver scope, egress, convergence-contract, and retention mutations are rejected.'
