@@ -160,6 +160,15 @@ spec:
         # port-forward to the same pod's :8888 answered instantly.
         - port: 8888
           protocol: TCP
+        # Vikunja's own metrics endpoint (:3456/api/v1/metrics). 7th
+        # recurrence. Confirmed 2026-09-05 from the targets API as the
+        # ONLY down target of 126: `context deadline exceeded` against
+        # 10.244.3.9:3456, while the same endpoint served 25KB of real
+        # unauthenticated metrics over a port-forward. The ServiceMonitor
+        # is not at fault -- its selector, port name and path are all
+        # correct -- so the scrape died on egress from Prometheus, here.
+        - port: 3456
+          protocol: TCP
     # External hosts via additional-scrape-configs (Mac Studio
     # node-exporter on inference VLAN per
     # observability/prometheus/external-hosts/).
