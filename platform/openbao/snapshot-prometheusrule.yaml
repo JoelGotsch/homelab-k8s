@@ -10,31 +10,94 @@ spec:
     - name: openbao.raft-snapshots
       interval: 1m
       rules:
+        # Start time of every FAILED snapshot Job, labelled with the CronJob that
+        # actually owns it. Two reasons this indirection is worth a recording rule:
+        #
+        # 1. `job_name=~"openbao-raft-snapshot.*"` also matches the *hourly*
+        #    Jobs (`openbao-raft-snapshot-hourly-<n>`), so before this rule a
+        #    failed hourly Job was attributed to the daily lane and vice versa.
+        #    `kube_job_owner` resolves the real owner instead of guessing from
+        #    the name — which also keeps ad-hoc `kubectl create job
+        #    --from=cronjob/...` runs attributed correctly (that flag sets a
+        #    controller ownerReference, so KSM reports owner_kind=CronJob).
+        # 2. `kube_job_status_failed` is emitted once per `reason`
+        #    (BackoffLimitExceeded / DeadlineExceeded / Evicted), so it must be
+        #    aggregated to one series per Job before it can be joined, or the
+        #    comparison below multiplies out.
+        #
+        # Rules inside a group evaluate in order, so the two alerts below may
+        # consume this series in the same evaluation.
+        - record: openbao_raft_snapshot:failed_job_start_time:max
+          expr: |
+            max by (namespace, cronjob, job_name) (
+              label_replace(
+                kube_job_status_start_time{
+                  namespace="openbao",
+                  job_name=~"openbao-raft-snapshot.*"
+                }
+                * on (namespace, job_name) group_left (owner_name)
+                kube_job_owner{namespace="openbao", owner_kind="CronJob"},
+                "cronjob", "$1", "owner_name", "(.+)"
+              )
+              and on (namespace, job_name)
+              (
+                max by (namespace, job_name) (
+                  kube_job_status_failed{
+                    namespace="openbao",
+                    job_name=~"openbao-raft-snapshot.*"
+                  }
+                ) > 0
+              )
+            )
+        # Fires while a failed snapshot Job has NOT been superseded by a later
+        # success, and keeps firing until one arrives.
+        #
+        # This deliberately replaces a `time() - kube_job_status_start_time <
+        # 3600` guard. That guard was a timer, not a condition: on 2026-09-06 the
+        # alert fired at 03:12 and resolved itself at 04:04 — exactly one hour
+        # after the Job started — with the failure entirely unremediated and the
+        # off-site snapshot still missing. The operator was left with the vague
+        # 36 h staleness alert 11½ h later instead of this one, which carries the
+        # runbook link. An alert must resolve because the world changed, never
+        # because a clock ran out.
+        #
+        # Branch 1: a failure newer than this CronJob's last success.
+        # Branch 2: a failure on a CronJob that has never succeeded at all
+        # (`kube_cronjob_status_last_successful_time` is absent, so branch 1's
+        # comparison would silently match nothing).
         - alert: OpenBaoRaftSnapshotJobFailed
           expr: |
             (
-              kube_job_status_failed{
-                namespace="openbao",
-                job_name=~"openbao-raft-snapshot.*"
-              } > 0
+              openbao_raft_snapshot:failed_job_start_time:max
+              > on (namespace, cronjob) group_left ()
+              max by (namespace, cronjob) (
+                kube_cronjob_status_last_successful_time{namespace="openbao"}
+              )
             )
-            and on (namespace, job_name)
+            or
             (
-              time() - kube_job_status_start_time{
-                namespace="openbao",
-                job_name=~"openbao-raft-snapshot.*"
-              } < 3600
+              openbao_raft_snapshot:failed_job_start_time:max
+              unless on (namespace, cronjob)
+              kube_cronjob_status_last_successful_time{namespace="openbao"}
             )
-          for: 1m
+          # 5m, not 1m: a kube-state-metrics restart can briefly publish the Job
+          # series without the CronJob series, which would make branch 2 look
+          # true. The condition is now stable rather than time-boxed, so paying
+          # four minutes of onset delay to suppress that flap is free.
+          for: 5m
           labels:
             severity: critical
             component: openbao-backup
           annotations:
-            summary: "OpenBao Raft snapshot Job {{ $labels.job_name }} failed"
+            summary: "OpenBao Raft snapshot Job {{ $labels.job_name }} failed and has not been superseded by a success"
             description: >-
               Inspect the retained Job and its redacted termination message with
               `kubectl -n openbao describe job {{ $labels.job_name }}` and
               `kubectl -n openbao logs job/{{ $labels.job_name }} --all-containers`.
+              The termination message names the failing `stage=` and the number of
+              upload attempts spent. To remediate now, run
+              `kubectl -n openbao create job --from=cronjob/{{ $labels.cronjob }} <name>`;
+              that records a real success and clears this alert.
             runbook_url: https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/openbao/restore-drill.md
         - alert: OpenBaoHourlyRaftSnapshotStale
           expr: |
@@ -67,20 +130,27 @@ spec:
           annotations:
             summary: OpenBao hourly Raft snapshot has not succeeded in two hours
             runbook_url: https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/openbao/restore-drill.md
+        # 90000s = 25 h. Was 129600s (36 h), which meant a single missed daily run
+        # paged ~12 h after the fact: the 2026-09-06 run failed at 03:09 and this
+        # alert did not fire until 15:35. 25 h pages within ~1.5 h of a missed run
+        # while still tolerating the largest legitimate gap between two
+        # successes — the daily is scheduled at 01:20 and may now spend up to
+        # activeDeadlineSeconds (1800s) retrying, so consecutive successes can sit
+        # at most ~24 h 30 m apart, leaving ~1 h of margin including `for`.
         - alert: OpenBaoDailyRaftSnapshotStale
           expr: |
             (
               time() - kube_cronjob_status_last_successful_time{
                 namespace="openbao",
                 cronjob="openbao-raft-snapshot"
-              } > 129600
+              } > 90000
             )
             or
             (
               (time() - kube_cronjob_created{
                 namespace="openbao",
                 cronjob="openbao-raft-snapshot"
-              } > 129600)
+              } > 90000)
               unless kube_cronjob_status_last_successful_time{
                 namespace="openbao",
                 cronjob="openbao-raft-snapshot"
@@ -91,10 +161,12 @@ spec:
               namespace="openbao",
               cronjob="openbao-raft-snapshot"
             })
+          # Kept at 30m: guards against a kube-state-metrics restart briefly
+          # dropping the series and tripping the `absent()` branch.
           for: 30m
           labels:
             severity: critical
             component: openbao-backup
           annotations:
-            summary: OpenBao off-site Raft snapshot has not succeeded in 36 hours
+            summary: OpenBao off-site Raft snapshot has not succeeded in 25 hours
             runbook_url: https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/openbao/restore-drill.md

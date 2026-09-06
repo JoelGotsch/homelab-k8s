@@ -1,0 +1,185 @@
+# promtool unit tests for snapshot-prometheusrule.yaml.
+#
+# Run via `scripts/check-prometheusrule-tests.sh` (pre-commit), which extracts
+# `.spec.groups` from the sibling PrometheusRule CR into a `rules.yaml` beside a
+# copy of this file — hence the bare `rule_files:` reference below. promtool
+# cannot read a PrometheusRule CR directly.
+#
+# These exist because of a specific 2026-09-06 failure: OpenBaoRaftSnapshotJobFailed
+# was gated on `time() - kube_job_status_start_time < 3600`, so it fired at 03:12
+# and resolved itself at 04:04 with the off-site snapshot still missing. Test (c)
+# is the regression guard for exactly that — an alert must resolve because the
+# world changed, not because a clock ran out. Eyeballing the PromQL is what let
+# the original bug through, so the predicate is asserted, not reviewed.
+#
+# NOTE ON TIMESTAMPS: promtool's clock starts at the Unix epoch, so
+# `eval_time: 10m` means `time() == 600`. The *_time series below therefore use
+# small absolute values (30, 60, 3000) rather than realistic epoch seconds; only
+# their ordering relative to each other and to `time()` matters.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # (a) A fresh failure that has not been superseded -> firing.
+  # (c) The SAME series still firing long after the old `< 3600` timer would
+  #     have silently resolved it. This is the regression test for the
+  #     2026-09-06 bug: fired 03:12, self-resolved 04:04, nothing fixed.
+  - interval: 1m
+    name: "daily failure is not superseded - fires, and keeps firing past one hour"
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="openbao", job_name="openbao-raft-snapshot-29811065"}'
+        values: "60+0x180"
+      - series: 'kube_job_owner{namespace="openbao", job_name="openbao-raft-snapshot-29811065", owner_kind="CronJob", owner_name="openbao-raft-snapshot", owner_is_controller="true"}'
+        values: "1+0x180"
+      - series: 'kube_job_status_failed{namespace="openbao", job_name="openbao-raft-snapshot-29811065", reason="BackoffLimitExceeded"}'
+        values: "1+0x180"
+      - series: 'kube_job_status_failed{namespace="openbao", job_name="openbao-raft-snapshot-29811065", reason="DeadlineExceeded"}'
+        values: "0+0x180"
+      # Last success predates the failed Job, and never advances.
+      - series: 'kube_cronjob_status_last_successful_time{namespace="openbao", cronjob="openbao-raft-snapshot"}'
+        values: "30+0x180"
+    alert_rule_test:
+      # (a) not yet firing before `for: 5m` elapses
+      - eval_time: 3m
+        alertname: OpenBaoRaftSnapshotJobFailed
+        exp_alerts: []
+      # (a) firing once `for` is satisfied
+      - eval_time: 10m
+        alertname: OpenBaoRaftSnapshotJobFailed
+        exp_alerts:
+          - exp_labels:
+              namespace: openbao
+              cronjob: openbao-raft-snapshot
+              job_name: openbao-raft-snapshot-29811065
+              severity: critical
+              component: openbao-backup
+            exp_annotations: &daily_ann
+              summary: "OpenBao Raft snapshot Job openbao-raft-snapshot-29811065 failed and has not been superseded by a success"
+              description: "Inspect the retained Job and its redacted termination message with `kubectl -n openbao describe job openbao-raft-snapshot-29811065` and `kubectl -n openbao logs job/openbao-raft-snapshot-29811065 --all-containers`. The termination message names the failing `stage=` and the number of upload attempts spent. To remediate now, run `kubectl -n openbao create job --from=cronjob/openbao-raft-snapshot <name>`; that records a real success and clears this alert."
+              runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/openbao/restore-drill.md"
+      # (c) THE BUG: >1h after the Job start time, still unremediated, still firing
+      - eval_time: 150m
+        alertname: OpenBaoRaftSnapshotJobFailed
+        exp_alerts:
+          - exp_labels:
+              namespace: openbao
+              cronjob: openbao-raft-snapshot
+              job_name: openbao-raft-snapshot-29811065
+              severity: critical
+              component: openbao-backup
+            exp_annotations: *daily_ann
+
+  # (b) A failure superseded by a later success -> resolves, because the world
+  #     changed. Models the real remediation: `kubectl create job --from=cronjob`.
+  - interval: 1m
+    name: "failure superseded by a later success - resolves"
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="openbao", job_name="openbao-raft-snapshot-29811065"}'
+        values: "60+0x180"
+      - series: 'kube_job_owner{namespace="openbao", job_name="openbao-raft-snapshot-29811065", owner_kind="CronJob", owner_name="openbao-raft-snapshot", owner_is_controller="true"}'
+        values: "1+0x180"
+      - series: 'kube_job_status_failed{namespace="openbao", job_name="openbao-raft-snapshot-29811065", reason="BackoffLimitExceeded"}'
+        values: "1+0x180"
+      # Last success starts BEFORE the failed Job (30) and jumps to AFTER it
+      # (3000) at t=30m, as a manual re-run would.
+      - series: 'kube_cronjob_status_last_successful_time{namespace="openbao", cronjob="openbao-raft-snapshot"}'
+        values: "30+0x29 3000+0x151"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: OpenBaoRaftSnapshotJobFailed
+        exp_alerts:
+          - exp_labels:
+              namespace: openbao
+              cronjob: openbao-raft-snapshot
+              job_name: openbao-raft-snapshot-29811065
+              severity: critical
+              component: openbao-backup
+            exp_annotations: *daily_ann
+      # superseded -> gone
+      - eval_time: 40m
+        alertname: OpenBaoRaftSnapshotJobFailed
+        exp_alerts: []
+      - eval_time: 150m
+        alertname: OpenBaoRaftSnapshotJobFailed
+        exp_alerts: []
+
+  # (d) A CronJob that has never succeeded at all: the last-success series does
+  #     not exist, so branch 1's comparison matches nothing and branch 2 must
+  #     carry the alert.
+  - interval: 1m
+    name: "cronjob has never succeeded - fires via the absent-success branch"
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="openbao", job_name="openbao-raft-snapshot-29811065"}'
+        values: "60+0x180"
+      - series: 'kube_job_owner{namespace="openbao", job_name="openbao-raft-snapshot-29811065", owner_kind="CronJob", owner_name="openbao-raft-snapshot", owner_is_controller="true"}'
+        values: "1+0x180"
+      - series: 'kube_job_status_failed{namespace="openbao", job_name="openbao-raft-snapshot-29811065", reason="BackoffLimitExceeded"}'
+        values: "1+0x180"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: OpenBaoRaftSnapshotJobFailed
+        exp_alerts:
+          - exp_labels:
+              namespace: openbao
+              cronjob: openbao-raft-snapshot
+              job_name: openbao-raft-snapshot-29811065
+              severity: critical
+              component: openbao-backup
+            exp_annotations: *daily_ann
+
+  # (e) A failed HOURLY Job must be attributed to the hourly CronJob, not the
+  #     daily one. The old `job_name=~"openbao-raft-snapshot.*"` regex matched
+  #     hourly Job names too and had no way to tell the lanes apart.
+  - interval: 1m
+    name: "failed hourly job is attributed to the hourly cronjob only"
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="openbao", job_name="openbao-raft-snapshot-hourly-29811725"}'
+        values: "60+0x180"
+      - series: 'kube_job_owner{namespace="openbao", job_name="openbao-raft-snapshot-hourly-29811725", owner_kind="CronJob", owner_name="openbao-raft-snapshot-hourly", owner_is_controller="true"}'
+        values: "1+0x180"
+      - series: 'kube_job_status_failed{namespace="openbao", job_name="openbao-raft-snapshot-hourly-29811725", reason="BackoffLimitExceeded"}'
+        values: "1+0x180"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="openbao", cronjob="openbao-raft-snapshot-hourly"}'
+        values: "30+0x180"
+      # The DAILY lane is healthy and succeeded after the hourly Job failed;
+      # that must not suppress the hourly alert.
+      - series: 'kube_cronjob_status_last_successful_time{namespace="openbao", cronjob="openbao-raft-snapshot"}'
+        values: "9000+0x180"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: OpenBaoRaftSnapshotJobFailed
+        exp_alerts:
+          - exp_labels:
+              namespace: openbao
+              cronjob: openbao-raft-snapshot-hourly
+              job_name: openbao-raft-snapshot-hourly-29811725
+              severity: critical
+              component: openbao-backup
+            exp_annotations:
+              summary: "OpenBao Raft snapshot Job openbao-raft-snapshot-hourly-29811725 failed and has not been superseded by a success"
+              description: "Inspect the retained Job and its redacted termination message with `kubectl -n openbao describe job openbao-raft-snapshot-hourly-29811725` and `kubectl -n openbao logs job/openbao-raft-snapshot-hourly-29811725 --all-containers`. The termination message names the failing `stage=` and the number of upload attempts spent. To remediate now, run `kubectl -n openbao create job --from=cronjob/openbao-raft-snapshot-hourly <name>`; that records a real success and clears this alert."
+              runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/openbao/restore-drill.md"
+
+  # (f) A SUCCESSFUL Job must never raise this alert, even while its CronJob's
+  #     last-success timestamp is older than the Job's own start time (which is
+  #     always momentarily true between a Job starting and completing).
+  - interval: 1m
+    name: "successful job does not alert"
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="openbao", job_name="openbao-raft-snapshot-29811065"}'
+        values: "60+0x180"
+      - series: 'kube_job_owner{namespace="openbao", job_name="openbao-raft-snapshot-29811065", owner_kind="CronJob", owner_name="openbao-raft-snapshot", owner_is_controller="true"}'
+        values: "1+0x180"
+      - series: 'kube_job_status_failed{namespace="openbao", job_name="openbao-raft-snapshot-29811065", reason="BackoffLimitExceeded"}'
+        values: "0+0x180"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="openbao", cronjob="openbao-raft-snapshot"}'
+        values: "30+0x180"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: OpenBaoRaftSnapshotJobFailed
+        exp_alerts: []
+      - eval_time: 150m
+        alertname: OpenBaoRaftSnapshotJobFailed
+        exp_alerts: []

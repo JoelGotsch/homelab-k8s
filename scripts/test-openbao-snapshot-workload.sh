@@ -144,9 +144,18 @@ TERMINATION_LOG="$test_tmp/upload.term" \
   || fail 'remote snapshot was not published'
 grep -Fq 'openbao_snapshot_upload_ok' "$test_tmp/upload.term" \
   || fail 'upload success evidence missing'
+grep -Fq 'attempts=1' "$test_tmp/upload.term" \
+  || fail 'a first-attempt success must report attempts=1'
 
+# A permanently failing remote must exhaust the retry budget and still report the
+# stage it died at. SNAPSHOT_UPLOAD_BACKOFFS is squashed to sub-second sleeps so
+# this stays a pre-commit-speed test; production uses the script's own defaults
+# (~16 min of backoff), which is the entire point of the 2026-09-06 fix — a
+# ~25 min Storage Box outage must not cost a whole day's off-site snapshot.
 if FAKE_UPLOAD_FAIL=1 SNAPSHOT_WORK_DIR="$test_tmp/work" \
     STORAGEBOX_KNOWN_HOSTS="$test_tmp/known_hosts" \
+    SNAPSHOT_UPLOAD_MAX_ATTEMPTS=3 \
+    SNAPSHOT_UPLOAD_BACKOFFS='0 0' \
     TERMINATION_LOG="$test_tmp/upload-failure.term" \
     "$repo_root/platform/openbao/snapshot-upload.sh" \
     >"$test_tmp/upload-failure.log" 2>&1; then
@@ -154,6 +163,45 @@ if FAKE_UPLOAD_FAIL=1 SNAPSHOT_WORK_DIR="$test_tmp/work" \
 fi
 grep -Fq 'stage=upload' "$test_tmp/upload-failure.term" \
   || fail 'upload failure stage evidence missing'
+grep -Fq 'attempts=3' "$test_tmp/upload-failure.term" \
+  || fail 'upload failure did not spend the whole retry budget'
+[ "$(grep -c 'openbao_snapshot_upload_retry' "$test_tmp/upload-failure.log")" -eq 2 ] \
+  || fail 'expected exactly two retry announcements before giving up'
+
+# A remote that fails once and then recovers must succeed, not surface the blip.
+# This is the actual 2026-09-06 shape: transient refusal, then a working box.
+cat >"$test_tmp/bin/scp" <<'FAKE'
+#!/usr/bin/env bash
+set -euo pipefail
+# Same publish behaviour as the stub above, but the first invocation fails.
+# The counter lives in a file because each retry is a fresh process.
+attempts_file="${FAKE_SCP_ATTEMPTS:?}"
+n=$(( $(cat "$attempts_file" 2>/dev/null || echo 0) + 1 ))
+printf '%s\n' "$n" >"$attempts_file"
+[ "$n" -gt 1 ] || exit 2
+args=("$@")
+src="${args[$((${#args[@]} - 2))]}"
+dest="${args[$((${#args[@]} - 1))]}"
+remote_path="${dest#*:}"
+cp "$src" "$FAKE_REMOTE/$remote_path"
+FAKE
+chmod +x "$test_tmp/bin/scp"
+rm -rf "$test_tmp/remote/openbao-snapshots"
+if ! FAKE_SCP_ATTEMPTS="$test_tmp/scp-attempts" \
+    SNAPSHOT_WORK_DIR="$test_tmp/work" \
+    STORAGEBOX_KNOWN_HOSTS="$test_tmp/known_hosts" \
+    SNAPSHOT_UPLOAD_BACKOFFS='0 0' \
+    TERMINATION_LOG="$test_tmp/upload-recovers.term" \
+    "$repo_root/platform/openbao/snapshot-upload.sh" \
+    >"$test_tmp/upload-recovers.log" 2>&1; then
+  fail 'upload did not recover from a single transient remote failure'
+fi
+grep -Fq 'openbao_snapshot_upload_ok' "$test_tmp/upload-recovers.term" \
+  || fail 'recovered upload lacks success evidence'
+grep -Fq 'attempts=2' "$test_tmp/upload-recovers.term" \
+  || fail 'recovered upload should report the attempt it succeeded on'
+[ -s "$test_tmp/remote/openbao-snapshots/bao-20260721T000000Z.snap" ] \
+  || fail 'recovered upload did not publish the remote snapshot'
 
 # When Docker and the already-pinned uploader image are locally available, use a
 # real Linux filesystem to prove the Kubernetes UID/GID handoff. No image is

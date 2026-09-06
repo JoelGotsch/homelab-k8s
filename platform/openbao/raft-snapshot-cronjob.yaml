@@ -22,15 +22,38 @@ metadata:
   name: openbao-raft-snapshot
   namespace: openbao
 spec:
-  schedule: "5 3 * * *"
+  # 01:20, moved off 03:05 on 2026-09-06. Two independent lanes ship to the same
+  # Hetzner Storage Box, and 03:05 had drifted inside the other one: the
+  # `restic-minio-to-hetzner` job starts 02:15 and its runtime has grown from
+  # ~25 min in August to ~115 min (finishing 04:10 on 2026-09-06), so the two
+  # now overlap. They failed together that morning, which is the shape to avoid
+  # — one remote fault should not be able to take out both off-site paths at
+  # once. Hetzner also allows only 10 simultaneous connections per Storage Box
+  # account, so overlap is a standing contention risk even without a fault.
+  #
+  # 01:20 is clear of every other scheduled consumer: restic-minio 02:15-~04:10,
+  # longhorn-system/backup-daily 03:35, restic-nas-personal 04:30-~05:01, the
+  # OpenBao *hourly* snapshot at every :05, and the Longhorn snapshot jobs at
+  # :25/:35. Worst-case retry exhaustion (activeDeadlineSeconds below) still
+  # finishes by ~01:50, 25 min before restic-minio starts.
+  schedule: "20 1 * * *"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 60
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      # backoffLimit is left at 2 deliberately. It is the wrong instrument for
+      # network transients — on 2026-09-06 its three pod attempts were spent
+      # inside 4m09s, entirely within a ~25 min Storage Box outage. The upload
+      # script now retries internally across ~20 min (see snapshot-upload.sh),
+      # so these pod-level retries cover only pod-level faults: a failed image
+      # pull, an evicted node, a killed container.
       backoffLimit: 2
-      activeDeadlineSeconds: 600
+      # 1800s, was 600s: the in-script retry budget is ~21 min worst case
+      # (~17 min of backoff plus six 30s bounded connect attempts). 600s would
+      # have SIGKILLed the pod mid-retry and defeated the whole mechanism.
+      activeDeadlineSeconds: 1800
       ttlSecondsAfterFinished: 86400
       template:
         metadata:

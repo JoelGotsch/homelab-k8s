@@ -408,3 +408,16 @@ repos:
         language: script
         pass_filenames: false
         files: '^(infrastructure/minio-on-nas/networkpolicy\.yaml|scripts/(check-langfuse-minio-ingress\.sh|test-langfuse-minio-ingress\.sh|fixtures/retention-rendered-projection\.yaml))$'
+
+      - id: check-prometheusrule-tests
+        name: every PrometheusRule with a *_test.yaml passes its promtool unit tests
+        entry: scripts/check-prometheusrule-tests.sh
+        language: script
+        pass_filenames: false
+        files: '(prometheusrule.*\.ya?ml|_test\.yaml|^scripts/check-prometheusrule-tests\.sh$)'
+        # Requires promtool on PATH (pin to the cluster's Prometheus, v3.13.1);
+        # the script fails loudly with install instructions rather than skipping,
+        # because an alert-rule test that silently passes when its runner is
+        # missing is worse than having no test at all. Added 2026-09-06 after
+        # OpenBaoRaftSnapshotJobFailed was found to resolve itself on a 1 h timer
+        # while the failure it reported was still unremediated.
