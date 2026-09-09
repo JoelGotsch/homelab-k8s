@@ -8,7 +8,7 @@ helmCharts:
     # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://charts.external-secrets.io).
     repo: oci://registry.homelab.internal/homelab
 
-    version: "0.16.2" # OPERATOR PINS via Renovate
+    version: "2.10.0" # OPERATOR PINS via Renovate
     releaseName: external-secrets
     namespace: external-secrets
     valuesFile: values.yaml
@@ -18,24 +18,3 @@ resources:
   - clustersecretstore.yaml
   - networkpolicy.yaml
 
-# ADR 0063: the three CRDs that carried a conversion webhook under 0.10.x are
-# synced with `kubectl replace`, not server-side apply, across the v1 migration.
-# Rehearsed 2026-09-09 on the local Talos docker cluster: ESO's own
-# cert-controller (field manager `external-secrets`, Update) co-owns
-# spec.conversion.webhook.clientConfig.caBundle on exactly these three CRDs,
-# and the 0.16.x chart drops spec.conversion entirely. A forced SSA by
-# `argocd-controller` cannot remove another manager's fields, so the merged
-# object keeps the webhook block with no strategy and the API server rejects
-# it: "spec.conversion.strategy: Required value, spec.conversion.
-# webhookClientConfig: Forbidden". Replace is a PUT of the rendered object and
-# clears the block regardless of ownership. Argo applies Replace=true ahead of
-# ServerSideApply=true for a resource carrying both. Remove this patch in the
-# commit that moves to 2.x: after this step no controller writes CRD fields.
-patches:
-  - target:
-      kind: CustomResourceDefinition
-      name: (externalsecrets|clustersecretstores|secretstores)\.external-secrets\.io
-    patch: |-
-      - op: add
-        path: /metadata/annotations/argocd.argoproj.io~1sync-options
-        value: Replace=true
