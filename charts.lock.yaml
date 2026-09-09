@@ -108,12 +108,12 @@
   mirror_artifact_sha256: sha256:de701886ed2eaaa0fb85d7cac5d960b06a82fa4c9d4e00310bebeb253f198a55
 - layer: infrastructure/tailscale-operator
   name: tailscale-operator
-  version: 1.98.9
+  version: 1.102.3
   upstream: https://pkgs.tailscale.com/helmcharts
   mirror: oci://registry.homelab.internal/homelab/tailscale-operator
-  content_digest: sha256:01cfac2a95a1541014ce294cd88055a2f571a82b97efce12e39d382b00230d44
-  upstream_artifact_sha256: sha256:3f1ffa33620a86ba57d074234d7dc6bd1f79ff92728f29176ae521c9719431ca
-  mirror_artifact_sha256: sha256:3f1ffa33620a86ba57d074234d7dc6bd1f79ff92728f29176ae521c9719431ca
+  content_digest: sha256:022d32573d0a55f88277b1418ae158f2b99514eb75331660dd9fea4426f230b0
+  upstream_artifact_sha256: sha256:c2440014df04fdf1b67b53daa4290d7b878584cf4702f9b1b50f51ba64499a6a
+  mirror_artifact_sha256: sha256:c2440014df04fdf1b67b53daa4290d7b878584cf4702f9b1b50f51ba64499a6a
 - layer: infrastructure/trivy-operator
   name: trivy-operator
   version: 0.34.0
