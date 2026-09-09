@@ -87,6 +87,35 @@
       enabled: false,
     },
 
+    // kube-prometheus-stack major: held until the CRD release has a git
+    // owner. The chart runs with `crds.enabled: false`; the CRDs are the
+    // helm release `prometheus-operator-crds` in kube-system (30.0.1,
+    // operator v0.92.1), installed from Ansible off a sops-held pin in
+    // homelab-infra. 88.x needs prometheus-operator-crds 31.x, so a major
+    // here is a two-repo change and a PR on this repo alone cannot be
+    // merged. Delete this rule when the CRD chart is in charts.lock.yaml
+    // or the infra pin is Renovate-visible — homelab-docs/TODO.md
+    // "Version-bump sweep follow-ups (2026-09-10 session)".
+    {
+      matchDepTypes: ["chart-lock"],
+      matchPackageNames: ["kube-prometheus-stack"],
+      matchUpdateTypes: ["major"],
+      enabled: false,
+    },
+
+    // loki: the grafana/loki chart is maintained for Grafana Enterprise
+    // Logs only from 7.0.0 (its CHANGELOG, 2026-03-16); OSS users moved
+    // to grafana-community/helm-charts, forked at 6.55.0 -- the pinned
+    // version. 7.x is not an upgrade for this cluster, the community
+    // chart is (upstream + mirror switch in charts.lock.yaml; same TODO
+    // entry as above). Held by version, not by update type, so 6.x
+    // patches still arrive if the old repo publishes any.
+    {
+      matchDepTypes: ["chart-lock"],
+      matchPackageNames: ["loki"],
+      allowedVersions: "<7.0.0",
+    },
+
     // OpenBao chart — pin tighter; v0.x means breaking
     // changes can land at minor bumps. Force individual PRs
     // even on minor.
