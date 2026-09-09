@@ -34,7 +34,13 @@ resources:
 # another manager entry owns — the merged Service would carry two
 # ports named `tempo-prom-metrics` and be rejected (server dry-run,
 # 2026-09-09). Replace=true makes the sync a PUT, which does not ask
-# who owns what (ADR 0063 D2 pattern).
+# who owns what (ADR 0063 D2 pattern). The comparison needs the same
+# exemption: Argo's server-side diff dry-runs every resource through
+# SSA regardless of Replace=true, and the first sync at this revision
+# stalled on `ComparisonError … Duplicate value: "tempo-prom-metrics"`
+# with the whole Application stuck at Unknown. ServerSideDiff=false
+# makes this one resource use the structured-merge diff instead
+# (argo-cd.readthedocs.io/en/stable/user-guide/diff-strategies/).
 patches:
   - target:
       kind: Service
@@ -43,3 +49,6 @@ patches:
       - op: add
         path: /metadata/annotations/argocd.argoproj.io~1sync-options
         value: Replace=true
+      - op: add
+        path: /metadata/annotations/argocd.argoproj.io~1compare-options
+        value: ServerSideDiff=false
