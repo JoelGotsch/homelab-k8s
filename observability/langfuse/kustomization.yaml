@@ -25,7 +25,7 @@ helmCharts:
   - name: langfuse
     # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://langfuse.github.io/langfuse-k8s).
     repo: oci://registry.homelab.internal/homelab
-    version: "1.5.38"  # OPERATOR PINS via Renovate (chart app v3.205.1)
+    version: "1.5.41"  # OPERATOR PINS via Renovate (chart app v3.224.1)
     releaseName: langfuse
     namespace: langfuse
     valuesFile: values.yaml

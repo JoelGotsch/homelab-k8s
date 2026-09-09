@@ -156,12 +156,12 @@
   mirror_artifact_sha256: sha256:05eae98df0ff6c21877a26a4400780e4bbff248bc3b88694ef8d08b273ed6815
 - layer: observability/langfuse
   name: langfuse
-  version: 1.5.38
+  version: 1.5.41
   upstream: https://langfuse.github.io/langfuse-k8s
   mirror: oci://registry.homelab.internal/homelab/langfuse
-  content_digest: sha256:f94ac8042dbf1b32e7fff57061d728f69aa89ddf0ff193556e009d4da908f296
-  upstream_artifact_sha256: sha256:c597fb91cccb5f32b69dbfffdb26964a8292aee43998e0826f73e36a039ebb94
-  mirror_artifact_sha256: sha256:c597fb91cccb5f32b69dbfffdb26964a8292aee43998e0826f73e36a039ebb94
+  content_digest: sha256:fdaf4d758dc70deab09f95ede151519f0ccd9e1d17e5d34f883964682f26c740
+  upstream_artifact_sha256: sha256:4706659f2e3631506cb7a442d10deac42644a94dad439bdf363b27c4635ea586
+  mirror_artifact_sha256: sha256:4706659f2e3631506cb7a442d10deac42644a94dad439bdf363b27c4635ea586
 - layer: observability/loki
   name: loki
   version: 6.55.0

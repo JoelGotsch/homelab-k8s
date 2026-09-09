@@ -17,13 +17,13 @@ cluster_defaults:
     chart_default_enabled: false
 layers:
 - path: observability/langfuse
-  input_digest_sha256: 108ecf5582ff8e2da3db3ea1f010f855f7674c36b1003e91542a60b143c549bc
+  input_digest_sha256: 8c7b8d1246242bfd76d2af3bb8c65222be1565634470d605cb9244794abb0c21
   chart:
     name: langfuse
     repository: oci://registry.homelab.internal/homelab
-    version: 1.5.38
-    app_version: 3.205.1
-    package_sha256: c597fb91cccb5f32b69dbfffdb26964a8292aee43998e0826f73e36a039ebb94
+    version: 1.5.41
+    app_version: 3.224.1
+    package_sha256: 4706659f2e3631506cb7a442d10deac42644a94dad439bdf363b27c4635ea586
     # values.yaml.j2 was the second mirror scanned for credential literals
     # until ADR 0045 C2 deleted it; values.yaml is now the only declaration,
     # and forbidden_literal_paths below are checked against it directly.
