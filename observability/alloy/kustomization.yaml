@@ -11,7 +11,7 @@ helmCharts:
   - name: alloy
     # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://grafana.github.io/helm-charts).
     repo: oci://registry.homelab.internal/homelab
-    version: "1.10.1"  # OPERATOR PINS via Renovate
+    version: "1.12.1"  # OPERATOR PINS via Renovate
     releaseName: alloy
     namespace: observability-alloy
     valuesFile: values.yaml

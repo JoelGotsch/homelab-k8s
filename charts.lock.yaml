@@ -132,12 +132,12 @@
   mirror_artifact_sha256: sha256:0de4bbef2d1a013bd4a91c6f59a9cb0273dda9a785e018a9a16e8f2b096af823
 - layer: observability/alloy
   name: alloy
-  version: 1.10.1
+  version: 1.12.1
   upstream: https://grafana.github.io/helm-charts
   mirror: oci://registry.homelab.internal/homelab/alloy
-  content_digest: sha256:7add78d3bae7c6afba2d92ff0f139e0a4c743e8a49f059cd34967ff866c0ed30
-  upstream_artifact_sha256: sha256:668a0c904bad8437baa920f11b3792d742d51d35a1161ab53ea9e70df2e51e7c
-  mirror_artifact_sha256: sha256:668a0c904bad8437baa920f11b3792d742d51d35a1161ab53ea9e70df2e51e7c
+  content_digest: sha256:8137e47dd7a74eee39cc6dc32142d92e73cab856f00356d3a1c4af855a7c281b
+  upstream_artifact_sha256: sha256:cdd1ec39f99c3c506d5b521156d72236ea143c089f50da6b64398f831734829c
+  mirror_artifact_sha256: sha256:cdd1ec39f99c3c506d5b521156d72236ea143c089f50da6b64398f831734829c
 - layer: observability/crowdsec
   name: crowdsec
   version: 0.24.2
