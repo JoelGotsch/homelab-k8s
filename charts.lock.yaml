@@ -140,12 +140,12 @@
   mirror_artifact_sha256: sha256:668a0c904bad8437baa920f11b3792d742d51d35a1161ab53ea9e70df2e51e7c
 - layer: observability/crowdsec
   name: crowdsec
-  version: 0.24.0
+  version: 0.24.2
   upstream: https://crowdsecurity.github.io/helm-charts
   mirror: oci://registry.homelab.internal/homelab/crowdsec
-  content_digest: sha256:a2e271d1099782e1e936dd6b197f70aa1e06259b400334758151fde924cc517f
-  upstream_artifact_sha256: sha256:fa383e922a46536db813a514e2bf082bab355081bab4aefaa964fbdbbfd7f8f1
-  mirror_artifact_sha256: sha256:fa383e922a46536db813a514e2bf082bab355081bab4aefaa964fbdbbfd7f8f1
+  content_digest: sha256:f4303aa1c9c43bf75798c4b49070d768bf03f63079277432ff318cf606ffe818
+  upstream_artifact_sha256: sha256:b3ded291c979373ffd328cdc4302b71fb14f166ffe4b339353df288d41474959
+  mirror_artifact_sha256: sha256:b3ded291c979373ffd328cdc4302b71fb14f166ffe4b339353df288d41474959
 - layer: observability/kube-prometheus-stack
   name: kube-prometheus-stack
   version: 87.16.1
