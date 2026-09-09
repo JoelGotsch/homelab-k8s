@@ -14,7 +14,7 @@ helmCharts:
   - name: woodpecker
     # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://woodpecker-ci.org/).
     repo: oci://registry.homelab.internal/homelab
-    version: "3.6.5"  # OPERATOR PINS via Renovate (chart 3.6.5)
+    version: "3.7.3"  # OPERATOR PINS via Renovate (chart 3.6.5)
     releaseName: woodpecker
     namespace: woodpecker
     valuesFile: values.yaml

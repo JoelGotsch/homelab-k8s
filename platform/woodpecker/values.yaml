@@ -26,7 +26,10 @@ server:
         value: "1"
 
   image:
-    # OPERATOR PINS via Renovate.
+    # OPERATOR PINS via Renovate. `repository` restates the chart default so
+    # Renovate's helm-values manager sees a (repository, tag) pair — with the
+    # tag alone it extracted nothing here (2026-09-10 full dry-run).
+    repository: woodpeckerci/woodpecker-server
     tag: "v3.15.0"
     pullPolicy: IfNotPresent
 
@@ -180,6 +183,9 @@ agent:
   enabled: true
 
   image:
+    # OPERATOR PINS via Renovate; `repository` restated for the same reason
+    # as on the server block.
+    repository: woodpeckerci/woodpecker-agent
     tag: "v3.15.0"
     pullPolicy: IfNotPresent
 

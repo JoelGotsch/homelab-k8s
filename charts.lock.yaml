@@ -212,9 +212,9 @@
   mirror_artifact_sha256: sha256:d62654eb787b70677d76b864528977277a306ac355c67f2cd8cfc301363119fb
 - layer: platform/woodpecker
   name: woodpecker
-  version: 3.6.5
+  version: 3.7.3
   upstream: https://woodpecker-ci.org/
   mirror: oci://registry.homelab.internal/homelab/woodpecker
-  content_digest: sha256:65ee422379b21981ada1c8d06dafee8da6c7a51993762def2797e24077a6f854
-  upstream_artifact_sha256: sha256:9a527325de4f9d2945f2a15db42e72a221f2577245fff3059a78aba0e6571025
-  mirror_artifact_sha256: sha256:9a527325de4f9d2945f2a15db42e72a221f2577245fff3059a78aba0e6571025
+  content_digest: sha256:fa51656058b958661d0f7a7ee62b08c2e52c47af7485c3edde0cc7064a78d491
+  upstream_artifact_sha256: sha256:7482b22aa4e79b4d0f6ca6686f58a5c83f4d7fcca1af3162877c0fe800c439e8
+  mirror_artifact_sha256: sha256:7482b22aa4e79b4d0f6ca6686f58a5c83f4d7fcca1af3162877c0fe800c439e8

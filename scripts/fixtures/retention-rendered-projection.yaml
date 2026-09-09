@@ -224,13 +224,13 @@ layers:
     storage_class_mode: explicit
   secret_references: []
 - path: platform/woodpecker
-  input_digest_sha256: 0da5f5eb9aa4445c8441e19c7d555e8c4af499db3def2eabbd52a8ae78cdc92d
+  input_digest_sha256: de1df9b33e8fbe7b05b0df968ef78f70705bbd676af9c88ff1c00c4bbeb8aa74
   chart:
     name: woodpecker
     repository: oci://registry.homelab.internal/homelab
-    version: 3.6.5
-    app_version: 3.16.0
-    package_sha256: 9a527325de4f9d2945f2a15db42e72a221f2577245fff3059a78aba0e6571025
+    version: 3.7.3
+    app_version: 3.18.0
+    package_sha256: 7482b22aa4e79b4d0f6ca6686f58a5c83f4d7fcca1af3162877c0fe800c439e8
     # values.yaml.j2 was the second mirror until ADR 0045 C2 deleted it; the
     # layer has no forbidden_literal_paths, so the list is now empty by design.
     values_mirrors: []
