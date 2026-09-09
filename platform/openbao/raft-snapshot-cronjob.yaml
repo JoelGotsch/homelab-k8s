@@ -94,7 +94,7 @@ spec:
             # SSA migration valid even while another field manager still
             # observes the old list entry during a dry-run.
             - name: create-snapshot
-              image: quay.io/openbao/openbao:2.5.5@sha256:6150c4a6b62067db6141c8da7a6a6b5763f4f47c315343d0c848b40fecdfd452
+              image: quay.io/openbao/openbao:2.6.2@sha256:11fd73a2102cda9c55d5d881a8c3210303146a7ec1e8ac76f526e175c6d24641
               imagePullPolicy: IfNotPresent
               env:
                 - name: BAO_ADDR

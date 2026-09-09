@@ -16,7 +16,7 @@ helmCharts:
     # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://openbao.github.io/openbao-helm).
     repo: oci://registry.homelab.internal/homelab
 
-    version: "0.28.4" # OPERATOR PINS via Renovate
+    version: "0.29.4" # OPERATOR PINS via Renovate
     releaseName: openbao
     namespace: openbao
     valuesFile: values.yaml
