@@ -1,0 +1,547 @@
+# promtool unit tests for storage-health-rules.yaml.
+#
+# Run via `scripts/check-prometheusrule-tests.sh` (pre-commit), which extracts
+# `.spec.groups` from the sibling PrometheusRule CR into a `rules.yaml` beside a
+# copy of this file — hence the bare `rule_files:` reference below. promtool
+# cannot read a PrometheusRule CR directly.
+#
+# These exist because the 2026-09-09 csi-rclone FUSE cascade was invisible to
+# every rule the cluster had, and several of the replacements written for it are
+# the kind that look obviously right and silently cannot fire:
+#
+#   * (d) THE LIMIT-RAISE REGRESSION. Both memory rules divide by
+#     `kube_pod_container_resource_limits` specifically so that raising the
+#     DaemonSet's memory limit re-scales the alert instead of silencing it.
+#     (d) feeds the SAME absolute byte count as (c) — which fires both tiers —
+#     against a doubled limit, and requires silence. If someone "simplifies"
+#     the join away to a hardcoded 3 GiB, (d) goes red and says why.
+#
+#   * (b) THE HONEST-PEAK REGRESSION. The real incident's highest SCRAPED
+#     working-set ratio was 0.756, even though the kernel's own high-water for
+#     the same container was 0.99 — the true peak lived between 30 s scrapes.
+#     (b) replays a 75% plateau and asserts that the 0.65 warning fires while
+#     the 0.80 critical stays SILENT. That is a deliberately recorded
+#     limitation, not an oversight: it is the reason the warning threshold sits
+#     down the ramp rather than near the ceiling, and if anyone later raises the
+#     warning above the level the real incident actually reached, (b) fails.
+#
+#   * (g) is the mirror of (f) for the stuck-Terminating backstop: a pod that
+#     terminates slowly but DOES converge must not page. The measured 30-day
+#     baseline had exactly two such pod-series (5–10 min, both real ENOTCONN
+#     casualties that did eventually go away) against two that wedged forever,
+#     and the 15 min threshold is where that distribution splits. (g) pins the
+#     converging side of it.
+#
+#   * (e) is the scope guard. The csi-rclone CONTROLLER also runs a container
+#     named `rclone`, with a 400 MiB limit and no FUSE mounts. It is pegged at
+#     100% in (e) and must stay silent, because its memory is not a
+#     mount-availability signal and its triage steps would be wrong.
+#
+# NOTE ON TIMESTAMPS: promtool's clock starts at the Unix epoch, so
+# `eval_time: 10m` means `time() == 600`. Case (i) exploits that with a NEGATIVE
+# `kube_pod_created` value (-36000) to place a pod creation 10 h in the "past"
+# within the first test minutes. That shortcut works here ONLY because
+# `CSIRcloneNodePluginReplaced` does not filter its input with `> 0` — see
+# `infrastructure/cnpg/archiving-rules_test.yaml`, where the same trick silently
+# discards the series and the alert never fires at all.
+#
+# NOTE ON MEMORY VALUES: the limit is the real 3.000 GiB (3221225472) and the
+# working-set values are exact binary fractions of it, so the rendered
+# `humanizePercentage` in each expected summary is exact rather than rounded:
+#   402653184 = 12.5%   2415919104 = 75%   2818572288 = 87.5%
+# ...and 2818572288 against the doubled 6.000 GiB limit is 43.75%.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+
+  # (a) Steady state. The four stable nodes in this cluster sat at ~0.8% of
+  #     limit for the whole 30-day baseline window; 12.5% is a generous
+  #     stand-in and still must not alert.
+  - interval: 1m
+    name: "(a) node plugin at 12.5 percent of limit - nothing fires"
+    input_series:
+      - series: 'container_memory_working_set_bytes{namespace="csi-rclone", container="rclone", pod="csi-rclone-node-krkvv", node="worker2"}'
+        values: "402653184+0x40"
+      - series: 'kube_pod_container_resource_limits{namespace="csi-rclone", container="rclone", pod="csi-rclone-node-krkvv", resource="memory"}'
+        values: "3221225472+0x40"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CSIRcloneNodePluginMemoryHigh
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CSIRcloneNodePluginMemoryCritical
+        exp_alerts: []
+
+  # (b) THE REAL 2026-09-09 FAULT, at its measured amplitude. Flat, then a
+  #     plateau at 75% of limit from t=10m - the highest ratio Prometheus ever
+  #     actually scraped during the incident.
+  #
+  #     The warning must not fire before `for: 5m` is satisfied (t=15m) and
+  #     must fire after. The critical must NEVER fire, because 75% is below
+  #     80%. That silence is the documented cost of a sub-scrape peak,
+  #     asserted here so it cannot be "fixed" by quietly raising the warning
+  #     threshold above the level the real incident actually reached.
+  - interval: 1m
+    name: "(b) real incident amplitude - warning fires at 75 percent, critical stays silent"
+    input_series:
+      - series: 'container_memory_working_set_bytes{namespace="csi-rclone", container="rclone", pod="csi-rclone-node-krkvv", node="worker2"}'
+        values: "402653184+0x9 2415919104+0x30"
+      - series: 'kube_pod_container_resource_limits{namespace="csi-rclone", container="rclone", pod="csi-rclone-node-krkvv", resource="memory"}'
+        values: "3221225472+0x40"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: CSIRcloneNodePluginMemoryHigh
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: CSIRcloneNodePluginMemoryHigh
+        exp_alerts:
+          - exp_labels:
+              component: csi-rclone
+              namespace: csi-rclone
+              node: worker2
+              pod: csi-rclone-node-krkvv
+              severity: warning
+            exp_annotations:
+              summary: "csi-rclone node plugin on worker2 is at 75% of its memory limit"
+              description: |
+                The `rclone` container in `csi-rclone-node-krkvv` on node
+                `worker2` has held more than 65% of its cgroup memory
+                limit for 5 minutes.
+
+                THIS CONTAINER IS A SHARED FATE POOL. Every FUSE mount on
+                `worker2` keeps its VFS read/write buffers in this one
+                cgroup, so one backup job's read-ahead is charged against every
+                other pod's mount. When the cgroup is exhausted the kernel kills
+                individual child FUSE mount processes; PID 1 survives with
+                `restarts=0` and `container_oom_events_total` never increments, so
+                this alert may be the ONLY warning you get.
+
+                Find out whose buffers these are before doing anything:
+                  # what is mounted here, and how many
+                  kubectl -n csi-rclone exec csi-rclone-node-krkvv -c rclone -- \
+                    sh -c 'mount | grep -c fuse; mount | grep fuse'
+                  # who is the likely source of the ramp right now
+                  kubectl get pods -A --field-selector spec.nodeName=worker2 \
+                    --sort-by=.metadata.creationTimestamp | tail -20
+                  # the ramp itself
+                  kubectl -n csi-rclone top pod csi-rclone-node-krkvv --containers
+
+                DO NOT delete this pod to "reset" it. Deleting the node plugin
+                severs the FUSE mounts of every already-running consumer on
+                `worker2`, which is precisely how the 2026-09-09
+                outage was manufactured — the pods keep Running with ENOTCONN
+                mounts and nothing notices. If the ramp is a backup job,
+                let it finish or suspend the CronJob; if it must be stopped,
+                expect to restart every consumer on the node afterwards.
+              runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/known-caveats.md"
+      - eval_time: 30m
+        alertname: CSIRcloneNodePluginMemoryCritical
+        exp_alerts: []
+
+  # (c) A louder ramp than the real one: 87.5% of limit. `krkvv` reached 0.929
+  #     and `wdgsj` 0.915 on other nights inside the 30-day window, so this
+  #     level is reached in practice. Both tiers must fire, the critical first
+  #     (`for: 2m` against the warning's `for: 5m`).
+  - interval: 1m
+    name: "(c) ramp to 87.5 percent - critical fires after two minutes, warning after five"
+    input_series:
+      - series: 'container_memory_working_set_bytes{namespace="csi-rclone", container="rclone", pod="csi-rclone-node-krkvv", node="worker2"}'
+        values: "402653184+0x9 2818572288+0x30"
+      - series: 'kube_pod_container_resource_limits{namespace="csi-rclone", container="rclone", pod="csi-rclone-node-krkvv", resource="memory"}'
+        values: "3221225472+0x40"
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: CSIRcloneNodePluginMemoryCritical
+        exp_alerts: []
+      - eval_time: 13m
+        alertname: CSIRcloneNodePluginMemoryCritical
+        exp_alerts:
+          - exp_labels:
+              component: csi-rclone
+              namespace: csi-rclone
+              node: worker2
+              pod: csi-rclone-node-krkvv
+              severity: critical
+            exp_annotations:
+              summary: "csi-rclone node plugin on worker2 is at 87.5% of its memory limit — FUSE mounts are about to be killed"
+              description: |
+                The `rclone` container in `csi-rclone-node-krkvv` on node
+                `worker2` has been above 80% of its cgroup memory
+                limit for 2 minutes. On 2026-09-09 the kernel began killing child
+                FUSE mount processes from roughly this level, one at a time, with
+                NO container restart and NO OOM event recorded.
+
+                Every pod on `worker2` that holds a csi-rclone volume
+                is at risk of a silently severed mount. Expect them to stay
+                `Running` and start returning ENOTCONN / "Transport endpoint is
+                not connected" on reads — they will not crash and they will not
+                be restarted for you.
+
+                Triage:
+                  # which consumers are exposed on this node
+                  kubectl get pods -A -o json --field-selector spec.nodeName=worker2 \
+                    | jq -r '.items[] | select(any(.spec.volumes[]?; .csi.driver? == "csi-rclone")) | "\(.metadata.namespace)/\(.metadata.name)"'
+                  # is the ramp still climbing
+                  kubectl -n csi-rclone top pod csi-rclone-node-krkvv --containers
+                  # what is driving it
+                  kubectl -n csi-rclone logs csi-rclone-node-krkvv -c rclone --tail=100
+
+                Relieve the pressure at the SOURCE (suspend or let the backup
+                CronJob finish), not by deleting this pod — deleting it severs
+                every mount on the node at once. If mounts have already died,
+                treat it as a node-local storage outage: restart each affected
+                consumer pod after the plugin is healthy again.
+              runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/known-caveats.md"
+      - eval_time: 16m
+        alertname: CSIRcloneNodePluginMemoryHigh
+        exp_alerts:
+          - exp_labels:
+              component: csi-rclone
+              namespace: csi-rclone
+              node: worker2
+              pod: csi-rclone-node-krkvv
+              severity: warning
+            exp_annotations:
+              summary: "csi-rclone node plugin on worker2 is at 87.5% of its memory limit"
+              description: |
+                The `rclone` container in `csi-rclone-node-krkvv` on node
+                `worker2` has held more than 65% of its cgroup memory
+                limit for 5 minutes.
+
+                THIS CONTAINER IS A SHARED FATE POOL. Every FUSE mount on
+                `worker2` keeps its VFS read/write buffers in this one
+                cgroup, so one backup job's read-ahead is charged against every
+                other pod's mount. When the cgroup is exhausted the kernel kills
+                individual child FUSE mount processes; PID 1 survives with
+                `restarts=0` and `container_oom_events_total` never increments, so
+                this alert may be the ONLY warning you get.
+
+                Find out whose buffers these are before doing anything:
+                  # what is mounted here, and how many
+                  kubectl -n csi-rclone exec csi-rclone-node-krkvv -c rclone -- \
+                    sh -c 'mount | grep -c fuse; mount | grep fuse'
+                  # who is the likely source of the ramp right now
+                  kubectl get pods -A --field-selector spec.nodeName=worker2 \
+                    --sort-by=.metadata.creationTimestamp | tail -20
+                  # the ramp itself
+                  kubectl -n csi-rclone top pod csi-rclone-node-krkvv --containers
+
+                DO NOT delete this pod to "reset" it. Deleting the node plugin
+                severs the FUSE mounts of every already-running consumer on
+                `worker2`, which is precisely how the 2026-09-09
+                outage was manufactured — the pods keep Running with ENOTCONN
+                mounts and nothing notices. If the ramp is a backup job,
+                let it finish or suspend the CronJob; if it must be stopped,
+                expect to restart every consumer on the node afterwards.
+              runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/known-caveats.md"
+
+  # (d) THE LIMIT-RAISE REGRESSION TEST. Byte-for-byte the same working set as
+  #     (c), which fires both tiers - but the operator has doubled the
+  #     DaemonSet's memory limit to 6.000 GiB, so the container is now at
+  #     43.75% of its own limit and NOTHING should fire.
+  #
+  #     This is the whole reason the rules join
+  #     `kube_pod_container_resource_limits` instead of comparing against a
+  #     hardcoded 3 GiB. A hardcoded rule would still be screaming here, which
+  #     is how a raised limit turns into a permanently-firing alert that gets
+  #     silenced, and then never fires for the real thing again.
+  - interval: 1m
+    name: "(d) same bytes against a doubled limit - nothing fires"
+    input_series:
+      - series: 'container_memory_working_set_bytes{namespace="csi-rclone", container="rclone", pod="csi-rclone-node-krkvv", node="worker2"}'
+        values: "2818572288+0x40"
+      - series: 'kube_pod_container_resource_limits{namespace="csi-rclone", container="rclone", pod="csi-rclone-node-krkvv", resource="memory"}'
+        values: "6442450944+0x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CSIRcloneNodePluginMemoryHigh
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: CSIRcloneNodePluginMemoryCritical
+        exp_alerts: []
+
+  # (e) SCOPE GUARD. The csi-rclone controller Deployment also has a container
+  #     named `rclone` (400 MiB limit, no FUSE mounts). Here it is pegged at
+  #     100% of its limit and must stay silent - the `pod=~"csi-rclone-node-.*"`
+  #     matcher is what keeps it out, and dropping that matcher would route
+  #     operators to mount-triage steps for a pod that mounts nothing.
+  - interval: 1m
+    name: "(e) controller rclone container at 100 percent - not in scope, stays silent"
+    input_series:
+      - series: 'container_memory_working_set_bytes{namespace="csi-rclone", container="rclone", pod="csi-rclone-controller-b9d98846-f22f5", node="cp2"}'
+        values: "419430400+0x40"
+      - series: 'kube_pod_container_resource_limits{namespace="csi-rclone", container="rclone", pod="csi-rclone-controller-b9d98846-f22f5", resource="memory"}'
+        values: "419430400+0x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CSIRcloneNodePluginMemoryHigh
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: CSIRcloneNodePluginMemoryCritical
+        exp_alerts: []
+
+  # -- PodStuckTerminating ---------------------------------------------------
+  # (f) The real fault: a deletion timestamp that never goes away. Set at the
+  #     epoch, so the pod's terminating age equals `time()` and crosses the
+  #     900 s threshold at t=16m; `for: 5m` then fires it at t=21m. Against the
+  #     real timeline (deleted 05:21) that is ~05:41, i.e. 4 h 47 min before
+  #     the outage surfaced at 10:28.
+  #
+  #     The input deliberately carries the noise labels kube-state-metrics
+  #     really attaches - `uid`, `container`, `instance`, `job`, `service` -
+  #     and the expected label set asserts that `max by (namespace, pod)`
+  #     dropped every one of them. Without that aggregation an `instance`
+  #     change (kube-state-metrics rescheduling) would re-fire the alert as a
+  #     brand-new series.
+  - interval: 1m
+    name: "(f) pod terminating past fifteen minutes - fires, with noise labels aggregated away"
+    input_series:
+      - series: 'kube_pod_deletion_timestamp{namespace="conversation-history", pod="enrich-29815507-2gnfm", uid="8213c7e4-9d40-4e6e-8da9-a0d56fa3d8cf", container="kube-state-metrics", instance="10.244.5.163:8080", job="kube-state-metrics", service="kube-prometheus-stack-kube-state-metrics"}'
+        values: "0+0x40"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: PodStuckTerminating
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: PodStuckTerminating
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: PodStuckTerminating
+        exp_alerts:
+          - exp_labels:
+              component: storage-health
+              namespace: conversation-history
+              pod: enrich-29815507-2gnfm
+              severity: critical
+            exp_annotations:
+              summary: "Pod conversation-history/enrich-29815507-2gnfm has been Terminating for 21m 0s"
+              description: |
+                `conversation-history/enrich-29815507-2gnfm` has had a deletion
+                timestamp for over 15 minutes and has not gone away. A pod that
+                cannot finish terminating is almost always blocked on a volume it
+                cannot unmount or a finalizer nobody will clear.
+
+                THIS ALERT IS USUALLY A SYMPTOM OF SOMETHING WORSE ON THE NODE.
+                On 2026-09-09 the unmount hung because the FUSE mount had been
+                severed underneath it — and the pods that were merely READING
+                that same dead mount stayed `Running` and never alerted at all.
+                So: identify the node, then audit its other volume consumers.
+
+                Identify what is blocking it:
+                  kubectl -n conversation-history get pod enrich-29815507-2gnfm \
+                    -o jsonpath='{.spec.nodeName}{"\n"}{.metadata.finalizers}{"\n"}'
+                  kubectl -n conversation-history describe pod enrich-29815507-2gnfm | tail -30
+
+                Then check whether the node's storage is the real fault. Replace
+                NODE with the nodeName printed above:
+                  # other pods holding csi-rclone volumes on the same node
+                  kubectl get pods -A -o json --field-selector spec.nodeName=NODE \
+                    | jq -r '.items[] | select(any(.spec.volumes[]?; .csi.driver? == "csi-rclone")) | "\(.metadata.namespace)/\(.metadata.name)"'
+                  # a severed FUSE mount reads as ENOTCONN from INSIDE a Running pod
+                  kubectl -n NS exec POD -- ls /mountpoint   # "Transport endpoint is not connected"
+                  # node plugin healthy, and how old?
+                  kubectl -n csi-rclone get pods -o wide --field-selector spec.nodeName=NODE
+                  # Longhorn equivalent: attachments with no consumer
+                  kubectl get volumeattachment -o wide | grep NODE
+
+                Only force-delete once you know what broke, because force-delete
+                destroys the evidence and leaves the mount reference on the node:
+                  kubectl -n conversation-history delete pod enrich-29815507-2gnfm \
+                    --force --grace-period=0
+                Any consumer whose mount was severed must be restarted afterwards
+                — it will not recover on its own and it will not tell you.
+              runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/known-caveats.md"
+
+  # (g) THE MIRROR OF (f). A pod that takes 10 minutes to drain and then
+  #     actually goes away must never page. This is the measured
+  #     slow-but-converging case: over 30 days exactly two pod-series crossed
+  #     5 minutes without crossing 15 (`follow-whatsapp-...-x5plh` and
+  #     `chist-web-...-httxm` - both genuine ENOTCONN casualties of this same
+  #     incident, both of which did terminate). The series simply ends at
+  #     t=9m, which is what a pod finishing termination looks like.
+  - interval: 1m
+    name: "(g) pod that drains in ten minutes and disappears - stays silent"
+    input_series:
+      - series: 'kube_pod_deletion_timestamp{namespace="conversation-history", pod="follow-whatsapp-7884df99b-x5plh", uid="c0ffee00-0000-4000-8000-000000000001", container="kube-state-metrics"}'
+        values: "0+0x9"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PodStuckTerminating
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: PodStuckTerminating
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: PodStuckTerminating
+        exp_alerts: []
+
+  # -- CSIRcloneNodePluginReplaced -------------------------------------------
+  # (h) A node plugin created at t=0. `kube_pod_created` carries no `node`
+  #     label, so the rule joins `kube_pod_info` with `group_left(node)` to get
+  #     one - this case is also the regression test for that join, since a
+  #     broken join yields no series and a permanently silent alert.
+  #
+  #     The alert is a 15-minute window on purpose: it fires at t=2m
+  #     (`for: 2m`) and RESOLVES ON ITS OWN once the pod is older than 900 s,
+  #     asserted at t=20m. It is a "this just happened, go audit the consumers"
+  #     notice, not a condition that needs clearing.
+  - interval: 1m
+    name: "(h) freshly created node plugin - fires, then self-resolves after fifteen minutes"
+    input_series:
+      - series: 'kube_pod_created{namespace="csi-rclone", pod="csi-rclone-node-4rmtn"}'
+        values: "0+0x40"
+      - series: 'kube_pod_info{namespace="csi-rclone", pod="csi-rclone-node-4rmtn", node="worker2"}'
+        values: "1+0x40"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: CSIRcloneNodePluginReplaced
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: CSIRcloneNodePluginReplaced
+        exp_alerts:
+          - exp_labels:
+              component: csi-rclone
+              namespace: csi-rclone
+              node: worker2
+              pod: csi-rclone-node-4rmtn
+              severity: warning
+            exp_annotations:
+              summary: "csi-rclone node plugin on worker2 was replaced — every FUSE mount on that node is now severed"
+              description: |
+                `csi-rclone-node-4rmtn` on node `worker2` was created less
+                than 15 minutes ago, which means the previous node plugin went
+                away. EVERY POD THAT WAS ALREADY RUNNING ON `worker2`
+                WITH A csi-rclone VOLUME NOW HAS A DEAD MOUNT.
+
+                Those pods will NOT crash, will NOT be restarted, and will NOT
+                report unhealthy. They stay `Running` and return ENOTCONN on
+                every read. On 2026-09-09 that state persisted for 5 hours and
+                surfaced as Forgejo HTTP 500s on OCI manifest reads, which in
+                turn put 28 Argo applications into ComparisonError. Pods
+                SCHEDULED AFTER the new plugin started are fine — only the
+                already-running ones are broken.
+
+                This is expected after a deliberate DaemonSet rollout or a node
+                reboot, and is NOT expected otherwise. Establish which it was:
+                  kubectl -n csi-rclone get pods -o wide --field-selector spec.nodeName=worker2
+                  kubectl -n csi-rclone describe pod csi-rclone-node-4rmtn | grep -A5 -i 'events\|reason'
+                  # was the janitor responsible?
+                  kubectl -n reboot-cascade-janitor logs -l app=reboot-cascade-janitor --tail=200 | grep -i 'signature B\|deleting'
+
+                Then repair the consumers — list them and restart each one:
+                  kubectl get pods -A -o json --field-selector spec.nodeName=worker2 \
+                    | jq -r '.items[] | select(any(.spec.volumes[]?; .csi.driver? == "csi-rclone")) | "\(.metadata.namespace)/\(.metadata.name)"'
+                  # confirm a mount is dead before restarting (fast, non-destructive)
+                  kubectl -n NS exec POD -- ls /mountpoint   # "Transport endpoint is not connected"
+                  kubectl -n NS rollout restart deploy/NAME
+              runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/known-caveats.md"
+      - eval_time: 20m
+        alertname: CSIRcloneNodePluginReplaced
+        exp_alerts: []
+
+  # (i) A long-lived plugin must be silent. Four of six nodes in this cluster
+  #     have held the same plugin pod for ~799 h, so silence here is the normal
+  #     case and the one that matters most.
+  #
+  #     `kube_pod_created: -36000` puts the creation 10 simulated hours before
+  #     the epoch, which is how a multi-hour age gets crossed inside a
+  #     40-sample test. This works ONLY because the rule does not filter its
+  #     input with `> 0`; see the header note.
+  - interval: 1m
+    name: "(i) node plugin created ten hours ago - stays silent"
+    input_series:
+      - series: 'kube_pod_created{namespace="csi-rclone", pod="csi-rclone-node-42wtl"}'
+        values: "-36000+0x40"
+      - series: 'kube_pod_info{namespace="csi-rclone", pod="csi-rclone-node-42wtl", node="cp1"}'
+        values: "1+0x40"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: CSIRcloneNodePluginReplaced
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: CSIRcloneNodePluginReplaced
+        exp_alerts: []
+
+  # -- CSIRcloneNodePluginFlapping -------------------------------------------
+  # (j) One plugin pod on the node for the whole window. The measured 30-day
+  #     max for cp1/cp2/cp3/worker3 is exactly 1, so this is what four of six
+  #     nodes look like permanently.
+  - interval: 1m
+    name: "(j) one stable node plugin - stays silent"
+    input_series:
+      - series: 'kube_pod_info{namespace="csi-rclone", pod="csi-rclone-node-42wtl", node="cp1"}'
+        values: "1+0x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CSIRcloneNodePluginFlapping
+        exp_alerts: []
+
+  # (k) THE JANITOR LOOP. Three distinct plugin pods on one node inside the 2 h
+  #     window, arriving sequentially as real replacements do (`_` marks the
+  #     samples where each pod does not yet, or no longer, exist). The measured
+  #     30-day max was 5 on worker2 - the day the janitor deleted the plugin at
+  #     05:20:03 and again at 05:25:03.
+  #
+  #     The third pod appears at t=20m, so `>= 3` becomes true there and
+  #     `for: 5m` fires it at t=25m. Two pods must NOT be enough - a single
+  #     replacement is `CSIRcloneNodePluginReplaced`'s job, not this one - and
+  #     the t=15m expectation pins exactly that.
+  - interval: 1m
+    name: "(k) three node plugins on one node in two hours - flapping fires; two do not"
+    input_series:
+      - series: 'kube_pod_info{namespace="csi-rclone", pod="csi-rclone-node-krkvv", node="worker2"}'
+        values: "1+0x9"
+      - series: 'kube_pod_info{namespace="csi-rclone", pod="csi-rclone-node-mlt78", node="worker2"}'
+        values: "_x10 1+0x9"
+      - series: 'kube_pod_info{namespace="csi-rclone", pod="csi-rclone-node-4rmtn", node="worker2"}'
+        values: "_x20 1+0x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: CSIRcloneNodePluginFlapping
+        exp_alerts: []
+      - eval_time: 24m
+        alertname: CSIRcloneNodePluginFlapping
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: CSIRcloneNodePluginFlapping
+        exp_alerts:
+          - exp_labels:
+              component: csi-rclone
+              node: worker2
+              severity: critical
+            exp_annotations:
+              summary: "csi-rclone node plugin on worker2 has been replaced 3 times in 2 hours — something is looping"
+              description: |
+                `3` distinct csi-rclone node-plugin pods have existed
+                on node `worker2` in the last 2 hours. A healthy node
+                shows exactly 1 — four of six nodes in this cluster have shown 1
+                for over 30 days.
+
+                Each replacement severs every FUSE mount on the node, so a loop
+                does cumulative damage: consumers are broken, restarted or not,
+                then broken again. The most likely driver is
+                `reboot-cascade-janitor` matching its "signature B" repeatedly and
+                deleting the plugin as remediation, which is what happened on
+                2026-09-09 at 05:20:03 and 05:25:03.
+
+                BREAK THE LOOP FIRST, diagnose second:
+                  kubectl -n reboot-cascade-janitor get cronjob
+                  kubectl -n reboot-cascade-janitor patch cronjob reboot-cascade-janitor \
+                    -p '{"spec":{"suspend":true}}'
+                Note that a CronJob `suspend` set with kubectl is reverted by Argo
+                self-heal wherever the field is present in git — check before
+                trusting it, and land a maintenance commit if it does not stick.
+
+                Then find out what it keeps matching, and whether the underlying
+                fault is memory pressure on the plugin:
+                  kubectl -n reboot-cascade-janitor logs -l app=reboot-cascade-janitor \
+                    --tail=500 | grep -i 'signature\|deleting'
+                  kubectl -n csi-rclone get pods -o wide --field-selector spec.nodeName=worker2
+                  kubectl -n csi-rclone top pod --containers | grep worker2
+                The janitor only ever looks at pods in `status.phase=Pending`, so
+                it is structurally blind to the ENOTCONN consumers its own
+                remediation creates. Audit those by hand.
+              runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/known-caveats.md"
