@@ -30,7 +30,7 @@ helmCharts:
     # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://charts.jetstack.io).
     repo: oci://registry.homelab.internal/homelab
 
-    version: "v1.21.0"  # OPERATOR PINS via Renovate
+    version: "v1.21.1"  # OPERATOR PINS via Renovate
     releaseName: cert-manager
     namespace: cert-manager
     valuesFile: values.yaml

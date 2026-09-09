@@ -12,12 +12,12 @@
 # Maintained by scripts/mirror-chart.sh (dry-run by default).
 - layer: infrastructure/cert-manager
   name: cert-manager
-  version: v1.21.0
+  version: v1.21.1
   upstream: https://charts.jetstack.io
   mirror: oci://registry.homelab.internal/homelab/cert-manager
-  content_digest: sha256:2114ad06dda7de371737ab807fa181d378aaf3a419264fcf230f57df37eb5e8f
-  upstream_artifact_sha256: sha256:9c2c6fabf3cf8fe14dacb016f37c819b66bc2c79e8b7acde4573d45ec141fb97
-  mirror_artifact_sha256: sha256:9c2c6fabf3cf8fe14dacb016f37c819b66bc2c79e8b7acde4573d45ec141fb97
+  content_digest: sha256:7b54afb6a3624e35d4b63e7e78fd1091a2e11bed7dc2f987046bf4e316fc2392
+  upstream_artifact_sha256: sha256:c27101f3f3e2349fb4a9e704316105bf7b52ad73b8c8257d3498ef7f2f6a4adc
+  mirror_artifact_sha256: sha256:c27101f3f3e2349fb4a9e704316105bf7b52ad73b8c8257d3498ef7f2f6a4adc
 - layer: infrastructure/cilium
   name: cilium
   version: 1.20.0
