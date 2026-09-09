@@ -361,7 +361,7 @@ repos:
         # keys against the (vendored, offline) chart, and suppresses keys
         # acknowledged in that layer's .helmcheckignore baseline — so only NEW
         # unknown keys block. Enforcement is OPT-IN per layer: a layer blocks
-        # only once it carries a .helmcheckignore (currently apps/vaultwarden +
+        # only once it carries a .helmcheckignore (currently only
         # observability/langfuse); layers not yet triaged warn but don't block,
         # so this hook is wired repo-wide without reding CI on the pre-existing
         # v1 flags most helm layers still have. Soft-skips if no PyYAML-capable
