@@ -24,7 +24,7 @@ helmCharts:
     # line at upstream or the bundle — the same shape as ADR 0037 for git, and
     # the same one platform/forgejo needed on 2026-08-19.
     repo: oci://registry.homelab.internal/homelab
-    version: "1.20.0"  # OPERATOR PINS via Renovate
+    version: "1.20.1"  # OPERATOR PINS via Renovate
     releaseName: cilium
     namespace: kube-system
     valuesFile: values.yaml

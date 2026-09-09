@@ -20,12 +20,12 @@
   mirror_artifact_sha256: sha256:c27101f3f3e2349fb4a9e704316105bf7b52ad73b8c8257d3498ef7f2f6a4adc
 - layer: infrastructure/cilium
   name: cilium
-  version: 1.20.0
+  version: 1.20.1
   upstream: https://helm.cilium.io
   mirror: oci://registry.homelab.internal/homelab/cilium
-  content_digest: sha256:b2053a29dc1b68fc0ec73ae07a356087f9e5d91389b30f6b1b194692711e55d6
-  upstream_artifact_sha256: sha256:c5f013912360d1a334f44ef25f36da59ba3414cdb48f466ee12d0c4fdff27883
-  mirror_artifact_sha256: sha256:c5f013912360d1a334f44ef25f36da59ba3414cdb48f466ee12d0c4fdff27883
+  content_digest: sha256:358362256b46fbc5d6858e2d033bc1661426c426c217626d9b1a780b469d3340
+  upstream_artifact_sha256: sha256:06210eef7c23d15f7699c79e2fe3a1ec9c389024c5c5c006ea04022d322449a2
+  mirror_artifact_sha256: sha256:06210eef7c23d15f7699c79e2fe3a1ec9c389024c5c5c006ea04022d322449a2
 - layer: infrastructure/clickhouse-operator
   name: altinity-clickhouse-operator
   version: 0.26.3
