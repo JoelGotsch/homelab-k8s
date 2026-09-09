@@ -1,7 +1,7 @@
 # Daily Raft snapshot to the off-site Hetzner Storage Box tier. An init
 # container obtains the short-lived OpenBao workload token and writes a verified
 # snapshot; the uploader never receives that token or the projected JWT.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: hetzner-sb-creds

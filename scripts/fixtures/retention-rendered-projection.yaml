@@ -17,7 +17,7 @@ cluster_defaults:
     chart_default_enabled: false
 layers:
 - path: observability/langfuse
-  input_digest_sha256: f56b0717e271a27555cb5543e89aa2f7a646d4089818fc32cad9ff388810b958
+  input_digest_sha256: 108ecf5582ff8e2da3db3ea1f010f855f7674c36b1003e91542a60b143c549bc
   chart:
     name: langfuse
     repository: oci://registry.homelab.internal/homelab
@@ -195,7 +195,7 @@ layers:
     source_name_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.name
     source_key_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.key
 - path: observability/crowdsec
-  input_digest_sha256: 269198f34bbc0440b6b917ce8a7fe6319981a4b2d84b5e2b7fbb1f15573de95b
+  input_digest_sha256: e304d5c7316d42865987b4a05b88d82c3a74617f7dd6015ccc85caf1598e7f82
   chart:
     name: crowdsec
     repository: oci://registry.homelab.internal/homelab
@@ -224,7 +224,7 @@ layers:
     storage_class_mode: explicit
   secret_references: []
 - path: platform/woodpecker
-  input_digest_sha256: e73e9af9703b454eb4ac9239337a5860dec1ffbdc9ed12fb032ea21d5ade9d3d
+  input_digest_sha256: 0da5f5eb9aa4445c8441e19c7d555e8c4af499db3def2eabbd52a8ae78cdc92d
   chart:
     name: woodpecker
     repository: oci://registry.homelab.internal/homelab
