@@ -2,7 +2,7 @@
 # pg-ha) and backup-and-dr.md "Postgres databases (CNPG)".
 #
 # Per-app Cluster CRDs live in the consuming app's namespace
-# (e.g. apps/llm-gateway/cnpg-cluster.yaml). The operator
+# (e.g. llm-gateway/k8s/cnpg-cluster.yaml). The operator
 # watches all namespaces. Each app's Cluster references its
 # own bucket path on MinIO-on-NAS for WAL+base backup; Restic
 # CronJob (configured separately) sweeps MinIO into tier-2/3.

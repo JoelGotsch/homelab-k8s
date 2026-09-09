@@ -9,7 +9,7 @@
 # delegate authn to Authentik via the community SSO-Auth plugin
 # (Jellyfin lacks native OIDC; operator installs the plugin
 # post-bring-up + wires it to the Secret produced by the
-# consumer-side ExternalSecret in apps/jellyfin/).
+# consumer-side ExternalSecret in jellyfin-k8s/k8s/).
 #
 # client_id + client_secret come from OpenBao via the
 # authentik-oidc-clients ExternalSecret (kv/jellyfin/oidc),

@@ -34,7 +34,7 @@ a silent landmine.
 
 Append a container block to `cronjob.yaml` (same mounts, new
 `validate --remote <ref>` args). Keep the ref list aligned with the
-first-party deployments: `apps/ntfy-e2ee-relay`, `apps/approval-channel`,
+first-party deployments: `ntfy-e2ee-relay/k8s`, `approval-channel/k8s`,
 `platform/pr-agent`.
 
 ## OpenBao paths to seed

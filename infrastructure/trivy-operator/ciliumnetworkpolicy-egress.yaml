@@ -2,7 +2,7 @@
 #
 # Plain K8s NetworkPolicy can't FQDN-match; Cilium L7 DNS
 # proxy + toFQDNs is the recurring pattern in this repo (see
-# apps/signal-bridge/ciliumnetworkpolicy-egress.yaml for the
+# signal-bridge-k8s/k8s/ciliumnetworkpolicy-egress.yaml for the
 # canonical example).
 #
 # Two egress flows are FQDN-gated here:

@@ -2,7 +2,7 @@
 #
 # Why this exists:
 # The 2026-06-22 → 2026-06-23 incident (openbao-0 sealed for ~26h
-# undetected, see apps/signal-bridge/openbao-seal-watchdog-cronjob.yaml
+# undetected, see signal-bridge-k8s/k8s/openbao-seal-watchdog-cronjob.yaml
 # header for the four-stack-deep RCA) closed with TWO complementary
 # defenses:
 #
@@ -186,7 +186,7 @@ spec:
 
               This is the worst-case state — the openbao-seal-
               watchdog CronJob should already have paged via
-              Signal (apps/signal-bridge/openbao-seal-watchdog-
+              Signal (signal-bridge-k8s/k8s/openbao-seal-watchdog-
               cronjob.yaml runs every 1m). If that page did NOT
               arrive, the operator has a stacked-failure scenario
               and must investigate the watchdog itself:

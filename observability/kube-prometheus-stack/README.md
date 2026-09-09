@@ -6,8 +6,8 @@ kube-state-metrics. Per [ADR 0021 D7 + D8](../../../homelab-docs/02-decisions/00
 **Activates** the ServiceMonitors + PrometheusRules already
 scaffolded across the cluster:
 
-- [apps/ntfy-e2ee-relay/servicemonitor.yaml](../../apps/ntfy-e2ee-relay/servicemonitor.yaml)
-- [apps/ntfy/servicemonitor.yaml](../../apps/ntfy/servicemonitor.yaml)
+- [ntfy-e2ee-relay/k8s/servicemonitor.yaml](../../../ntfy-e2ee-relay/k8s/servicemonitor.yaml)
+- [ntfy-k8s/k8s/servicemonitor.yaml](../../../ntfy-k8s/k8s/servicemonitor.yaml)
 - [observability/falco-stack/servicemonitor.yaml](../falco-stack/servicemonitor.yaml)
   (Falco + Falcosidekick)
 - [infrastructure/backup-cronjobs/prometheusrule.yaml](../../infrastructure/backup-cronjobs/prometheusrule.yaml)

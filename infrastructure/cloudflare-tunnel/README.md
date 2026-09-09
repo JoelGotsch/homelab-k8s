@@ -122,7 +122,7 @@ curl -I https://vaultwarden.<HOMELAB-DOMAIN>
 | Operator runs step 4 | DNS records routing hostnames to the tunnel. |
 | Argo sync `infrastructure/external-secrets/` + `platform/openbao/` | ESO can pull the credentials Secret. |
 | Argo sync this layer | cloudflared Deployment Ready (2 replicas connected to Cloudflare edge). |
-| Argo sync `apps/vaultwarden/` + `apps/jellyfin/` + `apps/immich-public-proxy/` | Upstream Services that the tunnel routes to come up. |
+| Argo sync `vaultwarden-k8s/k8s/` + `jellyfin-k8s/k8s/` + `immich-public-proxy-k8s/k8s/` | Upstream Services that the tunnel routes to come up. |
 | Operator validates per step 6 above | Public ingress confirmed working. |
 
 ## Adding a new tunnel-routed service
@@ -191,10 +191,10 @@ curl -I https://vaultwarden.<HOMELAB-DOMAIN>
 
 - [ADR 0024](../../../homelab-docs/02-decisions/0024-external-access-for-internal-services.md)
   — Cloudflare Tunnel + Authentik decisions.
-- [`apps/vaultwarden/`](../../apps/vaultwarden/) — first
+- [`vaultwarden-k8s/k8s/`](../../../vaultwarden-k8s/k8s/) — first
   Phase-2 consumer.
-- [`apps/jellyfin/`](../../apps/jellyfin/) — second.
-- [`apps/immich-public-proxy/`](../../apps/immich-public-proxy/)
+- [`jellyfin-k8s/k8s/`](../../../jellyfin-k8s/k8s/) — second.
+- [`immich-public-proxy-k8s/k8s/`](../../../immich-public-proxy-k8s/k8s/)
   — third; read-only `/share/*` surface for Immich albums.
 - [03-runbooks/network/cloudflare-tunnel-to-dns-failover.md](../../../homelab-docs/03-runbooks/network/cloudflare-tunnel-to-dns-failover.md)
   — failover when tunnel fails.

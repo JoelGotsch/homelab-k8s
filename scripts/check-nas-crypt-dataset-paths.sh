@@ -70,22 +70,15 @@ pv_file, workspace_root = sys.argv[1], sys.argv[2]
 # could only ever fire on the last dataset. The check is now unconditional:
 # EVERY nas-crypt PVC binds a named PV. There is no pending state to describe.
 
-# ── Stale central copies, deliberately not enforced ──────────────────────────
+# ── Superseded central copies ─────────────────────────────────────────────────
 #
-# `nextcloud`, `immich` and `paperless` reconcile from their OWN repositories
-# per bootstrap/applicationsets/apps.yaml. The copies under homelab-k8s/apps/
-# are superseded leftovers pending guarded cleanup (see CLAUDE.md and ADR
-# 0001's 2026-07-19 correction). Editing them would create a second, wrong
-# source of truth for the same PVC, so ADR 0051 explicitly leaves them alone —
-# which means this check must not demand they be migrated.
-#
-# Remove an entry here when the corresponding directory is deleted. If the path
-# no longer exists, the check says so rather than silently carrying a dead rule.
-STALE_CENTRAL_COPIES = (
-    "homelab-k8s/apps/nextcloud/",
-    "homelab-k8s/apps/immich/",
-    "homelab-k8s/apps/paperless/",
-)
+# Until 2026-09-09 the legacy `homelab-k8s/apps/{nextcloud,immich,paperless}/`
+# copies were listed here so the check would not demand their migration: the
+# live PVCs reconcile from the app repos per bootstrap/applicationsets/apps.yaml
+# and ADR 0051 left the stale copies untouched. The guarded cleanup deleted
+# them, so the list is empty. It stays as the extension point: a path listed
+# here is skipped while it exists and reported as a dead rule once it does not.
+STALE_CENTRAL_COPIES = ()
 
 failures = []
 notes = []

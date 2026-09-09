@@ -174,7 +174,7 @@ The app's own
 `apps/<app>/cnpg-s3-externalsecret.yaml` then projects that
 into the app namespace as a Secret consumed by the CNPG
 Cluster CRD's `barmanObjectStore.s3Credentials` (see
-[apps/llm-gateway/cnpg-s3-externalsecret.yaml](../../apps/llm-gateway/cnpg-s3-externalsecret.yaml)
+[llm-gateway/k8s/cnpg-s3-externalsecret.yaml](../../../llm-gateway/k8s/cnpg-s3-externalsecret.yaml)
 for the canonical example).
 
 When the per-app cluster count gets meaningful (>5), this

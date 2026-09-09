@@ -245,8 +245,8 @@ operator's shell.
 
 ### Adding a new namespace to the pull-enabled list
 
-1. Copy `apps/approval-channel/registry-pull-secret.yaml`
-   and `apps/approval-channel/sa-default.yaml` into the new
+1. Copy `approval-channel/k8s/registry-pull-secret.yaml`
+   and `approval-channel/k8s/sa-default.yaml` into the new
    namespace's directory. Edit the `metadata.namespace` field
    in both files (the ES `targetSecret` name + the SA name
    stay `default`).

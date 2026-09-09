@@ -11,7 +11,7 @@
 # Redirect URI points at the INTERNAL Immich hostname
 # (immich.lab.vyramo.com) — not `photos.vyramo.com`, which is
 # the public-album proxy (immich-public-proxy) and does not
-# handle authn. Confirmed against apps/immich/httproute.yaml +
+# handle authn. Confirmed against immich-k8s/k8s/httproute.yaml +
 # values.yaml.
 #
 # client_id + client_secret come from OpenBao via the

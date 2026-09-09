@@ -144,7 +144,7 @@ while IFS= read -r cluster; do
 
   if [ -n "$miss" ]; then
     echo "FAIL: $dir has an egress default-deny but its CNPG egress is missing:$miss"
-    echo "      -> model on apps/paperless/networkpolicy.yaml (the correct template)."
+    echo "      -> model on paperless-k8s/k8s/networkpolicy.yaml (the correct template)."
     fail=1
   fi
 done < <(find "${roots[@]}" -type f -name 'cnpg-cluster*.yaml' -exec \

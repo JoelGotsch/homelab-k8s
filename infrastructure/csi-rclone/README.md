@@ -65,7 +65,7 @@ ciphertext NFS share on the NAS.
 | 1. Generate per-share rclone-crypt key + assembled INI | Operator (one-time, per share) | `kv/prod/nas-encryption/<share>/rclone_config` populated; offline-recovery archive updated; NAS ciphertext share pre-created. |
 | 2. Argo sync `infrastructure/external-secrets/` + `platform/openbao/` | Argo | ESO can pull the Secret. |
 | 3. Argo sync this layer | Argo | Driver DaemonSet up on every node; ExternalSecret reconciles to Secret in this ns; StorageClass `nas-crypt-<share>` registered. |
-| 4. Argo sync the consumer app (e.g., `apps/immich/`) | Argo | Consumer claims PVC against `nas-crypt-<share>`; CSI provisions a volume; volume mounts in consumer pod with plaintext view. |
+| 4. Argo sync the consumer app (e.g., `immich-k8s/k8s/`) | Argo | Consumer claims PVC against `nas-crypt-<share>`; CSI provisions a volume; volume mounts in consumer pod with plaintext view. |
 | 5. End-to-end check | Operator | Write a test file in the consumer pod → verify it appears as ciphertext on the NAS share via SSH-to-NAS + `ls`. Read it back via the consumer pod → verify plaintext round-trip. |
 
 ## Onboarding a new encrypted share
@@ -189,7 +189,7 @@ share; the others stay opaque. Rotation per
   Longhorn.
 - [`storage.md`](../../../homelab-docs/01-architecture/storage.md)
   — share inventory + Tier-A/B/C access matrix.
-- [`apps/immich/`](../../apps/immich/) — first consumer.
+- [`immich-k8s/k8s/`](../../../immich-k8s/k8s/) — first consumer.
 - [`infrastructure/nfs-csi/`](../nfs-csi/) — sibling layer
   for `internal-media` / `public-*` plaintext shares (e.g.,
   Jellyfin) that don't need the encryption hop.

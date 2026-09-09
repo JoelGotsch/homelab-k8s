@@ -19,7 +19,7 @@ CloudNativePG operator. Per
 
 Each app that needs Postgres creates a `cnpg-cluster.yaml`
 under its own kustomize layer (e.g.
-[apps/llm-gateway/cnpg-cluster.yaml](../../apps/llm-gateway/cnpg-cluster.yaml))
+[llm-gateway/k8s/cnpg-cluster.yaml](../../../llm-gateway/k8s/cnpg-cluster.yaml))
 and a sibling `cnpg-s3-externalsecret.yaml` that pulls MinIO
 backup creds from OpenBao.
 
@@ -94,6 +94,7 @@ any write — gate the app's first sync on this).
   (`restic-minio-to-friends-nas`) blocks on friend's-NAS
   hardware ship; pattern documented in
   [backup-cronjobs/README §Tier-2 sibling](../backup-cronjobs/README.md).
-- Per-app `cnpg-cluster.yaml` for Vaultwarden, Nextcloud,
-  Langfuse — added when those apps' kustomize layers are
-  scaffolded. Currently only `apps/llm-gateway/` exists.
+- Per-app `cnpg-cluster.yaml` lives in each app's own repo
+  (`llm-gateway/k8s/`, `vaultwarden-k8s/k8s/`, `nextcloud-k8s/k8s/`,
+  `paperless-k8s/k8s/`, `immich-k8s/k8s/`) and, for cluster-owned
+  layers, next to the layer (`observability/langfuse/`).

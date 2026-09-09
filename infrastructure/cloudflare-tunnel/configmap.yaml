@@ -79,7 +79,7 @@ data:
       # Read-only public surface for Immich share links.
       # Per ADR 0024 D1; the proxy holds no creds and walks
       # only /share/* — Immich's admin UI / API stays
-      # Tailscale-only. See apps/immich-public-proxy/.
+      # Tailscale-only. See immich-public-proxy-k8s/k8s/.
       - hostname: photos.vyramo.com
         service: http://immich-public-proxy.immich-public-proxy.svc.cluster.local:3000
 

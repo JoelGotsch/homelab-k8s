@@ -9,8 +9,12 @@
 # This baseline does NOT declare these routes desirable steady state. It records
 # remaining temporary drift while notification delivery is migrated to the
 # clarified contract. Alertmanager fan-out and the incompatible Falco relay are
-# gone; the app-owned OpenBao watchdog is the final baselined route until its
-# ntfy-first implementation lands.
+# gone. The OpenBao watchdog's unconditional Signal send was the last baselined
+# route; its ntfy-first replacement lives in the app-owned repository
+# (signal-bridge-k8s/k8s/openbao-seal-watchdog-cronjob.yaml, guarded there by
+# scripts/check-temporary-signal-routes.sh) and the superseded central copy that
+# carried the marker was deleted on 2026-09-09. Nothing in this repository sends
+# to Signal directly any more; the empty inventories below keep it that way.
 
 apiVersion: homelab.internal/v1alpha1
 kind: TemporaryNotificationRouteBaseline
@@ -40,10 +44,4 @@ spec:
 
     customRelayRoutes: []
 
-    directOperationalSignalRoutes:
-      # This OpenBao circular-dependency watchdog deliberately bypasses
-      # Alertmanager, but its unconditional Signal send is still transitional.
-      - id: openbao-watchdog-direct-signal
-        file: apps/signal-bridge/openbao-seal-watchdog-cronjob.yaml
-        marker: P0-07-TEMPORARY-DRIFT(openbao-watchdog-direct-signal)
-        expression: '"$SIGNAL_BRIDGE_URL/v2/send")'
+    directOperationalSignalRoutes: []

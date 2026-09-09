@@ -1,5 +1,5 @@
 # LLM gateway deep-dive — single-page dashboard for the
-# LiteLLM proxy at apps/llm-gateway/. Per ADR 0007 + ADR 0026.
+# LiteLLM proxy at llm-gateway/k8s/. Per ADR 0007 + ADR 0026.
 #
 # LiteLLM's prometheus_callback exposes a stable set of
 # metrics we lean on here:

@@ -70,7 +70,7 @@ homelab-infra/scripts/seed-random-secret.sh \
     kv/pr-agent/webhook-secret secret
 
 # 3. LiteLLM virtual key — issued by the gateway per ADR 0026
-#    D6 + apps/llm-gateway/README.md §"Per-app virtual key".
+#    D6 + llm-gateway/k8s/README.md §"Per-app virtual key".
 #    The provisioning script issues a key constrained to the
 #    pr-agent allowlist (self-hosted models only) and seeds it.
 homelab-infra/scripts/provision-litellm-virtual-key.sh \
@@ -84,7 +84,7 @@ homelab-infra/scripts/provision-litellm-virtual-key.sh \
 | Bring-up step | What lands |
 |---|---|
 | Argo sync `platform/forgejo/` | Forgejo up; operator creates `pr-agent-bot` user + issues PAT. |
-| Argo sync `apps/llm-gateway/` | Gateway up; operator issues per-app virtual key for pr-agent. |
+| Argo sync `llm-gateway/k8s/` | Gateway up; operator issues per-app virtual key for pr-agent. |
 | Operator builds + pushes `pr-agent:gitea_app-<tag>` to `registry.homelab.internal` | Image available for pull. |
 | Operator seeds `kv/pr-agent/{forgejo-pat,webhook-secret,litellm-virtual-key}` | ESO can populate Secrets. |
 | Argo sync this layer | Deployment Ready; webhook listener available cluster-internally. |
@@ -180,6 +180,6 @@ review comment. No push needed.
 - [ADR 0023](../../../homelab-docs/02-decisions/0023-forgejo-and-woodpecker-ci.md)
   — Forgejo + Woodpecker; PR-Agent receives webhooks from this Forgejo.
 - [`platform/forgejo/`](../forgejo/) — webhook source.
-- [`apps/llm-gateway/`](../../apps/llm-gateway/) — inference target.
+- [`llm-gateway/k8s/`](../../../llm-gateway/k8s/) — inference target.
 - [99-journal/2026-05-02-llm-pr-review-tool-choice.md](../../../homelab-docs/99-journal/2026-05-02-llm-pr-review-tool-choice.md)
   — reasoning session.

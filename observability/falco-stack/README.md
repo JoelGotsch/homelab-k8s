@@ -125,5 +125,5 @@ declare no Falcosidekick credential here.
   — quarterly false-positive review + suppression patterns.
 - [`scripts/temporary-notification-route-baseline.yaml`](../../scripts/temporary-notification-route-baseline.yaml)
   — route-regression inventory; Alertmanager/custom-relay expected sets are empty.
-- [apps/ntfy/](../../apps/ntfy/) — the primary delivery endpoint through the
+- [ntfy-k8s/k8s/](../../../ntfy-k8s/k8s/) — the primary delivery endpoint through the
   Alertmanager formatter path.

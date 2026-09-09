@@ -23,7 +23,7 @@ Grafana dashboards").
 | ConfigMap | Dashboard | Data sources |
 |---|---|---|
 | `grafana-dashboard-cluster-overview` | **Cluster overview** — node count + condition, pod totals, CPU/mem cluster-wide, top-10 PVC fill, top-10 pods by namespace, Cilium agent status, Argo CD app sync + health counts, pods-not-Running table | Prometheus (kube-state-metrics + node-exporter + cilium + argocd-metrics) |
-| `grafana-dashboard-llm-gateway` | **LLM gateway** — requests/s by model, token throughput in/out, p50/p95/p99 latency by model, failed requests by exception class, per-team top-5, plus a Loki panel for `rejected_by_tag` / `rejected_by_secrets_scan` log events from the `llm-gateway` namespace | Prometheus (LiteLLM's `litellm_*` metrics via `apps/llm-gateway/`'s ServiceMonitor) + Loki |
+| `grafana-dashboard-llm-gateway` | **LLM gateway** — requests/s by model, token throughput in/out, p50/p95/p99 latency by model, failed requests by exception class, per-team top-5, plus a Loki panel for `rejected_by_tag` / `rejected_by_secrets_scan` log events from the `llm-gateway` namespace | Prometheus (LiteLLM's `litellm_*` metrics via `llm-gateway/k8s/`'s ServiceMonitor) + Loki |
 
 Both dashboards land in a Grafana folder named `Homelab` via
 the sidecar's `grafana_folder` annotation, so they don't
@@ -119,7 +119,7 @@ intermix with chart-default dashboards.
   — the LLM gateway being dashboarded.
 - [`observability/kube-prometheus-stack/`](../kube-prometheus-stack/)
   — Grafana itself + the dashboard sidecar.
-- [`apps/llm-gateway/`](../../apps/llm-gateway/)
+- [`llm-gateway/k8s/`](../../../llm-gateway/k8s/)
   — LiteLLM proxy emitting the `litellm_*` metrics.
 - [`llm-gateway/`](../../../llm-gateway/) (sibling repo)
   — pre/post-call hooks; tag-rejection log events.

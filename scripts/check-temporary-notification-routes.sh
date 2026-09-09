@@ -76,12 +76,16 @@ compare_inventory() {
 
 yq -r '.spec.reviewedDrift | .. |
   select(tag == "!!map" and has("id") and has("marker") and has("file")) |
-  [.id, .marker, .file] | @tsv' "$baseline" >"$expected/markers"
+  [.id, .marker, .file] | @tsv' "$baseline" \
+  | sed '/^[[:space:]]*$/d' >"$expected/markers"
 
 marker_rows="$(wc -l <"$expected/markers" | tr -d ' ')"
 unique_ids="$(cut -f1 "$expected/markers" | LC_ALL=C sort -u | wc -l | tr -d ' ')"
 unique_markers="$(cut -f2 "$expected/markers" | LC_ALL=C sort -u | wc -l | tr -d ' ')"
-[ "$marker_rows" -gt 0 ] || fail "baseline contains no reviewed drift entries"
+# Zero marker rows is a legitimate state since 2026-09-09: the last baselined
+# route left with the superseded central signal-bridge copy. The discovery
+# passes below still compare the (empty) baseline against what the repository
+# actually contains, so an empty baseline gates new routes rather than nothing.
 [ "$marker_rows" -eq "$unique_ids" ] || fail "baseline drift IDs must be unique"
 [ "$marker_rows" -eq "$unique_markers" ] || fail "baseline markers must be unique"
 
@@ -189,4 +193,4 @@ done < <(git ls-files '*.yaml' '*.yml')
 compare_inventory "direct operational Signal routes" \
   "$expected/direct-signal-routes" "$actual/direct-signal-routes"
 
-echo "OK: Alertmanager has no operational Signal/custom-relay route; the one app-owned direct watchdog route remains exactly contained."
+echo "OK: Alertmanager has no operational Signal/custom-relay route and no direct Signal send exists in this repository."
