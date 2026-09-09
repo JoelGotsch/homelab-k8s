@@ -172,12 +172,12 @@
   mirror_artifact_sha256: sha256:f0026f251da5b49cea636a24143dbbadf15b39f51fc4639c9e0d08a4bc975ee3
 - layer: observability/otel-collector
   name: opentelemetry-collector
-  version: 0.108.0
+  version: 0.172.1
   upstream: https://open-telemetry.github.io/opentelemetry-helm-charts
   mirror: oci://registry.homelab.internal/homelab/opentelemetry-collector
-  content_digest: sha256:b6ceac41accf2cc40a52aef758e0594a4bf69fc938d818ed6874f6c9adf04502
-  upstream_artifact_sha256: sha256:0ea2ea90404405fd0748f6c5c09da1ce581cb166689a4671aeb98ff2c00d782b
-  mirror_artifact_sha256: sha256:0ea2ea90404405fd0748f6c5c09da1ce581cb166689a4671aeb98ff2c00d782b
+  content_digest: sha256:5451045d2300e3974368cc1603f1f57860d3a3f931410153174fd6bd5eacffad
+  upstream_artifact_sha256: sha256:479d6bae365a7940331defe22c5085d33c2891f8124b30b0841c95815e49bda7
+  mirror_artifact_sha256: sha256:479d6bae365a7940331defe22c5085d33c2891f8124b30b0841c95815e49bda7
 - layer: observability/tempo
   name: tempo
   version: 1.24.4

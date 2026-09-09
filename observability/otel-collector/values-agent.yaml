@@ -14,7 +14,7 @@ mode: daemonset
 
 image:
   repository: otel/opentelemetry-collector-contrib
-  tag: 0.111.0   # OPERATOR PINS via Renovate
+  tag: 0.159.0   # OPERATOR PINS via Renovate
 
 config:
   receivers:
@@ -34,8 +34,11 @@ config:
       send_batch_size: 8192
   exporters:
     # Forward to the gateway via cluster DNS. Gateway's
-    # 2-replica Deployment + Service load-balances.
-    otlp/gateway:
+    # 2-replica Deployment + Service load-balances. `otlp_grpc` is
+    # the collector >= 0.144.0 name of the `otlp` exporter (see
+    # values-gateway.yaml); the self-metrics reader is the chart
+    # default on ${env:MY_POD_IP}:8888.
+    otlp_grpc/gateway:
       endpoint: opentelemetry-collector-gateway.monitoring.svc.cluster.local:4317
       tls:
         insecure: true   # cluster-internal HTTP
@@ -50,10 +53,7 @@ config:
       traces:
         receivers: [otlp]
         processors: [memory_limiter, batch]
-        exporters: [otlp/gateway]
-    telemetry:
-      metrics:
-        address: 0.0.0.0:8888
+        exporters: [otlp_grpc/gateway]
 
 # The chart creates no Service in daemonset mode unless this is
 # explicitly enabled, so ADR 0028 D5's documented workload endpoint

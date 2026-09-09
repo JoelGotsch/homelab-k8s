@@ -10,7 +10,7 @@ mode: deployment
 
 image:
   repository: otel/opentelemetry-collector-contrib
-  tag: 0.111.0   # OPERATOR PINS via Renovate
+  tag: 0.159.0   # OPERATOR PINS via Renovate
 
 replicaCount: 2  # HA on the gateway tier; agents fail-soft to either
 
@@ -120,8 +120,15 @@ config:
           statements:
             - delete_matching_keys(attributes, "^(gen_ai\\.(prompt|completion|input|output|system_instructions)|llm\\.(openai\\.(messages|choices|extra_body)|prompts|completions)|input|output)")
   exporters:
+    # Exporter type names follow collector >= 0.144.0: `otlp` became
+    # `otlp_grpc` and `otlphttp` became `otlp_http` (chart 0.171.0
+    # rewrites the old names only while rewriteDeprecatedComponentNames
+    # is on; naming them directly keeps the render independent of that
+    # shim). The collector's own metrics endpoint is the chart-default
+    # pull reader on ${env:MY_POD_IP}:8888; chart 0.161.0 dropped the
+    # old `service.telemetry.metrics.address` form.
     # Tempo receives OTLP gRPC on 4317.
-    otlp/tempo:
+    otlp_grpc/tempo:
       # Tempo runs in `observability-tempo`, not `monitoring`. The
       # original `tempo.monitoring.svc.cluster.local` resolved to
       # nothing; gRPC reported it as "name resolver error: produced
@@ -136,7 +143,7 @@ config:
     # semantic conventions (gen_ai.*) to its data model.
     # Auth via basicauth extension; creds ESO-projected from
     # kv/langfuse/otel-ingest at first install.
-    otlphttp/langfuse:
+    otlp_http/langfuse:
       endpoint: http://langfuse-web.langfuse.svc.cluster.local:3000/api/public/otel
       # Langfuse ingests in real time only when the request declares
       # the ingestion version; without it the span is accepted and
@@ -177,14 +184,11 @@ config:
       traces:
         receivers: [otlp]
         processors: [memory_limiter, transform/strip-llm-content, batch]
-        exporters: [otlp/tempo]
+        exporters: [otlp_grpc/tempo]
       traces/langfuse:
         receivers: [otlp]
         processors: [memory_limiter, filter/langfuse-llm-only, batch]
-        exporters: [otlphttp/langfuse]
-    telemetry:
-      metrics:
-        address: 0.0.0.0:8888
+        exporters: [otlp_http/langfuse]
 
 # Self-metrics scrape — chart's bundled ServiceMonitor doesn't
 # match our release-label convention; ship our own at
