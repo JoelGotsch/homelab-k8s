@@ -71,6 +71,8 @@ spec:
           protocol: TCP
         - port: 3100   # loki
           protocol: TCP
+        - port: 3200   # tempo (chart 1.24.4 moved it off 3100, 2026-09-09)
+          protocol: TCP
         - port: 8080
           protocol: TCP
         - port: 8081
