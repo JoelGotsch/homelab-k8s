@@ -48,6 +48,22 @@ replacements:
           - spec.groups.[name=backup-cronjobs.staging-pvc].rules.[alert=ResticStagingPVCNearFull].annotations.runbook_url
           - spec.groups.[name=backup-cronjobs.staging-pvc].rules.[alert=ResticStagingPVCCritical].annotations.runbook_url
           - spec.groups.[name=backup-cronjobs.job-failed].rules.[alert=BackupCronJobFailed].annotations.runbook_url
-          - spec.groups.[name=backup-cronjobs.job-failed].rules.[alert=BackupCronJobMissing24h].annotations.runbook_url
+          - spec.groups.[name=backup-cronjobs.job-failed].rules.[alert=BackupCronJobNotScheduled].annotations.runbook_url
           - spec.groups.[name=backup-cronjobs.staleness].rules.[alert=ResticSnapshotStale].annotations.runbook_url
+      # prometheusrule-footprint.yaml was left out when it landed, and its three
+      # alerts therefore shipped `https://github.com/<OPERATOR-GITHUB-USER>/...`
+      # verbatim — a paged operator following the link got a 404 from GitHub.
+      # Found 2026-09-09 by reading `kustomize build` output while retuning the
+      # staleness alerts, not by any check: `check-placeholders.sh` does catch
+      # the `<UPPER-SNAKE>` form, but it is a manual deploy-time script, and
+      # `check-bare-tokens.sh` only looks at value-bearing keys like `cidr:` /
+      # `server:` / `endpoint:`, not at annotations. The placeholders are now
+      # spelled `OPERATOR_GITHUB_USER` so this rule reaches them, which also
+      # means a future rename of any alert below is a hard build error rather
+      # than a silently dead link.
+      - select: { kind: PrometheusRule, name: backup-footprint }
+        fieldPaths:
+          - spec.groups.[name=backup-footprint.langfuse].rules.[alert=LangfuseTraceStoreGrowing].annotations.runbook_url
+          - spec.groups.[name=backup-footprint.nas-buckets].rules.[alert=LonghornBackupsBucketRegrowing].annotations.runbook_url
+          - spec.groups.[name=backup-footprint.nas-buckets].rules.[alert=NasBackupMetricsMissing].annotations.runbook_url
         options: { delimiter: '/', index: 3 }

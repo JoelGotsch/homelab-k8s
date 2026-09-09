@@ -50,7 +50,7 @@ spec:
               backup of a large ClickHouse gets inefficient. Consider moving
               the langfuse lane to `clickhouse-backup` (logical, FREEZE-
               consistent) and check the tier-3 footprint.
-            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+            runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
 
     - name: backup-footprint.nas-buckets
       interval: 5m
@@ -73,7 +73,7 @@ spec:
               suggests the blanket [default] backup returned or a backed-up
               volume grew. Check `scripts/label-backup-volumes.sh` membership +
               backup-daily's `groups`.
-            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+            runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
 
         - alert: NasBackupMetricsMissing
           # rule 17 — a broken MinIO scrape makes every size alert above
@@ -92,4 +92,4 @@ spec:
               for 30m — the minio-on-nas ServiceMonitor scrape is broken, so the
               NAS backup-footprint alerts can't fire. Check the ServiceMonitor +
               the minio-on-nas NetworkPolicy (monitoring→9000).
-            runbook_url: https://github.com/<OPERATOR-GITHUB-USER>/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+            runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md

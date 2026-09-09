@@ -126,21 +126,36 @@ spec:
         #
         # `> 0` matters: replicas export these gauges as 0, so an
         # unfiltered max() would report every cluster as never-backed-up.
+        # THRESHOLD (retuned 2026-09-09, was 129600 s / 36 h with `for: 2h`).
+        # 38 h of total latency against a nightly ScheduledBackup meant the
+        # librechat-vectordb wedge described above could sit for a day and a
+        # half before saying so. Retuned from measurement over 30 d
+        # (Prometheus, 2026-09-09): across all 14 clusters the observed
+        # inter-backup gaps are 24.00-24.33 h — these are small databases and
+        # the base backup is minutes, so the spread is scheduler jitter, not
+        # duration.
+        #
+        # 100800 s = 28 h, ~3.7 h of margin over the worst observed gap, with
+        # `for: 30m` (was 2h) to ride out a scrape gap or an operator restart.
+        # Every ScheduledBackup in the cluster is daily and staggered
+        # 01:00-03:47 (`kubectl get scheduledbackups.postgresql.cnpg.io -A`),
+        # so one threshold fits all 14; a sub-daily or weekly schedule arriving
+        # later needs its own clause rather than a raised number here.
         - alert: CNPGBaseBackupStale
           expr: |
             time() - max by (namespace, cluster) (
               (cnpg_collector_last_available_backup_timestamp > 0)
               or
               (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp > 0)
-            ) > 129600
-          for: 2h
+            ) > 100800
+          for: 30m
           labels:
             severity: warning
             component: cnpg
           annotations:
             summary: "CNPG base backup is stale for {{ $labels.namespace }}/{{ $labels.cluster }}"
             description: |
-              No successful base backup in more than 36 hours, against a
+              No successful base backup in more than 28 hours, against a
               nightly ScheduledBackup. WAL archiving may still be healthy —
               this is about the recoverability POINT, not the WAL stream.
 

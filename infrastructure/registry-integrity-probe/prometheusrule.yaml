@@ -57,29 +57,47 @@ spec:
         # backup-cronjobs staleness guard: last success older than 2
         # days; CronJob older than 2 days with no success series yet;
         # CronJob object absent entirely.
+        # THRESHOLD (retuned 2026-09-09, was `86400 * 2` with `for: 1h`).
+        # 48 h + 1 h against a daily probe is ~25 h of silence past the point
+        # the probe stopped running. Retuned from measurement over 30 d
+        # (Prometheus, 2026-09-09) rather than from the deadline field:
+        #
+        #   inter-success gaps  n=30  median 24.00 h  p95 24.02 h  max 24.03 h
+        #   run duration        n=31  median  6.3 min  p95 8.0 min  max 8.0 min
+        #
+        # This is the tightest of the four staleness lanes because it is also
+        # the most predictable: `schedule: "23 4 * * *"`,
+        # `startingDeadlineSeconds: 300`, `activeDeadlineSeconds: 600`. Worst
+        # legitimate gap = 24 h + 5 min + 8 min ≈ 24.2 h. 97200 s = 27 h keeps
+        # ~2.8 h of margin for scrape and kube-state-metrics lag; `for: 30m`
+        # (was 1h) rides out a restart and nothing more.
+        #
+        # Kept at `warning`: undetected blob loss is serious but not same-hour,
+        # and the sibling `ResticSnapshotStale` in backup-cronjobs is the
+        # `critical` that guards actual data egress.
         - alert: RegistryBlobValidateStale
           expr: |
             (
               time() - max by (cronjob) (kube_cronjob_status_last_successful_time{namespace="registry-integrity-probe",cronjob="registry-blob-validate"})
-              > 86400 * 2
+              > 97200
             )
             or
             (
-              (time() - max by (cronjob) (kube_cronjob_created{namespace="registry-integrity-probe",cronjob="registry-blob-validate"}) > 86400 * 2)
+              (time() - max by (cronjob) (kube_cronjob_created{namespace="registry-integrity-probe",cronjob="registry-blob-validate"}) > 97200)
               unless max by (cronjob) (kube_cronjob_status_last_successful_time{namespace="registry-integrity-probe",cronjob="registry-blob-validate"})
             )
             or
             absent(kube_cronjob_created{namespace="registry-integrity-probe",cronjob="registry-blob-validate"})
-          for: 1h
+          for: 30m
           labels:
             severity: warning
             component: registry-integrity-probe
           annotations:
-            summary: "Registry blob validation has not succeeded in 2 days"
+            summary: "Registry blob validation has not succeeded in 27 hours"
             description: |
-              No successful registry-blob-validate run for 2+ days (or
-              the CronJob was suspended / deleted / has never
-              succeeded). The integrity probe is not running — blob loss
+              No successful registry-blob-validate run for 27+ h against a
+              daily schedule (or the CronJob was suspended / deleted / has
+              never succeeded). The integrity probe is not running — blob loss
               would go undetected.
               Inspect:
                 kubectl -n registry-integrity-probe get cronjob,jobs

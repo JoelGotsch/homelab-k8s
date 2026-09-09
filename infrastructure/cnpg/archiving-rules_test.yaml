@@ -1,0 +1,149 @@
+# promtool unit tests for archiving-rules.yaml.
+#
+# Run via `scripts/check-prometheusrule-tests.sh` (pre-commit), which extracts
+# `.spec.groups` from the sibling PrometheusRule CR into a `rules.yaml` beside a
+# copy of this file — hence the bare `rule_files:` reference below.
+#
+# Added with the 2026-09-09 staleness retune (36 h + `for: 2h` -> 28 h +
+# `for: 30m`). Two things in this rule are easy to break by reading it and
+# concluding it is fine, so both are asserted:
+#
+#   * the `> 0` filters. Replica instances export these gauges as 0. Without the
+#     filter, `max by (namespace, cluster)` still returns 0 for a perfectly
+#     healthy cluster and `time() - 0` is enormous — every cluster reports as
+#     never-backed-up. Test (c) is that guard, and test (e) records the price of
+#     it: a cluster where NOTHING has ever produced a backup emits only zeroes,
+#     so this alert is silent by construction. That is a deliberate trade, not an
+#     oversight, and it belongs in a test rather than in a comment nobody
+#     re-reads.
+#   * the `or` between the pre- and post-barman-cloud-plugin metric names.
+#     `or` unions by label set and prefers the left side. Test (d) exercises the
+#     new name alone, which is the state every cluster ends up in after the
+#     plugin migration.
+#
+# NOTE ON TIMESTAMPS: promtool's clock starts at the Unix epoch, so `eval_time:
+# 28h` means `time() == 100800`. The sibling suites for backup-cronjobs and
+# registry-integrity-probe shortcut a multi-hour threshold by giving the
+# timestamp series NEGATIVE values, so `time() - series` crosses the threshold
+# inside the first test hour. THAT DOES NOT WORK HERE: this rule filters its
+# inputs with `> 0` (see below), which discards a negative timestamp before the
+# subtraction ever happens, and the alert simply never fires — `got: []` against
+# an expectation that looks obviously right. So these cases run on the real
+# clock, with the timestamp pinned at 1 (the smallest value the `> 0` filter
+# admits):
+#
+#   expr true from t > 100801 s (28 h 00 m), `for: 30m` satisfied at 28h30m.
+#   Hence "28h -> []" and "28h35m -> firing".
+#
+# The cost is 1710 evaluations per case instead of 50; measured at 2.9 s for the
+# whole repo-wide suite, so it stays inside a pre-commit hook's budget.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # (a) Backup inside the 28 h window -> silent. At `eval_time: 28h` the age is
+  #     exactly 100799 s, one second short of the threshold: the boundary itself
+  #     is pinned here, not approximated.
+  - interval: 1m
+    name: "base backup inside the 28h window - nothing fires"
+    input_series:
+      - series: 'cnpg_collector_last_available_backup_timestamp{namespace="forgejo", cluster="forgejo-pg", pod="forgejo-pg-1"}'
+        values: "1+0x1740"
+    alert_rule_test:
+      - eval_time: 28h
+        alertname: CNPGBaseBackupStale
+        exp_alerts: []
+
+  # (b) Same series 35 min later: 28 h exceeded and `for: 30m` satisfied.
+  - interval: 1m
+    name: "base backup older than 28h - fires"
+    input_series:
+      - series: 'cnpg_collector_last_available_backup_timestamp{namespace="forgejo", cluster="forgejo-pg", pod="forgejo-pg-1"}'
+        values: "1+0x1740"
+    alert_rule_test:
+      - eval_time: 28h35m
+        alertname: CNPGBaseBackupStale
+        exp_alerts:
+          - exp_labels:
+              namespace: forgejo
+              cluster: forgejo-pg
+              severity: warning
+              component: cnpg
+            exp_annotations: &stale_forgejo
+              summary: "CNPG base backup is stale for forgejo/forgejo-pg"
+              description: "No successful base backup in more than 28 hours, against a\nnightly ScheduledBackup. WAL archiving may still be healthy —\nthis is about the recoverability POINT, not the WAL stream.\n\nTriage (note the fully-qualified resource: plain `backup`\nresolves to longhorn.io on this cluster and silently reports\nnothing):\n  kubectl -n forgejo get backups.postgresql.cnpg.io \\\n    --sort-by=.metadata.creationTimestamp\n  kubectl -n forgejo get scheduledbackup\n\nThe common cause is a Backup stuck in a non-terminal phase:\nthe ScheduledBackup will not create another until it\nfinishes, and it does not recover on its own. Delete the\nwedged Backup object, then confirm the next run completes.\n"
+
+  # (c) THE `> 0` GUARD. A healthy cluster whose replica exports 0 beside a
+  #     primary exporting a fresh timestamp. Drop the `> 0` and `max` still
+  #     returns the fresh value here — so this case alone would NOT catch the
+  #     regression; what catches it is that the 0-only cluster in (e) starts
+  #     firing. Both cases are needed, which is why both are here.
+  - interval: 1m
+    name: "replica exports 0 beside a fresh primary - nothing fires"
+    input_series:
+      - series: 'cnpg_collector_last_available_backup_timestamp{namespace="immich", cluster="immich-pg", pod="immich-pg-1"}'
+        values: "0+0x60"
+      - series: 'cnpg_collector_last_available_backup_timestamp{namespace="immich", cluster="immich-pg", pod="immich-pg-2"}'
+        values: "0+0x60"
+      - series: 'cnpg_collector_last_available_backup_timestamp{namespace="immich", cluster="immich-pg", pod="immich-pg-3"}'
+        values: "0+0x60"
+    alert_rule_test:
+      - eval_time: 55m
+        alertname: CNPGBaseBackupStale
+        exp_alerts: []
+
+  # (d) Post-plugin-migration metric name only. The right-hand side of the `or`
+  #     has to be able to fire on its own, because after the migration the
+  #     `cnpg_collector_*` name is gone entirely.
+  - interval: 1m
+    name: "stale backup reported under the barman-cloud plugin metric name - fires"
+    input_series:
+      - series: 'barman_cloud_cloudnative_pg_io_last_available_backup_timestamp{namespace="nextcloud", cluster="nextcloud-pg", pod="nextcloud-pg-1"}'
+        values: "1+0x1740"
+    alert_rule_test:
+      - eval_time: 28h
+        alertname: CNPGBaseBackupStale
+        exp_alerts: []
+      - eval_time: 28h35m
+        alertname: CNPGBaseBackupStale
+        exp_alerts:
+          - exp_labels:
+              namespace: nextcloud
+              cluster: nextcloud-pg
+              severity: warning
+              component: cnpg
+            exp_annotations:
+              summary: "CNPG base backup is stale for nextcloud/nextcloud-pg"
+              description: "No successful base backup in more than 28 hours, against a\nnightly ScheduledBackup. WAL archiving may still be healthy —\nthis is about the recoverability POINT, not the WAL stream.\n\nTriage (note the fully-qualified resource: plain `backup`\nresolves to longhorn.io on this cluster and silently reports\nnothing):\n  kubectl -n nextcloud get backups.postgresql.cnpg.io \\\n    --sort-by=.metadata.creationTimestamp\n  kubectl -n nextcloud get scheduledbackup\n\nThe common cause is a Backup stuck in a non-terminal phase:\nthe ScheduledBackup will not create another until it\nfinishes, and it does not recover on its own. Delete the\nwedged Backup object, then confirm the next run completes.\n"
+
+  # (e) THE ACCEPTED BLIND SPOT, asserted so it cannot be lost silently. A
+  #     cluster that has NEVER produced a base backup exports 0 on every
+  #     instance; `> 0` filters all of them away and this alert says nothing.
+  #     That state is covered by `CNPGClusterHasNoBackup` further down this same
+  #     file, which is built the other way round — it counts the `== 0` series
+  #     and subtracts any cluster that has a nonzero reading anywhere. If
+  #     someone removes `> 0` here to "close the gap", THIS assertion flips
+  #     first while (c) stays green, which is the correct order of discovery:
+  #     the coverage they are reaching for already exists as a separate
+  #     count-shaped rule, and dropping the filter would instead make every
+  #     healthy cluster with a replica report as never-backed-up.
+  #
+  #     `CNPGClusterHasNoBackup` depends on `cnpg_collector_*` continuing to be
+  #     emitted as 0 for un-backed-up instances — its left-hand side has no
+  #     `barman_cloud_* == 0` twin. Verified live 2026-09-09, post-plugin
+  #     migration: both metric families carry 34 series, 23 of the
+  #     `cnpg_collector_*` ones read 0 while none of the `barman_cloud_*` ones
+  #     do, so the left side is still populated and the rule still works. If
+  #     `cnpg_collector_*` ever stops being exported, that rule goes silent and
+  #     this comment is where to start.
+  - interval: 1m
+    name: "cluster that has never been backed up reports only zeroes - deliberately silent"
+    input_series:
+      - series: 'cnpg_collector_last_available_backup_timestamp{namespace="librechat", cluster="librechat-vectordb", pod="librechat-vectordb-1"}'
+        values: "0+0x60"
+    alert_rule_test:
+      - eval_time: 55m
+        alertname: CNPGBaseBackupStale
+        exp_alerts: []

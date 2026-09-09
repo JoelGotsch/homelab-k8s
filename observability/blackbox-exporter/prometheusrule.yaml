@@ -33,7 +33,8 @@ spec:
         # It exists because ALERTMANAGER INHIBITION IS NOT SUFFICIENT for
         # this problem, and the reason is structural rather than a tuning
         # matter: inhibition only suppresses a target while the SOURCE is
-        # firing. ResticSnapshotStale (for: 1h) and the OpenBao snapshot
+        # firing. ResticSnapshotStale (for: 30m since the 2026-09-09 retune, when its
+        # threshold came down from 48 h to 30 h) and the OpenBao snapshot
         # staleness alerts keep firing long after Hetzner recovers, because
         # they stay firing until the next successful run — which is correct
         # behaviour, a missed backup is worth knowing about, but it leaves

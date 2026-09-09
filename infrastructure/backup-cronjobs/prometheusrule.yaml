@@ -1,11 +1,20 @@
-# PrometheusRules for the backup-cronjobs layer.
-# Two alerts:
+# PrometheusRules for the backup-cronjobs layer. Five alerts in three groups,
+# each owning exactly one question — the split matters, because collapsing them
+# is what produced the 2026-09-09 retune:
 #
-# 1. Restic-staging PVC fill — surfaces sizing problems before
-#    `mc mirror` runs out of space + the cronjob errors out.
-# 2. Backup CronJob failed — surfaces a job that finished with
-#    a non-zero status, so failures don't sit unnoticed in
-#    failedJobsHistoryLimit until quarterly review.
+# 1. ResticStagingPVCNearFull / ...Critical — sizing, before `mc mirror` runs
+#    out of space and the cronjob errors out.
+# 2. BackupCronJobFailed — a run finished non-zero and no LATER run of the same
+#    CronJob has succeeded since, so failures neither sit unnoticed in
+#    failedJobsHistoryLimit nor fire forever after a recovery.
+# 3. BackupCronJobNotScheduled — the MECHANISM: suspended, or the next trigger
+#    is >90 min overdue. Warning, ~2 h to notice.
+# 4. ResticSnapshotStale — the OBJECTIVE: no successful off-site copy in 30 h,
+#    per lane, including never-succeeded and CronJob-deleted. Critical.
+#
+# 3 and 4 are deliberately different signals rather than two thresholds on one:
+# a lane can be scheduled and still not producing copies, and it can be
+# unscheduled while yesterday's copy is still perfectly fresh.
 #
 # Per ADR 0021 + the Restic-tier-3 journal entry's deferred
 # observability follow-ups (now closed by this manifest).
@@ -165,38 +174,87 @@ spec:
               skipped a step.
             runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
 
-        # NOTE (2026-07-07 verification): kube_job_status_completion_time
-        # has NO series in this namespace when no completed Job exists in
-        # the retained history (all-failed runs, or history aged out) —
-        # this expression is then an empty vector and CANNOT fire. The
-        # ResticSnapshotStale alert below covers that quiet path via
-        # CronJob-level metrics + absent().
-        - alert: BackupCronJobMissing24h
-          # If no successful Job has finished within the last
-          # 24h (cronjob runs daily), something's wrong even
-          # if no explicit failure metric fires (e.g., the
-          # CronJob is paused, or the schedule didn't trigger).
+        # `BackupCronJobMissing24h` lived here until 2026-09-09 and was
+        # replaced, not retuned, because its expression could not do the job
+        # its own description claimed ("CronJob may be paused / suspended, the
+        # schedule didn't trigger"):
+        #
+        #   time() - max by (namespace) (kube_job_status_completion_time{ns}) > 86400
+        #
+        # `max by (namespace)` collapses every Job in the namespace into one
+        # number, so the NEWEST completion anywhere kept it green. This
+        # namespace holds two independent daily lanes plus ad-hoc Jobs —
+        # measured over the last 30 d: `restic-verify-0829`,
+        # `restic-restore-drill`, `restic-inventory-probe`,
+        # `restic-pin-clean-ledger`, four `nas-migrate-*-ledger` runs. Any one
+        # of those completing masked BOTH lanes for 24 h, and
+        # `restic-minio-to-hetzner` stalling was masked by
+        # `restic-nas-personal-to-hetzner` succeeding four hours earlier, every
+        # single day. It has never fired.
+        #
+        # Fixing the aggregation alone does not rescue it. Per-lane, the
+        # measured median inter-success gap is 24.00 h, so a 24 h threshold
+        # would fire on every normal-but-slightly-late run; raised to a
+        # defensible 30 h it becomes a second `critical` on the identical
+        # signal as `ResticSnapshotStale` below, reading a metric family that
+        # the NOTE it carried already admitted disappears under Job GC. Two
+        # pages, one fact.
+        #
+        # So the missing coverage is taken from the other side. The objective
+        # ("an off-site copy exists") is owned by `ResticSnapshotStale`
+        # (critical, per lane). The MECHANISM ("the lane is still being
+        # scheduled at all") is owned by the alert below, which fires ~2 h
+        # after a missed trigger instead of 25 h, names the lane, and
+        # distinguishes suspended from stalled.
+        - alert: BackupCronJobNotScheduled
+          # Two complementary clauses, and they are complementary by
+          # construction rather than by coincidence — verified against
+          # kube-state-metrics v2.19.1 `internal/store/cronjob.go`:
+          #
+          #   * `kube_cronjob_next_schedule_time` is the next cron time after
+          #     `.status.lastScheduleTime` (or after `creationTimestamp` if the
+          #     CronJob has never been scheduled). It is NOT derived from
+          #     wall-clock `now`, so if the CronJob controller stops creating
+          #     Jobs the series freezes in the past and this comparison grows
+          #     without bound. Normal value is seconds — the controller creates
+          #     the Job essentially at the scheduled instant.
+          #   * that metric is deliberately NOT emitted for a suspended
+          #     CronJob ("if the cron job is suspended, don't track the next
+          #     scheduled time"), which is exactly the case the first clause
+          #     would otherwise go blind on — hence the explicit
+          #     `kube_cronjob_spec_suspend == 1` clause.
+          #
+          # 5400 s = the lanes' `startingDeadlineSeconds: 3600` (past which
+          # the controller skips the run outright) plus 30 min of margin for
+          # scrape and reconcile lag. With `for: 30m` this pages ~2 h after a
+          # daily trigger goes missing. `for` also gives an operator half an
+          # hour to suspend a lane for a restore drill without being paged.
           expr: |
             (
-              time() - max by (namespace) (
-                kube_job_status_completion_time{namespace="backup-cronjobs"}
-              )
-            ) > 86400
-          for: 5m
+              kube_cronjob_spec_suspend{namespace="backup-cronjobs", cronjob=~"restic-.*"} == 1
+            )
+            or
+            (
+              time() - kube_cronjob_next_schedule_time{namespace="backup-cronjobs", cronjob=~"restic-.*"}
+              > 5400
+            )
+          for: 30m
           labels:
-            severity: critical
+            severity: warning
             component: backup-cronjobs
           annotations:
-            summary: No successful backup-cronjobs Job in 24h
+            summary: "Backup CronJob {{ $labels.cronjob }} is not being scheduled"
             description: |
-              The most recent successful Job in
-              `backup-cronjobs` finished
-              {{ $value | humanizeDuration }} ago (> 24h).
-              CronJob may be paused / suspended, the schedule
-              didn't trigger, or every recent run failed.
+              `{{ $labels.cronjob }}` is either suspended or its next
+              scheduled run is more than 90 min overdue. This is about the
+              MECHANISM, not the backup: the last off-site copy may still be
+              fresh, and `ResticSnapshotStale` is what fires when it is not.
               Inspect:
-                kubectl -n backup-cronjobs get cronjobs
-                kubectl -n backup-cronjobs get jobs --sort-by=.status.startTime
+                kubectl -n backup-cronjobs get cronjob {{ $labels.cronjob }} -o yaml | grep -E 'suspend|lastSchedule|lastSuccessful'
+                kubectl -n backup-cronjobs get jobs --sort-by=.status.startTime | tail -10
+              If a drill suspended it, unsuspend via a commit — Argo owns this
+              object and `kubectl patch` will be reverted (or silently kept,
+              which is worse).
             runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
 
     - name: backup-cronjobs.staleness
@@ -214,7 +272,17 @@ spec:
         #      .status.lastSuccessfulTime is set; verified live
         #      2026-07-07: restic-minio-to-hetzner is in exactly this
         #      state);
-        #   3. absent() — the CronJob object was deleted outright.
+        #   3+4. absent() PER LANE — the CronJob object was deleted outright.
+        #      Enumerated by name rather than left as one
+        #      `absent(...{cronjob=~"restic-.*"})`, which was a blind spot:
+        #      `absent()` over a regex selector is false while ANY matching
+        #      series exists, so deleting `restic-nas-personal-to-hetzner`
+        #      alone produced no alert at all — clauses 1 and 2 lose their
+        #      series with the object, and clause 3 was still satisfied by its
+        #      sibling. `absent()` keeps the labels of its `=` matchers, so
+        #      each clause names its own lane in the page. Adding a third
+        #      restic lane means adding a fifth clause here; that is the cost
+        #      of a per-lane guarantee.
         # CronJob-name regex matches the real object verified via
         # `kubectl get cronjob -A` 2026-07-07: restic-minio-to-hetzner
         # in namespace backup-cronjobs.
@@ -224,29 +292,63 @@ spec:
         # patch cronjob restic-minio-to-hetzner -p
         # '{"spec":{"suspend":true}}'`, wait for the page to reach the
         # phone, ack, unsuspend. Until then this is a paper guarantee.
+        # THRESHOLD (retuned 2026-09-09, was `86400 * 2` with `for: 1h`).
+        # 48 h + 1 h against a 24 h lane meant this alert could not report a
+        # missed off-site backup until ~25 h after the objective was already
+        # broken — the same defect class as the OpenBao snapshot alert on
+        # 2026-09-06, where the operator learned about a failed 03:05 upload at
+        # 15:35. A staleness threshold is a statement about the OBJECTIVE, so
+        # it is derived from the schedule, not chosen for quiet.
+        #
+        # 108000 s = 30 h, from measurement over 30 d (Prometheus, 2026-09-09)
+        # rather than from `activeDeadlineSeconds`:
+        #
+        #   lane                            median gap  max healthy gap  max run
+        #   restic-minio-to-hetzner            24.00 h          24.00 h   116 min
+        #   restic-nas-personal-to-hetzner     23.99 h          27.79 h   250 min
+        #
+        # Worst legitimate gap between successive successes is
+        # `period + startingDeadlineSeconds + max_run - min_run`
+        # = 24 h + 1 h + 4.2 h - 0.3 h = 28.9 h, and `restic-nas-personal`
+        # is the binding lane. 30 h leaves ~1.1 h of margin on it and ~3.4 h on
+        # `restic-minio`; one shared number keeps the rule testable, and the
+        # comment records which lane sets it.
+        #
+        # Deliberately NOT derived from `activeDeadlineSeconds` (21600 / 43200).
+        # Those are kill-switches, not expected durations: a run that genuinely
+        # takes 12 h has already blown the "off-site copy no older than a day"
+        # objective, so this alert firing then is correct behaviour, not a false
+        # positive. `BackupCronJobFailed` above is what covers the failure
+        # itself.
+        #
+        # `for: 30m` (was 1h) — its only job here is riding out a scrape gap or
+        # a kube-state-metrics restart; against a 30 h threshold anything longer
+        # is just added blindness.
         - alert: ResticSnapshotStale
           expr: |
             (
               time() - kube_cronjob_status_last_successful_time{namespace="backup-cronjobs",cronjob=~"restic-.*"}
-              > 86400 * 2
+              > 108000
             )
             or
             (
-              (time() - kube_cronjob_created{namespace="backup-cronjobs",cronjob=~"restic-.*"} > 86400 * 2)
+              (time() - kube_cronjob_created{namespace="backup-cronjobs",cronjob=~"restic-.*"} > 108000)
               unless kube_cronjob_status_last_successful_time{namespace="backup-cronjobs",cronjob=~"restic-.*"}
             )
             or
-            absent(kube_cronjob_created{namespace="backup-cronjobs",cronjob=~"restic-.*"})
-          for: 1h
+            absent(kube_cronjob_created{namespace="backup-cronjobs",cronjob="restic-minio-to-hetzner"})
+            or
+            absent(kube_cronjob_created{namespace="backup-cronjobs",cronjob="restic-nas-personal-to-hetzner"})
+          for: 30m
           labels:
             severity: critical
             component: backup-cronjobs
           annotations:
-            summary: "Backup CronJob {{ $labels.cronjob }} has not succeeded in 2 days"
+            summary: "Backup CronJob {{ $labels.cronjob }} has not succeeded in 30 hours"
             description: >-
-              No successful restic backup run for 2+ days (or the
-              CronJob was deleted / has never succeeded). Covers the
-              quiet-failure path: a suspended/deleted CronJob or a
-              credentials failure produces NO failure event. Review
-              finding docs-improvements.md L4/H1.
+              No successful restic backup run for 30+ h against a daily
+              schedule (or the CronJob was deleted / has never succeeded).
+              Covers the quiet-failure path: a suspended/deleted CronJob or a
+              credentials failure produces NO failure event. Review finding
+              docs-improvements.md L4/H1.
             runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md

@@ -316,8 +316,8 @@ spec:
     # information.
     #
     # SCOPED TO THE JOB-FAILURE CLASS ONLY, ON PURPOSE. The staleness /
-    # missing-backup criticals (ResticSnapshotStale, BackupCronJobMissing24h,
-    # the OpenBao snapshot staleness alerts) are deliberately NOT suppressed:
+    # missing-backup criticals (ResticSnapshotStale, the OpenBao snapshot
+    # staleness alerts) are deliberately NOT suppressed:
     # they are the backstop that still pages if a lane fails to recover after
     # Hetzner comes back, which is the case where suppression would be
     # genuinely dangerous. They get ATTRIBUTED instead of silenced, by
@@ -333,6 +333,12 @@ spec:
     # `component` matcher is what keeps the chart's own KubeJobFailed — which
     # carries no `component` label — out of scope, so an unrelated Job
     # failing during a Hetzner outage still reports.
+    #
+    # `BackupCronJobNotScheduled` (added 2026-09-09, replacing
+    # `BackupCronJobMissing24h`) is also out of scope, and for a stronger
+    # reason than the anchored regex: a Hetzner outage cannot make the CronJob
+    # controller stop creating Jobs, so that alert firing during one is a
+    # genuinely separate fault and must not be attributed away.
     - sourceMatch:
         - name: alertname
           value: HetznerStorageBoxUnreachable

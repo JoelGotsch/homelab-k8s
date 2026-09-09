@@ -1,0 +1,278 @@
+# promtool unit tests for prometheusrule.yaml.
+#
+# Run via `scripts/check-prometheusrule-tests.sh` (pre-commit), which extracts
+# `.spec.groups` from the sibling PrometheusRule CR into a `rules.yaml` beside a
+# copy of this file — hence the bare `rule_files:` reference below. promtool
+# cannot read a PrometheusRule CR directly.
+#
+# These exist because of the 2026-09-09 retune. Two defects had shipped and both
+# had been reviewed by reading the PromQL, which is exactly what missed them:
+#
+#   * `BackupCronJobMissing24h` used `max by (namespace)`, so the newest Job
+#     completion ANYWHERE in the namespace kept it green — the other daily lane,
+#     or any ad-hoc `restic-verify-*` / `nas-migrate-*` run. Test (b) is the
+#     regression guard: one lane stalls, the other succeeds, an ad-hoc Job
+#     completes, and the page must still name the stalled lane.
+#   * `ResticSnapshotStale` ended in a single `absent(...{cronjob=~"restic-.*"})`.
+#     `absent()` over a regex is false while ANY matching series exists, so
+#     deleting one of two lanes produced silence. Test (c) is that guard.
+#
+# NOTE ON TIMESTAMPS: promtool's clock starts at the Unix epoch, so `eval_time:
+# 50m` means `time() == 3000`. Testing a 30 h threshold with realistic epoch
+# values would need ~1800 evaluations per case. Instead the `*_time` series
+# below carry NEGATIVE values, which makes `time() - series` cross 108000 within
+# the first hour of the test clock. Nothing in these rules reads a timestamp as
+# a date — every use is `time() - x` — so only the difference matters, and the
+# suite stays fast enough for a pre-commit hook.
+#
+# With last_successful = -107000 and the group's `interval: 1m`:
+#   expr true from t > 1000 s (first evaluation at 17m), `for: 30m` satisfied
+#   at 47m. Hence "45m -> []" and "50m -> firing" throughout.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # (a) Both lanes healthy, scheduled, unsuspended -> total silence.
+  - interval: 1m
+    name: "both lanes fresh and scheduled - nothing fires"
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "0+0x60"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "0+0x60"
+      - series: 'kube_cronjob_created{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "-500000+0x60"
+      - series: 'kube_cronjob_created{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "-500000+0x60"
+      - series: 'kube_cronjob_spec_suspend{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "0+0x60"
+      - series: 'kube_cronjob_spec_suspend{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "0+0x60"
+      # Next trigger sits ahead of the test clock for the whole run.
+      - series: 'kube_cronjob_next_schedule_time{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "10000+0x60"
+      - series: 'kube_cronjob_next_schedule_time{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "10000+0x60"
+    alert_rule_test:
+      - eval_time: 55m
+        alertname: ResticSnapshotStale
+        exp_alerts: []
+      - eval_time: 55m
+        alertname: BackupCronJobNotScheduled
+        exp_alerts: []
+
+  # (b) THE `max by (namespace)` BUG. restic-minio has not succeeded in >30 h;
+  #     restic-nas succeeded moments ago; an ad-hoc Job completed just now.
+  #     Exactly one alert, naming restic-minio.
+  - interval: 1m
+    name: "one lane stalls while its sibling and an ad-hoc job succeed - fires for the stalled lane only"
+    input_series:
+      # -107000 -> crosses 108000 at t=1000s, `for: 30m` -> firing at 47m.
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "-107000+0x60"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "0+0x60"
+      - series: 'kube_cronjob_created{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "-500000+0x60"
+      - series: 'kube_cronjob_created{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "-500000+0x60"
+      - series: 'kube_cronjob_spec_suspend{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "0+0x60"
+      - series: 'kube_cronjob_spec_suspend{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "0+0x60"
+      - series: 'kube_cronjob_next_schedule_time{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "10000+0x60"
+      - series: 'kube_cronjob_next_schedule_time{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "10000+0x60"
+      # The masking series: an ad-hoc Job (not owned by either CronJob) that
+      # completed. The retired rule read exactly this and stayed green.
+      - series: 'kube_job_status_completion_time{namespace="backup-cronjobs", job_name="restic-verify-0829"}'
+        values: "0+0x60"
+    alert_rule_test:
+      # `for: 30m` not yet satisfied.
+      - eval_time: 45m
+        alertname: ResticSnapshotStale
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: ResticSnapshotStale
+        exp_alerts:
+          - exp_labels:
+              namespace: backup-cronjobs
+              cronjob: restic-minio-to-hetzner
+              severity: critical
+              component: backup-cronjobs
+            exp_annotations:
+              summary: "Backup CronJob restic-minio-to-hetzner has not succeeded in 30 hours"
+              description: "No successful restic backup run for 30+ h against a daily schedule (or the CronJob was deleted / has never succeeded). Covers the quiet-failure path: a suspended/deleted CronJob or a credentials failure produces NO failure event. Review finding docs-improvements.md L4/H1."
+              runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+      # The mechanism is fine — this is a producing failure, not a scheduling
+      # one. Asserting the silence is the point: the two alerts must not be
+      # two thresholds on one signal.
+      - eval_time: 50m
+        alertname: BackupCronJobNotScheduled
+        exp_alerts: []
+
+  # (c) THE regex-`absent()` BLIND SPOT. restic-nas's CronJob object is deleted
+  #     outright (all its series stop); restic-minio stays healthy. The old
+  #     single `absent(...{cronjob=~"restic-.*"})` was satisfied by
+  #     restic-minio's surviving series and said nothing at all.
+  - interval: 1m
+    name: "one of two CronJobs deleted - fires for the deleted lane"
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "0+0x60"
+      - series: 'kube_cronjob_created{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "-500000+0x60"
+      - series: 'kube_cronjob_spec_suspend{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "0+0x60"
+      - series: 'kube_cronjob_next_schedule_time{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "10000+0x60"
+      # restic-nas exists for 5 minutes, then the object is gone.
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "0+0x5 _x60"
+      - series: 'kube_cronjob_created{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "-500000+0x5 _x60"
+      - series: 'kube_cronjob_spec_suspend{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "0+0x5 _x60"
+      - series: 'kube_cronjob_next_schedule_time{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "10000+0x5 _x60"
+    alert_rule_test:
+      # Series go stale 5 min after the last sample, so the `absent()` clause
+      # activates around 10m and `for: 30m` lands it at ~41m.
+      - eval_time: 35m
+        alertname: ResticSnapshotStale
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: ResticSnapshotStale
+        exp_alerts:
+          - exp_labels:
+              namespace: backup-cronjobs
+              cronjob: restic-nas-personal-to-hetzner
+              severity: critical
+              component: backup-cronjobs
+            exp_annotations:
+              summary: "Backup CronJob restic-nas-personal-to-hetzner has not succeeded in 30 hours"
+              description: "No successful restic backup run for 30+ h against a daily schedule (or the CronJob was deleted / has never succeeded). Covers the quiet-failure path: a suspended/deleted CronJob or a credentials failure produces NO failure event. Review finding docs-improvements.md L4/H1."
+              runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+
+  # (d) Suspended lane. kube-state-metrics v2.19.1 deliberately stops emitting
+  #     `kube_cronjob_next_schedule_time` for a suspended CronJob, so the
+  #     overdue clause goes blind and `spec_suspend == 1` is what must carry it.
+  #     The off-site copy is still fresh, so the OBJECTIVE alert stays silent —
+  #     that separation is the whole reason this alert replaced a second
+  #     threshold on last-success.
+  - interval: 1m
+    name: "lane suspended with a fresh copy - mechanism fires, objective stays silent"
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "0+0x60"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "0+0x60"
+      - series: 'kube_cronjob_created{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "-500000+0x60"
+      - series: 'kube_cronjob_created{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "-500000+0x60"
+      - series: 'kube_cronjob_spec_suspend{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "1+0x60"
+      - series: 'kube_cronjob_spec_suspend{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "0+0x60"
+      # Emitted for the unsuspended lane only, exactly as ks-m behaves.
+      - series: 'kube_cronjob_next_schedule_time{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "10000+0x60"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: BackupCronJobNotScheduled
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: BackupCronJobNotScheduled
+        exp_alerts:
+          - exp_labels:
+              namespace: backup-cronjobs
+              cronjob: restic-minio-to-hetzner
+              severity: warning
+              component: backup-cronjobs
+            exp_annotations: &not_scheduled_minio
+              summary: "Backup CronJob restic-minio-to-hetzner is not being scheduled"
+              description: "`restic-minio-to-hetzner` is either suspended or its next\nscheduled run is more than 90 min overdue. This is about the\nMECHANISM, not the backup: the last off-site copy may still be\nfresh, and `ResticSnapshotStale` is what fires when it is not.\nInspect:\n  kubectl -n backup-cronjobs get cronjob restic-minio-to-hetzner -o yaml | grep -E 'suspend|lastSchedule|lastSuccessful'\n  kubectl -n backup-cronjobs get jobs --sort-by=.status.startTime | tail -10\nIf a drill suspended it, unsuspend via a commit — Argo owns this\nobject and `kubectl patch` will be reverted (or silently kept,\nwhich is worse).\n"
+              runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+      - eval_time: 35m
+        alertname: ResticSnapshotStale
+        exp_alerts: []
+
+  # (e) The controller stopped creating Jobs: `next_schedule_time` is frozen in
+  #     the past (ks-m computes it from `.status.lastScheduleTime`, never from
+  #     wall clock) and drifts further every scrape. 5400 s grace + `for: 30m`.
+  - interval: 1m
+    name: "next trigger overdue by more than 90 min - mechanism fires"
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "0+0x300"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "0+0x300"
+      - series: 'kube_cronjob_created{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "-500000+0x300"
+      - series: 'kube_cronjob_created{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "-500000+0x300"
+      - series: 'kube_cronjob_spec_suspend{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "0+0x300"
+      - series: 'kube_cronjob_spec_suspend{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "0+0x300"
+      # Frozen at t=0 for restic-minio: overdue by `time()`, crossing 5400 s at
+      # 90m, `for: 30m` -> firing at 2h.
+      - series: 'kube_cronjob_next_schedule_time{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "0+0x300"
+      - series: 'kube_cronjob_next_schedule_time{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "100000+0x300"
+    alert_rule_test:
+      - eval_time: 115m
+        alertname: BackupCronJobNotScheduled
+        exp_alerts: []
+      - eval_time: 125m
+        alertname: BackupCronJobNotScheduled
+        exp_alerts:
+          - exp_labels:
+              namespace: backup-cronjobs
+              cronjob: restic-minio-to-hetzner
+              severity: warning
+              component: backup-cronjobs
+            exp_annotations: *not_scheduled_minio
+
+  # (f) Never succeeded: the CronJob object is older than 30 h and has no
+  #     `last_successful_time` series at all (ks-m only emits it once
+  #     `.status.lastSuccessfulTime` is set — restic-minio was in exactly this
+  #     state at the 2026-07-07 verification). The `unless` clause carries it.
+  - interval: 1m
+    name: "CronJob older than 30h that has never succeeded - fires"
+    input_series:
+      - series: 'kube_cronjob_created{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "-107000+0x60"
+      - series: 'kube_cronjob_created{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "-500000+0x60"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "0+0x60"
+      - series: 'kube_cronjob_spec_suspend{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "0+0x60"
+      - series: 'kube_cronjob_spec_suspend{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "0+0x60"
+      - series: 'kube_cronjob_next_schedule_time{namespace="backup-cronjobs", cronjob="restic-minio-to-hetzner"}'
+        values: "10000+0x60"
+      - series: 'kube_cronjob_next_schedule_time{namespace="backup-cronjobs", cronjob="restic-nas-personal-to-hetzner"}'
+        values: "10000+0x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: ResticSnapshotStale
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: ResticSnapshotStale
+        exp_alerts:
+          - exp_labels:
+              namespace: backup-cronjobs
+              cronjob: restic-minio-to-hetzner
+              severity: critical
+              component: backup-cronjobs
+            exp_annotations:
+              summary: "Backup CronJob restic-minio-to-hetzner has not succeeded in 30 hours"
+              description: "No successful restic backup run for 30+ h against a daily schedule (or the CronJob was deleted / has never succeeded). Covers the quiet-failure path: a suspended/deleted CronJob or a credentials failure produces NO failure event. Review finding docs-improvements.md L4/H1."
+              runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
