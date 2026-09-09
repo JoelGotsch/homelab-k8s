@@ -18,7 +18,7 @@ helmCharts:
   - name: kube-prometheus-stack
     # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://prometheus-community.github.io/helm-charts).
     repo: oci://registry.homelab.internal/homelab
-    version: "87.16.1"  # OPERATOR PINS via Renovate
+    version: "87.21.0"  # OPERATOR PINS via Renovate
     releaseName: kube-prometheus-stack
     namespace: monitoring
     valuesFile: values.yaml

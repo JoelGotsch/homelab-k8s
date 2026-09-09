@@ -148,12 +148,12 @@
   mirror_artifact_sha256: sha256:b3ded291c979373ffd328cdc4302b71fb14f166ffe4b339353df288d41474959
 - layer: observability/kube-prometheus-stack
   name: kube-prometheus-stack
-  version: 87.16.1
+  version: 87.21.0
   upstream: https://prometheus-community.github.io/helm-charts
   mirror: oci://registry.homelab.internal/homelab/kube-prometheus-stack
-  content_digest: sha256:cf8d4a42056fc151ff4bf742bb664d886918854d3802e3ff209fb2ad3fb28a03
-  upstream_artifact_sha256: sha256:153c69faae66a313dc07ed36f77741fd17cc7da86d3d7790b34bf4d4902fe7f4
-  mirror_artifact_sha256: sha256:153c69faae66a313dc07ed36f77741fd17cc7da86d3d7790b34bf4d4902fe7f4
+  content_digest: sha256:c09026a65848acebf541850a16d91086361135b75167b6b1ce3b80182560eccd
+  upstream_artifact_sha256: sha256:05eae98df0ff6c21877a26a4400780e4bbff248bc3b88694ef8d08b273ed6815
+  mirror_artifact_sha256: sha256:05eae98df0ff6c21877a26a4400780e4bbff248bc3b88694ef8d08b273ed6815
 - layer: observability/langfuse
   name: langfuse
   version: 1.5.38
