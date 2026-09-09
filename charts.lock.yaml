@@ -76,12 +76,12 @@
   mirror_artifact_sha256: sha256:9663e8d3d15b070e5925b4f26b3f9a8824872a42ac7bf27ca105c897cb5aba51
 - layer: infrastructure/longhorn
   name: longhorn
-  version: 1.11.3
+  version: 1.12.1
   upstream: https://charts.longhorn.io
   mirror: oci://registry.homelab.internal/homelab/longhorn
-  content_digest: sha256:0ae4c782c3c50a71150796e2900430b0c6c742a94d3e4dc243d0c4ea578e7692
-  upstream_artifact_sha256: sha256:ab0682fe8ab2863c271bcfc230bc8c67a45dc0f2432cadbb917b3f52a23393d4
-  mirror_artifact_sha256: sha256:ab0682fe8ab2863c271bcfc230bc8c67a45dc0f2432cadbb917b3f52a23393d4
+  content_digest: sha256:c1e291fa64031df8e1fa07c418ed1ea5aaf69e3e857989b123d2e7efc1949c41
+  upstream_artifact_sha256: sha256:c8cf4b35a9d872cd5f7e44fd26d8e6ac7c2abaee42f4e2f2a0b0ebbc6e3a6116
+  mirror_artifact_sha256: sha256:c8cf4b35a9d872cd5f7e44fd26d8e6ac7c2abaee42f4e2f2a0b0ebbc6e3a6116
 - layer: infrastructure/minio-on-nas
   name: minio
   version: 5.4.0

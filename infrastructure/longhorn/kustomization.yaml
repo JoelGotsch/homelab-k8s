@@ -5,7 +5,7 @@ helmCharts:
   # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://charts.longhorn.io).
   repo: oci://registry.homelab.internal/homelab
 
-  version: 1.11.3
+  version: 1.12.1
   releaseName: longhorn
   namespace: longhorn-system
   valuesFile: values.yaml

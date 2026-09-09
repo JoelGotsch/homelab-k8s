@@ -113,6 +113,20 @@ metrics:
     additionalLabels:
       release: kube-prometheus-stack
 
+# Longhorn 1.12 renders six ingress NetworkPolicies for its internal
+# endpoints by default (`restrictInternalTraffic: true`, new in 1.12,
+# independent of `networkPolicies.enabled`). They are held OFF here,
+# which is the 1.11.3 state (zero policies rendered), because the
+# chart-default `longhorn-manager` policy admits only same-namespace
+# pods: it would cut the Prometheus scrape of :9500 from `monitoring`
+# (the ADR 0036 D7 alert source, ServiceMonitor above) and, under
+# Cilium, the host-originated iSCSI/CSI traffic into instance-manager
+# pods. Adopting them means re-authoring the six with a
+# namespaceSelector for monitoring plus an explicit host allowance --
+# homelab-docs/TODO.md "Version-bump sweep follow-ups (2026-09-10)".
+networkPolicies:
+  restrictInternalTraffic: false
+
 # Resource limits — Longhorn is per-node DaemonSet.
 # CSI sidecars: chart 1.7.2 does NOT expose per-container
 # resource keys under `csi:` (only replica counts). CSI-plugin
