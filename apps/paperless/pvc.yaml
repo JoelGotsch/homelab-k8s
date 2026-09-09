@@ -1,0 +1,110 @@
+# PVCs for Paperless-ngx's hot/cold storage split per ADR 0030 §D2.
+#
+# Paperless writes to four directories under
+# /usr/src/paperless/:
+#   data/     — config, dictionaries, ML model cache, db migrations.
+#               Tiny + load-bearing. Longhorn (hot).
+#   media/    — document originals + archive PDFs + thumbnails +
+#               OCR text. The bulk; `personal`-classified.
+#               csi-rclone (cold, encrypted at NAS).
+#   consume/  — incoming documents Paperless watches and processes.
+#               Transient; once consumed, files move to media/ and
+#               are deleted from here. Longhorn (hot).
+#   export/   — operator-triggered bulk exports. Empty most of the
+#               time. Longhorn (hot).
+#
+# The thumbnails-on-csi-rclone caveat from Immich's analysis
+# applies in a milder form here: Paperless's UI shows tile
+# grids of thumbs but pages through far fewer than Immich's
+# infinite-scroll timeline, and the read-amp blast radius is
+# bounded by document-count rather than photo-count. Accepted
+# as a known small cost; revisit if the operator's archive
+# grows into the >50k-document range.
+
+# Hot bucket — data dir.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paperless-data
+  namespace: paperless
+  labels:
+    app.kubernetes.io/name: paperless-ngx
+    app.kubernetes.io/component: hot-storage
+  annotations:
+    # ADR 0036: -retain SCs require a rationale.
+    retention.homelab.internal/reason: "Paperless data dir — config, migrations, ML/OCR model caches; rebuild is downloadable but non-trivial."
+spec:
+  accessModes: [ReadWriteOnce]
+  # 2026-07-09 ADR 0036: migrate to -retain family.
+  storageClassName: longhorn-replica2
+  resources:
+    requests:
+      # Sized for: SQLite WAL leftovers (none — we use CNPG),
+      # ML model cache (~2GB for the NLTK + spacy models
+      # Paperless uses for classification), tessdata
+      # languages (~200MB), config + migrations (~MB).
+      # 10Gi covers comfortably.
+      storage: 10Gi
+---
+# Cold bucket — media (originals + archive + thumbs + OCR
+# text). `personal`-classified per ADR 0003.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paperless-media
+  namespace: paperless
+  labels:
+    app.kubernetes.io/name: paperless-ngx
+    app.kubernetes.io/component: cold-storage
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nas-crypt-personal-documents
+  resources:
+    requests:
+      # Soft cap; NAS share is the actual constraint. 500Gi
+      # covers tens-of-thousands of typical-size scanned
+      # documents (PDF/image, ~MB each) with archive-PDF
+      # variants Paperless generates.
+      storage: 500Gi
+---
+# Hot bucket — consume (transient incoming watch directory).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paperless-consume
+  namespace: paperless
+  labels:
+    app.kubernetes.io/name: paperless-ngx
+    app.kubernetes.io/component: hot-storage
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: longhorn-replica2
+  resources:
+    requests:
+      # Transient; sized for a backlog of un-consumed
+      # documents (e.g., operator drops a year of statements
+      # at once). 10Gi handles ~thousand documents queued.
+      storage: 10Gi
+---
+# Hot bucket — export (operator-triggered bulk exports).
+# Stays on the default (reclaim=Delete) SC — exports are one-off,
+# operator-triggered artefacts; on PVC delete losing an incomplete
+# export is acceptable.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paperless-export
+  namespace: paperless
+  labels:
+    app.kubernetes.io/name: paperless-ngx
+    app.kubernetes.io/component: hot-storage
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: longhorn-replica2
+  resources:
+    requests:
+      # Right-sized 100Gi → 20Gi 2026-07-09 per ADR 0036 audit
+      # (previous audit report noted actual usage <10 GiB).
+      # Bulk export is re-run on demand; capacity is easy to
+      # resize if a larger archive lands.
+      storage: 100Gi

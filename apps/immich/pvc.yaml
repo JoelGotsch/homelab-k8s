@@ -1,0 +1,74 @@
+# PVCs for Immich's hot/cold storage split per ADR 0030 §D2.
+#
+# The Immich helm chart mounts ONE PVC at /usr/src/app/upload
+# by default. Per ADR 0030 the right shape for personal+ data
+# is to split by access pattern:
+#
+#   /usr/src/app/upload           ← Longhorn (this layer's
+#                                   `immich-hot` PVC)
+#                                   thumbs/, encoded-video/,
+#                                   profile/, backups/,
+#                                   upload/ (staging)
+#   /usr/src/app/upload/library   ← csi-rclone (this layer's
+#                                   `immich-originals` PVC)
+#                                   storage-template-
+#                                   organised originals on
+#                                   the encrypted NAS share
+#
+# values.yaml mounts both. Storage-template's upload→library
+# move on first-index of an upload becomes a cross-PVC copy —
+# one-shot per file, amortises to imperceptible at steady
+# state.
+
+# Hot bucket — thumbs, previews, encoded video, profile,
+# DB backups, upload-staging. LUKS at rest via cluster-node
+# disk encryption (ADR 0017).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-hot
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: hot-storage
+  annotations:
+    # ADR 0036: -retain SCs require a rationale. Immich's hot
+    # bucket holds thumbnails, previews, encoded video, profile
+    # + CNPG backups. Regenerating from the cold-tier originals
+    # costs hours of ML re-inference (CLIP + face embeddings) —
+    # deletion should NOT release the underlying volume.
+    retention.homelab.internal/reason: "Regenerating thumbs/previews/encoded video from originals costs hours of ML re-inference (CLIP + face embeddings); PVC delete must not evict data."
+spec:
+  accessModes: [ReadWriteMany]
+  # 2026-07-09 ADR 0036: migrate to -retain family. Default
+  # longhorn-replica2 is now reclaim=Delete (ephemeral).
+  storageClassName: longhorn-replica2
+  resources:
+    requests:
+      # Right-sized 2026-07-09 per ADR 0036 audit — actual usage
+      # sat well under 10 GiB (thumbs+previews at current photo
+      # count + DB backups). Original 100 GiB was speculative
+      # headroom for a hypothetical 100k-photo library. Resize
+      # (capacity-only edit) when actual utilisation approaches.
+      storage: 100Gi
+---
+# Cold bucket — originals on the encrypted NAS share via
+# csi-rclone. The crypt-over-NFS chained remote is configured
+# in the StorageClass's referenced Secret per ADR 0030 §D1.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-originals
+  namespace: immich
+  labels:
+    app.kubernetes.io/name: immich
+    app.kubernetes.io/component: cold-storage
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nas-crypt-personal-photos
+  resources:
+    requests:
+      # Sized for ~100k photo + video originals + headroom.
+      # csi-rclone reclaimPolicy: Retain — deleting this PVC
+      # does NOT delete the NAS-side bytes.
+      storage: 4Ti

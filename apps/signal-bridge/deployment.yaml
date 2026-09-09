@@ -1,0 +1,192 @@
+# bbernhard/signal-cli-rest-api as the Signal-cli transport.
+#
+# Per ADR 0009 D1 + ADR 0021 D7: Signal is the default approval
+# transport + high-severity alert sink. signal-bridge is the
+# low-level wrapper around signal-cli; approval-channel is the
+# higher-level alert/approval router that calls into here.
+#
+# Single-replica Deployment (signal-cli is stateful — registration
+# data lives in the PVC, and concurrent processes on the same
+# data dir corrupt the SQLite store). Pod restart re-loads
+# registration from PVC; no re-verify needed.
+#
+# MODE=native uses signal-cli's GraalVM-native build for fast
+# startup (~2s vs ~30s on JVM). As of upstream 0.99 the native
+# binary ships in the image and the separate `*-native` tag was
+# dropped, so native is selected purely by MODE, not the tag.
+# We pin the `-rootless` variant deliberately: the standard image's
+# entrypoint runs usermod/groupmod (needs root) and crashes under
+# our non-root + readOnlyRootFilesystem securityContext (exit 10,
+# "groupmod: cannot lock /etc/group"). The rootless image runs as
+# `signal-api`, sets S6_READ_ONLY_ROOT=1, and writes its s6 runtime
+# to /tmp (the emptyDir below); its SIGNAL_CLI_CONFIG_DIR is
+# /home/.local/share/signal-cli, matching the PVC mount. Native
+# falls back to `normal` on armv7; our nodes are amd64.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: signal-bridge-config
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: signal-bridge
+data:
+  # Native build — selected by MODE; bundled in the standard image.
+  MODE: native
+  # NOTE: no prometheus metrics here. bbernhard/signal-cli-rest-api
+  # has no ENABLE_METRICS var and no /v1/metrics endpoint in any mode
+  # (verified 2026-07-15 against the running 0.99 pod: /v1/metrics
+  # 404s under both native and json-rpc; upstream docs confirm no
+  # metrics feature — only the unrelated h4x0r/signal-cli-api fork
+  # exposes Prometheus). The old ENABLE_METRICS key + ServiceMonitor
+  # were a false premise and were removed 2026-07-16. Pod liveness is
+  # covered by KubePodNotReady (kube-state-metrics), not app metrics.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: signal-bridge
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: signal-bridge
+spec:
+  replicas: 1
+  strategy:
+    # Recreate, not RollingUpdate — two pods cannot share the
+    # signal-cli data dir (SQLite locks corrupt on overlap).
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: signal-bridge
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: signal-bridge
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # s6-overlay (rootless image) refuses to boot unless /run is
+        # owned by the runtime uid (1000): its preinit aborts with
+        # "/run belongs to uid 0 ... lacking privileges to fix it".
+        # A k8s emptyDir always mounts root-owned and fsGroup only sets
+        # the group, so this one-shot root init chowns /run (clearing the
+        # fsGroup setgid bit). Reuses the same pinned image — no extra
+        # image to scan/pin — with root confined to init and caps
+        # dropped to just CHOWN. Trips restricted PSA audit/warn (noise).
+        - name: chown-run
+          image: "bbernhard/signal-cli-rest-api:0.99-rootless@sha256:bf76cf1b34cc54763fc0f542b4210e2a60216ab23b335eec93e9d14556dd68bd"
+          imagePullPolicy: IfNotPresent
+          # chmod BEFORE chown: once /run is owned by 1000, root (uid 0)
+          # no longer owns it and — with caps dropped to CHOWN only (no
+          # FOWNER) — can't chmod it. Doing chmod while still root-owned
+          # also clears the fsGroup setgid bit s6 rejects as "insecure".
+          command: ["sh", "-c", "chmod 0755 /run && chown 1000:1000 /run"]
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN]
+          volumeMounts:
+            - name: run
+              mountPath: /run
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+      containers:
+        - name: signal-cli-rest-api
+          image: "bbernhard/signal-cli-rest-api:0.99-rootless@sha256:bf76cf1b34cc54763fc0f542b4210e2a60216ab23b335eec93e9d14556dd68bd"  # OPERATOR PINS via Renovate
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: signal-bridge-config
+          # bbernhard's image stores data under /home/.local/share/signal-cli.
+          # The PVC mount overlays the entire .local subtree.
+          volumeMounts:
+            - name: data
+              mountPath: /home/.local/share/signal-cli
+            # The rootless image is s6-overlay-based. Under
+            # readOnlyRootFilesystem it needs writable /run (s6 preinit
+            # tests /run writability and aborts otherwise) and /tmp
+            # (S6_RUNTIME_PATH=/tmp/s6-runtime + native build scratch).
+            - name: tmp
+              mountPath: /tmp
+            - name: run
+              mountPath: /run
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: signal-bridge-data
+        - name: tmp
+          emptyDir:
+            # signal-cli writes protocol-buffer caches + scratch under
+            # /tmp on every send and receive. At one-message-per-
+            # minute (openbao-seal-watchdog), 64Mi filled within ~14
+            # minutes and kubelet evicted the pod with `Usage of
+            # EmptyDir volume "tmp" exceeds the limit "64Mi"`. Each
+            # eviction killed the live Signal protocol session mid-
+            # flight, leaving subsequent HTTP-201-accepted messages
+            # in a broken-session state that never reached the
+            # operator's phone. 512Mi gives ~hours of headroom even
+            # under sustained alert storms; signal-cli compacts on
+            # restart so steady-state usage is well below.
+            sizeLimit: 512Mi
+        - name: run
+          emptyDir:
+            sizeLimit: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: signal-bridge
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: signal-bridge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: signal-bridge
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

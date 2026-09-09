@@ -1,0 +1,79 @@
+# Default-deny + ingress from named consumers + egress
+# kube-DNS only.
+#
+# Implemented as CiliumNetworkPolicy (not vanilla NetworkPolicy)
+# because Cilium Gateway API traffic carries the reserved
+# `ingress` identity, NOT the source namespace identity. K8s
+# NetPol's `namespaceSelector: kubernetes.io/metadata.name=ingress`
+# silently drops Gateway → ntfy traffic (503 / 5s timeout).
+# See homelab-k8s/platform/authentik/networkpolicy.yaml for the
+# canonical write-up.
+#
+# Subscribers reach ntfy via the cluster Gateway's HTTPRoute
+# (phase 1: Tailscale-fronted; phase 2: Cloudflare-Tunnel-
+# fronted). Ingress comes from the Gateway (reserved `ingress`
+# identity).
+#
+# Publishers: the relay only. Falcosidekick / Alertmanager
+# don't talk to ntfy directly — they POST to the relay,
+# which encrypts + republishes here.
+
+# Default-deny remains a vanilla NetworkPolicy: it has no
+# rules referencing the ingress namespace, so it doesn't
+# trip the Cilium Gateway identity mismatch. Cilium honors
+# vanilla NetPol for default-deny semantics.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ntfy-default-deny
+  namespace: ntfy
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: ntfy-allow
+  namespace: ntfy
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: ntfy
+  ingress:
+    # Cluster Gateway (Cilium) — operator subscriptions land
+    # here via reserved `ingress` identity.
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+    # The E2EE relay — the only authorized publisher.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: ntfy-e2ee-relay
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+    # Monitoring (Prometheus scrape — when ServiceMonitor lands).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+  egress:
+    # kube-DNS only.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP

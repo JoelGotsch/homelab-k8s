@@ -1,0 +1,231 @@
+# Jellyfin helm values (jellyfin/jellyfin community chart).
+# Per ADR 0024 D1 (CF Tunnel for E2EE / "internal-media" class)
+# + identity.md (Authentik OIDC + Nitrokey for operator).
+#
+# Single-replica + Longhorn for config + NFS-CSI for media
+# library. Cilium HTTPRoute Tailscale-only at first commit;
+# CF Tunnel migration documented for when that layer lands.
+#
+# Migration target from NAS-Docker Jellyfin per
+# 03-runbooks/migration/nas.md + 03-runbooks/jellyfin/migrate-from-nas-docker.md.
+
+replicaCount: 1
+
+# RWO Longhorn PVCs (config + cache below) + replicaCount: 1
+# deadlocks RollingUpdate. New pod can't attach volumes while
+# old pod holds them. See known-caveats §"Helm-chart rollouts
+# on RWO PVCs" (2026-05-25). The jellyfin/jellyfin chart 2.5.0 key
+# is `deploymentStrategy` — a top-level `strategy:` was silently
+# ignored (render kept RollingUpdate). Fixed 2026-05-27.
+deploymentStrategy:
+  type: Recreate
+
+# Lowest-priority workload — evicted first under cluster
+# resource pressure (operator decision 2026-05-02).
+# See priorityclass.yaml.
+priorityClassName: homelab-low
+
+# Worker-only scheduling. Jellyfin needs the AMD Radeon
+# iGPU on the worker nodes (/dev/dri/renderD128) for
+# hardware-accelerated decode (VAAPI on Vega 8 / VCN 2.x);
+# control-plane nodes don't need to run it. The worker
+# nodes per hardware.md:
+#   cluster-node-4, cluster-node-5: AMD Ryzen 7 5800U
+#                                   (Vega 8 iGPU, VCN 2.x)
+#   cluster-node-6: AMD Ryzen 7 5700U (Vega 8, VCN 2.0 —
+#                   older; per 99-journal/
+#                   2026-04-27-nas-trust-and-storage-redesign.md
+#                   "should be tested before declaring
+#                   'Jellyfin on cluster' the answer to
+#                   streaming stutter").
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: node-role.kubernetes.io/control-plane
+              operator: DoesNotExist
+
+image:
+  repository: jellyfin/jellyfin
+  # OPERATOR PINS via Renovate.
+  tag: "10.11.11"
+  pullPolicy: IfNotPresent
+
+# 10.11's EF Core library-DB migration runs at startup BEFORE the web
+# server binds, and must not be interrupted (one-way; auto-saves
+# library.db.old as retry point). The chart-default liveness probe
+# (tcpSocket, ~40s to kill) would murder a slow migration mid-write —
+# give it 15 min. Chart 2.7.0 has no startupProbe support, so a fat
+# failureThreshold on liveness is the available lever. Tighten back
+# to ~6 after the upgrade has soaked (migration only runs once).
+livenessProbe:
+  tcpSocket:
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  failureThreshold: 90
+
+# Enable Jellyfin's BUILT-IN Prometheus /metrics endpoint (there is no
+# metrics plugin in the official repo — the earlier "jellyfin-plugin-metrics"
+# assumption was wrong). `EnableMetrics` lives in system.xml, which Jellyfin
+# manages at runtime and does NOT expose in the UI, so we flip it before
+# startup with an idempotent sed. Reuses the jellyfin image (already present +
+# digest-pin-allowlisted) only for `sed`. Keep the tag in sync with image.tag
+# (Renovate should bump both; a lag is harmless — sed is version-agnostic).
+# On a brand-new config PVC, system.xml doesn't exist yet, so /metrics comes
+# up on the first restart after initial provisioning. (2026-07-16)
+initContainers:
+  - name: enable-metrics
+    image: jellyfin/jellyfin:10.11.11
+    command:
+      - sh
+      - -c
+      - |
+        f=/config/config/system.xml
+        if [ -f "$f" ]; then
+          sed -i 's|<EnableMetrics>false</EnableMetrics>|<EnableMetrics>true</EnableMetrics>|' "$f"
+          echo "enable-metrics: EnableMetrics=true ensured"
+        else
+          echo "enable-metrics: system.xml absent (fresh install); metrics enable on next restart"
+        fi
+    volumeMounts:
+      - name: config
+        mountPath: /config
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+
+# Config + cache + DB on Longhorn-replica2 (single-replica
+# Jellyfin; resilience via snapshot, not multi-replica).
+# 2026-07-09 ADR 0036: migrate to -retain family. The config
+# PVC carries library metadata + watch state + user accounts;
+# losing it forces a full NAS-tree rescan (hours) and drops
+# every user's playback progress. Right-sized 50Gi → 20Gi —
+# actual usage stays under 10 GiB even after full media scan.
+persistence:
+  config:
+    enabled: true
+    storageClassName: longhorn-replica2
+    size: 50Gi
+    accessModes:
+      - ReadWriteOnce
+  # Media library mount — references the NFS PVC declared
+  # in nfs-pv.yaml. ReadOnlyMany; Jellyfin doesn't write back.
+  media:
+    enabled: true
+    type: pvc
+    existingClaim: jellyfin-media
+    mountPath: /media
+    readOnly: true
+
+# Don't expose Service externally — Cilium HTTPRoute owns
+# ingress.
+service:
+  type: ClusterIP
+  port: 8096
+
+ingress:
+  enabled: false
+
+# Hardware acceleration: VAAPI on the AMD Radeon Vega iGPU
+# present on every worker node per hardware.md.
+#
+# AMD Vega VCN 2.x decode coverage:
+# - H.264 decode: yes
+# - H.265 decode: yes
+# - H.265 10-bit (HDR source) decode: yes
+# - encode: SOFTWARE ONLY (no hardware encoder on this
+#   silicon generation — meaningful CPU savings still come
+#   from offloading decode while encoding stays on CPU).
+# - HDR → SDR tone-mapping: software only (heavy)
+#
+# `/dev/dri/renderD128` is hostPath-mounted directly (AMD
+# k8s-device-plugin is ROCm-only; for video acceleration
+# the standard pattern is hostPath + render-group GID).
+# Talos's render group GID is 105 (validate at first deploy
+# via `ls -ln /dev/dri/renderD128` from a debug pod;
+# adjust supplementalGroups below if different).
+#
+# At Jellyfin first-run wizard: Dashboard → Playback →
+# Hardware Acceleration → "Video Acceleration API (VAAPI)"
+# + VA-API Device = `/dev/dri/renderD128`. Operator
+# verifies via Dashboard → Logs that transcode jobs use
+# `vaapi_h264` / `vaapi_hevc` decoders.
+podOptions:
+  hostNetwork: false
+
+extraVolumes:
+  - name: dri
+    hostPath:
+      path: /dev/dri
+      type: Directory
+
+extraVolumeMounts:
+  - name: dri
+    mountPath: /dev/dri
+
+# Pod-level security: non-root, dropped caps. Jellyfin image
+# runs as user 1000 by default.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  # Talos render group GID — gives the pod's user access to
+  # /dev/dri/renderD128 without running as root. Validate
+  # at first deploy: `kubectl debug node/<worker> -- ls -ln
+  # /dev/dri/renderD128` shows the actual GID; adjust below
+  # if Talos's group differs from this default.
+  supplementalGroups: [105]
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  # readOnlyRootFilesystem: false — Jellyfin writes
+  # transcode-cache to /tmp + plugin downloads to /config
+  # which is its own PVC. Rootfs writes are minimal but
+  # exist. Set to true only after a transcode-cache redirect
+  # to emptyDir.
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: [ALL]
+
+resources:
+  # Sized for 2 simultaneous 4K streams per operator's
+  # 2026-05-02 decision. Memory budget breakdown:
+  # - Jellyfin baseline: ~500MB
+  # - 2 transcode pipelines (FFmpeg buffers + scaler): ~3GB
+  # - HDR → SDR tone-mapping buffers (software): ~2GB
+  # - Library scan / thumbnail concurrent: ~500MB
+  # - Headroom: ~2GB
+  # CPU: 200m request keeps it lightly bound at idle; the
+  # 8C/16T Ryzen 5800U/5700U workers have ample headroom for
+  # the 6-8 cores worst-case 2 × 4K transcode burns.
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    memory: 8Gi
+
+# OIDC env (for the LDAP/SSO plugin once installed).
+extraEnv:
+  - name: OIDC_CLIENT_ID
+    valueFrom:
+      secretKeyRef:
+        name: jellyfin-oidc
+        key: client_id
+  - name: OIDC_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: jellyfin-oidc
+        key: client_secret
+  - name: OIDC_ISSUER
+    valueFrom:
+      secretKeyRef:
+        name: jellyfin-oidc
+        key: issuer

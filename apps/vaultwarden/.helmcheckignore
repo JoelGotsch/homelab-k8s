@@ -1,0 +1,32 @@
+# .helmcheckignore — check-helm-values-keys.sh baseline for apps/vaultwarden
+# (guerzon/vaultwarden chart, pinned in kustomization.yaml).
+#
+# One key path per line; `#` comments and blanks ignored. An entry `a.b`
+# acknowledges `a.b` and every key nested under it (`a.b.*`). Suppressed keys
+# no longer flag, so future commits surface only NEW unknown keys.
+#
+# Classification method: `grep -rn '.Values.<key>' apps/vaultwarden/charts/*/`.
+# Chart reads it → back-compat-OK (renders fine, just absent from the chart's
+# published defaults). Chart never reads it → genuine wrong-key (DROPPED).
+
+# ── Back-compat-OK ──────────────────────────────────────────────────────────
+# The chart's templates DO consume these (via `with`/`range`/`toYaml` over a
+# list or empty-dict default); they render correctly. Safe to suppress.
+image.extraVars        # _podSpec.tpl: `range .Values.image.extraVars`
+podSecurityContext     # _podSpec.tpl: `with .Values.podSecurityContext | toYaml`
+securityContext        # _podSpec.tpl: toYaml (accepts any subkey)
+resources              # toYaml (accepts any subkey)
+strategy.type          # deployment/statefulset: `with .Values.strategy | toYaml`
+storage.data           # _pvcSpec.tpl reads .name/.accessMode/.size/.class/.path
+
+# ── KNOWN WRONG-KEYS — value is DROPPED at render (NOT back-compat-OK) ───────
+# Acknowledged here ONLY so the hook stays green and flags NEW drift. These are
+# TRACKED BUGS: fix the key in values.yaml, then DELETE the line (the script
+# nudges on stale entries). Right-hand side = the key the chart actually reads.
+replicaCount           # chart reads `.Values.replicas` (our value is ignored; default 1 anyway)
+websocketEnabled       # not in chart at all (Vaultwarden websockets are built-in now)
+disableAdminToken      # chart uses `adminToken.*` (existingSecret/value); this is a no-op
+passwordIterations     # not in chart; PASSWORD_ITERATIONS is not exposed by this chart
+logging.level          # chart reads `logging.logLevel` (and logging.logFile)
+smtp.fromAddress       # chart reads `smtp.from` — our sender address is currently DROPPED
+service.port           # chart hardcodes 443/80 and reads `rocket.port` for targetPort

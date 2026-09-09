@@ -1,0 +1,29 @@
+# ServiceMonitor for the cluster-hosted ntfy server's
+# /metrics endpoint.
+#
+# ntfy exposes Prometheus metrics on the same :80 port at
+# /metrics when `enable-metrics: true` is set in server.yml
+# (already on per configmap.yaml).
+#
+# Per ADR 0021 — kube-prometheus-stack discovers
+# ServiceMonitors with the matching `release` label.
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ntfy
+  namespace: ntfy
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ntfy
+  namespaceSelector:
+    matchNames:
+      - ntfy
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

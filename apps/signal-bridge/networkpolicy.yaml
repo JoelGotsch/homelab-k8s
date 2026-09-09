@@ -1,0 +1,153 @@
+# Signal-bridge NetworkPolicy.
+#
+# Ingress: approval-channel only (the canonical caller for the
+#   alert + approval-routing surface per ADR 0009 + the
+#   signal-webhook runbook).
+# Egress: kube-DNS for hostname resolution. External 443 egress
+#   to Signal infrastructure is FQDN-narrowed via the companion
+#   CiliumNetworkPolicy at ciliumnetworkpolicy-egress.yaml
+#   (toFQDNs: *.signal.org). Vanilla NetworkPolicy can't match
+#   on hostname; the L7-aware gate lives in the CCNP.
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: signal-bridge
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: signal-bridge
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: signal-bridge
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # approval-channel is the only allowed caller. Anything
+    # else trying to reach signal-bridge:8080 fails fast.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: approval-channel
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: approval-channel
+      ports:
+        - port: 8080
+          protocol: TCP
+    # Prometheus self-metrics scrape — kps's Prometheus runs
+    # in monitoring.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - port: 8080
+          protocol: TCP
+    # openbao-seal-watchdog CronJob (same namespace) — direct
+    # signal dispatch path that bypasses Alertmanager for the
+    # OpenBao-sealed circular-dependency case. See
+    # openbao-seal-watchdog-cronjob.yaml for the rationale.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openbao-seal-watchdog
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    # kube-DNS for Signal hostname resolution.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # External Signal-infrastructure egress is gated by the
+    # companion CiliumNetworkPolicy in
+    # ciliumnetworkpolicy-egress.yaml (toFQDNs: *.signal.org).
+    # Vanilla NetPol cannot match on hostname; the L7-aware
+    # gate lives in the CCNP.
+---
+# NetworkPolicy for the openbao-seal-watchdog CronJob — egress
+# to OpenBao :8200 (seal-status probe) + signal-bridge :8080
+# (alert dispatch) + DNS. Ingress: none (CronJob has no
+# listening sockets).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openbao-seal-watchdog
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: openbao-seal-watchdog
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbao-seal-watchdog
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # OpenBao seal-status probe — every replica in the openbao ns.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openbao
+      ports:
+        - port: 8200
+          protocol: TCP
+    # signal-bridge in same namespace — alert dispatch.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: signal-bridge
+      ports:
+        - port: 8080
+          protocol: TCP
+---
+# Cilium-side egress allow for kube-apiserver. The watchdog's
+# Phase 4 (state-CM PATCH) needs to talk to the API server to
+# persist `last_sent_ts` for dedup. Standard NetworkPolicy can
+# only match on pod/namespace selectors, but the apiserver
+# lives on the control-plane nodes (not as a pod from the
+# cluster's perspective), so we need Cilium's `kube-apiserver`
+# reserved entity. Without this, the PATCH times out, state
+# stays at 0, and the dedup window never engages.
+#
+# Discovered 2026-06-24 after the cross-account + dedup
+# amendment landed and the operator observed the watchdog
+# log: `curl: (28) Connection timed out after 10001 ms` on
+# the PATCH call following a successful send.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: openbao-seal-watchdog-apiserver
+  namespace: signal-bridge
+  labels:
+    app.kubernetes.io/name: openbao-seal-watchdog
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbao-seal-watchdog
+  egress:
+    - toEntities:
+        - kube-apiserver

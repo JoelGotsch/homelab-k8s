@@ -1,0 +1,32 @@
+# ntfy server — message broker for the operator's alert path.
+# Per ADR 0024 D1 phase-2.
+#
+# Companion to apps/ntfy-e2ee-relay/ which encrypts upstream
+# webhook payloads before publishing here.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - pvc.yaml
+  - configmap.yaml
+  - externalsecret.yaml
+  - deployment.yaml
+  - httproute.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml
+
+# ADR 0036: cluster-wide resource-governance baseline.
+components:
+  - ../../components/first-party-namespace
+  - ../../components/site-config
+
+# Hostname from the single site-config (no hardcoded domain) — see
+# components/site-config/README.md.
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: HTTPRoute, name: ntfy }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }

@@ -1,0 +1,110 @@
+# BEGIN ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
+# RENDERED FILE — DO NOT EDIT. Edit the .j2 sibling and re-run:
+#   ansible-playbook ansible/playbooks/00-render-static.yml
+# (from the homelab-infra repo root).
+# END ANSIBLE-RENDERED HEADER (auto-managed; do not edit)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-gateway-policies
+  namespace: llm-gateway
+  annotations:
+    rendered-from: llm-gateway/policies/{provider,mcp}-allowlist.yaml
+data:
+  provider-allowlist.yaml: |
+    # Per-model data-tag allowlist enforced by the pre-call hook.
+    #
+    # Tag order (least → most sensitive):
+    #   public < non-personal < code-no-secrets < personal < secret
+    #
+    # Naming: model keys here MUST match `model_name` in
+    # proxy_config.yaml. External providers are listed with the
+    # tags they're allowed to handle. `personal` and `secret`
+    # are intentionally absent from every external provider —
+    # only the local `mac-*` routes accept those.
+    
+    models:
+      # External providers (egress over WAN — kept narrow).
+      claude-sonnet:
+        - public
+        - non-personal
+        - code-no-secrets
+      claude-opus:
+        - public
+        - non-personal
+        - code-no-secrets
+      gpt-4o:
+        - public
+        - non-personal
+        - code-no-secrets
+      gpt-4o-mini:
+        - public
+        - non-personal
+        - code-no-secrets
+    
+      # Local Mac Studio routes (MLX-primary, Ollama-fallback).
+      # Local routes are allowed for every tag — egress stays
+      # inside the homelab.
+      mac-qwen-14b:
+        - public
+        - non-personal
+        - code-no-secrets
+        - personal
+        - secret
+      mac-deepseek-coder-lite:
+        - public
+        - non-personal
+        - code-no-secrets
+        - personal
+        - secret
+      mac-llama-8b:
+        - public
+        - non-personal
+        - code-no-secrets
+        - personal
+        - secret
+      mac-embed:
+        - public
+        - non-personal
+        - code-no-secrets
+        - personal
+        - secret
+  mcp-allowlist.yaml: |
+    # MCP-tool data-tag allowlist enforced by the pre-call hook.
+    #
+    # Tag floor: a tool listed under tag T is callable when the
+    # request's data tag is T or stricter. The hook checks
+    # `metadata.mcp_tools` (a list of tool names the request
+    # intends to invoke).
+    #
+    # Tags listed PER TOOL == the set of request tags allowed.
+    # personal/secret tools should NEVER appear in external
+    # providers' tool calls — those routes are local-only.
+    
+    tools:
+      # Always-safe tools. Public docs lookup, time, currency.
+      web-search:
+        - public
+        - non-personal
+      fetch-url:
+        - public
+        - non-personal
+    
+      # Code-context tools (read-only access to the repo).
+      repo-read:
+        - public
+        - non-personal
+        - code-no-secrets
+    
+      # Personal-tier tools (calendar, email summarization). These
+      # are callable only when the data tag itself is personal.
+      calendar-read:
+        - personal
+      email-summarize:
+        - personal
+    
+      # Secret-tier tools — ops actions. Local routes only.
+      vault-issue-cert:
+        - secret
+      argocd-sync:
+        - secret

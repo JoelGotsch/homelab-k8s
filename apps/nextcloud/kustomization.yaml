@@ -1,0 +1,47 @@
+# Nextcloud — Synology Drive + Radicale replacement per
+# ADR 0025 D4 + ADR 0024 D5 (Tailscale-only).
+#
+# Storage: hot bucket (config / custom_apps / themes / tmp)
+# on Longhorn; cold bucket (user files + Group Folders) on
+# csi-rclone-NFS-crypt per ADR 0030 §D2. Three csi-rclone
+# StorageClasses (personal-files / family-shared /
+# internal-archive) — per-share keys per ADR 0025 D8.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: nextcloud
+
+helmCharts:
+  - name: nextcloud
+    repo: https://nextcloud.github.io/helm/
+    version: "5.5.6"  # OPERATOR PINS via Renovate
+    releaseName: nextcloud
+    namespace: nextcloud
+    valuesFile: values.yaml
+    includeCRDs: true
+
+resources:
+  - namespace.yaml
+  - cnpg-cluster.yaml
+  - pvc.yaml
+  - externalsecret.yaml
+  - httproute.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml
+
+# ADR 0036: cluster-wide resource-governance baseline
+# (LimitRange + ResourceQuota + default-deny NetPol scaffold).
+components:
+  - ../../components/first-party-namespace
+  - ../../components/site-config   # build-only ConfigMap for the replacement below
+
+# Resolve the HTTPRoute hostname from the single site-config (no hardcoded
+# domain): <prefix>.FQDN_SUFFIX -> <prefix>.<fqdn_suffix>. Provenance: this rule
+# -> ConfigMap/site-config.data.fqdn_suffix -> components/site-config/site-config.env.
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: HTTPRoute, name: nextcloud }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }

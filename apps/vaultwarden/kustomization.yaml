@@ -1,0 +1,41 @@
+# Vaultwarden — operator's daily-driver password manager.
+# Per ADR 0024 D1 + audit follow-up "1.33.0+ pin discipline,
+# admin behind OIDC, Cloudflare Tunnel + WAF in front".
+#
+# Helm chart: guerzon/vaultwarden (community-maintained
+# canonical chart for vaultwarden/server).
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: vaultwarden
+
+helmCharts:
+  - name: vaultwarden
+    repo: https://guerzon.github.io/vaultwarden
+    version: "0.43.1"  # OPERATOR PINS via Renovate
+    releaseName: vaultwarden
+    namespace: vaultwarden
+    valuesFile: values.yaml
+    includeCRDs: true
+
+resources:
+  - namespace.yaml
+  - cnpg-cluster.yaml
+  - externalsecret.yaml
+  - httproute.yaml
+  - networkpolicy.yaml
+
+# ADR 0036: cluster-wide resource-governance baseline.
+components:
+  - ../../components/first-party-namespace
+  - ../../components/site-config
+
+# Hostname from the single site-config (no hardcoded domain) — see
+# components/site-config/README.md.
+replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
+    targets:
+      - select: { kind: HTTPRoute, name: vaultwarden }
+        fieldPaths: [spec.hostnames.0]
+        options: { delimiter: '.', index: 1 }
