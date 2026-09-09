@@ -124,6 +124,24 @@ repos:
         pass_filenames: false
         files: '(platform/openbao/|scripts/(check|test)-openbao-snapshot-auth.*\.sh$)'
 
+      - id: test-reboot-cascade-janitor
+        name: reboot-cascade janitor decision logic (offline fixtures + defect mutations)
+        entry: scripts/test-reboot-cascade-janitor.sh
+        language: script
+        pass_filenames: false
+        files: '^(infrastructure/reboot-cascade-janitor/reboot-cascade-janitor\.yaml|scripts/test-reboot-cascade-janitor\.sh|scripts/fixtures/reboot-cascade-janitor/)'
+        # The janitor deletes pods in any namespace, including the
+        # csi-rclone node plugin, and on 2026-09-09 it turned one dead FUSE
+        # mount into a 5.5 h, 28-Argo-app outage through four defects that
+        # were all invisible to reading the file. Its decision logic is
+        # therefore exercised offline: the shell body is extracted from the
+        # CronJob itself, kubectl/date/sleep are faked, and each scenario
+        # asserts the exact [act] plan against recorded API responses. The
+        # suite then re-introduces each defect into a copy of the manifest
+        # and requires the guarding scenario to fail — a green run that
+        # stays green when the bug returns is what this hook prevents.
+        # Requires yq + jq; no cluster or network.
+
       - id: check-temporary-notification-routes
         name: contain temporary operational Signal and incompatible custom-relay routes
         entry: scripts/check-temporary-notification-routes.sh

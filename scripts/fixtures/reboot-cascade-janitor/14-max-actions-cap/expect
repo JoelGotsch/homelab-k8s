@@ -1,0 +1,5 @@
+[act] delete-wedged forgejo/forgejo-job-1 node=worker2 sig=C:orphaned-mount
+[act] delete-wedged forgejo/forgejo-job-2 node=worker2 sig=C:orphaned-mount
+[act] delete-wedged forgejo/forgejo-job-3 node=worker2 sig=C:orphaned-mount
+[act] delete-wedged forgejo/forgejo-job-4 node=worker2 sig=C:orphaned-mount
+[act] delete-wedged forgejo/forgejo-job-5 node=worker2 sig=C:orphaned-mount

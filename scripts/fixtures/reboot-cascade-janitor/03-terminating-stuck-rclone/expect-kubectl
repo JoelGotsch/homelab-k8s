@@ -1,0 +1,1 @@
+delete pod enrich-29815507-2gnfm -n conversation-history --force --grace-period=0 --wait=false

@@ -1,0 +1,14 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "involvedObject": {
+        "uid": "uid-enrich1"
+      },
+      "reason": "FailedMount",
+      "message": "MountVolume.SetUp failed for volume \"nas-registry-blobs-forgejo-packages\" : rpc error: code = Internal desc = directory already mounted",
+      "lastTimestamp": "2026-09-09T05:29:00Z"
+    }
+  ]
+}

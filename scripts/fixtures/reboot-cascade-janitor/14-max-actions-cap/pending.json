@@ -1,0 +1,258 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "metadata": {
+        "name": "forgejo-job-1",
+        "namespace": "forgejo",
+        "uid": "uid-many",
+        "creationTimestamp": "2026-09-09T05:07:00Z",
+        "ownerReferences": [
+          {
+            "kind": "Job",
+            "name": "forgejo-job",
+            "controller": true
+          }
+        ]
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          },
+          {
+            "name": "forgejo-packages",
+            "persistentVolumeClaim": {
+              "claimName": "forgejo-packages"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Pending",
+        "startTime": "2026-09-09T05:07:00Z"
+      }
+    },
+    {
+      "metadata": {
+        "name": "forgejo-job-2",
+        "namespace": "forgejo",
+        "uid": "uid-many",
+        "creationTimestamp": "2026-09-09T05:07:00Z",
+        "ownerReferences": [
+          {
+            "kind": "Job",
+            "name": "forgejo-job",
+            "controller": true
+          }
+        ]
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          },
+          {
+            "name": "forgejo-packages",
+            "persistentVolumeClaim": {
+              "claimName": "forgejo-packages"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Pending",
+        "startTime": "2026-09-09T05:07:00Z"
+      }
+    },
+    {
+      "metadata": {
+        "name": "forgejo-job-3",
+        "namespace": "forgejo",
+        "uid": "uid-many",
+        "creationTimestamp": "2026-09-09T05:07:00Z",
+        "ownerReferences": [
+          {
+            "kind": "Job",
+            "name": "forgejo-job",
+            "controller": true
+          }
+        ]
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          },
+          {
+            "name": "forgejo-packages",
+            "persistentVolumeClaim": {
+              "claimName": "forgejo-packages"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Pending",
+        "startTime": "2026-09-09T05:07:00Z"
+      }
+    },
+    {
+      "metadata": {
+        "name": "forgejo-job-4",
+        "namespace": "forgejo",
+        "uid": "uid-many",
+        "creationTimestamp": "2026-09-09T05:07:00Z",
+        "ownerReferences": [
+          {
+            "kind": "Job",
+            "name": "forgejo-job",
+            "controller": true
+          }
+        ]
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          },
+          {
+            "name": "forgejo-packages",
+            "persistentVolumeClaim": {
+              "claimName": "forgejo-packages"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Pending",
+        "startTime": "2026-09-09T05:07:00Z"
+      }
+    },
+    {
+      "metadata": {
+        "name": "forgejo-job-5",
+        "namespace": "forgejo",
+        "uid": "uid-many",
+        "creationTimestamp": "2026-09-09T05:07:00Z",
+        "ownerReferences": [
+          {
+            "kind": "Job",
+            "name": "forgejo-job",
+            "controller": true
+          }
+        ]
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          },
+          {
+            "name": "forgejo-packages",
+            "persistentVolumeClaim": {
+              "claimName": "forgejo-packages"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Pending",
+        "startTime": "2026-09-09T05:07:00Z"
+      }
+    },
+    {
+      "metadata": {
+        "name": "forgejo-job-6",
+        "namespace": "forgejo",
+        "uid": "uid-many",
+        "creationTimestamp": "2026-09-09T05:07:00Z",
+        "ownerReferences": [
+          {
+            "kind": "Job",
+            "name": "forgejo-job",
+            "controller": true
+          }
+        ]
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          },
+          {
+            "name": "forgejo-packages",
+            "persistentVolumeClaim": {
+              "claimName": "forgejo-packages"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Pending",
+        "startTime": "2026-09-09T05:07:00Z"
+      }
+    },
+    {
+      "metadata": {
+        "name": "forgejo-job-7",
+        "namespace": "forgejo",
+        "uid": "uid-many",
+        "creationTimestamp": "2026-09-09T05:07:00Z",
+        "ownerReferences": [
+          {
+            "kind": "Job",
+            "name": "forgejo-job",
+            "controller": true
+          }
+        ]
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          },
+          {
+            "name": "forgejo-packages",
+            "persistentVolumeClaim": {
+              "claimName": "forgejo-packages"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Pending",
+        "startTime": "2026-09-09T05:07:00Z"
+      }
+    }
+  ]
+}

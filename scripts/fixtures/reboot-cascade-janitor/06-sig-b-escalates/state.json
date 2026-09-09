@@ -1,0 +1,11 @@
+{
+  "apiVersion": "v1",
+  "kind": "ConfigMap",
+  "metadata": {
+    "name": "reboot-cascade-janitor-state",
+    "namespace": "reboot-cascade-janitor"
+  },
+  "data": {
+    "cheapfix.worker2": "2:1788931500"
+  }
+}

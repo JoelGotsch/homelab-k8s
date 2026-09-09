@@ -1,0 +1,43 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "metadata": {
+        "name": "enrich-29815507-2gnfm",
+        "namespace": "conversation-history",
+        "uid": "uid-enrich1",
+        "creationTimestamp": "2026-09-08T20:30:00Z",
+        "ownerReferences": [
+          {
+            "kind": "Job",
+            "name": "enrich-29815507",
+            "controller": true
+          }
+        ],
+        "deletionTimestamp": "2026-09-08T20:30:00Z"
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          },
+          {
+            "name": "vault",
+            "persistentVolumeClaim": {
+              "claimName": "vault"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Pending",
+        "startTime": "2026-09-08T20:30:00Z"
+      }
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "metadata": {
+        "name": "forgejo-runner-1",
+        "namespace": "forgejo",
+        "uid": "uid-runner",
+        "creationTimestamp": "2026-09-09T05:07:00Z",
+        "ownerReferences": [
+          {
+            "kind": "Job",
+            "name": "forgejo-runner",
+            "controller": true
+          }
+        ]
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          },
+          {
+            "name": "forgejo-packages",
+            "persistentVolumeClaim": {
+              "claimName": "forgejo-packages"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Pending",
+        "startTime": "2026-09-09T05:07:00Z"
+      }
+    }
+  ]
+}

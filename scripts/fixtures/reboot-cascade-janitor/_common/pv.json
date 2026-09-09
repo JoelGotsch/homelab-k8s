@@ -1,0 +1,114 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "metadata": {
+        "name": "nas-internal-archive-conversation-history-vault"
+      },
+      "spec": {
+        "csi": {
+          "driver": "rclone.csi.veloxpack.io",
+          "volumeHandle": "nas-internal-archive-conversation-history-vault"
+        },
+        "claimRef": {
+          "namespace": "conversation-history",
+          "name": "vault"
+        }
+      },
+      "status": {
+        "phase": "Bound"
+      }
+    },
+    {
+      "metadata": {
+        "name": "nas-registry-blobs-forgejo-packages"
+      },
+      "spec": {
+        "csi": {
+          "driver": "rclone.csi.veloxpack.io",
+          "volumeHandle": "nas-registry-blobs-forgejo-packages"
+        },
+        "claimRef": {
+          "namespace": "forgejo",
+          "name": "forgejo-packages"
+        }
+      },
+      "status": {
+        "phase": "Bound"
+      }
+    },
+    {
+      "metadata": {
+        "name": "nas-personal-documents-paperless-media"
+      },
+      "spec": {
+        "csi": {
+          "driver": "rclone.csi.veloxpack.io",
+          "volumeHandle": "nas-personal-documents-paperless-media"
+        },
+        "claimRef": {
+          "namespace": "paperless",
+          "name": "paperless-media"
+        }
+      },
+      "status": {
+        "phase": "Bound"
+      }
+    },
+    {
+      "metadata": {
+        "name": "nas-family-shared-nextcloud"
+      },
+      "spec": {
+        "csi": {
+          "driver": "rclone.csi.veloxpack.io",
+          "volumeHandle": "nas-family-shared-nextcloud"
+        },
+        "claimRef": {
+          "namespace": "nextcloud",
+          "name": "nextcloud-family-shared"
+        }
+      },
+      "status": {
+        "phase": "Bound"
+      }
+    },
+    {
+      "metadata": {
+        "name": "pvc-longhorn-paperless-data"
+      },
+      "spec": {
+        "csi": {
+          "driver": "driver.longhorn.io",
+          "volumeHandle": "pvc-longhorn-paperless-data"
+        },
+        "claimRef": {
+          "namespace": "paperless",
+          "name": "paperless-data"
+        }
+      },
+      "status": {
+        "phase": "Bound"
+      }
+    },
+    {
+      "metadata": {
+        "name": "nas-internal-archive-stale"
+      },
+      "spec": {
+        "csi": {
+          "driver": "rclone.csi.veloxpack.io",
+          "volumeHandle": "nas-internal-archive-stale"
+        },
+        "claimRef": {
+          "namespace": "conversation-history",
+          "name": "vault-old"
+        }
+      },
+      "status": {
+        "phase": "Released"
+      }
+    }
+  ]
+}

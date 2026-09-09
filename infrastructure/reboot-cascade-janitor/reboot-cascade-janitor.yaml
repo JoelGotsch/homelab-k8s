@@ -1,8 +1,8 @@
-# Reboot-cascade janitor — auto-remediates the three post-reboot
-# failure signatures documented 2026-07-20 (known-caveats + journal
-# 2026-07-18/20). Sibling of longhorn-va-janitor; same safety
-# philosophy: strict multi-criteria detection, minimal RBAC,
-# bounded blast radius, log-everything.
+# Reboot-cascade janitor — auto-remediates the post-reboot csi-rclone
+# and image-pull failure signatures documented 2026-07-20
+# (known-caveats + journal 2026-07-18/20). Sibling of
+# longhorn-va-janitor; same safety philosophy: strict multi-criteria
+# detection, minimal RBAC, bounded blast radius, log-everything.
 #
 # WHY: during the 2026-07-20 worker BIOS/reboot session, EVERY node
 # reboot produced manual-recovery work on the surviving nodes:
@@ -12,8 +12,9 @@
 #      Recovery: delete the pod → fresh pull against healed mesh.
 #   B. csi-rclone stuck operation lock → FailedMount "An operation
 #      with the given Volume ID ... already exists" (forgejo,
-#      nextcloud — took the GitOps source down). Recovery: restart
-#      that node's csi-rclone-node plugin, then delete the pod.
+#      nextcloud — took the GitOps source down). Recovery: delete the
+#      wedged consumer; only if that keeps failing, restart that
+#      node's csi-rclone-node plugin.
 #   C. csi-rclone orphaned FUSE mount → FailedMount "directory
 #      already mounted" (forgejo after plugin restart). Recovery:
 #      delete the pod (new pod UID = fresh mount path).
@@ -22,11 +23,54 @@
 # net for WATCHDOG hard-resets and anything that slips through.
 #
 # ============================================================
+# 2026-09-09 — WHY THIS FILE WAS REWRITTEN (read before editing)
+# ============================================================
+# The janitor turned one dead FUSE mount into a 5.5-hour, 28-Argo-app
+# outage. Measured chain:
+#   04:30-05:10 restic-nas-personal-to-hetzner pushed the csi-rclone
+#     NODE plugin's single memory cgroup to 2.970 of 3.000 GiB. The
+#     kernel killed CHILD FUSE mount processes one at a time; PID 1
+#     survived, so restarts=0 and container_oom_events_total never
+#     moved. Seven nas-crypt mounts on worker2 were dead by 05:07.
+#   05:07/05:12 two conversation-history Job pods hit FailedMount on
+#     the dead `vault` mount and sat Pending.
+#   05:20:03 tick matched signature B and went STRAIGHT to the most
+#     destructive rung: it deleted worker2's csi-rclone-node pod
+#     (up since 08-31) plus the consumer.
+#   05:25:03 the next tick matched B on the SECOND stuck pod and
+#     deleted the REPLACEMENT plugin pod, three minutes old.
+#   Each plugin deletion severed the FUSE mounts of every ALREADY
+#     RUNNING pod on worker2 — forgejo (/data/packages, /data/lfs),
+#     paperless (media), chist-web and follow-whatsapp (/vault) —
+#     verified by hand: `ls` returned "Transport endpoint is not
+#     connected", while the same shares on worker3 were healthy.
+#     Those four pods stayed Running, and the janitor never looked at
+#     them again.
+#   Two pods stuck Terminating from 05:21/05:27 absorbed a graceful
+#     delete every 5 min for 6+ hours with no effect.
+#   10:28 Forgejo's OCI registry started returning HTTP 500 ("stat
+#     /data/packages/...: transport endpoint is not connected"),
+#     blocking chart pulls for 28 Argo applications and Kyverno
+#     cosign verification. Nothing alerted on the actual fault.
+# Four defects, all invisible to reading the old file, all fixed here:
+#   (a) blast radius unowned — deleting a node plugin severs every
+#       already-running consumer on that node, and the janitor did
+#       nothing about the damage;
+#   (b) the restart cap had no cross-tick memory (RESTARTED_NODES was
+#       re-initialised every run, so "one restart per node per run"
+#       permitted one every 5 minutes forever);
+#   (c) Running-but-broken was structurally invisible — the candidate
+#       list is `status.phase=Pending`, and signature B's own
+#       remediation produces Running-but-broken pods;
+#   (d) OP_EXISTS_PATTERN was the bare substring "already exists",
+#       escalating to the most destructive action on a two-word match.
+#
+# ============================================================
 # DETECTION CRITERIA (safety boundary — reviewer, read this)
 # ============================================================
-# Common gates for ALL signatures — a pod is only ever touched if:
-#   (1) It is NOT Running/Succeeded (phase Pending, or stuck
-#       ContainerCreating per containerStatuses).
+# Common gates for ALL signature-driven actions — a candidate pod is
+# only ever touched if:
+#   (1) It is Pending (the API-boundary filter; see BOUNDED MEMORY).
 #   (2) It is OLDER than STUCK_THRESHOLD_SECONDS (default 600).
 #       Legit slow pulls (multi-GB images) and slow mounts finish
 #       well inside 10 min on this LAN; a false-positive delete of
@@ -34,35 +78,136 @@
 #       replacement resumes the pull).
 #   (3) It HAS a controller ownerReference (ReplicaSet/StatefulSet/
 #       DaemonSet/Job) — NEVER delete a naked pod; it would not
-#       come back.
+#       come back. This gate also governs the collateral sweep and
+#       is what makes a plugin restart refusable (see rung 3).
 #   (4) Its namespace is not in EXCLUDE_NAMESPACES (kube-system and
 #       longhorn-system manage their own lifecycles).
 #   (5) Total actions this run < MAX_ACTIONS_PER_RUN (default 5) —
 #       a mass-wedge (e.g. mid-reboot listing) must not trigger a
 #       mass-delete; the 5-min tick will drain it gradually.
+#       DELIBERATE EXCEPTION: collateral recycles (rung 4) are
+#       counted against COLLATERAL_MAX_PODS instead. Gate 5 exists
+#       to stop the janitor STARTING a mass remediation; refusing to
+#       finish repairing damage it already caused is defect (a).
 # Signature discrimination (checked in order, first match wins):
-#   B: pod has a FailedMount event matching OP_EXISTS_PATTERN with
-#      lastTimestamp inside the last EVENT_FRESH_SECONDS →
-#      restart csi-rclone-node on that pod's node (at most ONE
-#      plugin restart per node per run), then delete the pod.
+#   B: pod has a FailedMount event containing BOTH OP_EXISTS_PATTERN
+#      ("An operation with the given Volume ID") AND OP_EXISTS_TAIL
+#      ("already exists"), fresh within EVENT_FRESH_SECONDS. The
+#      volume ID sits between the two halves, so no single fixed
+#      string spans the message — matching only the tail was defect
+#      (d). If NONE of the pod's PVCs is csi-rclone the signature is
+#      downgraded to B0 (cheap fix only): another driver's operation
+#      lock must never restart the csi-rclone plugin.
 #   C: pod has a FailedMount event matching ALREADY_MOUNTED_PATTERN
 #      (fresh) → delete the pod only.
 #   A: pod has a fresh "Pulling" event AND NO fresh error-ish event
 #      (Failed/BackOff/ErrImagePull/FailedMount) — i.e. the SILENT
 #      hang, not a normal retrying ImagePullBackOff (those recover
 #      on their own and are NOT touched) → delete the pod.
-# Deletes are GRACEFUL (default grace period). NEVER --force: on
-# Longhorn-backed pods a force-delete orphans the VolumeAttachment
-# (the 2026-07-20 langfuse lesson; see known-caveats).
 #
-# DRY_RUN=true logs decisions without acting — used for the initial
-# smoke test and available for re-verification any time.
+# ESCALATION LADDER for signature B (was: straight to rung 3)
+#   rung 1  delete the wedged CONSUMER pod, gracefully. This is what
+#           signature C does and what actually recovered the enrich
+#           pods on 2026-09-09. Every B tick does this.
+#   rung 2  count. `cheapfix.<node>` in the state ConfigMap counts
+#           consecutive ticks on which signature B survived the cheap
+#           fix on that node (once per node per tick; the streak is
+#           dropped after CHEAP_FIX_RESET_SECONDS). Below
+#           CHEAP_FIX_TICKS_BEFORE_ESCALATION (default 3 ≈ 15 min)
+#           nothing else happens.
+#   rung 3  restart the node plugin — only with the streak spent AND
+#           all four of these true: the plugin pod is older than
+#           PLUGIN_RESTART_COOLDOWN_SECONDS (default 3600); the
+#           janitor has not restarted this node's plugin inside the
+#           same interval; the csi-rclone PVC inventory resolved, so
+#           the blast radius is knowable; and every consumer we are
+#           about to sever is controller-owned and their number is
+#           within COLLATERAL_MAX_PODS, so the blast radius is
+#           repairable. Refusing leaves one Pending pod to alerting,
+#           which beats severing a whole node's mounts irreparably.
+#   rung 4  OWN THE COLLATERAL. After a restart, wait up to
+#           PLUGIN_READY_TIMEOUT_SECONDS for the replacement, then
+#           recycle every Running csi-rclone consumer on that node
+#           that started before it. Recycling is UNCONDITIONAL, not
+#           probe-gated: a consumer cannot reach Running before its
+#           volume is NodePublished, and csi-rclone's rclone process
+#           lives in the plugin container, so a consumer older than
+#           the current plugin instance provably holds a dead mount.
+#           The alternative — probing each mountPath for ENOTCONN —
+#           needs `pods/exec`, which this janitor deliberately does
+#           NOT have, and would only confirm what the timestamps
+#           already prove. Cost of being wrong: one graceful recycle
+#           of a controller-owned pod, the same cost gate 2 already
+#           accepts.
+#   The same rung-4 sweep also runs at the TOP of every tick for any
+#   node whose plugin pod is younger than SEVER_SWEEP_WINDOW_SECONDS,
+#   whoever restarted it (this janitor on an earlier tick, an Argo
+#   DaemonSet rollout, a node reboot, an OOM of the whole plugin pod).
+#   A node reboot sweeps nothing, because the consumers come back after
+#   the plugin; a DaemonSet rollout recycles every csi-rclone consumer
+#   on each rolled node, which is correct and is why COLLATERAL_MAX_PODS
+#   exists.
+#   That is the fix for defect (c) — the Running-but-broken pods are
+#   found through the plugin's own start time instead of by widening
+#   the candidate list.
+#   NOT COVERED: a mount killed while the plugin pod SURVIVES — the
+#   2026-09-09 root cause, where the kernel killed child FUSE
+#   processes inside the cgroup. No API-visible signal exists for it
+#   (restarts=0, no OOM event, pod Ready), so it needs the memory
+#   limit fixed and an alert, not this janitor. What the janitor now
+#   does do is reach that state's remediation by the ladder: B keeps
+#   failing → rung 3 restarts the plugin at ~05:30 → rung 4 recycles
+#   forgejo/paperless/chist-web/follow-whatsapp with fresh mounts,
+#   instead of leaving them broken until 10:28.
 #
-# FAILURE-INJECTION STATUS (rule 35/40): detection logic smoke-
-# tested against a healthy fleet (0 findings) 2026-07-20. Full
-# injection test rides on the next reboot-bearing session (CP BIOS
-# trips) — the janitor is expected to clear the cascade UNAIDED;
-# that observation closes the paper-guarantee gap. Tracked in TODO.
+# TERMINATING PODS. A graceful delete cannot clear a pod whose unmount
+# hangs — the API already has the deletion. Re-issuing one every tick
+# is what the old janitor did for 6+ hours. Now: below
+# TERMINATING_QUIET_SECONDS (default 900) the janitor stays silent;
+# above it, a pod whose PVCs are ALL csi-rclone is force-deleted once
+# and anything else is left to alerting. The repo's NEVER --force rule
+# was written for Longhorn, where force-delete strands a
+# VolumeAttachment and the next pod cannot attach the volume anywhere.
+# csi-rclone volumes are node-published with NO attacher: there is no
+# VolumeAttachment to orphan, and a leaked mount path under the old
+# pod UID is exactly what signature C already handles. One
+# non-csi-rclone PVC and the Longhorn rule applies again.
+#
+# BOUNDED MEMORY (192 MiB cgroup). Every listing is either
+# API-filtered to one node / one label / one pod's events, or is the
+# PV list (154 KiB for 105 PVs, measured 2026-09-09 — PVs carry no pod
+# spec). No large JSON body is ever captured into a shell variable:
+# kubectl pipes straight into jq and only reduced rows land in /tmp.
+# That removes the interpreter copies that actually blew the limit the
+# first time round. In steady state the new steps add ONE small
+# label-selected list (6 plugin pods) and one PV list per tick; the
+# per-node Running list (1.0 MiB / 47 pods on worker2) is made only
+# when a plugin is young or a restart is being considered.
+#
+# STATE. `reboot-cascade-janitor-state` is a ConfigMap the Job patches.
+# It is deliberately NOT declared in git: it is observed state, and an
+# Argo-tracked ConfigMap with a data: block would have its keys
+# reverted by self-heal between ticks. Reads are best-effort — an
+# unreadable or unwritable state store means count 0, and count 0
+# means cheap-fix-only, so losing state makes the janitor LESS
+# destructive. The authoritative plugin cooldown is the age of the
+# plugin pod itself and needs no state at all.
+#
+# DRY_RUN=true logs decisions without acting. Every mutation goes
+# through the act() helper, which prints one machine-readable
+# "[act] <verb> <subject> k=v ..." line before doing anything, so a
+# dry run emits a complete plan. scripts/test-reboot-cascade-janitor.sh
+# asserts on exactly those lines against recorded fixtures
+# (scripts/fixtures/reboot-cascade-janitor/), in both dry-run and
+# acting modes, with kubectl faked — a mutation added outside act() is
+# invisible to the plan AND to the tests.
+#
+# FAILURE-INJECTION STATUS (rule 35/40): detection logic smoke-tested
+# against a healthy fleet (0 findings) 2026-07-20. The 2026-09-09
+# incident was the injection test, and it failed it; the four defects
+# above now have offline fixture coverage. A live re-verification of
+# rungs 3-4 (plugin restart + collateral sweep) still rides on the
+# next reboot-bearing session. Tracked in TODO.
 
 apiVersion: v1
 kind: Namespace
@@ -87,9 +232,21 @@ metadata:
 # criteria-gated in code:
 #   pods get/list/delete cluster-wide: needed to bounce wedged pods
 #     in ANY app namespace (the cascade hits arbitrary victims) and
-#     to restart the csi-rclone node plugin. No patch/exec/create.
+#     to restart the csi-rclone node plugin. No patch/create.
+#   NO pods/exec. Nothing in this janitor probes a mount from inside
+#     a container; rung 4 decides from pod start times instead
+#     (see the ESCALATION LADDER note). Keep it that way — exec on
+#     every pod in the cluster is a different security posture, and
+#     the timestamps are sufficient.
 #   events get/list: signature discrimination.
-# The real safety boundary is the detection criteria + action cap
+#   persistentvolumes get/list (added 2026-09-09): the ONLY way to
+#     answer "is this PVC a csi-rclone volume?" — needed to refuse a
+#     csi-rclone plugin restart for another driver's operation lock,
+#     to enumerate the consumers a restart severs, and to confine
+#     force-delete to volumes with no attacher. Read-only; PVs carry
+#     no secret material (the rclone remote config lives in a Secret
+#     the janitor cannot read).
+# The real safety boundary is the detection criteria + action caps
 # above, mirrored from longhorn-va-janitor's design.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -104,6 +261,9 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -115,6 +275,50 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: reboot-cascade-janitor
+subjects:
+  - kind: ServiceAccount
+    name: reboot-cascade-janitor
+    namespace: reboot-cascade-janitor
+---
+# Namespaced write access for the ONE ConfigMap that carries the
+# cross-tick state (defect b). Scoped as narrowly as the API allows:
+#   * a Role, not a ClusterRole — this namespace only;
+#   * get/patch pinned to resourceNames: the state ConfigMap. The
+#     janitor cannot patch its own config ConfigMap, so it can never
+#     rewrite its own thresholds or clear DRY_RUN;
+#   * create is namespace-scoped without resourceNames because the
+#     authorizer cannot match a name that does not exist yet. It is
+#     harmless here: this namespace holds only the janitor's own two
+#     ConfigMaps, `create` cannot overwrite an existing object, and
+#     without patch rights on it a created object is inert.
+#   * NO update/delete/list/watch.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: reboot-cascade-janitor-state
+  namespace: reboot-cascade-janitor
+  labels:
+    app.kubernetes.io/name: reboot-cascade-janitor
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["reboot-cascade-janitor-state"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: reboot-cascade-janitor-state
+  namespace: reboot-cascade-janitor
+  labels:
+    app.kubernetes.io/name: reboot-cascade-janitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: reboot-cascade-janitor-state
 subjects:
   - kind: ServiceAccount
     name: reboot-cascade-janitor
@@ -134,17 +338,92 @@ data:
   # kubelet's mount-retry cadence; stale events from a resolved
   # incident must not trigger actions).
   EVENT_FRESH_SECONDS: "600"
-  # Hard cap on remediations per tick.
+  # Hard cap on signature-driven remediations per tick. Collateral
+  # recycles have their own cap (COLLATERAL_MAX_PODS) — see gate 5.
   MAX_ACTIONS_PER_RUN: "5"
   # Namespaces the janitor never touches.
   EXCLUDE_NAMESPACES: "kube-system longhorn-system"
-  # csi-rclone node-plugin location (signature B remediation).
+  # csi-rclone node-plugin location and identity.
   CSI_RCLONE_NAMESPACE: "csi-rclone"
   CSI_RCLONE_POD_PREFIX: "csi-rclone-node"
-  # Signature match patterns (fixed strings, grep -F).
-  OP_EXISTS_PATTERN: "already exists"
+  # Label selector for the node plugin DaemonSet's pods. The chart
+  # (csi-driver-rclone 0.4.11) sets `app: <node.name>` on the pod
+  # template; verified against the live DaemonSet 2026-09-09.
+  CSI_RCLONE_NODE_SELECTOR: "app=csi-rclone-node"
+  # Driver name, as it appears in PV .spec.csi.driver and in the
+  # StorageClass provisioner (infrastructure/csi-rclone).
+  CSI_RCLONE_DRIVER: "rclone.csi.veloxpack.io"
+  # Signature match patterns (fixed substrings, jq `contains`).
+  # Signature B needs BOTH halves; the volume ID sits between them,
+  # and matching the tail alone was the 2026-09-09 defect (d).
+  OP_EXISTS_PATTERN: "An operation with the given Volume ID"
+  OP_EXISTS_TAIL: "already exists"
   ALREADY_MOUNTED_PATTERN: "directory already mounted"
+  # Escalation ladder (signature B). Consecutive ticks on which the
+  # cheap fix failed to clear B on a node before the node plugin may
+  # be restarted; 3 ticks ~= 15 min.
+  CHEAP_FIX_TICKS_BEFORE_ESCALATION: "3"
+  # A streak older than this is dropped, so two unrelated incidents
+  # hours apart never add up to an escalation.
+  CHEAP_FIX_RESET_SECONDS: "1800"
+  # Minimum interval between plugin restarts on the SAME node,
+  # enforced against the plugin pod's own age (stateless) and against
+  # the janitor's recorded last restart. On 2026-09-09 the second
+  # severing killed a pod that was 3 minutes old.
+  PLUGIN_RESTART_COOLDOWN_SECONDS: "3600"
+  # How long to wait for the replacement plugin before recycling the
+  # severed consumers. Bounded so a run stays inside
+  # activeDeadlineSeconds.
+  PLUGIN_READY_TIMEOUT_SECONDS: "60"
+  # Collateral sweep. Nodes whose plugin pod is younger than the
+  # window get their pre-plugin consumers recycled, whoever restarted
+  # it. Note the consequence for an Argo rollout of the csi-rclone
+  # DaemonSet: every csi-rclone consumer on each rolled node is
+  # recycled, one node at a time (maxUnavailable: 1). That is correct —
+  # those mounts really are dead after the rollout — and it is the
+  # reason COLLATERAL_MAX_PODS exists. A NODE reboot sweeps nothing,
+  # because the consumers restart after the plugin. Set "false" to
+  # disable the sweep entirely (e.g. if the driver ever learns to
+  # restore mounts across a restart, which 0.4.11 does not).
+  SEVER_SWEEP: "true"
+  SEVER_SWEEP_WINDOW_SECONDS: "1800"
+  # Tolerance on the "consumer started before the plugin" comparison.
+  SEVER_SKEW_SECONDS: "60"
+  # Cap on collateral recycles per tick. Sized above the realistic
+  # worst case measured 2026-09-09 (5 long-lived consumers on worker2
+  # plus up to 7 concurrent restic backup-source pods).
+  COLLATERAL_MAX_PODS: "20"
+  # Terminating pods: stay silent below this, then force-delete once
+  # if and only if every PVC is csi-rclone.
+  TERMINATING_QUIET_SECONDS: "900"
+  TERMINATING_FORCE: "true"
+  # Cross-tick state. Created by the Job on first use; intentionally
+  # not declared in git (Argo self-heal would revert the keys).
+  STATE_CONFIGMAP: "reboot-cascade-janitor-state"
   # Set "true" to log decisions without acting.
+  #
+  # LIVE FROM THE FIRST COMMIT, BY OPERATOR DECISION (2026-09-09). The
+  # rewrite was drafted to ship dry, on the "dry-run before any real
+  # apply" rule. The operator chose live, and the reasoning is worth
+  # keeping because it will be questioned:
+  #
+  #   - The code this replaces was live on a 5-minute schedule and had
+  #     caused the outage that morning. Every dry tick was a tick of the
+  #     old behaviour still being possible; the replacement is more
+  #     conservative than the old code on EVERY path (no plugin restart
+  #     inside an hour of the last one, none on a plugin younger than an
+  #     hour, none until the cheap fix has failed three consecutive ticks).
+  #   - A dry run cannot demonstrate the part that matters. The ladder
+  #     counter is not persisted in dry-run mode, so rungs 3-4 never plan
+  #     anything and the streak never matures. Those rungs are proven
+  #     offline instead (scripts/test-reboot-cascade-janitor.sh scenarios
+  #     06-08 and 11-13, plus the mutation suite) and that is the evidence
+  #     the decision rests on.
+  #   - Expected first ticks: nothing. The two Terminating enrich pods the
+  #     dry-run comment anticipated were released by the 0.5.0 DaemonSet
+  #     roll earlier the same day, so the first live tick should log no
+  #     [act] line at all. Confirm with:
+  #       kubectl -n reboot-cascade-janitor logs job/<latest> | grep '^\[act\]'
   DRY_RUN: "false"
 ---
 apiVersion: batch/v1
@@ -166,7 +445,11 @@ spec:
   startingDeadlineSeconds: 120
   jobTemplate:
     spec:
-      activeDeadlineSeconds: 180
+      # 240s, up from 180s: rung 3 may wait up to
+      # PLUGIN_READY_TIMEOUT_SECONDS (60s) for the replacement plugin
+      # before paying the collateral debt. Still below the 300s tick,
+      # and concurrencyPolicy: Forbid covers the overlap either way.
+      activeDeadlineSeconds: 240
       backoffLimit: 1
       ttlSecondsAfterFinished: 600
       template:
@@ -191,6 +474,12 @@ spec:
               envFrom:
                 - configMapRef:
                     name: reboot-cascade-janitor-config
+              env:
+                # Namespace of the state ConfigMap the Job patches.
+                - name: POD_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
@@ -206,51 +495,517 @@ spec:
               args:
                 - |
                   set -eu
-                  echo "[step 1] reboot-cascade-janitor starting (dry_run=$DRY_RUN, cap=$MAX_ACTIONS_PER_RUN, threshold=${STUCK_THRESHOLD_SECONDS}s)"
+
+                  # ------------------------------------------------------------------
+                  # Bounded-memory contract for every listing in this script
+                  # ------------------------------------------------------------------
+                  # The 192 MiB cgroup killed the first implementation, which captured a
+                  # cluster-wide `kubectl get pods -A -o json` (plus events) into a shell
+                  # variable. Two rules keep every listing here bounded, and they are the
+                  # reason the new steps are affordable at all:
+                  #   R1. Filter at the API boundary. Pods are only ever listed with a
+                  #       field selector (`status.phase=Pending`, or
+                  #       `spec.nodeName=<one node>,status.phase=Running`) and the plugin
+                  #       DaemonSet with a label selector. Measured 2026-09-09:
+                  #       -A = 6.2 MiB of JSON, one node's Running set = 1.0 MiB / 47
+                  #       pods, the 6 plugin pods = a few KiB, all 105 PVs = 154 KiB.
+                  #   R2. Never capture a large JSON body in a shell variable. Every
+                  #       kubectl call is piped STRAIGHT into jq and only the reduced
+                  #       rows (a few dozen short lines) are retained, in /tmp files on
+                  #       the 32 MiB emptyDir. That removes the interpreter copies that
+                  #       actually blew the limit, so peak RSS is kubectl's decode of one
+                  #       node's pod list, not a multiple of it.
+                  # The one list that is NOT node-scoped is `get pv`, and it is the
+                  # smallest of them (154 KiB) because PVs carry no pod spec.
+                  # ------------------------------------------------------------------
+
+                  # Scratch dir for the reduced rows (see R2). Overridable so the offline
+                  # fixture tests can give each scenario a clean one; in the Pod this is
+                  # the 32 MiB /tmp emptyDir.
+                  W=${JANITOR_WORKDIR:-/tmp/janitor}
+                  mkdir -p "$W"
+                  : > "$W/state-writes"
                   NOW_TS=$(date -u +%s)
-
-                  # [step 2] Ask the API server for Pending pods only. The
-                  # first implementation materialized every cluster Pod and
-                  # Event as JSON; kubectl's decode plus shell copies exceeded
-                  # the 192 MiB cgroup limit before jq ran. Every actionable
-                  # signature is Pending, so filtering at the API boundary is
-                  # both equivalent and bounded. Per-pod Events and the
-                  # csi-rclone plugin are queried only if a candidate needs
-                  # them.
-                  PODS_JSON=$(kubectl get pods -A \
-                    --field-selector 'status.phase=Pending' -o json)
-                  echo "[step 2] listed $(echo "$PODS_JSON" | jq '.items|length') Pending pods"
-
-                  # [step 3] candidate pods: common gates (1)-(4).
-                  # Emits ns|name|node|uid rows. The UID keys the later Event
-                  # query so events from an older pod with a reused name can
-                  # never count as evidence for the replacement.
-                  CANDS=$(echo "$PODS_JSON" | jq -r \
-                    --argjson now "$NOW_TS" \
-                    --argjson thr "$STUCK_THRESHOLD_SECONDS" \
-                    --arg excl "$EXCLUDE_NAMESPACES" '
-                      ($excl | split(" ")) as $ex
-                      | .items[]
-                      | select(.metadata.namespace as $n | $ex | index($n) | not)
-                      | select(($now - (.metadata.creationTimestamp | fromdateiso8601)) > $thr)
-                      | select([.metadata.ownerReferences[]?
-                                | select(.kind == "ReplicaSet" or .kind == "StatefulSet"
-                                         or .kind == "DaemonSet" or .kind == "Job")]
-                               | length > 0)
-                      | "\(.metadata.namespace)|\(.metadata.name)|\(.spec.nodeName // "?")|\(.metadata.uid)"
-                    ')
-                  if [ -z "$CANDS" ]; then
-                    echo "[step 3] no stuck candidate pods — done"
-                    exit 0
-                  fi
-                  echo "[step 3] candidates:"; echo "$CANDS" | sed 's/^/  /'
-
                   ACTIONS=0
-                  RESTARTED_NODES=" "
-                  echo "$CANDS" | while IFS='|' read -r NS NAME NODE POD_UID; do
-                    [ "$ACTIONS" -ge "$MAX_ACTIONS_PER_RUN" ] && { echo "[cap] MAX_ACTIONS_PER_RUN reached; remaining candidates wait for next tick"; break; }
+                  COLLATERAL=0
+                  SWEPT_NODES=" "
+                  COUNTED_NODES=" "
+                  ESCALATE=no
 
-                    # [step 4] fresh events for this pod.
+                  echo "[step 1] reboot-cascade-janitor starting (dry_run=$DRY_RUN, cap=$MAX_ACTIONS_PER_RUN, threshold=${STUCK_THRESHOLD_SECONDS}s, ladder=$CHEAP_FIX_TICKS_BEFORE_ESCALATION ticks, plugin_cooldown=${PLUGIN_RESTART_COOLDOWN_SECONDS}s, collateral_cap=$COLLATERAL_MAX_PODS)"
+
+                  # act VERB SUBJECT -- COMMAND...
+                  # The ONLY way this script mutates anything. It prints one
+                  # machine-readable line
+                  #     [act] <verb> <subject> [k=v ...]
+                  # and then runs the command — or prints the line and stops, when
+                  # DRY_RUN=true. So the dry-run log is a complete, greppable plan of the
+                  # run, and scripts/test-reboot-cascade-janitor.sh asserts on exactly
+                  # these lines against recorded fixtures. Adding a mutation that does not
+                  # go through act() removes it from the plan AND from the tests.
+                  act() {
+                    _verb=$1
+                    shift
+                    _subj=$1
+                    shift
+                    echo "[act] $_verb $_subj"
+                    if [ "$DRY_RUN" = "true" ]; then
+                      return 0
+                    fi
+                    if "$@"; then
+                      return 0
+                    fi
+                    echo "[warn] $_verb $_subj: command failed"
+                    return 0
+                  }
+
+                  num_or_zero() {
+                    case "${1:-}" in
+                      '' | *[!0-9]*) echo 0 ;;
+                      *) echo "$1" ;;
+                    esac
+                  }
+
+                  # ------------------------------------------------------------------
+                  # [step 2] Durable state (defect b: the old RESTARTED_NODES lived for
+                  # exactly one tick, so "at most ONE plugin restart per node per run"
+                  # still allowed a restart every 5 minutes forever — which is how
+                  # 2026-09-09 severed worker2 twice, at 05:20 and 05:25).
+                  #
+                  # The state ConfigMap is deliberately NOT declared in git: it holds
+                  # OBSERVED state, not desired state, and an Argo-tracked ConfigMap with
+                  # a `data:` block would have its keys reverted by self-heal between
+                  # ticks. The janitor creates it on first use.
+                  #
+                  # It is best-effort by design. Every read failure degrades to count 0,
+                  # and count 0 means "cheap fix only, never escalate" — so a broken or
+                  # unwritable state store makes the janitor LESS destructive, not more.
+                  # The plugin-restart cooldown does not depend on it at all (see
+                  # restart_plugin: the authoritative cooldown is the age of the plugin
+                  # pod itself, which needs no state and cannot be lost).
+                  # ------------------------------------------------------------------
+                  : > "$W/state"
+                  kubectl get configmap "$STATE_CONFIGMAP" -n "$POD_NAMESPACE" -o json 2>/dev/null \
+                    | jq -r '(.data // {}) | to_entries[] | "\(.key)=\(.value)"' > "$W/state" 2>/dev/null || true
+                  echo "[step 2] durable state: $(wc -l < "$W/state" | tr -d ' ') key(s) in $POD_NAMESPACE/$STATE_CONFIGMAP"
+
+                  state_get() {
+                    awk -F= -v k="$1" '$1 == k { print $2; exit }' "$W/state"
+                  }
+                  state_put() {
+                    printf '%s=%s\n' "$1" "$2" >> "$W/state-writes"
+                  }
+                  flush_state() {
+                    if [ ! -s "$W/state-writes" ]; then
+                      return 0
+                    fi
+                    echo "[state] writes:"
+                    sed 's/^/    /' "$W/state-writes"
+                    if [ "$DRY_RUN" = "true" ]; then
+                      echo "[state] dry-run — not persisted"
+                      return 0
+                    fi
+                    _patch=$(jq -R -s -c 'split("\n") | map(select(length > 0)
+                               | (index("=")) as $i
+                               | { (.[0:$i]): .[$i+1:] }) | add | {data: .}' < "$W/state-writes")
+                    kubectl create configmap "$STATE_CONFIGMAP" -n "$POD_NAMESPACE" >/dev/null 2>&1 || true
+                    kubectl patch configmap "$STATE_CONFIGMAP" -n "$POD_NAMESPACE" \
+                      --type merge -p "$_patch" >/dev/null 2>&1 \
+                      || echo "[warn] state persist failed — the ladder cannot advance, so the janitor stays cheap-fix-only"
+                  }
+
+                  # ------------------------------------------------------------------
+                  # [step 3] Which PVCs are csi-rclone? Needed three times over:
+                  #   * to refuse a csi-rclone plugin restart for another driver's
+                  #     volume-operation lock (the old signature-B remediation never
+                  #     checked whose volume was wedged),
+                  #   * to find the consumers a plugin restart severs (step 4/7),
+                  #   * to confine force-delete to volumes with no attacher (step 6).
+                  # Only BOUND claimRefs count: a Released PV keeps a stale claimRef that
+                  # may now name a different driver's PVC.
+                  # ------------------------------------------------------------------
+                  : > "$W/rclone-pvcs"
+                  kubectl get pv -o json 2>/dev/null \
+                    | jq -r --arg drv "$CSI_RCLONE_DRIVER" '
+                        .items[]
+                        | select((.spec.csi.driver // "") == $drv)
+                        | select(.status.phase == "Bound")
+                        | select(.spec.claimRef != null)
+                        | "\(.spec.claimRef.namespace)/\(.spec.claimRef.name)"' \
+                    | sort -u > "$W/rclone-pvcs" || true
+                  RCLONE_PVC_COUNT=$(wc -l < "$W/rclone-pvcs" | tr -d ' ')
+                  RCLONE_PVCS=$(cat "$W/rclone-pvcs")
+                  echo "[step 3] $RCLONE_PVC_COUNT bound csi-rclone PVC(s) for driver $CSI_RCLONE_DRIVER"
+                  if [ "$RCLONE_PVC_COUNT" = "0" ]; then
+                    echo "[step 3] WARN: no csi-rclone PVC resolved (RBAC on persistentvolumes? driver renamed?) — plugin restarts, collateral sweeps and force-deletes are DISABLED this run"
+                  fi
+
+                  # Node-plugin inventory: 6 small pods, one label-selected call.
+                  # deletionTimestamp==null so a plugin already on its way out is not
+                  # mistaken for the live one.
+                  : > "$W/plugins"
+                  kubectl get pods -n "$CSI_RCLONE_NAMESPACE" -l "$CSI_RCLONE_NODE_SELECTOR" -o json 2>/dev/null \
+                    | jq -r '
+                        .items[]
+                        | select(.metadata.deletionTimestamp == null)
+                        | ((.status.containerStatuses // [])) as $cs
+                        | "\(.spec.nodeName // "?")|\(.metadata.name)|\(((.status.startTime // .metadata.creationTimestamp) | fromdateiso8601))|\(if ($cs | length) > 0 and (([$cs[] | select(.ready)] | length) == ($cs | length)) then "ready" else "notready" end)"' \
+                    > "$W/plugins" || true
+                  echo "[step 3] $(wc -l < "$W/plugins" | tr -d ' ') csi-rclone node plugin pod(s)"
+
+                  # ------------------------------------------------------------------
+                  # list_consumers NODE MAX_START_EPOCH
+                  # Running pods ON ONE NODE that mount a csi-rclone PVC and started
+                  # before MAX_START_EPOCH. Emits "ns|name|owned|naked".
+                  #
+                  # Why "started before" is a sound dead-mount test WITHOUT exec:
+                  # a pod cannot reach Running until every volume it declares has been
+                  # NodePublished, and csi-rclone's rclone process lives in the node
+                  # plugin container — it dies with that pod (mountPropagation is
+                  # Bidirectional, so the mount is visible on the host, but the FUSE
+                  # server backing it is gone and every consumer gets ENOTCONN). So a
+                  # Running consumer that started BEFORE the current plugin instance
+                  # necessarily had its mount served by the previous instance, and that
+                  # mount is dead. Confirmed by hand on 2026-09-09: after the janitor
+                  # deleted worker2's plugin, `ls` on forgejo's /data/packages, paperless'
+                  # media and both /vault mounts returned "Transport endpoint is not
+                  # connected", while the same shares on worker3 (plugin untouched) were
+                  # fine.
+                  #
+                  # This is the alternative to probing each mount, and it is the one
+                  # taken: a probe needs `pods/exec` RBAC, which this janitor
+                  # deliberately does not have (see the file header), and the severing is
+                  # deterministic, so the probe would only ever confirm what the
+                  # timestamps already prove. The cost of being wrong is one graceful
+                  # recycle of a controller-owned pod — the same cost the header already
+                  # accepts for a false-positive delete of a slow-pulling pod.
+                  # ------------------------------------------------------------------
+                  list_consumers() {
+                    _node=$1
+                    _maxstart=$2
+                    kubectl get pods -A --field-selector "spec.nodeName=$_node,status.phase=Running" -o json 2>/dev/null \
+                      | jq -r --arg pvcs "$RCLONE_PVCS" --arg excl "$EXCLUDE_NAMESPACES" \
+                              --argjson maxstart "$_maxstart" '
+                          ($pvcs | split("\n") | map(select(length > 0))) as $set
+                          | ($excl | split(" ")) as $ex
+                          | .items[]
+                          | select(.metadata.deletionTimestamp == null)
+                          | select(.metadata.namespace as $n | $ex | index($n) | not)
+                          | . as $p
+                          | select(((.status.startTime // .metadata.creationTimestamp) | fromdateiso8601) < $maxstart)
+                          | select([ .spec.volumes[]?
+                                     | select(.persistentVolumeClaim != null)
+                                     | "\($p.metadata.namespace)/\(.persistentVolumeClaim.claimName)"
+                                     | . as $k
+                                     | select(($set | index($k)) != null) ] | length > 0)
+                          | "\(.metadata.namespace)|\(.metadata.name)|\(if ([.metadata.ownerReferences[]? | select(.kind == "ReplicaSet" or .kind == "StatefulSet" or .kind == "DaemonSet" or .kind == "Job")] | length) > 0 then "owned" else "naked" end)"'
+                  }
+
+                  # ------------------------------------------------------------------
+                  # recycle_list NODE FILE WHY — pay the collateral debt (defect a).
+                  # Deletes every controller-owned pod in FILE. These deletes are counted
+                  # against COLLATERAL_MAX_PODS, NOT against MAX_ACTIONS_PER_RUN: gate 5
+                  # exists to stop the janitor STARTING a mass remediation, and refusing
+                  # to finish repairing damage the janitor already caused would be the
+                  # 2026-09-09 failure mode itself (four Running pods left with dead
+                  # mounts for 5.5 h). A naked pod is reported for manual action and left
+                  # alone — gate 3 still holds.
+                  # ------------------------------------------------------------------
+                  recycle_list() {
+                    _rnode=$1
+                    _rfile=$2
+                    _rwhy=$3
+                    while IFS='|' read -r _ns _name _own; do
+                      if [ -z "${_ns:-}" ]; then
+                        continue
+                      fi
+                      if [ "$_own" != "owned" ]; then
+                        echo "[sweep] MANUAL: $_ns/$_name on $_rnode has a dead csi-rclone mount but no controller ownerReference — the janitor never deletes a naked pod (gate 3)"
+                        continue
+                      fi
+                      if [ "$COLLATERAL" -ge "$COLLATERAL_MAX_PODS" ]; then
+                        echo "[sweep] COLLATERAL_MAX_PODS=$COLLATERAL_MAX_PODS reached — the rest wait for the next tick (the sweep is idempotent and repeats while the plugin is inside SEVER_SWEEP_WINDOW_SECONDS)"
+                        break
+                      fi
+                      act recycle-severed "$_ns/$_name node=$_rnode why=$_rwhy" \
+                        kubectl delete pod "$_name" -n "$_ns" --wait=false
+                      COLLATERAL=$((COLLATERAL + 1))
+                    done < "$_rfile"
+                  }
+
+                  # sweep_node NODE PLUGIN_START WHY — enumerate then recycle.
+                  sweep_node() {
+                    _snode=$1
+                    _sstart=$2
+                    _swhy=$3
+                    case "$SWEPT_NODES" in
+                      *" $_snode "*) return 0 ;;
+                    esac
+                    SWEPT_NODES="$SWEPT_NODES$_snode "
+                    _cut=$((_sstart - SEVER_SKEW_SECONDS))
+                    list_consumers "$_snode" "$_cut" > "$W/sweep-$_snode" || true
+                    _n=$(wc -l < "$W/sweep-$_snode" | tr -d ' ')
+                    if [ "$_n" = "0" ]; then
+                      echo "[sweep] $_snode: no Running csi-rclone consumer predates the current plugin — nothing was severed"
+                      return 0
+                    fi
+                    echo "[sweep] $_snode ($_swhy): $_n Running csi-rclone consumer(s) started before it, so their FUSE mounts died with the previous plugin instance:"
+                    sed 's/^/    /' "$W/sweep-$_snode"
+                    recycle_list "$_snode" "$W/sweep-$_snode" "$_swhy"
+                  }
+
+                  # ------------------------------------------------------------------
+                  # [step 4] Sweep nodes whose plugin restarted recently — WHOEVER
+                  # restarted it (this janitor on an earlier tick, an Argo DaemonSet
+                  # rollout, a node reboot, an OOM of the plugin pod). Fixes defect c
+                  # without a cluster-wide Running list: the plugin list is 6 short rows,
+                  # and in steady state no plugin is inside the window, so this step
+                  # makes ZERO extra pod listings. Only when a plugin is young does it
+                  # make exactly one node-scoped listing per affected node.
+                  # ------------------------------------------------------------------
+                  if [ "$SEVER_SWEEP" = "true" ] && [ "$RCLONE_PVC_COUNT" != "0" ]; then
+                    while IFS='|' read -r PNODE PNAME PSTART PREADY; do
+                      if [ -z "${PNODE:-}" ]; then
+                        continue
+                      fi
+                      PAGE=$((NOW_TS - PSTART))
+                      if [ "$PAGE" -gt "$SEVER_SWEEP_WINDOW_SECONDS" ]; then
+                        continue
+                      fi
+                      if [ "$PREADY" != "ready" ]; then
+                        echo "[step 4] $PNODE: plugin $PNAME is ${PAGE}s old and not Ready yet — deferring its sweep to the next tick"
+                        continue
+                      fi
+                      sweep_node "$PNODE" "$PSTART" "plugin-$PNAME-started-${PAGE}s-ago"
+                    done < "$W/plugins"
+                  else
+                    echo "[step 4] severed-consumer sweep disabled (SEVER_SWEEP=$SEVER_SWEEP, rclone_pvcs=$RCLONE_PVC_COUNT)"
+                  fi
+
+                  # ------------------------------------------------------------------
+                  # ladder NODE — sets ESCALATE=yes|no (defect a + requirement 1).
+                  # Signature B always gets the CHEAP fix (delete the wedged consumer).
+                  # Only after CHEAP_FIX_TICKS_BEFORE_ESCALATION consecutive ticks in
+                  # which the cheap fix demonstrably failed to clear signature B on this
+                  # node does the expensive, collateral-bearing plugin restart unlock.
+                  # Counted at most once per node per tick, and the streak is dropped
+                  # after CHEAP_FIX_RESET_SECONDS so two unrelated incidents a day apart
+                  # never add up.
+                  # ------------------------------------------------------------------
+                  ladder() {
+                    _lnode=$1
+                    ESCALATE=no
+                    _raw=$(state_get "cheapfix.$_lnode")
+                    _cnt=0
+                    case "$_raw" in
+                      *:*)
+                        _c=$(num_or_zero "${_raw%%:*}")
+                        _t=$(num_or_zero "${_raw##*:}")
+                        if [ "$_t" != "0" ] && [ $((NOW_TS - _t)) -le "$CHEAP_FIX_RESET_SECONDS" ]; then
+                          _cnt=$_c
+                        else
+                          echo "[ladder] $_lnode: previous signature-B streak is stale (older than ${CHEAP_FIX_RESET_SECONDS}s) — starting over"
+                        fi
+                        ;;
+                    esac
+                    case "$COUNTED_NODES" in
+                      *" $_lnode "*) ;;
+                      *)
+                        _cnt=$((_cnt + 1))
+                        COUNTED_NODES="$COUNTED_NODES$_lnode "
+                        state_put "cheapfix.$_lnode" "$_cnt:$NOW_TS"
+                        ;;
+                    esac
+                    echo "[ladder] $_lnode: signature B has survived $_cnt consecutive tick(s) of the cheap fix (escalate at $CHEAP_FIX_TICKS_BEFORE_ESCALATION)"
+                    if [ "$_cnt" -ge "$CHEAP_FIX_TICKS_BEFORE_ESCALATION" ]; then
+                      ESCALATE=yes
+                    fi
+                  }
+
+                  wait_plugin_ready() {
+                    _wnode=$1
+                    if [ "$DRY_RUN" = "true" ]; then
+                      return 0
+                    fi
+                    _waited=0
+                    while [ "$_waited" -lt "$PLUGIN_READY_TIMEOUT_SECONDS" ]; do
+                      sleep 5
+                      _waited=$((_waited + 5))
+                      _ready=$(kubectl get pods -n "$CSI_RCLONE_NAMESPACE" -l "$CSI_RCLONE_NODE_SELECTOR" \
+                                 --field-selector "spec.nodeName=$_wnode" -o json 2>/dev/null \
+                               | jq -r '[.items[]
+                                         | select(.metadata.deletionTimestamp == null)
+                                         | ((.status.containerStatuses // [])) as $cs
+                                         | select(($cs | length) > 0 and (([$cs[] | select(.ready)] | length) == ($cs | length)))] | length' 2>/dev/null || echo 0)
+                      _ready=$(num_or_zero "$_ready")
+                      if [ "$_ready" -ge 1 ]; then
+                        echo "[escalate] $_wnode: replacement node plugin Ready after ${_waited}s"
+                        return 0
+                      fi
+                    done
+                    echo "[warn] $_wnode: replacement node plugin not Ready after ${PLUGIN_READY_TIMEOUT_SECONDS}s — recycling the severed consumers anyway; their mounts are dead either way and kubelet retries NodePublish until the plugin returns"
+                  }
+
+                  # ------------------------------------------------------------------
+                  # restart_plugin NODE — the expensive rung. Four gates, in order, any
+                  # of which declines the action outright:
+                  #   1. COOLDOWN (stateless, authoritative). The plugin pod's own age is
+                  #      the cooldown clock: if it is younger than
+                  #      PLUGIN_RESTART_COOLDOWN_SECONDS it was (re)started recently by
+                  #      somebody — us, Argo, the kubelet — and restarting it again would
+                  #      sever every mount that has been rebuilt since. On 2026-09-09 the
+                  #      05:25 tick killed a plugin pod that was THREE MINUTES old; this
+                  #      gate alone stops that, and it cannot be defeated by losing state.
+                  #   2. COOLDOWN (durable). Same interval against the janitor's own last
+                  #      restart of this node, so a plugin pod replaced by other means
+                  #      does not reopen the window early.
+                  #   3. Blast radius is knowable: refuse if the rclone PVC inventory is
+                  #      empty, i.e. we cannot enumerate what we are about to sever.
+                  #   4. Blast radius is repairable: refuse if any consumer we would
+                  #      sever is a naked pod (we could never recycle it), or if the
+                  #      consumer count exceeds COLLATERAL_MAX_PODS. Refusing leaves the
+                  #      original wedge to the cheap fix and to alerting, which is the
+                  #      right trade: an unremediated Pending pod is one app, a severing
+                  #      we cannot repair is every csi-rclone app on the node.
+                  # ------------------------------------------------------------------
+                  restart_plugin() {
+                    _pnode=$1
+                    _row=$(awk -F'|' -v n="$_pnode" '$1 == n { print; exit }' "$W/plugins")
+                    if [ -z "$_row" ]; then
+                      echo "[escalate] WARN: no $CSI_RCLONE_POD_PREFIX pod found on $_pnode — cannot escalate"
+                      return 0
+                    fi
+                    _pname=$(echo "$_row" | cut -d'|' -f2)
+                    _pstart=$(num_or_zero "$(echo "$_row" | cut -d'|' -f3)")
+                    _page=$((NOW_TS - _pstart))
+
+                    if [ "$_page" -lt "$PLUGIN_RESTART_COOLDOWN_SECONDS" ]; then
+                      echo "[cooldown] $_pnode: node plugin $_pname is only ${_page}s old (< ${PLUGIN_RESTART_COOLDOWN_SECONDS}s) — REFUSING a second restart. Restarting it would sever every mount rebuilt since it started."
+                      return 0
+                    fi
+                    _last=$(num_or_zero "$(state_get "plugin-restart.$_pnode")")
+                    if [ "$_last" != "0" ] && [ $((NOW_TS - _last)) -lt "$PLUGIN_RESTART_COOLDOWN_SECONDS" ]; then
+                      echo "[cooldown] $_pnode: the janitor restarted this plugin $((NOW_TS - _last))s ago (< ${PLUGIN_RESTART_COOLDOWN_SECONDS}s) — REFUSING"
+                      return 0
+                    fi
+                    if [ "$RCLONE_PVC_COUNT" = "0" ]; then
+                      echo "[escalate] REFUSED on $_pnode: csi-rclone PVC inventory is empty, so the blast radius cannot be enumerated"
+                      return 0
+                    fi
+
+                    list_consumers "$_pnode" "$NOW_TS" > "$W/pre-$_pnode" || true
+                    _n=$(wc -l < "$W/pre-$_pnode" | tr -d ' ')
+                    _naked=$(awk -F'|' '$3 != "owned"' "$W/pre-$_pnode" | wc -l | tr -d ' ')
+                    echo "[escalate] $_pnode: restarting node plugin $_pname will sever $_n Running consumer(s):"
+                    sed 's/^/    /' "$W/pre-$_pnode"
+                    if [ "$_naked" != "0" ]; then
+                      echo "[escalate] REFUSED on $_pnode: $_naked consumer(s) have no controller ownerReference — the janitor would sever mounts it can never repair. Manual action required."
+                      return 0
+                    fi
+                    if [ "$_n" -gt "$COLLATERAL_MAX_PODS" ]; then
+                      echo "[escalate] REFUSED on $_pnode: $_n consumers exceed COLLATERAL_MAX_PODS=$COLLATERAL_MAX_PODS — too large to own in one tick. Leaving to alerting."
+                      return 0
+                    fi
+
+                    act restart-plugin "$_pname node=$_pnode severs=$_n age=${_page}s" \
+                      kubectl delete pod "$_pname" -n "$CSI_RCLONE_NAMESPACE" --wait=false
+                    state_put "plugin-restart.$_pnode" "$NOW_TS"
+                    state_put "cheapfix.$_pnode" "0:$NOW_TS"
+                    ACTIONS=$((ACTIONS + 1))
+
+                    wait_plugin_ready "$_pnode"
+                    case "$SWEPT_NODES" in
+                      *" $_pnode "*) ;;
+                      *) SWEPT_NODES="$SWEPT_NODES$_pnode " ;;
+                    esac
+                    recycle_list "$_pnode" "$W/pre-$_pnode" "collateral-of-restart-$_pname"
+                  }
+
+                  # ------------------------------------------------------------------
+                  # [step 5] Candidate pods. Still `status.phase=Pending` at the API
+                  # boundary (R1): every signature that starts a remediation is Pending,
+                  # and the Running-but-broken pods the old janitor created are now
+                  # handled by step 4's node-scoped sweep instead of by widening this
+                  # list. Emits ns|name|node|uid|deletion_age|rclone_pvcs|total_pvcs;
+                  # deletion_age is "none" when the pod is not Terminating (it can be
+                  # NEGATIVE for a Terminating pod inside its grace period, which is why a
+                  # numeric sentinel would be wrong).
+                  # ------------------------------------------------------------------
+                  : > "$W/cands"
+                  kubectl get pods -A --field-selector 'status.phase=Pending' -o json \
+                    | jq -r --argjson now "$NOW_TS" --argjson thr "$STUCK_THRESHOLD_SECONDS" \
+                            --arg excl "$EXCLUDE_NAMESPACES" --arg pvcs "$RCLONE_PVCS" '
+                        ($excl | split(" ")) as $ex
+                        | ($pvcs | split("\n") | map(select(length > 0))) as $set
+                        | .items[]
+                        | select(.metadata.namespace as $n | $ex | index($n) | not)
+                        | select(($now - (.metadata.creationTimestamp | fromdateiso8601)) > $thr)
+                        | select([.metadata.ownerReferences[]?
+                                  | select(.kind == "ReplicaSet" or .kind == "StatefulSet"
+                                           or .kind == "DaemonSet" or .kind == "Job")]
+                                 | length > 0)
+                        | . as $p
+                        | ([ .spec.volumes[]? | select(.persistentVolumeClaim != null)
+                             | "\($p.metadata.namespace)/\(.persistentVolumeClaim.claimName)" ]) as $names
+                        | "\(.metadata.namespace)|\(.metadata.name)|\(.spec.nodeName // "?")|\(.metadata.uid)|\(if .metadata.deletionTimestamp == null then "none" else (($now - (.metadata.deletionTimestamp | fromdateiso8601)) | floor) end)|\([$names[] | . as $k | select(($set | index($k)) != null)] | length)|\($names | length)"' \
+                    > "$W/cands"
+                  CAND_COUNT=$(wc -l < "$W/cands" | tr -d ' ')
+                  if [ "$CAND_COUNT" = "0" ]; then
+                    echo "[step 5] no Pending pod passes the common gates"
+                  else
+                    echo "[step 5] $CAND_COUNT candidate(s) (ns|name|node|uid|terminating_age|rclone_pvcs|pvcs):"
+                    sed 's/^/  /' "$W/cands"
+                  fi
+
+                  while IFS='|' read -r NS NAME NODE POD_UID DEL_AGE PVC_RCLONE PVC_TOTAL; do
+                    if [ -z "${NS:-}" ]; then
+                      continue
+                    fi
+                    if [ "$ACTIONS" -ge "$MAX_ACTIONS_PER_RUN" ]; then
+                      echo "[cap] MAX_ACTIONS_PER_RUN reached; remaining candidates wait for the next tick"
+                      break
+                    fi
+
+                    # ----------------------------------------------------------------
+                    # [step 6] Terminating pods (requirement 4). A pod whose unmount
+                    # hangs cannot be cleared by another graceful delete: the API already
+                    # has the deletion, the kubelet is stuck in TearDownVolume. The old
+                    # janitor re-issued a graceful delete every 5 minutes — on
+                    # 2026-09-09 two conversation-history pods absorbed that for 6+ hours
+                    # (its 11:05 log shows it matching signature C and "deleting" one of
+                    # them again, nine hours after the first attempt).
+                    #
+                    # force is confined to pods whose ONLY PVCs are csi-rclone. The
+                    # repo's NEVER --force rule was written for Longhorn, where
+                    # force-delete strands a VolumeAttachment and the next pod cannot
+                    # attach the volume anywhere. csi-rclone volumes are node-published
+                    # with no attacher at all: there is no VolumeAttachment to orphan,
+                    # and a leaked mount path under the old pod UID is exactly what
+                    # signature C already handles (a new pod UID gets a fresh mount
+                    # path). Any pod with even one non-csi-rclone PVC keeps the Longhorn
+                    # rule and is left to alerting.
+                    # ----------------------------------------------------------------
+                    if [ "$DEL_AGE" != "none" ]; then
+                      if [ "$DEL_AGE" -lt "$TERMINATING_QUIET_SECONDS" ]; then
+                        echo "[step 6] $NS/$NAME: graceful delete in flight for ${DEL_AGE}s — NOT re-deleting (a second graceful delete is a no-op)"
+                        continue
+                      fi
+                      if [ "$TERMINATING_FORCE" != "true" ]; then
+                        echo "[step 6] MANUAL: $NS/$NAME stuck Terminating for ${DEL_AGE}s; TERMINATING_FORCE=false — leaving to alerting"
+                        continue
+                      fi
+                      if [ "$RCLONE_PVC_COUNT" = "0" ] || [ "$PVC_TOTAL" = "0" ] || [ "$PVC_RCLONE" != "$PVC_TOTAL" ]; then
+                        echo "[step 6] MANUAL: $NS/$NAME stuck Terminating for ${DEL_AGE}s, but only $PVC_RCLONE of its $PVC_TOTAL PVC(s) are csi-rclone — NOT force-deleting (the Longhorn stale-VolumeAttachment rule stands for anything with an attacher). Leaving to alerting."
+                        continue
+                      fi
+                      act force-delete-terminating "$NS/$NAME node=$NODE age=${DEL_AGE}s pvcs=csi-rclone-only" \
+                        kubectl delete pod "$NAME" -n "$NS" --force --grace-period=0 --wait=false
+                      ACTIONS=$((ACTIONS + 1))
+                      continue
+                    fi
+
+                    # [step 7] fresh events for this pod, keyed by UID so events from an
+                    # older pod with a reused name can never count as evidence.
                     POD_EV=$(kubectl get events -n "$NS" \
                       --field-selector "involvedObject.uid=$POD_UID" -o json \
                       | jq -r \
@@ -259,10 +1014,20 @@ spec:
                          | select(((.lastTimestamp // .eventTime // "1970-01-01T00:00:00Z")
                                    | sub("\\.[0-9]+";"") | fromdateiso8601) > ($now - $fresh))
                          | {reason, message}]')
-                    HAS_OP_EXISTS=$(echo "$POD_EV" | jq -r --arg p "$OP_EXISTS_PATTERN" '[.[] | select(.reason=="FailedMount") | select(.message | contains($p))] | length')
-                    HAS_ALREADY_MOUNTED=$(echo "$POD_EV" | jq -r --arg p "$ALREADY_MOUNTED_PATTERN" '[.[] | select(.reason=="FailedMount") | select(.message | contains($p))] | length')
-                    HAS_PULLING=$(echo "$POD_EV" | jq -r '[.[] | select(.reason=="Pulling")] | length')
-                    HAS_ERRORISH=$(echo "$POD_EV" | jq -r '[.[] | select(.reason=="Failed" or .reason=="BackOff" or .reason=="ErrImagePull" or .reason=="FailedMount" or .reason=="FailedAttachVolume")] | length')
+                    # Signature B needs BOTH halves of the driver's message, not the bare
+                    # two-word tail (defect d): "already exists" alone appears in
+                    # unrelated FailedMount text and used to escalate straight to the
+                    # most destructive action available.
+                    HAS_OP_EXISTS=$(echo "$POD_EV" | jq -r --arg p "$OP_EXISTS_PATTERN" --arg q "$OP_EXISTS_TAIL" '[.[] | select(.reason == "FailedMount") | select((.message | contains($p)) and (.message | contains($q)))] | length')
+                    HAS_ALREADY_MOUNTED=$(echo "$POD_EV" | jq -r --arg p "$ALREADY_MOUNTED_PATTERN" '[.[] | select(.reason == "FailedMount") | select(.message | contains($p))] | length')
+                    HAS_PULLING=$(echo "$POD_EV" | jq -r '[.[] | select(.reason == "Pulling")] | length')
+                    HAS_ERRORISH=$(echo "$POD_EV" | jq -r '[.[] | select(.reason == "Failed" or .reason == "BackOff" or .reason == "ErrImagePull" or .reason == "FailedMount" or .reason == "FailedAttachVolume")] | length')
+                    # An empty/failed jq read must never present as evidence: "" != "0" is
+                    # true in sh, which would have turned an API hiccup into signature B.
+                    HAS_OP_EXISTS=$(num_or_zero "$HAS_OP_EXISTS")
+                    HAS_ALREADY_MOUNTED=$(num_or_zero "$HAS_ALREADY_MOUNTED")
+                    HAS_PULLING=$(num_or_zero "$HAS_PULLING")
+                    HAS_ERRORISH=$(num_or_zero "$HAS_ERRORISH")
 
                     SIG=""
                     if [ "$HAS_OP_EXISTS" != "0" ]; then SIG="B:csi-op-exists"
@@ -270,47 +1035,37 @@ spec:
                     elif [ "$HAS_PULLING" != "0" ] && [ "$HAS_ERRORISH" = "0" ]; then SIG="A:silent-pull-hang"
                     fi
                     if [ -z "$SIG" ]; then
-                      echo "[step 4] $NS/$NAME: no signature match (pulling=$HAS_PULLING errorish=$HAS_ERRORISH op=$HAS_OP_EXISTS mounted=$HAS_ALREADY_MOUNTED) — leaving alone"
-                      continue
-                    fi
-                    echo "[step 5] $NS/$NAME on $NODE matches signature $SIG"
-
-                    if [ "$DRY_RUN" = "true" ]; then
-                      echo "[dry-run] would remediate $NS/$NAME ($SIG)"
+                      echo "[step 7] $NS/$NAME: no signature match (pulling=$HAS_PULLING errorish=$HAS_ERRORISH op=$HAS_OP_EXISTS mounted=$HAS_ALREADY_MOUNTED) — leaving alone"
                       continue
                     fi
 
-                    # [step 6] signature B: restart csi-rclone node
-                    # plugin on that node first (once per node per run).
+                    # A volume-operation lock on somebody else's driver must never
+                    # restart the csi-rclone plugin. The old code read the message and
+                    # never asked whose volume it was.
+                    if [ "$SIG" = "B:csi-op-exists" ] && [ "$PVC_RCLONE" = "0" ]; then
+                      echo "[step 7] $NS/$NAME: volume-operation lock is not on a csi-rclone volume (0 of $PVC_TOTAL PVCs) — cheap fix only, no plugin restart"
+                      SIG="B0:op-exists-other-driver"
+                    fi
+                    echo "[step 7] $NS/$NAME on $NODE matches signature $SIG"
+
+                    # [step 8] escalation ladder: the cheap fix first, always.
                     if [ "$SIG" = "B:csi-op-exists" ]; then
-                      case "$RESTARTED_NODES" in
-                        *" $NODE "*) echo "[step 6] plugin on $NODE already restarted this run" ;;
-                        *)
-                          PLUGIN=$(kubectl get pods -n "$CSI_RCLONE_NAMESPACE" \
-                            --field-selector "spec.nodeName=$NODE" -o json \
-                            | jq -r --arg pfx "$CSI_RCLONE_POD_PREFIX" '
-                              .items[]
-                              | select(.metadata.name | startswith($pfx))
-                              | .metadata.name' | head -1)
-                          if [ -n "$PLUGIN" ]; then
-                            echo "[step 6] restarting csi-rclone plugin $PLUGIN on $NODE (graceful delete)"
-                            kubectl delete pod "$PLUGIN" -n "$CSI_RCLONE_NAMESPACE" --wait=false || echo "[step 6] WARN plugin delete failed"
-                            RESTARTED_NODES="$RESTARTED_NODES$NODE "
-                            sleep 10
-                          else
-                            echo "[step 6] WARN: no $CSI_RCLONE_POD_PREFIX pod found on $NODE"
-                          fi
-                          ;;
-                      esac
+                      ladder "$NODE"
+                      if [ "$ESCALATE" = "yes" ]; then
+                        restart_plugin "$NODE"
+                      else
+                        echo "[step 8] $NODE: cheap fix only this tick"
+                      fi
                     fi
 
-                    # [step 7] graceful pod delete — NEVER --force
-                    # (stale-VA lesson, known-caveats 2026-07-20).
-                    echo "[step 7] deleting $NS/$NAME (graceful; controller recreates)"
-                    kubectl delete pod "$NAME" -n "$NS" --wait=false || echo "[step 7] WARN delete failed on $NS/$NAME"
-                    ACTIONS=$((ACTIONS+1))
-                  done
-                  echo "[step 8] janitor pass complete"
+                    # [step 9] the cheap fix itself — graceful, controller recreates.
+                    act delete-wedged "$NS/$NAME node=$NODE sig=$SIG" \
+                      kubectl delete pod "$NAME" -n "$NS" --wait=false
+                    ACTIONS=$((ACTIONS + 1))
+                  done < "$W/cands"
+
+                  flush_state
+                  echo "[step 10] pass complete: actions=$ACTIONS/$MAX_ACTIONS_PER_RUN collateral_recycled=$COLLATERAL/$COLLATERAL_MAX_PODS swept_nodes='$SWEPT_NODES'"
               volumeMounts:
                 - name: tmp
                   mountPath: /tmp

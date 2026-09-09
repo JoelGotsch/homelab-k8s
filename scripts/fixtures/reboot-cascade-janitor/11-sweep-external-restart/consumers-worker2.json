@@ -1,0 +1,114 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "metadata": {
+        "name": "forgejo-78697c55df-9bbqn",
+        "namespace": "forgejo",
+        "uid": "uid-forgejo",
+        "creationTimestamp": "2026-09-09T04:06:40Z",
+        "ownerReferences": [
+          {
+            "kind": "ReplicaSet",
+            "name": "forgejo-78697c55df",
+            "controller": true
+          }
+        ]
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          },
+          {
+            "name": "forgejo-packages",
+            "persistentVolumeClaim": {
+              "claimName": "forgejo-packages"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Running",
+        "startTime": "2026-09-09T04:06:40Z"
+      }
+    },
+    {
+      "metadata": {
+        "name": "chist-web-77468b7848-97ht4",
+        "namespace": "conversation-history",
+        "uid": "uid-chist",
+        "creationTimestamp": "2026-09-09T04:06:40Z",
+        "ownerReferences": [
+          {
+            "kind": "ReplicaSet",
+            "name": "chist-web-77468b7848",
+            "controller": true
+          }
+        ]
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          },
+          {
+            "name": "vault",
+            "persistentVolumeClaim": {
+              "claimName": "vault"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Running",
+        "startTime": "2026-09-09T04:06:40Z"
+      }
+    },
+    {
+      "metadata": {
+        "name": "follow-whatsapp-5984bf5fd8-pfnhm",
+        "namespace": "conversation-history",
+        "uid": "uid-follow",
+        "creationTimestamp": "2026-09-09T05:29:00Z",
+        "ownerReferences": [
+          {
+            "kind": "ReplicaSet",
+            "name": "follow-whatsapp-5984bf5fd8",
+            "controller": true
+          }
+        ]
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          },
+          {
+            "name": "vault",
+            "persistentVolumeClaim": {
+              "claimName": "vault"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Running",
+        "startTime": "2026-09-09T05:29:00Z"
+      }
+    }
+  ]
+}

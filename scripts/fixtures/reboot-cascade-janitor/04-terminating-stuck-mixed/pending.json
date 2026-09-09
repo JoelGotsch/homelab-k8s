@@ -1,0 +1,49 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "metadata": {
+        "name": "paperless-migrate-1",
+        "namespace": "paperless",
+        "uid": "uid-pmig",
+        "creationTimestamp": "2026-09-08T20:30:00Z",
+        "ownerReferences": [
+          {
+            "kind": "Job",
+            "name": "paperless-migrate",
+            "controller": true
+          }
+        ],
+        "deletionTimestamp": "2026-09-08T20:30:00Z"
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          },
+          {
+            "name": "paperless-media",
+            "persistentVolumeClaim": {
+              "claimName": "paperless-media"
+            }
+          },
+          {
+            "name": "paperless-data",
+            "persistentVolumeClaim": {
+              "claimName": "paperless-data"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Pending",
+        "startTime": "2026-09-08T20:30:00Z"
+      }
+    }
+  ]
+}

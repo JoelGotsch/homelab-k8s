@@ -1,0 +1,14 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "involvedObject": {
+        "uid": "uid-enrich1"
+      },
+      "reason": "FailedMount",
+      "message": "MountVolume.SetUp failed for volume \"nas-internal-archive-conversation-history-vault\" : rpc error: code = Aborted desc = An operation with the given Volume ID nas-internal-archive-conversation-history-vault already exists",
+      "lastTimestamp": "2026-09-09T05:29:00Z"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+[act] restart-plugin csi-rclone-node-krkvv node=worker2 severs=3 age=2851200s
+[act] recycle-severed forgejo/forgejo-78697c55df-9bbqn node=worker2 why=collateral-of-restart-csi-rclone-node-krkvv
+[act] recycle-severed paperless/paperless-ngx-758cd75ccd-r4w9d node=worker2 why=collateral-of-restart-csi-rclone-node-krkvv
+[act] recycle-severed conversation-history/chist-web-77468b7848-97ht4 node=worker2 why=collateral-of-restart-csi-rclone-node-krkvv
+[act] delete-wedged conversation-history/enrich-29815507-2gnfm node=worker2 sig=B:csi-op-exists

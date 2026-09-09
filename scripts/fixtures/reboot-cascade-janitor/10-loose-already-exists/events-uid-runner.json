@@ -1,0 +1,14 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "involvedObject": {
+        "uid": "uid-runner"
+      },
+      "reason": "FailedMount",
+      "message": "Unable to attach or mount volumes: unmounted volumes=[secrets], timed out waiting for the condition: secret \"forgejo-runner-token\" already exists",
+      "lastTimestamp": "2026-09-09T05:29:00Z"
+    }
+  ]
+}

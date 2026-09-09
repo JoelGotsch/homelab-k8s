@@ -1,0 +1,14 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "involvedObject": {
+        "uid": "uid-pcons"
+      },
+      "reason": "FailedMount",
+      "message": "MountVolume.SetUp failed for volume \"pvc-longhorn-paperless-data\" : rpc error: code = Aborted desc = An operation with the given Volume ID pvc-longhorn-paperless-data already exists",
+      "lastTimestamp": "2026-09-09T05:29:00Z"
+    }
+  ]
+}

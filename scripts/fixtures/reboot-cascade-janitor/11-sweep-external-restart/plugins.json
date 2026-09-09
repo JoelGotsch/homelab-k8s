@@ -1,0 +1,94 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "metadata": {
+        "name": "csi-rclone-node-4rmtn",
+        "namespace": "csi-rclone",
+        "uid": "uid-csi-rclone-node-4rmtn",
+        "creationTimestamp": "2026-09-09T05:25:00Z",
+        "ownerReferences": [
+          {
+            "kind": "DaemonSet",
+            "name": "csi-rclone-node",
+            "controller": true
+          }
+        ]
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Running",
+        "startTime": "2026-09-09T05:25:00Z",
+        "containerStatuses": [
+          {
+            "name": "liveness-probe",
+            "ready": true
+          },
+          {
+            "name": "node-driver-registrar",
+            "ready": true
+          },
+          {
+            "name": "rclone",
+            "ready": true
+          }
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "name": "csi-rclone-node-wdgsj",
+        "namespace": "csi-rclone",
+        "uid": "uid-csi-rclone-node-wdgsj",
+        "creationTimestamp": "2026-08-07T05:30:00Z",
+        "ownerReferences": [
+          {
+            "kind": "DaemonSet",
+            "name": "csi-rclone-node",
+            "controller": true
+          }
+        ]
+      },
+      "spec": {
+        "nodeName": "worker3",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Running",
+        "startTime": "2026-08-07T05:30:00Z",
+        "containerStatuses": [
+          {
+            "name": "liveness-probe",
+            "ready": true
+          },
+          {
+            "name": "node-driver-registrar",
+            "ready": true
+          },
+          {
+            "name": "rclone",
+            "ready": true
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "metadata": {
+        "name": "forgejo-78697c55df-9bbqn",
+        "namespace": "forgejo",
+        "uid": "uid-forgejo",
+        "creationTimestamp": "2026-09-09T04:06:40Z",
+        "ownerReferences": [
+          {
+            "kind": "ReplicaSet",
+            "name": "forgejo-78697c55df",
+            "controller": true
+          }
+        ]
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          },
+          {
+            "name": "forgejo-packages",
+            "persistentVolumeClaim": {
+              "claimName": "forgejo-packages"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Running",
+        "startTime": "2026-09-09T04:06:40Z"
+      }
+    },
+    {
+      "metadata": {
+        "name": "operator-shell",
+        "namespace": "nextcloud",
+        "uid": "uid-shell",
+        "creationTimestamp": "2026-09-09T04:06:40Z"
+      },
+      "spec": {
+        "nodeName": "worker2",
+        "volumes": [
+          {
+            "name": "config",
+            "configMap": {
+              "name": "x"
+            }
+          },
+          {
+            "name": "nextcloud-family-shared",
+            "persistentVolumeClaim": {
+              "claimName": "nextcloud-family-shared"
+            }
+          }
+        ]
+      },
+      "status": {
+        "phase": "Running",
+        "startTime": "2026-09-09T04:06:40Z"
+      }
+    }
+  ]
+}
