@@ -18,6 +18,18 @@
 # puts the same value in a ConfigMap, and it fits the repo's
 # helmCharts + Renovate pattern.
 #
+# A chart bump here is a FLEET-WIDE DATABASE RESTART, not a
+# control-plane change: the chart's ConfigMap carries SIDECAR_IMAGE,
+# the operator rebuilds every instance pod spec with the new native
+# sidecar, recreates the replicas and restarts the primaries in place
+# (default primaryUpdateMethod: restart). Observed 2026-09-10 on the
+# 0.7.1 -> 0.8.0 bump: 14 clusters, 28 UpgradingInstance events,
+# starting four minutes after the new plugin pod took leadership --
+# after Argo had reported this Application Healthy. Schedule it,
+# snapshot `kubectl get clusters.postgresql.cnpg.io -A` before, and
+# treat "every Cluster healthy with the new sidecar image on a
+# primary" as the completion signal (lessons.md, CloudNativePG).
+#
 # Prerequisites (both satisfied here): CloudNativePG >= 1.26 in this
 # same namespace, and cert-manager — the chart issues the plugin's
 # gRPC client/server certificates through a namespace-local
