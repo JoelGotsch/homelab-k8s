@@ -60,12 +60,12 @@
   mirror_artifact_sha256: sha256:7f13aba9a7d38041fbb1e1e32de2d7d8b258a37b52f3cb155b2159dd50eaad4e
 - layer: infrastructure/external-secrets
   name: external-secrets
-  version: 0.10.5
+  version: 0.16.2
   upstream: https://charts.external-secrets.io
   mirror: oci://registry.homelab.internal/homelab/external-secrets
-  content_digest: sha256:46d58b394ade2ed54097e985d57a1d718c8da54f4f3e10361325a2fc02adb19d
-  upstream_artifact_sha256: sha256:5cf78ad97d7f3dfe596bbc1b58afc5043d7ee34f80b1354941bc4f0741442811
-  mirror_artifact_sha256: sha256:5cf78ad97d7f3dfe596bbc1b58afc5043d7ee34f80b1354941bc4f0741442811
+  content_digest: sha256:8d4d75deaf7ad3f10b31e077665ffc02b150f75132120a91e5e7b0a026943700
+  upstream_artifact_sha256: sha256:3bc0a2de05fff62bccbfd026d7eebfacd44b71da7729d8866274acec892add5d
+  mirror_artifact_sha256: sha256:3bc0a2de05fff62bccbfd026d7eebfacd44b71da7729d8866274acec892add5d
 - layer: infrastructure/kyverno
   name: kyverno
   version: 3.9.0
