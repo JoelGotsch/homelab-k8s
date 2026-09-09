@@ -1,0 +1,160 @@
+# Reboot-cascade janitor convergence alerts, written 2026-09-09 alongside the
+# janitor rewrite (infrastructure/reboot-cascade-janitor, commit 36af127).
+#
+# WHY. On 2026-09-09 the old janitor deleted the same two Terminating pods
+# roughly 130 times over 11 hours. Every one of those deletes was logged and
+# not one of them was alertable, because the janitor emitted no metric and
+# "remediation attempted repeatedly on a target that never leaves the
+# matching state" was not expressible against anything Prometheus had.
+# storage-health-rules.yaml declined to ship a convergence alert for exactly
+# that reason and used CSIRcloneNodePluginReplaced as the nearest proxy —
+# which sees plugin restarts (rung 3 of the ladder) but is blind to the
+# cheap-fix loop (rung 1) that actually ran 130 times.
+#
+# WHERE THE SERIES COME FROM — read this before touching an expression.
+# The janitor is a Job: unscrapable, and this estate has no Pushgateway by
+# decision (ADR 0062) and no textfile collector (Talos). Its act() helper
+# prints one "[metric] ..." line per remediation, and Alloy's existing pod-log
+# pipeline (observability/alloy/values.yaml, loki.process "janitor_metrics")
+# turns those lines into series on Alloy's own /metrics. Consequences that
+# shape every rule here:
+#
+#   * The counter is kept by the Alloy pod on whichever node the Job ran.
+#     Six nodes, so up to six partial series per target; every expression
+#     therefore aggregates with `sum by (...)` over the target labels and
+#     never over Alloy's scrape labels (pod, instance).
+#   * Series EXPIRE. Alloy drops a counter after max_idle_duration (1h) of
+#     silence and the gauges after 1h / 15m. So `janitor_remediation_total`
+#     for a target only exists while the janitor is still touching it, and
+#     is gone an hour after the last remediation. That is why the looping
+#     rule compares the RAW SUM to a threshold rather than
+#     `increase(...[1h])`: with a fresh Job pod every tick, a series is born
+#     already at 1 on each Alloy, and Prometheus does not count a series'
+#     first sample as an increase from zero — increase() would under-count
+#     by up to one per Alloy instance. The raw sum with a 1h idle expiry says
+#     precisely "N remediations of this target, never more than an hour
+#     apart", which is the convergence failure we want named.
+#   * The expiry is also what makes JanitorNotRunning honest: a janitor that
+#     stopped produces absence, not a stale last value (the failure mode
+#     ADR 0062 holds against Pushgateway).
+#
+# THRESHOLD. The ladder gives signature B three cheap-fix ticks (15 min)
+# before escalation may even be considered, and escalation is then gated by
+# a 1h plugin cooldown. Six remediations of the same (namespace, pod) inside
+# the counter's lifetime means the cheap fix has been re-applied to a target
+# that keeps re-matching for at least half an hour — double the ladder's
+# own patience — and that the ladder has either refused to escalate or
+# escalated without effect. On 2026-09-09 this would have fired at ~05:50,
+# 4.5 hours before the outage became visible.
+#
+# dry_run="false" ONLY. In DRY_RUN the janitor prints the same lines with
+# dry_run=true and touches nothing, so a target that never converges is the
+# expected steady state, not a loop. Grafana can still plot the plan.
+#
+# Routing: severity warning -> ntfy attention topic; severity info -> null
+# receiver (Tier 3: logged by Alertmanager's notification log into Loki,
+# surfaced by the weekly digest). See alertmanager-config.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: reboot-cascade-janitor
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: reboot-cascade-janitor
+    # LOAD-BEARING. The chart's ruleSelector matches on this label; without it
+    # the CR is applied, is visible to `kubectl get prometheusrule`, and is
+    # NEVER LOADED BY PROMETHEUS. See
+    # homelab-docs/99-journal/2026-09-05-the-monitor-that-was-never-selected.md
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: reboot-cascade-janitor.convergence
+      interval: 1m
+      rules:
+        # ── JanitorRemediationLooping ────────────────────────────────────────
+        # `for: 1m` rather than 0: the sum is monotone until a partial series
+        # expires, so this is not flap protection — it is one evaluation of
+        # slack for a scrape that lands mid-tick across two Alloy pods.
+        - alert: JanitorRemediationLooping
+          expr: |
+            sum by (target_namespace, target_pod) (
+              janitor_remediation_total{dry_run="false"}
+            ) >= 6
+          for: 1m
+          labels:
+            severity: warning
+            component: reboot-cascade-janitor
+          annotations:
+            summary: "reboot-cascade-janitor has remediated {{ $labels.target_namespace }}/{{ $labels.target_pod }} {{ $value }} times without it converging"
+            description: |
+              The janitor keeps acting on `{{ $labels.target_namespace }}/{{ $labels.target_pod }}`
+              and the pod keeps re-matching a failure signature: {{ $value }}
+              remediations, never more than an hour apart. The remediation is
+              not fixing the fault — it is either being absorbed (a graceful
+              delete of a pod whose unmount hangs; the 2026-09-09 shape) or the
+              fault lives one layer down (a dead FUSE mount, a node-plugin that
+              keeps getting wedged) and deleting the consumer cannot reach it.
+
+              THE JANITOR WILL NOT STOP ON ITS OWN. Every tick re-applies the
+              same rung; only the target changing state ends the loop.
+
+              What it has been doing, by action and rung:
+                # per-action counts for this target
+                sum by (action, signature, node) (janitor_remediation_total{target_namespace="{{ $labels.target_namespace }}",target_pod="{{ $labels.target_pod }}"})
+                # the ladder position on its node (0 = idle/reset)
+                max by (node) (janitor_state_streak)
+                # the decisions themselves, with the gates that refused
+                kubectl -n reboot-cascade-janitor logs -l app.kubernetes.io/name=reboot-cascade-janitor --tail=200 | grep -E '^\[(act|ladder|escalate|cooldown|step 6|sweep)\]'
+                # Loki keeps the full history: {namespace="reboot-cascade-janitor"} |= "{{ $labels.target_pod }}"
+
+              Then look at the target, not the janitor:
+                kubectl -n {{ $labels.target_namespace }} describe pod {{ $labels.target_pod }} | tail -30
+                kubectl -n {{ $labels.target_namespace }} get pod {{ $labels.target_pod }} -o jsonpath='{.spec.nodeName}{" "}{.metadata.deletionTimestamp}{"\n"}'
+                kubectl -n csi-rclone get pods -o wide   # is that node's plugin young, or restarting?
+
+              If the loop itself is doing harm, quiesce it through git, not
+              kubectl (Argo self-heals): set DRY_RUN "true" in
+              infrastructure/reboot-cascade-janitor/reboot-cascade-janitor.yaml.
+              The alert resolves one hour after the last remediation of this
+              target, because the counter expires — not because a timer ran out.
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/known-caveats.md"
+
+        # ── JanitorNotRunning ────────────────────────────────────────────────
+        # Not an incident: the cluster is no worse off than it was before the
+        # janitor existed. But its coverage has silently gone — a watchdog
+        # hard-reset during that window gets the 2026-07-20 manual recovery
+        # session again — so it should be KNOWN, at Tier 3.
+        #
+        # Two branches, both needed. A janitor that stops running leaves a
+        # last value that ages (`time() - ts > 900`, i.e. two ticks missed)
+        # and then, an hour later, no series at all (Alloy's gauge expiry),
+        # which only absent() can see. `for: 10m` is what keeps an Alloy
+        # rollout — every gauge briefly absent until the next tick lands —
+        # from being reported as a dead janitor.
+        - alert: JanitorNotRunning
+          expr: |
+            (time() - max(janitor_run_timestamp_seconds) > 900)
+            or
+            absent(janitor_run_timestamp_seconds)
+          for: 10m
+          labels:
+            severity: info
+            component: reboot-cascade-janitor
+          annotations:
+            summary: "reboot-cascade-janitor has not completed a run for over 15 minutes"
+            description: |
+              The */5 janitor CronJob has not reported a completed run. Nothing
+              is necessarily wrong with the cluster, but the post-reboot
+              auto-remediation (Spegel pull hangs, csi-rclone operation locks,
+              orphaned FUSE mounts) is not covering it while this fires.
+
+              Either the Jobs are not running, are failing before they finish,
+              or their stdout is not reaching Alloy (the metric is derived from
+              the Job's log lines, so a broken log pipeline looks identical to
+              a dead janitor — check `up{job="alloy"}` first).
+                kubectl -n reboot-cascade-janitor get cronjob,jobs
+                kubectl -n reboot-cascade-janitor logs -l app.kubernetes.io/name=reboot-cascade-janitor --tail=50
+                kubectl -n reboot-cascade-janitor get cronjob reboot-cascade-janitor -o jsonpath='{.spec.suspend}{"\n"}'
+              A run that fails mid-way emits no completion metric on purpose;
+              KubeJobFailed carries that case.
+            runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/known-caveats.md"

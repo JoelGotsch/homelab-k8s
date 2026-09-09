@@ -1,0 +1,320 @@
+# promtool unit tests for janitor-rules.yaml.
+#
+# Run via `scripts/check-prometheusrule-tests.sh` (pre-commit), which extracts
+# `.spec.groups` from the sibling PrometheusRule CR into a `rules.yaml` beside a
+# copy of this file — hence the bare `rule_files:` reference below.
+#
+# The input series mimic what Alloy actually exports (see
+# observability/alloy/values.yaml, loki.process "janitor_metrics"): the
+# janitor's target labels plus Alloy's OWN scrape labels (`pod`, `instance`,
+# `job="alloy"`). Cases (d) and (e) exist because of that split: the same
+# target counted on two Alloy pods must add up, and two different targets
+# must not.
+#
+# NOTE ON TIMESTAMPS: promtool's clock starts at the Unix epoch, so
+# `eval_time: 20m` means `time() == 1200`. Case (g) gives
+# `janitor_run_timestamp_seconds` the constant value 0 — "the janitor last
+# finished at the epoch" — so `time() - 0 > 900` becomes true at t=15m; (i)
+# tracks the clock with `0+60x40` so the lag stays 0.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+
+  # (a) Steady state: one target remediated three times (a normal ladder
+  #     climb to escalation), the janitor completing every tick. Nothing fires.
+  - interval: 1m
+    name: "(a) three remediations and a fresh run - nothing fires"
+    input_series:
+      - series: 'janitor_remediation_total{signature="B:csi-op-exists", action="delete-wedged", target_namespace="conversation-history", target_pod="enrich-29815507-2gnfm", node="worker2", dry_run="false", job="alloy", pod="alloy-bs4ds", instance="10.244.2.54:12345"}'
+        values: "1+0x4 2+0x4 3+0x30"
+      - series: 'janitor_run_timestamp_seconds{job="alloy", pod="alloy-bs4ds", instance="10.244.2.54:12345"}'
+        values: "0+60x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: JanitorRemediationLooping
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: JanitorNotRunning
+        exp_alerts: []
+
+  # (b) THE 2026-09-09 SHAPE: the same Terminating pod gracefully re-deleted
+  #     every tick. The counter climbs one per five minutes and reaches 6 at
+  #     t=25m; `for: 1m` fires it at t=26m. Silent at 24m, firing at 27m with
+  #     the target as its identity and none of Alloy's labels.
+  - interval: 1m
+    name: "(b) same target every tick - fires once the sixth remediation lands"
+    input_series:
+      - series: 'janitor_remediation_total{signature="C:orphaned-mount", action="delete-wedged", target_namespace="conversation-history", target_pod="enrich-29815507-2gnfm", node="worker2", dry_run="false", job="alloy", pod="alloy-bs4ds", instance="10.244.2.54:12345"}'
+        values: "1+0x4 2+0x4 3+0x4 4+0x4 5+0x4 6+0x4 6+0x20"
+    alert_rule_test:
+      - eval_time: 24m
+        alertname: JanitorRemediationLooping
+        exp_alerts: []
+      - eval_time: 27m
+        alertname: JanitorRemediationLooping
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: reboot-cascade-janitor
+              target_namespace: conversation-history
+              target_pod: enrich-29815507-2gnfm
+            exp_annotations:
+              summary: "reboot-cascade-janitor has remediated conversation-history/enrich-29815507-2gnfm 6 times without it converging"
+              description: |
+                The janitor keeps acting on `conversation-history/enrich-29815507-2gnfm`
+                and the pod keeps re-matching a failure signature: 6
+                remediations, never more than an hour apart. The remediation is
+                not fixing the fault — it is either being absorbed (a graceful
+                delete of a pod whose unmount hangs; the 2026-09-09 shape) or the
+                fault lives one layer down (a dead FUSE mount, a node-plugin that
+                keeps getting wedged) and deleting the consumer cannot reach it.
+
+                THE JANITOR WILL NOT STOP ON ITS OWN. Every tick re-applies the
+                same rung; only the target changing state ends the loop.
+
+                What it has been doing, by action and rung:
+                  # per-action counts for this target
+                  sum by (action, signature, node) (janitor_remediation_total{target_namespace="conversation-history",target_pod="enrich-29815507-2gnfm"})
+                  # the ladder position on its node (0 = idle/reset)
+                  max by (node) (janitor_state_streak)
+                  # the decisions themselves, with the gates that refused
+                  kubectl -n reboot-cascade-janitor logs -l app.kubernetes.io/name=reboot-cascade-janitor --tail=200 | grep -E '^\[(act|ladder|escalate|cooldown|step 6|sweep)\]'
+                  # Loki keeps the full history: {namespace="reboot-cascade-janitor"} |= "enrich-29815507-2gnfm"
+
+                Then look at the target, not the janitor:
+                  kubectl -n conversation-history describe pod enrich-29815507-2gnfm | tail -30
+                  kubectl -n conversation-history get pod enrich-29815507-2gnfm -o jsonpath='{.spec.nodeName}{" "}{.metadata.deletionTimestamp}{"\n"}'
+                  kubectl -n csi-rclone get pods -o wide   # is that node's plugin young, or restarting?
+
+                If the loop itself is doing harm, quiesce it through git, not
+                kubectl (Argo self-heals): set DRY_RUN "true" in
+                infrastructure/reboot-cascade-janitor/reboot-cascade-janitor.yaml.
+                The alert resolves one hour after the last remediation of this
+                target, because the counter expires — not because a timer ran out.
+              runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/known-caveats.md"
+
+  # (c) DRY_RUN. The same loop, planned but never executed, must stay silent:
+  #     in dry-run a never-converging target is the expected steady state.
+  - interval: 1m
+    name: "(c) dry-run plan looping - silent"
+    input_series:
+      - series: 'janitor_remediation_total{signature="C:orphaned-mount", action="delete-wedged", target_namespace="conversation-history", target_pod="enrich-29815507-2gnfm", node="worker2", dry_run="true", job="alloy", pod="alloy-bs4ds", instance="10.244.2.54:12345"}'
+        values: "10+0x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: JanitorRemediationLooping
+        exp_alerts: []
+
+  # (d) Two different targets, three remediations each (six in total) — a
+  #     mass-wedge after a reboot draining normally, not a loop. Silent.
+  - interval: 1m
+    name: "(d) six remediations spread over two targets - silent"
+    input_series:
+      - series: 'janitor_remediation_total{signature="A:silent-pull-hang", action="delete-wedged", target_namespace="forgejo", target_pod="forgejo-job-1", node="worker1", dry_run="false", job="alloy", pod="alloy-shkhg", instance="10.244.3.87:12345"}'
+        values: "3+0x30"
+      - series: 'janitor_remediation_total{signature="A:silent-pull-hang", action="delete-wedged", target_namespace="forgejo", target_pod="forgejo-job-2", node="worker1", dry_run="false", job="alloy", pod="alloy-shkhg", instance="10.244.3.87:12345"}'
+        values: "3+0x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: JanitorRemediationLooping
+        exp_alerts: []
+
+  # (e) THE SPLIT COUNTER. Each tick's Job lands on a different node, so the
+  #     same target is counted by two different Alloy pods. Three and three
+  #     must add up to six and fire; an expression that grouped by Alloy's
+  #     `pod` or `instance` would see two threes and stay silent.
+  - interval: 1m
+    name: "(e) same target counted on two Alloy pods - the sum fires"
+    input_series:
+      - series: 'janitor_remediation_total{signature="C:orphaned-mount", action="delete-wedged", target_namespace="conversation-history", target_pod="enrich-29815507-2gnfm", node="worker2", dry_run="false", job="alloy", pod="alloy-bs4ds", instance="10.244.2.54:12345"}'
+        values: "3+0x30"
+      - series: 'janitor_remediation_total{signature="C:orphaned-mount", action="delete-wedged", target_namespace="conversation-history", target_pod="enrich-29815507-2gnfm", node="worker2", dry_run="false", job="alloy", pod="alloy-sh274", instance="10.244.5.3:12345"}'
+        values: "3+0x30"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: JanitorRemediationLooping
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: reboot-cascade-janitor
+              target_namespace: conversation-history
+              target_pod: enrich-29815507-2gnfm
+            exp_annotations:
+              summary: "reboot-cascade-janitor has remediated conversation-history/enrich-29815507-2gnfm 6 times without it converging"
+              description: |
+                The janitor keeps acting on `conversation-history/enrich-29815507-2gnfm`
+                and the pod keeps re-matching a failure signature: 6
+                remediations, never more than an hour apart. The remediation is
+                not fixing the fault — it is either being absorbed (a graceful
+                delete of a pod whose unmount hangs; the 2026-09-09 shape) or the
+                fault lives one layer down (a dead FUSE mount, a node-plugin that
+                keeps getting wedged) and deleting the consumer cannot reach it.
+
+                THE JANITOR WILL NOT STOP ON ITS OWN. Every tick re-applies the
+                same rung; only the target changing state ends the loop.
+
+                What it has been doing, by action and rung:
+                  # per-action counts for this target
+                  sum by (action, signature, node) (janitor_remediation_total{target_namespace="conversation-history",target_pod="enrich-29815507-2gnfm"})
+                  # the ladder position on its node (0 = idle/reset)
+                  max by (node) (janitor_state_streak)
+                  # the decisions themselves, with the gates that refused
+                  kubectl -n reboot-cascade-janitor logs -l app.kubernetes.io/name=reboot-cascade-janitor --tail=200 | grep -E '^\[(act|ladder|escalate|cooldown|step 6|sweep)\]'
+                  # Loki keeps the full history: {namespace="reboot-cascade-janitor"} |= "enrich-29815507-2gnfm"
+
+                Then look at the target, not the janitor:
+                  kubectl -n conversation-history describe pod enrich-29815507-2gnfm | tail -30
+                  kubectl -n conversation-history get pod enrich-29815507-2gnfm -o jsonpath='{.spec.nodeName}{" "}{.metadata.deletionTimestamp}{"\n"}'
+                  kubectl -n csi-rclone get pods -o wide   # is that node's plugin young, or restarting?
+
+                If the loop itself is doing harm, quiesce it through git, not
+                kubectl (Argo self-heals): set DRY_RUN "true" in
+                infrastructure/reboot-cascade-janitor/reboot-cascade-janitor.yaml.
+                The alert resolves one hour after the last remediation of this
+                target, because the counter expires — not because a timer ran out.
+              runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/known-caveats.md"
+
+  # (f) RESOLUTION. A loop that ends: the counter series expires (Alloy's
+  #     1h idle drop) and the alert must go with it, not latch.
+  - interval: 1m
+    name: "(f) counter series expires - the alert resolves"
+    input_series:
+      - series: 'janitor_remediation_total{signature="C:orphaned-mount", action="delete-wedged", target_namespace="conversation-history", target_pod="enrich-29815507-2gnfm", node="worker2", dry_run="false", job="alloy", pod="alloy-bs4ds", instance="10.244.2.54:12345"}'
+        values: "6+0x9 stale stale stale stale stale stale stale stale stale stale"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: JanitorRemediationLooping
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: reboot-cascade-janitor
+              target_namespace: conversation-history
+              target_pod: enrich-29815507-2gnfm
+            exp_annotations:
+              summary: "reboot-cascade-janitor has remediated conversation-history/enrich-29815507-2gnfm 6 times without it converging"
+              description: |
+                The janitor keeps acting on `conversation-history/enrich-29815507-2gnfm`
+                and the pod keeps re-matching a failure signature: 6
+                remediations, never more than an hour apart. The remediation is
+                not fixing the fault — it is either being absorbed (a graceful
+                delete of a pod whose unmount hangs; the 2026-09-09 shape) or the
+                fault lives one layer down (a dead FUSE mount, a node-plugin that
+                keeps getting wedged) and deleting the consumer cannot reach it.
+
+                THE JANITOR WILL NOT STOP ON ITS OWN. Every tick re-applies the
+                same rung; only the target changing state ends the loop.
+
+                What it has been doing, by action and rung:
+                  # per-action counts for this target
+                  sum by (action, signature, node) (janitor_remediation_total{target_namespace="conversation-history",target_pod="enrich-29815507-2gnfm"})
+                  # the ladder position on its node (0 = idle/reset)
+                  max by (node) (janitor_state_streak)
+                  # the decisions themselves, with the gates that refused
+                  kubectl -n reboot-cascade-janitor logs -l app.kubernetes.io/name=reboot-cascade-janitor --tail=200 | grep -E '^\[(act|ladder|escalate|cooldown|step 6|sweep)\]'
+                  # Loki keeps the full history: {namespace="reboot-cascade-janitor"} |= "enrich-29815507-2gnfm"
+
+                Then look at the target, not the janitor:
+                  kubectl -n conversation-history describe pod enrich-29815507-2gnfm | tail -30
+                  kubectl -n conversation-history get pod enrich-29815507-2gnfm -o jsonpath='{.spec.nodeName}{" "}{.metadata.deletionTimestamp}{"\n"}'
+                  kubectl -n csi-rclone get pods -o wide   # is that node's plugin young, or restarting?
+
+                If the loop itself is doing harm, quiesce it through git, not
+                kubectl (Argo self-heals): set DRY_RUN "true" in
+                infrastructure/reboot-cascade-janitor/reboot-cascade-janitor.yaml.
+                The alert resolves one hour after the last remediation of this
+                target, because the counter expires — not because a timer ran out.
+              runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/known-caveats.md"
+      - eval_time: 15m
+        alertname: JanitorRemediationLooping
+        exp_alerts: []
+
+  # (g) STOPPED. The janitor last completed at the epoch and never again;
+  #     the gauge still exists (it is inside Alloy's 1h expiry). The lag
+  #     crosses 900s at t=15m and `for: 10m` fires it at t=25m.
+  - interval: 1m
+    name: "(g) stale last-run timestamp - fires after two missed ticks plus for"
+    input_series:
+      - series: 'janitor_run_timestamp_seconds{job="alloy", pod="alloy-bs4ds", instance="10.244.2.54:12345"}'
+        values: "0+0x40"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: JanitorNotRunning
+        exp_alerts: []
+      - eval_time: 26m
+        alertname: JanitorNotRunning
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              component: reboot-cascade-janitor
+            exp_annotations:
+              summary: "reboot-cascade-janitor has not completed a run for over 15 minutes"
+              description: |
+                The */5 janitor CronJob has not reported a completed run. Nothing
+                is necessarily wrong with the cluster, but the post-reboot
+                auto-remediation (Spegel pull hangs, csi-rclone operation locks,
+                orphaned FUSE mounts) is not covering it while this fires.
+
+                Either the Jobs are not running, are failing before they finish,
+                or their stdout is not reaching Alloy (the metric is derived from
+                the Job's log lines, so a broken log pipeline looks identical to
+                a dead janitor — check `up{job="alloy"}` first).
+                  kubectl -n reboot-cascade-janitor get cronjob,jobs
+                  kubectl -n reboot-cascade-janitor logs -l app.kubernetes.io/name=reboot-cascade-janitor --tail=50
+                  kubectl -n reboot-cascade-janitor get cronjob reboot-cascade-janitor -o jsonpath='{.spec.suspend}{"\n"}'
+                A run that fails mid-way emits no completion metric on purpose;
+                KubeJobFailed carries that case.
+              runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/known-caveats.md"
+
+  # (h) GONE. No series at all — the janitor (or the log pipeline feeding
+  #     the metric) has been dead long enough for Alloy to expire the gauge.
+  #     absent() is true from t=0; `for: 10m` fires at t=10m.
+  - interval: 1m
+    name: "(h) metric absent entirely - fires after for"
+    input_series: []
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: JanitorNotRunning
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: JanitorNotRunning
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              component: reboot-cascade-janitor
+            exp_annotations:
+              summary: "reboot-cascade-janitor has not completed a run for over 15 minutes"
+              description: |
+                The */5 janitor CronJob has not reported a completed run. Nothing
+                is necessarily wrong with the cluster, but the post-reboot
+                auto-remediation (Spegel pull hangs, csi-rclone operation locks,
+                orphaned FUSE mounts) is not covering it while this fires.
+
+                Either the Jobs are not running, are failing before they finish,
+                or their stdout is not reaching Alloy (the metric is derived from
+                the Job's log lines, so a broken log pipeline looks identical to
+                a dead janitor — check `up{job="alloy"}` first).
+                  kubectl -n reboot-cascade-janitor get cronjob,jobs
+                  kubectl -n reboot-cascade-janitor logs -l app.kubernetes.io/name=reboot-cascade-janitor --tail=50
+                  kubectl -n reboot-cascade-janitor get cronjob reboot-cascade-janitor -o jsonpath='{.spec.suspend}{"\n"}'
+                A run that fails mid-way emits no completion metric on purpose;
+                KubeJobFailed carries that case.
+              runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/04-guides/known-caveats.md"
+
+  # (i) ALIVE, SEEN FROM SEVERAL ALLOYS. Each tick lands on a different
+  #     node, so several Alloy pods hold a `janitor_run_timestamp_seconds`;
+  #     only one is current. `max()` must pick the fresh one and stay silent
+  #     even though the other is 30 minutes stale.
+  - interval: 1m
+    name: "(i) one fresh and one stale Alloy reading - silent"
+    input_series:
+      - series: 'janitor_run_timestamp_seconds{job="alloy", pod="alloy-bs4ds", instance="10.244.2.54:12345"}'
+        values: "0+60x40"
+      - series: 'janitor_run_timestamp_seconds{job="alloy", pod="alloy-sh274", instance="10.244.5.3:12345"}'
+        values: "0+0x40"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: JanitorNotRunning
+        exp_alerts: []

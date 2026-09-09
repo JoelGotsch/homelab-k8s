@@ -5,6 +5,18 @@
 # kubernetes.default ClusterIP port 443 to a control-plane endpoint on 6443
 # before policy evaluation, so permit both ports to the reserved
 # kube-apiserver entity (Cilium 1.16 policy language).
+#
+# STILL ONE FLOW AFTER THE 2026-09-09 METRICS WORK, DELIBERATELY. The janitor
+# exports janitor_remediation_total / janitor_state_streak /
+# janitor_run_{timestamp,duration}_seconds, and needs no egress for any of
+# them: it prints "[metric] ..." lines on stdout and Alloy — which already
+# tails every pod's logs and is already scraped — derives the series
+# (observability/alloy/values.yaml, loki.process "janitor_metrics"). There is
+# no Pushgateway in this estate by decision (ADR 0062) and no textfile
+# collector on Talos, so if a future edit reaches for a METRICS_PUSH_URL, the
+# missing piece is a component and an ADR, not a rule in this file. Adding
+# egress here to make a push work would also give the janitor's pod-deleting
+# service account a network path it does not otherwise have.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

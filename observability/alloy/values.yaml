@@ -78,13 +78,164 @@ alloy:
 
       // Drop noisy logs we don't need at retention scale.
       loki.process "pods" {
-        forward_to = [loki.write.default.receiver]
+        // Every entry goes to Loki AND through the janitor_metrics
+        // branch below. The branch forwards nothing, so it cannot
+        // change what Loki stores; it only derives metrics.
+        forward_to = [loki.write.default.receiver, loki.process.janitor_metrics.receiver]
 
         // Drop k8s probe-noise (kubelet healthcheck pings)
         // — high volume, low signal.
         stage.match {
           selector = "{container=~\".*\"} |~ \"GET /healthz\""
           action   = "drop"
+        }
+      }
+
+      // ---------- Log-derived metrics: reboot-cascade-janitor ----------
+      //
+      // The janitor (infrastructure/reboot-cascade-janitor) is a */5
+      // CronJob that deletes pods. A Job cannot be scraped, this
+      // estate has no Pushgateway by decision (ADR 0062) and Talos has
+      // no textfile collector — but Alloy already tails the Job's
+      // stdout, so the janitor prints one machine-readable
+      //   [metric] <name> k=v ...
+      // line per remediation and per run, and this branch turns them
+      // into series on Alloy's own /metrics (scraped by the sibling
+      // ServiceMonitor). The line format is a contract with the
+      // janitor manifest and with its fixture scenarios 15/16.
+      //
+      // `forward_to = []`: a pure sink. The label_drop stages below
+      // rewrite labels for the METRIC only; nothing here reaches Loki,
+      // and the parent `loki.process "pods"` still ships the unmodified
+      // entry. Dropping the janitor pod's own stream labels is what
+      // keeps the series stable across ticks: every tick is a new Job
+      // pod, and a counter that restarts at 1 under a new `pod` label
+      // every 5 minutes would never increase — Prometheus does not
+      // count a series' first sample as an increase from zero.
+      //
+      // Counter lifetime (max_idle_duration = 1h) is part of the
+      // alert semantics in kube-prometheus-stack/janitor-rules.yaml:
+      // `janitor_remediation_total` only exists while the janitor is
+      // still touching that target, and disappears an hour after the
+      // last remediation. The gauges expire the same way, which is
+      // what lets JanitorNotRunning use absent().
+      loki.process "janitor_metrics" {
+        forward_to = []
+
+        stage.match {
+          selector = "{namespace=\"reboot-cascade-janitor\"} |= \"[metric] janitor_remediation_total \""
+
+          stage.regex {
+            expression = "^\\[metric\\] janitor_remediation_total signature=(?P<signature>\\S+) action=(?P<action>\\S+) target_namespace=(?P<target_namespace>\\S+) target_pod=(?P<target_pod>\\S+) node=(?P<node>\\S+) dry_run=(?P<dry_run>\\S+)$"
+          }
+
+          stage.label_drop {
+            values = ["namespace", "pod", "container", "app", "component", "job", "instance"]
+          }
+
+          stage.labels {
+            values = {
+              signature        = "",
+              action           = "",
+              target_namespace = "",
+              target_pod       = "",
+              node             = "",
+              dry_run          = "",
+            }
+          }
+
+          stage.metrics {
+            metric.counter {
+              name              = "remediation_total"
+              prefix            = "janitor_"
+              description       = "Remediations the reboot-cascade janitor planned (dry_run=true) or executed, by signature, action and target pod."
+              // source + no match_all: a line the regex did not parse
+              // has no `action` key and is NOT counted, so format drift
+              // shows as a missing series rather than an unlabelled one.
+              source            = "action"
+              action            = "inc"
+              max_idle_duration = "1h"
+            }
+          }
+        }
+
+        stage.match {
+          selector = "{namespace=\"reboot-cascade-janitor\"} |= \"[metric] janitor_state_streak \""
+
+          stage.regex {
+            expression = "^\\[metric\\] janitor_state_streak node=(?P<node>\\S+) value=(?P<value>[0-9]+)$"
+          }
+
+          stage.label_drop {
+            values = ["namespace", "pod", "container", "app", "component", "job", "instance"]
+          }
+
+          stage.labels {
+            values = {
+              node = "",
+            }
+          }
+
+          stage.metrics {
+            metric.gauge {
+              name              = "state_streak"
+              prefix            = "janitor_"
+              description       = "Consecutive ticks on which signature B survived the janitor's cheap fix on this node (the escalation-ladder rung); 0 = ladder idle or just reset."
+              source            = "value"
+              action            = "set"
+              // Short: each tick may land on a different node, so the
+              // gauge lives in whichever Alloy saw it last. 15m (three
+              // ticks) bounds how long a stale reading can outlive the
+              // fresh one under `max by (node)`.
+              max_idle_duration = "15m"
+            }
+          }
+        }
+
+        stage.match {
+          selector = "{namespace=\"reboot-cascade-janitor\"} |= \"[metric] janitor_run_timestamp_seconds \""
+
+          stage.regex {
+            expression = "^\\[metric\\] janitor_run_timestamp_seconds value=(?P<value>[0-9]+)$"
+          }
+
+          stage.label_drop {
+            values = ["namespace", "pod", "container", "app", "component", "job", "instance"]
+          }
+
+          stage.metrics {
+            metric.gauge {
+              name              = "run_timestamp_seconds"
+              prefix            = "janitor_"
+              description       = "Unix time at which the reboot-cascade janitor last completed a run."
+              source            = "value"
+              action            = "set"
+              max_idle_duration = "1h"
+            }
+          }
+        }
+
+        stage.match {
+          selector = "{namespace=\"reboot-cascade-janitor\"} |= \"[metric] janitor_run_duration_seconds \""
+
+          stage.regex {
+            expression = "^\\[metric\\] janitor_run_duration_seconds value=(?P<value>[0-9]+)$"
+          }
+
+          stage.label_drop {
+            values = ["namespace", "pod", "container", "app", "component", "job", "instance"]
+          }
+
+          stage.metrics {
+            metric.gauge {
+              name              = "run_duration_seconds"
+              prefix            = "janitor_"
+              description       = "Wall-clock seconds the last reboot-cascade janitor run took."
+              source            = "value"
+              action            = "set"
+              max_idle_duration = "1h"
+            }
+          }
         }
       }
 

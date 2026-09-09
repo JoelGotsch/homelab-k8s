@@ -1,0 +1,8 @@
+[metric] janitor_remediation_total signature=B:csi-op-exists action=restart-plugin target_namespace=csi-rclone target_pod=csi-rclone-node-krkvv node=worker2 dry_run=false
+[metric] janitor_remediation_total signature=B:csi-op-exists action=recycle-severed target_namespace=forgejo target_pod=forgejo-78697c55df-9bbqn node=worker2 dry_run=false
+[metric] janitor_remediation_total signature=B:csi-op-exists action=recycle-severed target_namespace=paperless target_pod=paperless-ngx-758cd75ccd-r4w9d node=worker2 dry_run=false
+[metric] janitor_remediation_total signature=B:csi-op-exists action=recycle-severed target_namespace=conversation-history target_pod=chist-web-77468b7848-97ht4 node=worker2 dry_run=false
+[metric] janitor_remediation_total signature=B:csi-op-exists action=delete-wedged target_namespace=conversation-history target_pod=enrich-29815507-2gnfm node=worker2 dry_run=false
+[metric] janitor_state_streak node=worker2 value=0
+[metric] janitor_run_timestamp_seconds value=1788931800
+[metric] janitor_run_duration_seconds value=0

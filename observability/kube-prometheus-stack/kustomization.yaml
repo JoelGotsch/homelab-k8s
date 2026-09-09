@@ -39,6 +39,7 @@ resources:
   - argocd-reconciliation-rules.yaml  # 2026-07-22 LimitRange freeze — alert on stuck Argo sync/health
   - kube-job-failed-rules.yaml  # 2026-08-24 — CronJob-aware replacement for the stock KubeJobFailed (disabled in values.yaml)
   - storage-health-rules.yaml  # 2026-09-09 csi-rclone FUSE cascade — mount-cgroup pressure, stuck Terminating, node-plugin churn
+  - janitor-rules.yaml  # 2026-09-09 — reboot-cascade-janitor convergence (log-derived metrics via Alloy): looping remediation, janitor not running
 
 configMapGenerator:
   - name: alert-formatter-script

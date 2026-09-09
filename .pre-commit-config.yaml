@@ -430,6 +430,34 @@ repos:
         pass_filenames: false
         files: '^(infrastructure/minio-on-nas/networkpolicy\.yaml|scripts/(check-langfuse-minio-ingress\.sh|test-langfuse-minio-ingress\.sh|fixtures/retention-rendered-projection\.yaml))$'
 
+      - id: check-alloy-config
+        name: inline Alloy (River) config in observability/alloy/values.yaml validates
+        entry: scripts/check-alloy-config.sh
+        language: script
+        pass_filenames: false
+        files: '^(observability/alloy/values\.yaml|scripts/check-alloy-config\.sh)$'
+        # Requires `alloy` on PATH (brew install grafana-alloy); fails loudly
+        # rather than skipping. The config is a River document inside a YAML
+        # string, so nothing else on this list can parse it, and a bad edit
+        # crash-loops every Alloy pod = cluster-wide log loss. Added 2026-09-09
+        # when the reboot-cascade janitor's metrics became log-derived there.
+
+      - id: test-alloy-janitor-metrics
+        name: janitor "[metric]" lines still parse into the series the alerts query
+        entry: scripts/test-alloy-janitor-metrics.sh
+        language: script
+        pass_filenames: false
+        files: '^(infrastructure/reboot-cascade-janitor/reboot-cascade-janitor\.yaml|observability/alloy/values\.yaml|observability/kube-prometheus-stack/janitor-rules.*\.yaml|scripts/(test-alloy-janitor-metrics\.sh|fixtures/reboot-cascade-janitor/))'
+        # The janitor's metrics are log-derived: it prints "[metric] ..." lines
+        # and Alloy's loki.process "janitor_metrics" regex-parses them into
+        # counters. Two files, one format, no compiler between them — rename a
+        # token on either side and the line still ships to Loki while the
+        # counter silently stops incrementing, taking JanitorRemediationLooping
+        # with it. This feeds the lines the fixtures pin through the REAL Alloy
+        # block in a local `alloy run` and asserts the exact series, labels and
+        # counts come back. Requires `alloy` (brew install grafana-alloy);
+        # fails loudly rather than skipping. Added 2026-09-09.
+
       - id: check-prometheusrule-tests
         name: every PrometheusRule with a *_test.yaml passes its promtool unit tests
         entry: scripts/check-prometheusrule-tests.sh

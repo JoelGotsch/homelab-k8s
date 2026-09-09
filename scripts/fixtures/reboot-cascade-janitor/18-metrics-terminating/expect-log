@@ -1,0 +1,1 @@
+[metric] janitor_remediation_total signature=terminating-stuck action=force-delete-terminating target_namespace=conversation-history target_pod=enrich-29815507-2gnfm node=worker2 dry_run=false

@@ -20,7 +20,7 @@ Both ship to `http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push`.
 | File | Purpose |
 |---|---|
 | `kustomization.yaml` | Pins grafana/alloy chart 0.10.0. |
-| `values.yaml` | DaemonSet (one per node, all tolerations). Alloy flow-language config inline (River syntax). |
+| `values.yaml` | DaemonSet (one per node, all tolerations). Alloy flow-language config inline (River syntax). Validated by `scripts/check-alloy-config.sh` (pre-commit, needs `alloy`). |
 | `networkpolicy.yaml` | Ingress from Prometheus (self-metrics); egress to kube-API (pod discovery) + Loki + kube-DNS. |
 | `servicemonitor.yaml` | Self-metrics scrape via kube-prometheus-stack. |
 
@@ -35,6 +35,30 @@ within ~30s of Alloy + Loki both Running.
 | Argo sync `observability/loki/` | Loki StatefulSet up |
 | Argo sync this layer | Alloy DaemonSet on every node; first logs flow within ~30s |
 | Argo sync `observability/kube-prometheus-stack/` (with Loki data source enabled) | Grafana queries surface |
+
+## Log-derived metrics
+
+`loki.process "janitor_metrics"` is a second branch fed from the pod-log
+pipeline that forwards nothing to Loki and only derives Prometheus series,
+exposed on Alloy's own `/metrics` (scraped by `servicemonitor.yaml`). It
+exists because a CronJob cannot be scraped and this estate has no
+Pushgateway by decision (ADR 0062) and no textfile collector (Talos).
+
+| Source line (stdout of `reboot-cascade-janitor`) | Series |
+|---|---|
+| `[metric] janitor_remediation_total signature=… action=… target_namespace=… target_pod=… node=… dry_run=…` | `janitor_remediation_total{signature,action,target_namespace,target_pod,node,dry_run}` (counter, 1h idle expiry) |
+| `[metric] janitor_state_streak node=… value=N` | `janitor_state_streak{node}` (gauge, 15m idle expiry) |
+| `[metric] janitor_run_timestamp_seconds value=…` / `janitor_run_duration_seconds value=…` | gauges, 1h idle expiry |
+
+The janitor's own stream labels (`pod`, `instance`, …) are dropped for
+the metric only, so a counter survives the Job pod changing every tick;
+the series still carry Alloy's scrape labels, so consumers aggregate with
+`sum by (target_…)`. The line format is a contract with
+`infrastructure/reboot-cascade-janitor/reboot-cascade-janitor.yaml` (its
+fixture scenarios 15–18 pin the lines) and the alerts live in
+`observability/kube-prometheus-stack/janitor-rules.yaml`. Expiry is
+deliberate: a janitor that stops running produces *absence*, which
+`JanitorNotRunning` alerts on, not a stale last value.
 
 ## Caveats
 

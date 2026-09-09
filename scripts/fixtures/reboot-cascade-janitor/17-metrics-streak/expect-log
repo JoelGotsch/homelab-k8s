@@ -1,0 +1,2 @@
+[metric] janitor_remediation_total signature=B:csi-op-exists action=delete-wedged target_namespace=conversation-history target_pod=enrich-29815507-2gnfm node=worker2 dry_run=false
+[metric] janitor_state_streak node=worker2 value=1

@@ -1,0 +1,5 @@
+[metric] janitor_remediation_total signature=B:csi-op-exists action=restart-plugin target_namespace=csi-rclone target_pod=csi-rclone-node-krkvv node=worker2 dry_run=true
+[metric] janitor_remediation_total signature=B:csi-op-exists action=delete-wedged target_namespace=conversation-history target_pod=enrich-29815507-2gnfm node=worker2 dry_run=true
+[metric] janitor_state_streak node=worker2 value=0
+[metric] janitor_run_timestamp_seconds value=1788931800
+[state] dry-run — not persisted

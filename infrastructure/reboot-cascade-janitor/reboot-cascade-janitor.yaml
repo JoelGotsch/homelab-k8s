@@ -202,6 +202,34 @@
 # acting modes, with kubectl faked — a mutation added outside act() is
 # invisible to the plan AND to the tests.
 #
+# METRICS (added 2026-09-09, same day as the rewrite). On 2026-09-09 the old
+# janitor deleted the same two pods ~130 times over 11 hours and nothing could
+# alert on it, because "remediation attempted repeatedly on a target that
+# never leaves the matching state" was not expressible anywhere. A Job cannot
+# be scraped, this estate has no Pushgateway by decision (ADR 0062) and no
+# textfile collector (Talos). What it does have is Alloy tailing every pod's
+# stdout, so the seam is the same one the tests use: act() prints one
+# "[metric] janitor_remediation_total k=v ..." line next to its "[act]" line,
+# the run prints its ladder position and completion, and
+# observability/alloy/values.yaml (loki.process "janitor_metrics") turns those
+# lines into Prometheus series on Alloy's own, already-scraped /metrics:
+#   janitor_remediation_total{signature,action,target_namespace,target_pod,node,dry_run}
+#   janitor_state_streak{node}         cheapfix.<node>, i.e. the ladder rung
+#   janitor_run_timestamp_seconds      end of the last completed run
+#   janitor_run_duration_seconds
+# observability/kube-prometheus-stack/janitor-rules.yaml alerts on them
+# (JanitorRemediationLooping, JanitorNotRunning). The line format is a
+# contract with that Alloy config; change both together, and edit the fixtures
+# first. Guarded by two checks that are only complete together (verified by
+# re-introducing each drift, 2026-09-09): fixture scenarios 15-18 assert this
+# file really prints these exact lines, and
+# scripts/test-alloy-janitor-metrics.sh feeds those same lines through the real
+# Alloy block and asserts the series, labels and counts that come back. No
+# network is involved and no egress was added for this (see
+# ciliumnetworkpolicy-egress.yaml): a metric line that reaches stdout has been
+# emitted, which is why the offline harness can assert it and why DRY_RUN
+# emits them too, labelled dry_run=true.
+#
 # FAILURE-INJECTION STATUS (rule 35/40): detection logic smoke-tested
 # against a healthy fleet (0 findings) 2026-07-20. The 2026-09-09
 # incident was the injection test, and it failed it; the four defects
@@ -531,6 +559,20 @@ spec:
                   SWEPT_NODES=" "
                   COUNTED_NODES=" "
                   ESCALATE=no
+                  # Why the current act() is happening, for the metric's `signature`
+                  # label. The step-4 sweep runs before any signature is matched, so
+                  # it starts as the reason that sweep exists; the candidate loop
+                  # overwrites it per pod.
+                  METRIC_SIG=plugin-replaced
+
+                  # metric LINE — one "[metric] <name> k=v ... " line on stdout. Alloy
+                  # (observability/alloy/values.yaml, loki.process "janitor_metrics")
+                  # parses these into Prometheus series; see the METRICS header note.
+                  # Deliberately not a network call: nothing to fake, nothing to
+                  # time out, and DRY_RUN emits them too (labelled dry_run=true).
+                  metric() {
+                    echo "[metric] $*"
+                  }
 
                   echo "[step 1] reboot-cascade-janitor starting (dry_run=$DRY_RUN, cap=$MAX_ACTIONS_PER_RUN, threshold=${STUCK_THRESHOLD_SECONDS}s, ladder=$CHEAP_FIX_TICKS_BEFORE_ESCALATION ticks, plugin_cooldown=${PLUGIN_RESTART_COOLDOWN_SECONDS}s, collateral_cap=$COLLATERAL_MAX_PODS)"
 
@@ -549,6 +591,22 @@ spec:
                     _subj=$1
                     shift
                     echo "[act] $_verb $_subj"
+                    # The subject is "<ns>/<pod> node=<node> ..." for every verb except
+                    # restart-plugin, whose subject is the bare plugin pod name in
+                    # CSI_RCLONE_NAMESPACE. Parsed here rather than passed as extra
+                    # arguments so the [act] lines the fixtures pin stay byte-identical.
+                    _target=${_subj%% *}
+                    case "$_target" in
+                      */*) _tns=${_target%%/*}; _tpod=${_target#*/} ;;
+                      *) _tns=$CSI_RCLONE_NAMESPACE; _tpod=$_target ;;
+                    esac
+                    _tnode="?"
+                    for _kv in $_subj; do
+                      case "$_kv" in
+                        node=*) _tnode=${_kv#node=} ;;
+                      esac
+                    done
+                    metric "janitor_remediation_total signature=$METRIC_SIG action=$_verb target_namespace=$_tns target_pod=$_tpod node=$_tnode dry_run=$DRY_RUN"
                     if [ "$DRY_RUN" = "true" ]; then
                       return 0
                     fi
@@ -998,6 +1056,7 @@ spec:
                         echo "[step 6] MANUAL: $NS/$NAME stuck Terminating for ${DEL_AGE}s, but only $PVC_RCLONE of its $PVC_TOTAL PVC(s) are csi-rclone — NOT force-deleting (the Longhorn stale-VolumeAttachment rule stands for anything with an attacher). Leaving to alerting."
                         continue
                       fi
+                      METRIC_SIG=terminating-stuck
                       act force-delete-terminating "$NS/$NAME node=$NODE age=${DEL_AGE}s pvcs=csi-rclone-only" \
                         kubectl delete pod "$NAME" -n "$NS" --force --grace-period=0 --wait=false
                       ACTIONS=$((ACTIONS + 1))
@@ -1047,6 +1106,7 @@ spec:
                       SIG="B0:op-exists-other-driver"
                     fi
                     echo "[step 7] $NS/$NAME on $NODE matches signature $SIG"
+                    METRIC_SIG=$SIG
 
                     # [step 8] escalation ladder: the cheap fix first, always.
                     if [ "$SIG" = "B:csi-op-exists" ]; then
@@ -1066,6 +1126,27 @@ spec:
 
                   flush_state
                   echo "[step 10] pass complete: actions=$ACTIONS/$MAX_ACTIONS_PER_RUN collateral_recycled=$COLLATERAL/$COLLATERAL_MAX_PODS swept_nodes='$SWEPT_NODES'"
+
+                  # [step 11] ladder position per node, from the merged view of what
+                  # was read and what this run wrote (later lines win). A streak the
+                  # ladder would treat as stale reads as 0, so the gauge shows the
+                  # rung the NEXT tick will start from. In DRY_RUN the writes were not
+                  # persisted, so this is the position the run would have reached.
+                  cat "$W/state" "$W/state-writes" \
+                    | awk -F= '/^cheapfix\./ { sub(/^cheapfix\./, "", $1); v[$1] = $2 } END { for (n in v) print n "=" v[n] }' \
+                    | sort \
+                    | while IFS='=' read -r _sn _sv; do
+                        [ -n "${_sn:-}" ] || continue
+                        _sc=$(num_or_zero "${_sv%%:*}")
+                        _st=$(num_or_zero "${_sv##*:}")
+                        if [ "$_st" = "0" ] || [ $((NOW_TS - _st)) -gt "$CHEAP_FIX_RESET_SECONDS" ]; then
+                          _sc=0
+                        fi
+                        metric "janitor_state_streak node=$_sn value=$_sc"
+                      done
+                  END_TS=$(date -u +%s)
+                  metric "janitor_run_timestamp_seconds value=$END_TS"
+                  metric "janitor_run_duration_seconds value=$((END_TS - NOW_TS))"
               volumeMounts:
                 - name: tmp
                   mountPath: /tmp
