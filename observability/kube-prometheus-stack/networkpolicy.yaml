@@ -393,7 +393,7 @@ spec:
             app.kubernetes.io/name: tempo
       toPorts:
         - ports:
-            - port: "3100"
+            - port: "3200"   # chart 1.24.4 default; was 3100 under 1.10.1
               protocol: TCP
     # Authentik OIDC server-to-server (token + userinfo).
     - toEndpoints:

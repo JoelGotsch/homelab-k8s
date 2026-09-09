@@ -180,12 +180,12 @@
   mirror_artifact_sha256: sha256:0ea2ea90404405fd0748f6c5c09da1ce581cb166689a4671aeb98ff2c00d782b
 - layer: observability/tempo
   name: tempo
-  version: 1.10.1
+  version: 1.24.4
   upstream: https://grafana.github.io/helm-charts
   mirror: oci://registry.homelab.internal/homelab/tempo
-  content_digest: sha256:6d2c904d4fb254676d301a22a0757db94796084fe076c7d20c379f7e45c719c9
-  upstream_artifact_sha256: sha256:6179337f221f86c9eab7d6a4c986b1dea56360bf1b61081403f28c573c86f42f
-  mirror_artifact_sha256: sha256:6179337f221f86c9eab7d6a4c986b1dea56360bf1b61081403f28c573c86f42f
+  content_digest: sha256:3c2d97bed6b249b19dc5ef5aa95c9aad168e433daed1032006ace06f0bec1db4
+  upstream_artifact_sha256: sha256:f1f6e318d5bca3b5097cb676077796cdf8135beb2c1f71c4d14614ccf9b0081b
+  mirror_artifact_sha256: sha256:f1f6e318d5bca3b5097cb676077796cdf8135beb2c1f71c4d14614ccf9b0081b
 - layer: platform/authentik
   name: authentik
   version: 2026.5.4

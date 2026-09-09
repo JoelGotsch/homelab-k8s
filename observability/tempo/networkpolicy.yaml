@@ -45,14 +45,19 @@ spec:
             matchLabels:
               app.kubernetes.io/name: grafana
       ports:
-        # 3100, not 3200. The chart's Service exposes 3100 (named
-        # `tempo-prom-metrics`) and it serves the query API — /api/traces
-        # and /api/search both answer there — while 3200 is not in the
-        # Service at all. Grafana's datasource named 3200 too, so the
-        # read path was broken at both ends and reported "no data"
-        # rather than a connection error. Corrected 2026-09-01, the
-        # first time anyone tried to read a trace.
-        - port: 3100   # Tempo HTTP query API
+        # 3200 since chart 1.24.4 (2026-09-09): the chart's
+        # `tempo.server.http_listen_port` default moved from 3100 to
+        # Tempo's canonical 3200, and the Service port named
+        # `tempo-prom-metrics` moved with it. It serves the query API —
+        # /api/traces and /api/search both answer there. Under chart
+        # 1.10.1 this was 3100 and the datasource in
+        # kube-prometheus-stack/values.yaml said 3200, so the read path
+        # was broken at both ends and reported "no data" rather than a
+        # connection error (corrected 2026-09-01). The three places that
+        # name this port — here, the Grafana egress rule in
+        # kube-prometheus-stack/networkpolicy.yaml and the datasource
+        # URL — move together.
+        - port: 3200   # Tempo HTTP query API
           protocol: TCP
     # Prometheus (self-metrics scrape) — lives in `monitoring`.
     - from:
@@ -63,7 +68,7 @@ spec:
             matchLabels:
               app.kubernetes.io/name: prometheus
       ports:
-        - port: 3100   # same port; Tempo's self-metrics are on it too
+        - port: 3200   # same port; Tempo's self-metrics are on it too
           protocol: TCP
   egress:
     # kube-DNS.

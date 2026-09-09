@@ -14,7 +14,7 @@ helmCharts:
   - name: tempo
     # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://grafana.github.io/helm-charts).
     repo: oci://registry.homelab.internal/homelab
-    version: "1.10.1"  # OPERATOR PINS via Renovate
+    version: "1.24.4"  # OPERATOR PINS via Renovate
     releaseName: tempo
     namespace: observability-tempo
     valuesFile: values.yaml
@@ -25,3 +25,21 @@ resources:
   - externalsecret.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml
+
+# TEMPORARY — remove after the first sync at chart 1.24.4 lands.
+# The chart moved the `tempo-prom-metrics` Service port from 3100 to
+# 3200. The live Service still carries the 3100 entry under an
+# `argocd-controller Update` managedFields entry from before this
+# Application used server-side apply, and SSA never removes a field
+# another manager entry owns — the merged Service would carry two
+# ports named `tempo-prom-metrics` and be rejected (server dry-run,
+# 2026-09-09). Replace=true makes the sync a PUT, which does not ask
+# who owns what (ADR 0063 D2 pattern).
+patches:
+  - target:
+      kind: Service
+      name: tempo
+    patch: |-
+      - op: add
+        path: /metadata/annotations/argocd.argoproj.io~1sync-options
+        value: Replace=true
