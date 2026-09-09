@@ -28,12 +28,12 @@
   mirror_artifact_sha256: sha256:06210eef7c23d15f7699c79e2fe3a1ec9c389024c5c5c006ea04022d322449a2
 - layer: infrastructure/clickhouse-operator
   name: altinity-clickhouse-operator
-  version: 0.26.3
+  version: 0.27.3
   upstream: https://docs.altinity.com/clickhouse-operator/
   mirror: oci://registry.homelab.internal/homelab/altinity-clickhouse-operator
-  content_digest: sha256:527c7dfb26d3ef8ca24f88ed6314ab377a03e91f6d2c99e15b6eeb4a9364cedf
-  upstream_artifact_sha256: sha256:4b136458a27a240ec0aa6199303505e40d484e72bb3902f06f179df0c74a648e
-  mirror_artifact_sha256: sha256:4b136458a27a240ec0aa6199303505e40d484e72bb3902f06f179df0c74a648e
+  content_digest: sha256:8ec14a3a3bb9dd84850ab9f551139cf8e2745bae1710c32682763807bce4ffb2
+  upstream_artifact_sha256: sha256:614756ea8d395b205d6585209b0ef0a9d25d7cdbb9f0998bffd1c33c9e244d6d
+  mirror_artifact_sha256: sha256:614756ea8d395b205d6585209b0ef0a9d25d7cdbb9f0998bffd1c33c9e244d6d
 - layer: infrastructure/cnpg-barman-plugin
   name: plugin-barman-cloud
   version: 0.7.1

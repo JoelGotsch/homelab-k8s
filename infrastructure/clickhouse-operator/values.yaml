@@ -22,7 +22,7 @@ topologySpreadConstraints: []
 operator:
   image:
     repository: altinity/clickhouse-operator
-    tag: "0.26.3"  # OPERATOR PINS via Renovate
+    tag: "0.27.3"  # OPERATOR PINS via Renovate
   resources:
     requests:
       cpu: 50m
@@ -62,7 +62,7 @@ operator:
 metrics:
   image:
     repository: altinity/metrics-exporter
-    tag: "0.26.3"
+    tag: "0.27.3"
   resources:
     requests:
       cpu: 25m
