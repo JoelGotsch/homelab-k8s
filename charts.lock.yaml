@@ -116,12 +116,12 @@
   mirror_artifact_sha256: sha256:c2440014df04fdf1b67b53daa4290d7b878584cf4702f9b1b50f51ba64499a6a
 - layer: infrastructure/trivy-operator
   name: trivy-operator
-  version: 0.34.0
+  version: 0.36.0
   upstream: https://aquasecurity.github.io/helm-charts/
   mirror: oci://registry.homelab.internal/homelab/trivy-operator
-  content_digest: sha256:a3de6e391cdf5f466657ca2af5f459c770ba590a1d459e8dbfa5f10080c193c9
-  upstream_artifact_sha256: sha256:df8d44a9b9cbc2e2be60c367d93b05cd857e032bd1870e9fa99bb9cff387cdbc
-  mirror_artifact_sha256: sha256:df8d44a9b9cbc2e2be60c367d93b05cd857e032bd1870e9fa99bb9cff387cdbc
+  content_digest: sha256:841f4e79e47e81bedb981bd5d0b21c689c155ab56049c1f6c43484d7748e07bc
+  upstream_artifact_sha256: sha256:bb0c44bc70e3158cc63ea49d7458ede6db5b6c932f6585a2d787eb9712fd4288
+  mirror_artifact_sha256: sha256:bb0c44bc70e3158cc63ea49d7458ede6db5b6c932f6585a2d787eb9712fd4288
 - layer: infrastructure/trust-manager
   name: trust-manager
   version: v0.24.0
