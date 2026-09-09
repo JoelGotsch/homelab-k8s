@@ -16,6 +16,8 @@ resources:
   - serviceaccount.yaml
   - configmap.yaml
   - externalsecret.yaml
+  - externalsecret-github-token.yaml
+  - registry-pull-secret.yaml
   - cronjob.yaml
   - networkpolicy.yaml
 

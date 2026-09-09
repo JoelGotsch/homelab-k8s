@@ -10,3 +10,9 @@ metadata:
     homelab.internal/data-class: internal
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
+    # Opt into trust-manager's Bundles so the homelab-internal CA
+    # (registry.homelab.internal's issuer) lands here as the
+    # `homelab-root-ca` ConfigMap — mounted by cronjob.yaml for
+    # NODE_EXTRA_CA_CERTS. Without it every first-party image
+    # lookup died with UNABLE_TO_VERIFY_LEAF_SIGNATURE.
+    homelab.lab/inject-ca: "true"

@@ -60,4 +60,27 @@ data:
       // gracefully rebuilds).
       cacheDir: '/tmp/renovate/cache',
       baseDir: '/tmp/renovate/base',
+      // registry.homelab.internal (Forgejo Packages, ADR 0038)
+      // refuses anonymous reads — REQUIRE_SIGNIN_VIEW is set on
+      // purpose — so first-party image tags were never visible to
+      // the `kubernetes` manager. Same bot + scope Argo's
+      // repo-server uses for chart pulls (kv/argocd/registry-pull,
+      // `read:package`), delivered as env by registry-pull-
+      // secret.yaml + cronjob.yaml. `hostType: docker` keeps the
+      // credential off every other request to that host. Shape
+      // verified against configuration-options.md @ 38.142.7
+      // (`hostRules[].matchHost/hostType/username/password`).
+      // The rule is only emitted when both env vars are present:
+      // a half-set pair would send a malformed basic-auth header
+      // instead of failing loudly at 401 like the anonymous case.
+      hostRules: (process.env.HOMELAB_REGISTRY_USERNAME && process.env.HOMELAB_REGISTRY_PASSWORD)
+        ? [
+            {
+              matchHost: 'registry.homelab.internal',
+              hostType: 'docker',
+              username: process.env.HOMELAB_REGISTRY_USERNAME,
+              password: process.env.HOMELAB_REGISTRY_PASSWORD,
+            },
+          ]
+        : [],
     };

@@ -9,9 +9,21 @@
 # Argo leaves the field alone after first apply. Confirmed via
 # the syncOptions=RespectIgnoreDifferences pattern below.
 #
-# Schedule: weekly Saturday before 06:00 Europe/Berlin —
-# matches the central preset's `schedule` so PRs land
-# during the operator's review window.
+# Schedule: weekly Saturday 05:00 Europe/Berlin (spec.timeZone),
+# inside the central preset's `schedule: before 08:00 on saturday`
+# window so PRs land before the operator's review pass.
+#
+# THE WINDOW HAD NEVER OPENED before 2026-09-09. This comment used
+# to claim "before 06:00 Europe/Berlin" while the CronJob carried
+# no `timeZone`, so `0 5 * * 6` fired at 05:00 UTC = 07:00 Berlin
+# — outside the preset's `before 06:00 on saturday`, which is
+# evaluated in Europe/Berlin. Every scheduled run since activation
+# scanned all 32 repos and opened nothing, and each run's log
+# looked healthy. `timeZone` is GA since Kubernetes 1.27 (cluster
+# is 1.36; `kubectl explain cronjob.spec.timeZone` confirms).
+# The preset window was widened to 08:00 in the same change: a run
+# takes ~13 min across the org, and a 60-minute window that opens
+# at the fire time leaves any repo processed late silently out.
 
 apiVersion: batch/v1
 kind: CronJob
@@ -30,6 +42,10 @@ metadata:
 spec:
   suspend: false
   schedule: "0 5 * * 6"
+  # Without this the schedule is kube-controller-manager's zone
+  # (UTC) and the preset's Berlin-evaluated window is missed —
+  # see the header comment.
+  timeZone: "Europe/Berlin"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 5
@@ -80,6 +96,55 @@ spec:
                     secretKeyRef:
                       name: renovate-forgejo-token
                       key: token
+                # github.com token for the github-releases /
+                # github-tags datasources and release-notes
+                # fetches. Renovate runs against Forgejo, so
+                # nothing else authenticates it to github.com and
+                # unauthenticated api.github.com is rate-limited to
+                # 60 req/h — which is why `talos_version` and
+                # `argocd_version` in homelab-infra's 00-defaults.yml
+                # never got a PR. Renovate reads exactly this env
+                # name (self-hosted docs @ 38.142.7: "The GitHub.com
+                # token as an environment variable is needed to
+                # fetch changelogs ... if you're using ... GitLab").
+                # `optional: true` because the operator mints the
+                # PAT by hand (externalsecret-github-token.yaml):
+                # until kv/renovate/github is seeded the Secret does
+                # not exist, and a hard reference would leave the
+                # whole run stuck in CreateContainerConfigError
+                # instead of just the GitHub deps staying dark.
+                - name: GITHUB_COM_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: renovate-github-token
+                      key: token
+                      optional: true
+                # registry.homelab.internal pull credential, read by
+                # config.js into a `hostRules` entry. NOT prefixed
+                # RENOVATE_: Renovate parses every RENOVATE_* env var
+                # as a config option and would warn on an unknown
+                # one. See registry-pull-secret.yaml.
+                - name: HOMELAB_REGISTRY_USERNAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: renovate-registry-pull
+                      key: username
+                - name: HOMELAB_REGISTRY_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: renovate-registry-pull
+                      key: password
+                # registry.homelab.internal serves a certificate from
+                # the homelab-internal-issuer (OpenBao PKI root); the
+                # image trusts only public CAs, so every lookup there
+                # failed with UNABLE_TO_VERIFY_LEAF_SIGNATURE. Node
+                # APPENDS this file to its built-in bundle (unlike
+                # SSL_CERT_FILE, which replaces it), so the pin-only
+                # `homelab-root-ca` Bundle is the right one — public
+                # registries keep working. Path per Renovate's
+                # self-hosting docs @ 38.142.7 (NODE_EXTRA_CA_CERTS).
+                - name: NODE_EXTRA_CA_CERTS
+                  value: /etc/ssl/homelab/ca-bundle.pem
                 # Log level + format are set in config.js
                 # but Renovate also honours these env vars,
                 # which is handy for ad-hoc debug runs.
@@ -95,6 +160,9 @@ spec:
                   mountPath: /tmp
                 - name: home
                   mountPath: /home/ubuntu
+                - name: homelab-ca
+                  mountPath: /etc/ssl/homelab
+                  readOnly: true
               resources:
                 requests:
                   cpu: 100m
@@ -123,3 +191,17 @@ spec:
             - name: home
               emptyDir:
                 sizeLimit: 4Gi
+            # trust-manager writes the `homelab-root-ca` Bundle
+            # (infrastructure/trust-manager/bundles.yaml, key
+            # ca-bundle.pem) into every namespace labelled
+            # homelab.lab/inject-ca=true — namespace.yaml carries
+            # the label. Deliberately NOT optional: a missing
+            # ConfigMap must block the pod, because the alternative
+            # is the pre-2026-09-09 state where first-party image
+            # lookups fail quietly inside an otherwise green run.
+            - name: homelab-ca
+              configMap:
+                name: homelab-root-ca
+                items:
+                  - key: ca-bundle.pem
+                    path: ca-bundle.pem

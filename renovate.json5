@@ -17,12 +17,25 @@
   ],
 
   // Per-repo packageRules — additive to the central preset.
+  //
+  // Chart rules match `matchDepTypes: ["chart-lock"]`, the depType
+  // the preset's charts.lock.yaml customManager stamps on every
+  // chart dep. Until 2026-09-09 they all said
+  // `matchManagers: ["helmv3"]` — which matches `Chart.yaml` files,
+  // of which this repo tracks none outside the ignored vendored
+  // copies (see the preset's chart-lock rule for the audit). So the
+  // Cilium and Argo CD major holds, the OpenBao and barman-plugin
+  // un-groupings and the minor grouping were all inert. Nothing
+  // noticed because the schedule window had never opened either
+  // (platform/renovate/cronjob.yaml); the two fixes land together
+  // so the first in-window Saturday cannot open a Cilium major.
   packageRules: [
-    // Group all Helm chart updates into one PR per minor
-    // bump cadence — easier to review the cluster's chart
-    // matrix as a unit. Major bumps stay individual.
+    // Group Helm chart minor+patch updates into one PR — easier
+    // to review the cluster's chart matrix as a unit. Major bumps
+    // stay individual. This overrides the preset's per-chart
+    // `groupName: "{{depName}}"` for the minor/patch case only.
     {
-      matchManagers: ["helmv3"],
+      matchDepTypes: ["chart-lock"],
       matchUpdateTypes: ["minor", "patch"],
       groupName: "helm charts (minor+patch)",
       groupSlug: "helm-charts-minor",
@@ -33,7 +46,7 @@
     // update-policy.md). Major Cilium bumps wait for
     // operator validation against the matched Talos minor.
     {
-      matchManagers: ["helmv3"],
+      matchDepTypes: ["chart-lock"],
       matchPackageNames: ["cilium"],
       matchUpdateTypes: ["major"],
       enabled: false,
@@ -50,7 +63,7 @@
     // grouped: it moves in lockstep with the operator's plugin API
     // and owns the backup path for every database.
     {
-      matchManagers: ["helmv3"],
+      matchDepTypes: ["chart-lock"],
       matchPackageNames: ["plugin-barman-cloud"],
       groupName: null,
     },
@@ -58,8 +71,17 @@
     // Hold the Argo CD chart at the operator's pinned major
     // until v3 / future-major is validated against the rest
     // of the GitOps chain.
+    //
+    // INERT for a second reason, found 2026-09-09 while fixing the
+    // helmv3 one: there is no `argo-cd` entry in charts.lock.yaml.
+    // Argo CD is not a chart in this repo — it is installed from
+    // homelab-infra/argocd/install/ off `argocd_version` in
+    // group_vars/all/00-defaults.yml (github-releases,
+    // depName argoproj/argo-cd). The hold that can actually fire
+    // is in homelab-infra/renovate.json5. Kept here so the day
+    // the chart moves into the lock it is already held.
     {
-      matchManagers: ["helmv3"],
+      matchDepTypes: ["chart-lock"],
       matchPackageNames: ["argo-cd"],
       matchUpdateTypes: ["major"],
       enabled: false,
@@ -69,10 +91,11 @@
     // changes can land at minor bumps. Force individual PRs
     // even on minor.
     {
-      matchManagers: ["helmv3"],
+      matchDepTypes: ["chart-lock"],
       matchPackageNames: ["openbao"],
       groupName: null, // override the helm-charts-minor group
-      schedule: ["before 06:00 on saturday"],
+      // Same window as the preset — see there for why 08:00.
+      schedule: ["before 08:00 on saturday"],
     },
 
     // Container images in homelab-k8s manifests — covered
@@ -82,7 +105,8 @@
     {
       matchManagers: ["kubernetes"],
       matchUpdateTypes: ["patch"],
-      schedule: ["before 06:00 on saturday"],
+      // Same window as the preset — see there for why 08:00.
+      schedule: ["before 08:00 on saturday"],
     },
 
     // The MinIO `mc` and server images use date-stamped tags

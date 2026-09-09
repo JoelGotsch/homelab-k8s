@@ -18,11 +18,13 @@ no Renovate runs anywhere; manual bumps fill the gap.
 
 | File | Purpose |
 |---|---|
-| `namespace.yaml` | `renovate` ns; PSA restricted. |
+| `namespace.yaml` | `renovate` ns; PSA restricted; `homelab.lab/inject-ca=true` so trust-manager drops the `homelab-root-ca` ConfigMap here. |
 | `serviceaccount.yaml` | Dedicated SA; `automountServiceAccountToken: false`. No cluster RBAC needed. |
-| `configmap.yaml` | Renovate global config (`config.js`): `platform: gitea`, endpoint, autodiscover filter, JSON logging. |
+| `configmap.yaml` | Renovate global config (`config.js`): `platform: gitea`, endpoint, autodiscover filter, `hostRules` for `registry.homelab.internal`. Rendered from the `.j2` sibling by `00-render-static.yml`. |
 | `externalsecret.yaml` | OpenBao `kv/platform/renovate/forgejo-token` → `RENOVATE_TOKEN`. |
-| `cronjob.yaml` | Weekly Saturday 05:00 UTC scan. **`spec.suspend: true` until operator activates.** |
+| `externalsecret-github-token.yaml` | OpenBao `kv/renovate/github` → `GITHUB_COM_TOKEN` (github-releases / github-tags datasources, release notes). Operator-minted; the env ref is `optional` so an unseeded path only darkens the GitHub deps, not the run. |
+| `registry-pull-secret.yaml` | OpenBao `kv/argocd/registry-pull` (the `read:package` bot Argo's repo-server already uses) → `HOMELAB_REGISTRY_USERNAME/PASSWORD` → `config.js` `hostRules`. |
+| `cronjob.yaml` | Weekly Saturday 05:00 Europe/Berlin (`spec.timeZone`) scan, inside the preset's `before 08:00 on saturday` window. Mounts the `homelab-root-ca` bundle for `NODE_EXTRA_CA_CERTS`. |
 | `networkpolicy.yaml` | Vanilla: kube-DNS + Forgejo. CCNP: FQDN-aware allow for known upstream registries. |
 
 ## OpenBao paths to seed
@@ -32,6 +34,8 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 | Path | Field | Source |
 |---|---|---|
 | `kv/platform/renovate/forgejo-token` | `token` | Forgejo PAT for the `renovate-bot` user. Generated in Forgejo's web UI: Settings → Applications → Generate New Token. Required scopes: `read:repository`, `write:repository`, `write:issue`, `read:user`, `read:organization`. **`read:user` is not optional** — Renovate calls `GET /api/v1/user` on platform init and aborts if it 403s; see Caveat 8. Token is account-wide per Forgejo (see Caveat 1). |
+| `kv/renovate/github` | `token` | github.com personal access token, **read-only, public repositories only** (fine-grained PAT, no repository access needed — the "Public repositories" scope is enough; classic PATs need no scopes at all). Operator-minted at github.com → Settings → Developer settings; no script in this estate can create it. Exposed as `GITHUB_COM_TOKEN` so the `github-releases` / `github-tags` datasources and changelog fetches are authenticated: unauthenticated `api.github.com` is capped at 60 requests/hour, which is why `talos_version` / `argocd_version` in `homelab-infra` never received a PR. Seed: `bao kv put kv/renovate/github token='<github-pat>'`. |
+| `kv/argocd/registry-pull` | `username` `token` | **Not seeded here** — already minted for Argo's repo-server (`bootstrap/argocd/`, `provision-forgejo-bot-pat.sh --bot-username argocd-chart-pull --scopes read:package`). This layer is a second consumer: `registry-pull-secret.yaml` projects it so `config.js` can authenticate the `docker` datasource to `registry.homelab.internal`, which refuses anonymous reads. |
 
 ## Post-Forgejo activation (one-time)
 
@@ -131,7 +135,8 @@ updated in each scanned repo.
 | Argo sync `platform/forgejo/` | Forgejo Service + Deployment Healthy. |
 | Argo sync `platform/renovate/` | This layer — namespace, ConfigMap, ESO, CronJob (suspended). |
 | Operator runs Steps 1-3 above | CronJob un-suspended; ESO populates the Secret on next reconcile. |
-| Saturday 05:00 UTC, then weekly | First scheduled scan. PRs land against repos with `renovate.json5`. |
+| Operator seeds `kv/renovate/github` | GitHub-hosted datasources light up on the next run; until then those deps are skipped, everything else proceeds. |
+| Saturday 05:00 Europe/Berlin, then weekly | First scheduled scan. PRs land against repos with `renovate.json5`. |
 
 ## Caveats
 
