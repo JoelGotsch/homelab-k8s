@@ -1,9 +1,33 @@
 # Explicit ResourceQuota for csi-rclone, replacing the Kyverno-generated
-# 16Gi default (bypassed via the namespace annotation). Sized for the
-# node DaemonSet's write-burst memory: 6 nodes × (rclone 3Gi + sidecars
-# 200Mi) ≈ 19.2Gi, plus the controller pod ≈ 0.7Gi. 24Gi gives headroom.
-# The 3Gi mounter limit itself is justified in values.yaml (a ~1GB
-# registry image push OOM-killed the FUSE mount at 1Gi, 2026-08-07).
+# 16Gi default (bypassed via the namespace annotation).
+#
+# THIS FILE IS COUPLED TO node.resources.rclone.limits.memory IN
+# values.yaml AND MUST MOVE WITH IT. `limits.memory` here is a quota on
+# the SUM of limits across the namespace, so a DaemonSet multiplies every
+# per-node change by the node count. Raising the mounter cap without
+# raising this number does not fail the way you would expect: the
+# DaemonSet's existing pods keep running, the rollout stops partway with
+# `FailedCreate ... exceeded quota`, and the DaemonSet reports
+# numberReady one short while every visible pod is Ready. Measured
+# 2026-09-09 on the 3Gi → 6Gi change: five nodes rolled, cp3 was left
+# with NO node plugin at all, and nothing surfaced it but a Warning event
+# on the DaemonSet.
+#
+# Sizing, 2026-09-09: 6 nodes × (rclone 6Gi + sidecars 200Mi) = 38064Mi,
+# plus the controller pod (rclone 400Mi + provisioner 200Mi + liveness
+# 100Mi) = 700Mi → 38764Mi ≈ 37.9Gi. 44Gi leaves room for one extra node
+# without another edit here.
+#
+# A summed-limits quota is a blunt instrument for a DaemonSet and it is
+# worth being clear about what it does NOT mean: limits are ceilings, not
+# reservations. `requests.memory` is what the scheduler commits, and that
+# stays at 552Mi per node pod — 8Gi still covers the namespace with the
+# same headroom it had before. The 44Gi is permission for six independent
+# nodes to each spike to 6Gi, not a claim on 44Gi of cluster memory.
+#
+# The 6Gi mounter limit itself is justified in values.yaml with the
+# 30-day high-water measurements that showed 3Gi being reached on three
+# separate plugin pods.
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -12,4 +36,4 @@ metadata:
 spec:
   hard:
     requests.memory: 8Gi
-    limits.memory: 24Gi
+    limits.memory: 44Gi
