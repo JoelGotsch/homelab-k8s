@@ -188,12 +188,12 @@
   mirror_artifact_sha256: sha256:f1f6e318d5bca3b5097cb676077796cdf8135beb2c1f71c4d14614ccf9b0081b
 - layer: platform/authentik
   name: authentik
-  version: 2026.5.4
+  version: 2026.8.2
   upstream: https://charts.goauthentik.io
   mirror: oci://registry.homelab.internal/homelab/authentik
-  content_digest: sha256:b3a50c1764a1387ec7af78d4f00446cd1ca83009c484052131f729dc1985aea8
-  upstream_artifact_sha256: sha256:b9396670c46b35e45d40bbfc6406d8b81e2ee9f9d339ca018b7e1ccdfb81a6c0
-  mirror_artifact_sha256: sha256:b9396670c46b35e45d40bbfc6406d8b81e2ee9f9d339ca018b7e1ccdfb81a6c0
+  content_digest: sha256:c4d240943a7f1f0027497edddf53667061ffbfef636d127c1bc9582843b869a5
+  upstream_artifact_sha256: sha256:c65ab5db8c2ae58474b8192e0d0d7caab66859da833540717b78c75754695ff7
+  mirror_artifact_sha256: sha256:c65ab5db8c2ae58474b8192e0d0d7caab66859da833540717b78c75754695ff7
 - layer: platform/forgejo
   name: forgejo
   version: 17.1.5

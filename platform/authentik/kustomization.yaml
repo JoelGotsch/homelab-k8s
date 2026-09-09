@@ -12,7 +12,7 @@ helmCharts:
   - name: authentik
     # ADR 0052 D3: chart from the Forgejo Packages mirror (was https://charts.goauthentik.io).
     repo: oci://registry.homelab.internal/homelab
-    version: "2026.5.4"  # OPERATOR PINS via Renovate
+    version: "2026.8.2"  # OPERATOR PINS via Renovate
     releaseName: authentik
     namespace: authentik
     valuesFile: values.yaml
@@ -66,6 +66,16 @@ replacements:
       - select: { kind: Deployment, name: authentik-worker }
         fieldPaths:
           - spec.template.spec.containers.[name=worker].env.[name=AUTHENTIK_HOST].value
+        options: { delimiter: '/', index: 2 }
+      # AUTHENTIK_WEB__BASE_URL carries the same `https://AUTH_FQDN`
+      # placeholder (values.yaml) and is rewritten the same way.
+      - select: { kind: Deployment, name: authentik-server }
+        fieldPaths:
+          - spec.template.spec.containers.[name=server].env.[name=AUTHENTIK_WEB__BASE_URL].value
+        options: { delimiter: '/', index: 2 }
+      - select: { kind: Deployment, name: authentik-worker }
+        fieldPaths:
+          - spec.template.spec.containers.[name=worker].env.[name=AUTHENTIK_WEB__BASE_URL].value
         options: { delimiter: '/', index: 2 }
 
 # Custom blueprints — one YAML per app, materialised as a

@@ -57,6 +57,15 @@ global:
     # DEDICATED outpost. (WEB__ vars are ignored by the worker pod.)
     - name: AUTHENTIK_WEB__WORKERS
       value: "4"
+    # Bootstrap value for the "Base URL" system setting: copied in on
+    # first start when the setting is unset, unused otherwise, and
+    # documented upstream as becoming required from 2026.11. Set with
+    # the 2026.8.2 bump so the 2026.11 hop does not need a config edit.
+    # Scheme and host only, no path. Same placeholder + replacement
+    # as AUTHENTIK_HOST above (kustomization.yaml rewrites it from
+    # site-config auth_fqdn after inflation).
+    - name: AUTHENTIK_WEB__BASE_URL
+      value: "https://AUTH_FQDN"
 
   # Project all operator-managed creds into env vars.
   # ESO writes Secret keys named after the env var; chart's
