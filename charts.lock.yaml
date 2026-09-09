@@ -68,12 +68,12 @@
   mirror_artifact_sha256: sha256:5cf78ad97d7f3dfe596bbc1b58afc5043d7ee34f80b1354941bc4f0741442811
 - layer: infrastructure/kyverno
   name: kyverno
-  version: 3.8.2
+  version: 3.9.0
   upstream: https://kyverno.github.io/kyverno
   mirror: oci://registry.homelab.internal/homelab/kyverno
-  content_digest: sha256:e69bb31ffec916752d9760352ae6d616375d3f7207e0110eb01f41dba13798ff
-  upstream_artifact_sha256: sha256:f4fc787cf1d6781eefb9e9b45837edcddcfae984c872888289914e97207cc5de
-  mirror_artifact_sha256: sha256:f4fc787cf1d6781eefb9e9b45837edcddcfae984c872888289914e97207cc5de
+  content_digest: sha256:3781c5676f9b63126bc17df0572e204c02367b0c1c593d71744d6eba773b0c68
+  upstream_artifact_sha256: sha256:9663e8d3d15b070e5925b4f26b3f9a8824872a42ac7bf27ca105c897cb5aba51
+  mirror_artifact_sha256: sha256:9663e8d3d15b070e5925b4f26b3f9a8824872a42ac7bf27ca105c897cb5aba51
 - layer: infrastructure/longhorn
   name: longhorn
   version: 1.11.3

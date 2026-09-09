@@ -7,9 +7,10 @@
 webhooksCleanup:
   image:
     repository: bitnamilegacy/kubectl
-policyReportsCleanup:
-  image:
-    repository: bitnamilegacy/kubectl
+# `policyReportsCleanup:` used to sit here with the same image override. It
+# was dead config: neither chart 3.8.2 nor 3.9.0 has any such value (grep of
+# both vendored charts, 2026-09-09 — zero references), so it rendered to
+# nothing. Removed during the 3.9.0 bump rather than carried forward.
 
 # Spread the admission stack across workers. Without this, the chart's
 # default `preferred` podAntiAffinity (weight=1) is too weak — in the
