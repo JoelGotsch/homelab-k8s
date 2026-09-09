@@ -36,12 +36,12 @@
   mirror_artifact_sha256: sha256:614756ea8d395b205d6585209b0ef0a9d25d7cdbb9f0998bffd1c33c9e244d6d
 - layer: infrastructure/cnpg-barman-plugin
   name: plugin-barman-cloud
-  version: 0.7.1
+  version: 0.8.0
   upstream: https://cloudnative-pg.github.io/charts
   mirror: oci://registry.homelab.internal/homelab/plugin-barman-cloud
-  content_digest: sha256:f12de363787d2948809f2ac4320acbfa8df6af7585745f431a14072d806deeb4
-  upstream_artifact_sha256: sha256:3b385372b21c9a5bfb12283726ef3a7a726ce1f7dbafa2c27e49aa50eb6207f2
-  mirror_artifact_sha256: sha256:3b385372b21c9a5bfb12283726ef3a7a726ce1f7dbafa2c27e49aa50eb6207f2
+  content_digest: sha256:56a604be0fe128285b7a40160eac3109e71ce6e6b9e3ec2c069e0597b51908b7
+  upstream_artifact_sha256: sha256:e9d8e8578d2757761fe5e1a761c762b54ccd02bc27df8ad251812aa2571c4d42
+  mirror_artifact_sha256: sha256:e9d8e8578d2757761fe5e1a761c762b54ccd02bc27df8ad251812aa2571c4d42
 - layer: infrastructure/cnpg
   name: cloudnative-pg
   version: 0.29.0
