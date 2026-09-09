@@ -20,21 +20,63 @@ the wreckage of the things that depended on it.
 
 ## What it measures today
 
-| Target | Module | Interval | Alert |
+| Target | Module | Interval | Alerts |
 |---|---|---|---|
 | `u609156.your-storagebox.de:23` | `tcp_connect` | 30s | `HetznerStorageBoxUnreachable` (warning, `for: 3m`) |
+| `10.10.40.2:445` | `tcp_connect` | 30s | `NasUnreachable` (warning, `for: 3m`) → `NasUnreachableSustained` (critical, `for: 15m`) |
 
 Unauthenticated TCP connect only — no banner exchange, no credential. The
 Storage Box SSH key is `secret` and is deliberately not part of this layer;
 the connect is strictly less privileged than the backup jobs that share the
 dependency. Host and port are public routing config already committed in
-`platform/openbao/raft-snapshot-cronjob.yaml`.
+`platform/openbao/raft-snapshot-cronjob.yaml`. The same holds for the NAS: the
+SMB credential lives in the rclone INI behind an ExternalSecret in
+`infrastructure/csi-rclone`, and nothing in this layer touches it.
+
+### Why the NAS ladder ends in a page and the Storage Box's does not
+
+Hetzner being unreachable delays a backup. The NAS being unreachable takes
+live serving with it — every `nas-crypt-*` StorageClass is a crypt-over-SMB
+remote on that one host, so Immich originals, Nextcloud data, Paperless media
+and the Forgejo LFS and package stores are all downstream of it. It is still a
+two-step ladder rather than a straight critical, because a FUSE mount survives
+a brief blip and rclone retries; what it does not survive is a long one. The
+warning at 3 m is there to attribute the first symptoms, the critical at 15 m
+is the incident.
+
+### Port 445, and why that number was measured rather than read
+
+`infrastructure/csi-rclone/networkpolicy.yaml` described this transport as NFS
+on 2049/111 in both its header and its CCNP port list, and ADR 0030 followed
+it. That is wrong. Read from worker2's rclone container on 2026-09-09,
+`/proc/net/tcp` held four sockets to `10.10.40.2:445` and none to 2049 or 111.
+A probe built from the committed comment would have reported a permanent NAS
+outage — this layer fabricating the very kind of incident it exists to detect.
+
+The error survived since ADR 0030 because it could not produce a symptom: both
+csi-rclone pods are `hostNetwork=true`, so the namespace has zero
+`CiliumEndpoints` and neither of that layer's policies selects anything. An
+allowlist that is never consulted cannot be contradicted by the traffic it
+names. Those comments are now corrected in place; closing the enforcement gap
+is a separate, reviewed posture change.
 
 ## Adding a target
 
-1. Add its FQDN to `ciliumnetworkpolicy.yaml` under `toFQDNs`. **A target
-   that is not in that allowlist reports a permanent outage** — the probe
-   fails closed, and the resulting alert is indistinguishable from a real one.
+1. Add it to `ciliumnetworkpolicy.yaml` — `toFQDNs` for a DNS name, `toCIDR`
+   with a `/32` for a bare address. **A target that is not in that allowlist
+   reports a permanent outage** — the probe fails closed, and the resulting
+   alert is indistinguishable from a real one. The signature of this mistake
+   is `probe_success 0` after *exactly* the module's timeout (5.000s), because
+   a Cilium denial drops rather than resets; a genuinely closed port resets
+   fast. Confirm against the live exporter before committing:
+   ```sh
+   kubectl -n monitoring port-forward deploy/blackbox-exporter 19115:9115 &
+   curl -sG http://localhost:19115/probe \
+     --data-urlencode 'target=<host:port>' --data-urlencode 'module=tcp_connect' \
+     | grep -E '^probe_success|^probe_duration'
+   # always alongside a known-good control, so "0" cannot be read as "unreachable"
+   # when it actually means "not yet allowed out"
+   ```
 2. Add a `Probe` CR carrying `release: kube-prometheus-stack`. Without that
    label the Prometheus Operator silently does not select it.
 3. If the check shape is new (HTTP, TLS-expiry, DNS), add a module to

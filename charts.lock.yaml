@@ -52,12 +52,12 @@
   mirror_artifact_sha256: sha256:668e065ff53508d58238788fd35b355a925060843629a951df0e6a9362e6d32f
 - layer: infrastructure/csi-rclone
   name: csi-driver-rclone
-  version: 0.4.11
+  version: 0.5.0
   upstream: oci://ghcr.io/veloxpack/charts
   mirror: oci://registry.homelab.internal/homelab/csi-driver-rclone
-  content_digest: sha256:e3c37911cc6d745bc8feb5a8120b7c18bfc5fcaa3e1e419847d299b43488829e
-  upstream_artifact_sha256: sha256:d51c7ef5fe9d9cc1862e107ce99d5ef0631da2e6edb9ff589f8161eadae1a679
-  mirror_artifact_sha256: sha256:d51c7ef5fe9d9cc1862e107ce99d5ef0631da2e6edb9ff589f8161eadae1a679
+  content_digest: sha256:de26c42ed474d604e161dc15159e48387fb386e4da32b2dcbf58c1bb8f21f6d5
+  upstream_artifact_sha256: sha256:7f13aba9a7d38041fbb1e1e32de2d7d8b258a37b52f3cb155b2159dd50eaad4e
+  mirror_artifact_sha256: sha256:7f13aba9a7d38041fbb1e1e32de2d7d8b258a37b52f3cb155b2159dd50eaad4e
 - layer: infrastructure/external-secrets
   name: external-secrets
   version: 0.10.5

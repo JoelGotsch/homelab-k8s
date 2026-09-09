@@ -1,8 +1,11 @@
-# Alert rules for the Hetzner Storage Box reachability probe (ADR 0062).
+# Alert rules for the external-storage reachability probes (ADR 0062).
 #
-# Three alerts and one recording rule, in one group so the recording rule is
-# evaluated before the alert that consumes it (rules inside a group run in
-# order; rules in different groups do not).
+# Two groups, one per probed dependency. Within a group the recording rule is
+# declared before the alert that consumes it, because rules inside a group run
+# in order and rules in different groups do not.
+#
+#   hetzner-storagebox.reachability  the off-site backup target
+#   nas.reachability                 the NAS every nas-crypt share sits on
 #
 # The `release: kube-prometheus-stack` label is what makes this file
 # LOADED. The Prometheus CR's ruleSelector is
@@ -195,3 +198,134 @@ spec:
               real success clears the staleness alert; the staleness alerts
               are deliberately NOT suppressed by the Hetzner outage, so a
               lane that fails to recover still pages.
+
+    # =================================================================
+    # The NAS. Separate group so its recording rule is ordered ahead of
+    # its own consumers and not interleaved with the Storage Box's.
+    #
+    # WHY THE SEVERITY LADDER DIFFERS FROM THE STORAGE BOX'S. Hetzner
+    # being unreachable delays a backup; the NAS being unreachable takes
+    # live serving with it. Every nas-crypt share is a crypt-over-SMB
+    # remote on this one host, so a sustained outage means Immich
+    # originals, Nextcloud data, Paperless media and the Forgejo LFS and
+    # package stores are all reading from a remote that is not answering.
+    # So this ladder ends in a page, where the Storage Box's does not.
+    #
+    # It is still a two-step ladder rather than a straight critical,
+    # because a FUSE mount tolerates a brief blip: rclone retries and the
+    # mount survives. What it does not tolerate is a long one.
+    - name: nas.reachability
+      interval: 30s
+      rules:
+        # ---------------------------------------------------------------
+        # Attribution primitive, same shape and same 6h window as the
+        # Storage Box's, and for the same reason: the alerts a NAS outage
+        # causes outlive the outage, so a signal that only exists while
+        # the outage exists cannot explain them.
+        - record: nas:probe_success:min6h
+          expr: min_over_time(probe_success{instance="10.10.40.2:445"}[6h])
+
+        # ---------------------------------------------------------------
+        # for: 3m = six consecutive failed probes at the 30s interval —
+        # past one dropped packet, well inside the window where a mount
+        # can still recover on its own.
+        #
+        # warning, not a page: at three minutes this is the EXPLANATION
+        # for whatever storage symptom the operator is about to see, not
+        # yet an incident of its own.
+        - alert: NasUnreachable
+          expr: probe_success{instance="10.10.40.2:445"} == 0
+          for: 3m
+          labels:
+            severity: warning
+            component: nas-storage
+          annotations:
+            summary: "The NAS (10.10.40.2) is not accepting SMB connections on port 445"
+            description: |
+              An unauthenticated TCP connect to 10.10.40.2:445 from inside
+              the cluster has failed for more than 3 minutes. Every
+              `nas-crypt-*` StorageClass is a crypt-over-SMB remote on
+              this host, so expect FailedMount events, stalled reads and
+              rclone retry storms across `immich`, `nextcloud`,
+              `paperless`, `forgejo` and `backup-cronjobs`. Those are
+              consequences, not independent faults.
+
+              Port 445 and not 2049: the transport is SMB. Two committed
+              files still describe it as NFS — that is a documentation
+              defect, measured and corrected 2026-09-09; see the header of
+              probe.yaml.
+
+              Triage:
+                # is it the host, or just us?
+                nc -vz 10.10.40.2 445
+                # what does the prober itself say
+                kubectl -n monitoring logs deploy/blackbox-exporter --tail=20
+                # are mounts already severed? ENOTCONN is the signature
+                kubectl -n csi-rclone logs ds/csi-rclone-node -c rclone --tail=50
+                # which consumers are wedged
+                kubectl get pods -A --field-selector 'status.phase=Pending'
+
+              If it self-resolves inside a few minutes no action is
+              needed; rclone retries. If it does not, the mounts will not
+              heal on their own — a severed FUSE mount stays severed in a
+              Running pod, which is how 2026-09-09 became a 5.5h outage.
+
+        # ---------------------------------------------------------------
+        # The page. 15m of a dead NAS is no longer "a blip that explains
+        # things" — at that point mounts are severed and the pods holding
+        # them will not recover without being recycled, because a
+        # Running pod with an ENOTCONN mount never retries the mount.
+        #
+        # Deliberately a SEPARATE alert rather than a longer `for:` on
+        # the warning above, so the warning still lands early enough to
+        # attribute the first symptoms.
+        - alert: NasUnreachableSustained
+          expr: probe_success{instance="10.10.40.2:445"} == 0
+          for: 15m
+          labels:
+            severity: critical
+            component: nas-storage
+          annotations:
+            summary: "The NAS (10.10.40.2) has been unreachable for 15 minutes — assume severed mounts"
+            description: |
+              10.10.40.2:445 has refused connections for 15 minutes. Treat
+              every nas-crypt mount as suspect: at this duration the FUSE
+              mounts have very likely gone to ENOTCONN, and a severed
+              mount inside a Running pod does NOT self-heal — the pod
+              keeps its dead file descriptors and serves errors until it
+              is recycled.
+
+              Recover the NAS first, then repair consumers. Confirm which
+              mounts are actually dead before restarting anything:
+                for p in $(kubectl get pods -A -o json \
+                    | jq -r '.items[] | select(.spec.volumes[]?.persistentVolumeClaim)
+                             | "\(.metadata.namespace)/\(.metadata.name)"'); do
+                  : # see 03-runbooks for the per-app mount paths
+                done
+              Then delete the affected pods so their mounts are re-published.
+              2026-09-09 needed forgejo, paperless, chist-web and
+              follow-whatsapp; each converged in under 40s.
+
+        # ---------------------------------------------------------------
+        # Fail-loud guard, same rationale as the Storage Box's: an absent
+        # probe is reported as absent, never as healthy. This layer exists
+        # because unmeasured looked identical to fine.
+        - alert: NasProbeAbsent
+          expr: absent(probe_success{instance="10.10.40.2:445"})
+          for: 15m
+          labels:
+            severity: info
+            component: nas-storage
+          annotations:
+            summary: "The NAS reachability probe is reporting no data"
+            description: |
+              `probe_success{instance="10.10.40.2:445"}` has had no samples
+              for 15 minutes, so NAS reachability is UNMEASURED, not
+              known-good.
+
+              Each of these has failed silently in this repo before:
+                kubectl -n monitoring get probe nas-smb -o yaml   # release: label present?
+                kubectl -n monitoring get deploy blackbox-exporter
+                # is the egress rule still there? without it the probe
+                # reports a permanent, fabricated outage
+                kubectl -n monitoring get cnp blackbox-exporter -o yaml

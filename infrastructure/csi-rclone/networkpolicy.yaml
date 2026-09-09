@@ -1,11 +1,57 @@
 # NetworkPolicies for csi-rclone.
 #
+# ============================================================
+# READ THIS BEFORE TRUSTING ANYTHING BELOW: as written, NEITHER
+# POLICY IN THIS FILE RESTRICTS ANYTHING, and both describe the
+# wrong transport. Measured 2026-09-09; left in place rather
+# than rewritten, because closing it is a posture change to a
+# tier-0 storage driver and belongs in its own reviewed commit.
+#
+# 1. NOTHING IS SELECTED. Both csi-rclone pods run
+#    hostNetwork=true (the node DaemonSet needs the kubelet CSI
+#    socket; the controller inherits it), so they live in the
+#    host network namespace and Cilium mints no endpoint for
+#    them:
+#
+#      kubectl -n csi-rclone get ciliumendpoints
+#      # No resources found in csi-rclone namespace.
+#
+#    A vanilla NetworkPolicy podSelector and a CCNP
+#    endpointSelector both select pod endpoints. With zero
+#    endpoints in the namespace, both rule sets are inert. The
+#    driver's egress is in practice the node's egress.
+#
+# 2. THE TRANSPORT IS SMB ON 445, NOT NFS ON 2049/111. The
+#    comments below and the port list in the CCNP say NFS. Read
+#    from worker2's rclone container:
+#
+#      kubectl -n csi-rclone exec csi-rclone-node-4rmtn -c rclone \
+#        -- cat /proc/net/tcp
+#      # remote 10.10.40.2:445  state=06 (TIME_WAIT)  x4
+#      # nothing on 2049, nothing on 111
+#
+#    lessons.md's "crypt over SMB" entry agrees, and so does
+#    storageclasses.yaml's own header. The two errors hid each
+#    other: because (1) makes the allowlist unenforced, an
+#    allowlist naming the wrong ports never produced a symptom.
+#    That is the whole reason this went unnoticed since ADR 0030
+#    — a policy that is never consulted cannot be contradicted
+#    by reality.
+#
+#    Consequence for anyone fixing (1): flipping these pods to
+#    an enforceable posture while the port list still says 2049
+#    would sever every nas-crypt mount in the cluster. Fix the
+#    ports in the same change, and verify with a live probe
+#    (observability/blackbox-exporter now measures
+#    10.10.40.2:445 continuously) rather than from this comment.
+# ============================================================
+#
 # Ingress: only Prometheus scrape on the metrics endpoint.
 # The driver's Node DaemonSet is consumed via the kubelet
 # CSI socket (host-local, not in-cluster network).
 #
-# Egress: kube-DNS + the NAS NFS endpoint. The driver doesn't
-# fetch external content (rclone is embedded as a library; no
+# Egress: kube-DNS + the NAS. The driver doesn't fetch external
+# content (rclone is embedded as a library; no
 # rclone-config-fetch from a remote URL).
 
 apiVersion: networking.k8s.io/v1
@@ -45,10 +91,14 @@ spec:
         - port: 53
           protocol: TCP
 ---
-# CCNP for NFS egress to the NAS. The driver's Node DaemonSet
-# pods need to reach <NAS_IP>:2049 for the underlying NFS
-# transport (the crypt layer is wholly in-pod; only the NFS
-# bytes traverse the wire and they're already ciphertext).
+# CCNP for egress to the NAS. The crypt layer is wholly in-pod,
+# so only the transport bytes traverse the wire and they are
+# already ciphertext.
+#
+# THE PORTS BELOW ARE WRONG AND UNENFORCED — 2049/111 is NFS,
+# the driver speaks SMB on 445, and the endpointSelector
+# matches no endpoint because these pods are hostNetwork. See
+# the block at the top of this file before changing either.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

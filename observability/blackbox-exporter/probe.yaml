@@ -1,4 +1,7 @@
-# Probe: Hetzner Storage Box, SSH/SFTP port.
+# Probes: the cluster's external storage dependencies.
+#
+#   hetzner-storagebox  u609156.your-storagebox.de:23   off-site backup target
+#   nas-smb             10.10.40.2:445                  the NAS every nas-crypt share sits on
 #
 # The expensive plumbing for this already existed and was unused: the
 # Prometheus CR carries `probeSelector: {matchLabels: {release:
@@ -49,3 +52,67 @@ spec:
     staticConfig:
       static:
         - u609156.your-storagebox.de:23
+---
+# Probe: the NAS, on the SMB port csi-rclone actually uses.
+#
+# ADR 0062 D1 generalised: an external dependency's reachability is measured,
+# not inferred. This is the second such dependency and by far the larger blast
+# radius — every `nas-crypt-*` StorageClass is a crypt-over-SMB remote on this
+# one host, so Immich originals, Nextcloud data, Paperless media, the Forgejo
+# LFS and package stores and all seven restic source trees terminate here.
+# Before this Probe, the NAS was the only thing in that chain with no signal
+# of its own.
+#
+# PORT 445, AND THAT NUMBER WAS MEASURED, NOT READ. Two committed files
+# describe this transport as NFS on 2049/111 —
+# infrastructure/csi-rclone/networkpolicy.yaml in its header and its CCNP, and
+# ADR 0030 by reference. Both are wrong. Read from worker2's rclone container
+# on 2026-09-09:
+#
+#   /proc/net/tcp → remote 10.10.40.2:445 state=06 (TIME_WAIT), 4 sockets
+#   no connection to 2049 or 111 in the snapshot, and none in any other
+#
+# and lessons.md's own "crypt over SMB" entry agrees. A probe built from the
+# committed comment would have targeted a port nothing listens on and reported
+# a permanent NAS outage — a monitoring component fabricating an incident,
+# which is the exact failure the sibling CCNP header warns about. Verified
+# through the live exporter before this file was written: :23 → probe_success
+# 1, :445 → 0 with a 5.000s timeout (the Cilium-drop signature, since the
+# egress rule below did not exist yet), :2049 → 0 identically.
+#
+# Consequence worth acting on separately: because both csi-rclone pods run
+# hostNetwork=true, the namespace has ZERO CiliumEndpoints, so neither the
+# vanilla NetworkPolicy nor the CCNP in that layer selects anything. The
+# driver's egress is not actually restricted. That is a posture finding for the
+# operator, not something to quietly rewrite under a monitoring change.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: nas-smb
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: blackbox-exporter
+    app.kubernetes.io/component: probe
+    app.kubernetes.io/part-of: observability
+    # LOAD-BEARING — see the header of the first Probe above.
+    release: kube-prometheus-stack
+spec:
+  jobName: nas-smb
+  # Reuses the existing module unchanged: an unauthenticated TCP connect
+  # presents no credential, so probing SMB does not put a NAS account
+  # anywhere near this pod. ADR 0062 D3 holds for this target too.
+  module: tcp_connect
+  interval: 30s
+  scrapeTimeout: 10s
+  prober:
+    url: blackbox-exporter.monitoring.svc.cluster.local:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        # An IP, not a name, because that is what the rclone remotes resolve
+        # to and there is no DNS record in front of it to follow. `internal`
+        # per ADR 0003 and already committed in
+        # infrastructure/csi-rclone/networkpolicy.yaml.
+        - 10.10.40.2:445

@@ -275,3 +275,181 @@ tests:
                 No operator action is required if it self-resolves: the
                 backup lanes retry, and their staleness alerts are the
                 backstop if they do not recover.
+
+  # ---------------------------------------------------------------------
+  # NAS probe (10.10.40.2:445). The ladder is the thing under test: the
+  # warning must land at 3m so it can attribute the first symptoms, and the
+  # critical must NOT fire until 15m so a recoverable blip does not page.
+  # A single `for:` cannot express both, which is why these are two alerts,
+  # and (g)/(h) are what stop someone collapsing them back into one.
+
+  # (g) Healthy NAS: nothing fires, including the absent() guard.
+  - interval: 30s
+    name: "reachable NAS - nothing fires"
+    input_series:
+      - series: 'probe_success{instance="10.10.40.2:445", job="nas-smb", namespace="monitoring"}'
+        values: "1+0x180"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: NasUnreachable
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: NasUnreachableSustained
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: NasProbeAbsent
+        exp_alerts: []
+
+  # (h) THE LADDER. At 10m the warning is up and the critical is NOT —
+  #     that gap is the design. At 20m both are up.
+  - interval: 30s
+    name: "NAS outage escalates warning at 3m, critical only at 15m"
+    input_series:
+      - series: 'probe_success{instance="10.10.40.2:445", job="nas-smb", namespace="monitoring"}'
+        values: "0+0x180"
+    alert_rule_test:
+      # before the warning's for:
+      - eval_time: 2m
+        alertname: NasUnreachable
+        exp_alerts: []
+      # warning is up
+      - eval_time: 10m
+        alertname: NasUnreachable
+        exp_alerts:
+          - exp_labels:
+              alertname: NasUnreachable
+              severity: warning
+              component: nas-storage
+              instance: "10.10.40.2:445"
+              job: nas-smb
+              namespace: monitoring
+            exp_annotations:
+              summary: "The NAS (10.10.40.2) is not accepting SMB connections on port 445"
+              description: |
+                An unauthenticated TCP connect to 10.10.40.2:445 from inside
+                the cluster has failed for more than 3 minutes. Every
+                `nas-crypt-*` StorageClass is a crypt-over-SMB remote on
+                this host, so expect FailedMount events, stalled reads and
+                rclone retry storms across `immich`, `nextcloud`,
+                `paperless`, `forgejo` and `backup-cronjobs`. Those are
+                consequences, not independent faults.
+
+                Port 445 and not 2049: the transport is SMB. Two committed
+                files still describe it as NFS — that is a documentation
+                defect, measured and corrected 2026-09-09; see the header of
+                probe.yaml.
+
+                Triage:
+                  # is it the host, or just us?
+                  nc -vz 10.10.40.2 445
+                  # what does the prober itself say
+                  kubectl -n monitoring logs deploy/blackbox-exporter --tail=20
+                  # are mounts already severed? ENOTCONN is the signature
+                  kubectl -n csi-rclone logs ds/csi-rclone-node -c rclone --tail=50
+                  # which consumers are wedged
+                  kubectl get pods -A --field-selector 'status.phase=Pending'
+
+                If it self-resolves inside a few minutes no action is
+                needed; rclone retries. If it does not, the mounts will not
+                heal on their own — a severed FUSE mount stays severed in a
+                Running pod, which is how 2026-09-09 became a 5.5h outage.
+      # THE GAP: warning up, critical still silent at 10m
+      - eval_time: 10m
+        alertname: NasUnreachableSustained
+        exp_alerts: []
+      # and one evaluation before the critical's for: elapses
+      - eval_time: 14m30s
+        alertname: NasUnreachableSustained
+        exp_alerts: []
+      # critical lands
+      - eval_time: 20m
+        alertname: NasUnreachableSustained
+        exp_alerts:
+          - exp_labels:
+              alertname: NasUnreachableSustained
+              severity: critical
+              component: nas-storage
+              instance: "10.10.40.2:445"
+              job: nas-smb
+              namespace: monitoring
+            exp_annotations:
+              summary: "The NAS (10.10.40.2) has been unreachable for 15 minutes — assume severed mounts"
+              description: |
+                10.10.40.2:445 has refused connections for 15 minutes. Treat
+                every nas-crypt mount as suspect: at this duration the FUSE
+                mounts have very likely gone to ENOTCONN, and a severed
+                mount inside a Running pod does NOT self-heal — the pod
+                keeps its dead file descriptors and serves errors until it
+                is recycled.
+
+                Recover the NAS first, then repair consumers. Confirm which
+                mounts are actually dead before restarting anything:
+                  for p in $(kubectl get pods -A -o json \
+                      | jq -r '.items[] | select(.spec.volumes[]?.persistentVolumeClaim)
+                               | "\(.metadata.namespace)/\(.metadata.name)"'); do
+                    : # see 03-runbooks for the per-app mount paths
+                  done
+                Then delete the affected pods so their mounts are re-published.
+                2026-09-09 needed forgejo, paperless, chist-web and
+                follow-whatsapp; each converged in under 40s.
+
+  # (i) A blip shorter than the warning's for: must not fire at all. Six
+  #     failed probes is exactly the boundary, so this uses five.
+  - interval: 30s
+    name: "brief NAS blip does not fire"
+    input_series:
+      - series: 'probe_success{instance="10.10.40.2:445", job="nas-smb", namespace="monitoring"}'
+        values: "1 1 1 1 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NasUnreachable
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: NasUnreachableSustained
+        exp_alerts: []
+
+  # (j) No samples at all is reported as unmeasured, not as healthy — and
+  #     the outage alerts stay quiet, because absent() is not == 0. A
+  #     selector typo therefore surfaces as NasProbeAbsent rather than as
+  #     silence. The series below is a DIFFERENT instance so the rules'
+  #     own selector matches nothing.
+  - interval: 30s
+    name: "no NAS samples reports the probe as absent"
+    input_series:
+      - series: 'probe_success{instance="10.10.40.2:139", job="nas-smb", namespace="monitoring"}'
+        values: "1+0x120"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: NasProbeAbsent
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: NasProbeAbsent
+        exp_alerts:
+          - exp_labels:
+              alertname: NasProbeAbsent
+              severity: info
+              component: nas-storage
+              # absent() synthesises the selector's own labels onto its
+              # output sample, so `instance` is present here even though no
+              # such series exists. Asserting it is what proves the alert
+              # names the right target rather than firing anonymously.
+              instance: "10.10.40.2:445"
+            exp_annotations:
+              summary: "The NAS reachability probe is reporting no data"
+              description: |
+                `probe_success{instance="10.10.40.2:445"}` has had no samples
+                for 15 minutes, so NAS reachability is UNMEASURED, not
+                known-good.
+
+                Each of these has failed silently in this repo before:
+                  kubectl -n monitoring get probe nas-smb -o yaml   # release: label present?
+                  kubectl -n monitoring get deploy blackbox-exporter
+                  # is the egress rule still there? without it the probe
+                  # reports a permanent, fabricated outage
+                  kubectl -n monitoring get cnp blackbox-exporter -o yaml
+      - eval_time: 30m
+        alertname: NasUnreachable
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: NasUnreachableSustained
+        exp_alerts: []

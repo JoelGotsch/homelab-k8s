@@ -24,6 +24,18 @@ node:
   # FUSE-related flags are baked into the driver's Pod spec
   # by the chart; values exposed below are the operator-tunable
   # subset.
+  #
+  # mountTimeout is new in chart/driver 0.5.0 and is pinned rather than
+  # left empty because it is load-bearing here, not a tuning knob. It
+  # bounds how long NodePublishVolume waits before returning and reaping
+  # the mount in the background, so a wedged mount cannot hold a volume
+  # lock indefinitely. That lock is what produces "An operation with the
+  # given Volume ID ... already exists" — the exact signature the
+  # reboot-cascade-janitor escalates on, and the one that made it delete
+  # this DaemonSet's pod twice on 2026-09-09. 90s is the driver default;
+  # pinning it means an upstream default change cannot silently widen the
+  # window. Must stay under the kubelet NodePublishVolume timeout (~120s).
+  mountTimeout: "90s"
   metrics:
     enabled: true
     service:
@@ -32,7 +44,7 @@ node:
       enabled: true
       additionalLabels:
         release: kube-prometheus-stack
-  # PER-CONTAINER resources (chart 0.4.x uses node.resources.<container>,
+  # PER-CONTAINER resources (chart 0.4.x/0.5.x use node.resources.<container>,
   # NOT a flat requests/limits — the old flat block was silently ignored,
   # leaving the rclone mounter on the chart-default 300Mi). The rclone
   # container holds every FUSE mount's VFS dir cache; a Nextcloud
@@ -48,13 +60,47 @@ node:
   # while PID 1 survived (restarts=0), the signature of a child FUSE mount
   # process cgroup-OOM-killed under the 1Gi cap. Node has ~30GB free; 3Gi
   # gives write-burst headroom. No CPU limit (ADR 0042: FUSE latency).
+  #
+  # 2026-09-09 → 6Gi: 3Gi was not headroom, it was the next ceiling, and it
+  # has been hit repeatedly. `container_memory_max_usage_bytes` high-water
+  # per node-plugin pod over the 30 days to 2026-09-09:
+  #
+  #     wdgsj (worker3) 3.00Gi    8fcv9 3.00Gi    krkvv (worker2) 2.97Gi
+  #     nv68r 2.66Gi              b4cnj 2.11Gi
+  #
+  # Three pods reached the cap. On 2026-09-09 the 04:30 restic run mounted
+  # 7 nas-crypt shares at once on worker2; the shared cgroup ramped 0.41 →
+  # 2.27Gi working set against a 2.970Gi high-water, and between 05:00 and
+  # 05:07 the kernel reaped child FUSE mount processes one at a time —
+  # memory stepping 2.27 → 1.86 → 1.70 → 1.27 → 1.11Gi. Exactly the
+  # 2026-08-07 signature recurring: PID 1 alive, restarts=0, and
+  # `container_oom_events_total` NEVER incremented, because that counter
+  # tracks the container's own OOM and not a child's. Five severed mounts
+  # across four pods, then a 5.5h Forgejo-registry outage. Full chain in
+  # 99-journal/2026-09-09.
+  #
+  # Why a bigger limit and NOT a per-mount buffer cap: the arithmetic says
+  # buffers are not the consumer. rclone's default --buffer-size is 16Mi
+  # and --vfs-read-ahead 128Ki, so 7 concurrent mounts account for ~112Mi
+  # against a 3Gi cgroup. The mass is the per-remote VFS dir cache (the
+  # 2026-08-05 Nextcloud 253k-file scan) plus in-flight transfers. Capping
+  # buffers here would be a placebo, and it could not reach the running
+  # mounts anyway: the static PVs in persistentvolumes.yaml bake their
+  # mountOptions at creation, so a StorageClass change only affects PVs
+  # provisioned afterwards.
+  #
+  # 6Gi is 2x the measured worst case on a node with ~30.7Gi total and
+  # ~11Gi in use. It is deliberately not unbounded — the ceiling now has a
+  # smoke alarm on it (CSIRcloneNodeMemoryHigh, storage-health-rules.yaml)
+  # so the next approach is seen at ~30 minutes' warning instead of being
+  # discovered 5.5h later through a registry 500.
   resources:
     rclone:
       requests:
         cpu: 50m
         memory: 512Mi
       limits:
-        memory: 3Gi
+        memory: 6Gi
     livenessProbe:
       requests:
         cpu: 10m
@@ -71,7 +117,7 @@ node:
 # Controller — single Deployment, leader-elects.
 controller:
   replicas: 1
-  # Same per-container shape as node (chart 0.4.x schema).
+  # Same per-container shape as node (unchanged 0.4.x → 0.5.x).
   resources:
     rclone:
       requests:

@@ -76,3 +76,25 @@ spec:
       toPorts:
         - ports:
             - { port: "23", protocol: TCP }
+    # The NAS, on the SMB port the csi-rclone remotes actually use. A CIDR
+    # rather than a toFQDNs rule because the target is an address with no DNS
+    # record in front of it — so no L7 DNS proxying is involved for this one,
+    # and the DNS rule above is not what makes it work.
+    #
+    # /32, so Kyverno homelab-disallow-open-egress-cnp (which audits for
+    # `toEntities: [world]` and /0-/1 CIDRs) is satisfied without a bypass.
+    #
+    # WITHOUT THIS RULE THE PROBE REPORTS A PERMANENT NAS OUTAGE. Measured
+    # 2026-09-09 through the live exporter before the rule existed: a connect
+    # to 10.10.40.2:445 returned probe_success 0 after exactly 5.000s, the
+    # drop-not-reset signature of a Cilium denial, while the Storage Box
+    # control probe on the same call path returned 1 in 28ms. Pod egress to
+    # the LAN is routable — cilium-config has enable-ipv4-masquerade=true with
+    # ipv4-native-routing-cidr=10.244.0.0/16, so 10.10.40.2 leaves masqueraded
+    # to the node IP, and the host itself demonstrably holds sockets to
+    # 10.10.40.2:445.
+    - toCIDR:
+        - "10.10.40.2/32"
+      toPorts:
+        - ports:
+            - { port: "445", protocol: TCP }
