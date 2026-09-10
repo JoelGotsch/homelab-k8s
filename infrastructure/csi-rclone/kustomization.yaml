@@ -55,13 +55,25 @@ resources:
 #    masqueraded to the node IP (bpf masquerade), so the NAS sees no change.
 #    dnsPolicy moves to ClusterFirst in values.yaml (both copies) with it.
 #
-# 2. Liveness endpoint on 29655 (since 2026-05-27). When both this DaemonSet
+# 2. Liveness probes must NOT say `host: localhost` once the pods are off the
+#    host network. The chart's probe is `httpGet: {host: localhost, port: N}`
+#    and its liveness-probe sidecar listens on `localhost:N`. The kubelet runs
+#    the httpGet from the NODE's network namespace, so `host: localhost` means
+#    the node's loopback — which only worked while the sidecar shared it.
+#    2026-09-10 08:07–08:10 UTC, first roll after D1: every rclone container
+#    (six nodes + controller) was killed on `dial tcp [::1]:29655: connection
+#    refused` every ~3 min, and each kill severed every mount on that node —
+#    exactly the outage the policy ordering was meant to avoid. Fix: drop
+#    `host` (kubelet then dials the pod IP; the local host reaches its own
+#    endpoints without a policy rule — Cilium `--allow-localhost=auto`) and
+#    bind the sidecar to `:N`. BOTH workloads, BOTH halves, or it loops again.
+#
+# 3. Liveness endpoint on 29655 (since 2026-05-27). When both this DaemonSet
 #    and nfs-csi's csi-nfs-node were hostNetwork, the chart-default
 #    localhost:29653 collided on every node ("bind: address already in use",
 #    both crashlooping). Off the host network the collision is gone, but a
 #    distinct port costs nothing and keeps this patch stable across future
-#    flips, so it stays. Must change BOTH the liveness-probe sidecar's
-#    --http-endpoint and the rclone container's livenessProbe httpGet.
+#    flips, so it stays. The controller keeps the chart's 29652.
 patches:
   - target:
       kind: DaemonSet
@@ -80,11 +92,12 @@ patches:
                 args:
                   - --csi-address=/csi/csi.sock
                   - --probe-timeout=3s
-                  - --http-endpoint=localhost:29655
+                  - --http-endpoint=:29655
                   - --v=5
               - name: rclone
                 livenessProbe:
                   httpGet:
+                    host: null   # see header §2 — pod IP, not the node's loopback
                     port: 29655
   - target:
       kind: Deployment
@@ -98,3 +111,14 @@ patches:
         template:
           spec:
             hostNetwork: false
+            containers:
+              - name: liveness-probe
+                args:
+                  - --csi-address=/csi/csi.sock
+                  - --probe-timeout=3s
+                  - --http-endpoint=:29652
+                  - --v=5
+              - name: rclone
+                livenessProbe:
+                  httpGet:
+                    host: null   # see header §2
