@@ -44,6 +44,7 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 | `kv/data/forgejo/postgres` | `password` | CNPG-issued; operator copies from the auto-created `forgejo-pg-app` Secret. |
 | `kv/data/forgejo/oidc` | `client_id`, `client_secret` | From Authentik — operator creates the `forgejo` OIDC client in Authentik admin UI, then copies values. |
 | `kv/data/cnpg/forgejo/s3-creds` | `access_key_id`, `secret_access_key` | MinIO svc-account scoped to `homelab-backups-cluster/cnpg/forgejo/`. Standard CNPG-app pattern. |
+| `kv/data/forgejo/s3-creds` | `access_key_id`, `secret_access_key` | MinIO whole-bucket user `forgejo-blobs` for Packages + LFS objects (ADR 0064 D4). Minted by `homelab-infra/scripts/setup-minio-buckets.sh` from the `forgejo-blobs` inventory entry; projected into Secret `forgejo-s3` and injected as `FORGEJO__packages__MINIO_*` / `FORGEJO__lfs__MINIO_*`. |
 
 **First-install seed:**
 

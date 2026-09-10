@@ -308,6 +308,33 @@ gitea:
         secretKeyRef:
           name: forgejo-security-keys
           key: lfs_jwt_secret
+    # Object-store credentials for [packages] and [lfs] (ADR 0064 D4).
+    # The non-secret half of those sections (STORAGE_TYPE, endpoint,
+    # bucket, base path) lives under gitea.config above; only the keys
+    # come through here. Same MinIO user for both sections — one
+    # whole-bucket user, two base paths. Injected BEFORE the cutover so
+    # `forgejo migrate-storage` can be run inside the pod with the keys
+    # taken from its own environment (nothing typed, nothing printed).
+    - name: FORGEJO__packages__MINIO_ACCESS_KEY_ID
+      valueFrom:
+        secretKeyRef:
+          name: forgejo-s3
+          key: ACCESS_KEY_ID
+    - name: FORGEJO__packages__MINIO_SECRET_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: forgejo-s3
+          key: SECRET_ACCESS_KEY
+    - name: FORGEJO__lfs__MINIO_ACCESS_KEY_ID
+      valueFrom:
+        secretKeyRef:
+          name: forgejo-s3
+          key: ACCESS_KEY_ID
+    - name: FORGEJO__lfs__MINIO_SECRET_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: forgejo-s3
+          key: SECRET_ACCESS_KEY
 
 # Pod-level security: non-root, readOnlyRootFilesystem true
 # (Forgejo writes only to mounted volumes), drop all caps.

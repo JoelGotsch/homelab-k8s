@@ -12,7 +12,8 @@
 #   Prometheus scrape + in-cluster consumers (Woodpecker
 #   server + agent for OAuth + git-fetch, Renovate for API).
 # - Forgejo egress: kube-DNS + CNPG Postgres (same ns) +
-#   OpenBao (for ESO-managed secrets) + NFS server (NAS) +
+#   OpenBao (for ESO-managed secrets) + MinIO-on-NAS:9000
+#   (Packages + LFS object store, ADR 0064 D4) +
 #   Authentik (OIDC discovery + token validation) +
 #   github.com:443 (push-mirror sync — Forgejo is source of
 #   truth, GitHub read-only mirror per ADR 0023 D1).
@@ -208,6 +209,17 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    # MinIO-on-NAS — Packages + LFS object store (ADR 0064 D4).
+    # Forgejo talks S3 to MinIO; MinIO talks NFS to the NAS. The
+    # "no NAS egress from Forgejo" note below still holds.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: minio-on-nas
+            app: minio
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
     # Woodpecker server cluster-internal — webhook delivery
     # target. The webhook URL stored in Forgejo points at the
     # Service DNS (woodpecker-server.woodpecker.svc.cluster.local.
@@ -225,12 +237,12 @@ spec:
         - ports:
             - port: "8000"
               protocol: TCP
-# NAS NFS egress is NOT allowed from Forgejo pods — per
-# ADR 0030 §D1 the csi-rclone driver in `csi-rclone` ns is
-# the only thing that talks to the NAS. Forgejo sees the
-# encrypted shares (forgejo-lfs, registry-blobs) as normal
-# mounted filesystems via CSI; if a PVC fails to bind, the
-# pod fails to start (correct behaviour — fail-closed).
+# NAS egress is NOT allowed from Forgejo pods. Since ADR 0064
+# D4 (2026-09-10) Forgejo keeps no NAS mount at all: Packages and
+# LFS objects live in the `forgejo-blobs` bucket on MinIO-on-NAS,
+# reached over the 9000 rule above, and MinIO is the thing that
+# talks NFS to the NAS. Before that the two crypt shares were CSI
+# mounts served by the csi-rclone driver (ADR 0030 §D1).
 ---
 # CNPG DB-pod lockdown (netpol-audit.md MEDIUM-2). DRAFT — do NOT merge-and-
 # apply blind. Until now the forgejo-pg instances ran Cilium DEFAULT-ALLOW

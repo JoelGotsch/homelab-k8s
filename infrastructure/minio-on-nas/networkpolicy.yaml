@@ -5,8 +5,9 @@
 # Consumers: CNPG (per-app cluster Postgres pods writing WAL
 # + base), Longhorn (backup target), the Restic CronJob (when
 # it lands under infrastructure/backup-cronjobs/), and Loki
-# (chunk storage backend per ADR 0021), and Langfuse web/worker
-# (event, batch-export, and media objects).
+# (chunk storage backend per ADR 0021), Langfuse web/worker
+# (event, batch-export, and media objects), and Forgejo (Packages +
+# LFS objects, ADR 0064 D4).
 
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -63,6 +64,21 @@ spec:
                 values:
                   - web
                   - worker
+      ports:
+        - port: 9000
+          protocol: TCP
+    # Forgejo — Packages + LFS object store in `forgejo-blobs`
+    # (ADR 0064 D4, 2026-09-10). Namespace AND pod selector in one
+    # peer: the CNPG pods in `forgejo` are already admitted by the
+    # cnpg.io/cluster rule above; nothing else in that namespace
+    # gets here.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: forgejo
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: forgejo
       ports:
         - port: 9000
           protocol: TCP
