@@ -1,130 +1,96 @@
-# NetworkPolicies for csi-rclone.
+# Network policy for the csi-rclone driver — ADR 0064 D2.
 #
-# ============================================================
-# READ THIS BEFORE TRUSTING ANYTHING BELOW: as written, NEITHER
-# POLICY IN THIS FILE RESTRICTS ANYTHING, and both describe the
-# wrong transport. Measured 2026-09-09; left in place rather
-# than rewritten, because closing it is a posture change to a
-# tier-0 storage driver and belongs in its own reviewed commit.
+# HISTORY, because the previous version of this file misled for four
+# months. Until 2026-09-10 it held a NetworkPolicy and a
+# CiliumNetworkPolicy that selected NOTHING: both driver pods ran
+# hostNetwork=true (hardcoded in the chart's templates), Cilium mints
+# no endpoint for a host-network pod, and a policy with no endpoint is
+# never consulted. Its NAS port list said NFS 2049/111; the driver
+# speaks SMB on 445 (measured 2026-09-09 from /proc/net/tcp in the
+# rclone container). The two errors hid each other — an allowlist
+# that is never enforced cannot be contradicted by reality.
 #
-# 1. NOTHING IS SELECTED. Both csi-rclone pods run
-#    hostNetwork=true (the node DaemonSet needs the kubelet CSI
-#    socket; the controller inherits it), so they live in the
-#    host network namespace and Cilium mints no endpoint for
-#    them:
+# ADR 0064 D1 takes both pods off the host network (kustomization.yaml
+# patches; the chart offers no value for it), which makes them Cilium
+# endpoints and makes THIS policy bite. The order of the two commits
+# is the safety argument: this file landed first, inert, and was
+# validated against a scratch pod carrying the driver's label before
+# the flip. Anyone changing the ports below must repeat that check —
+# a wrong port here severs every nas-crypt mount in the cluster.
 #
-#      kubectl -n csi-rclone get ciliumendpoints
-#      # No resources found in csi-rclone namespace.
+# What the driver needs, and nothing else:
 #
-#    A vanilla NetworkPolicy podSelector and a CCNP
-#    endpointSelector both select pod endpoints. With zero
-#    endpoints in the namespace, both rule sets are inert. The
-#    driver's egress is in practice the node's egress.
+#   ingress  monitoring/prometheus -> 5572   (metrics; ServiceMonitor)
+#   egress   kube-dns 53                     (UDP + TCP)
+#   egress   kube-apiserver 443 + 6443       (node plugin lists PVs, PVCs,
+#                                            nodes, CSINodes; provisioner
+#                                            + its lease; BOTH ports —
+#                                            socket-LB DNATs :443 -> :6443
+#                                            before policy evaluation)
+#   egress   10.10.40.2:445 TCP              (the NAS, SMB — crypt is
+#                                            in-process, the wire sees
+#                                            ciphertext)
 #
-# 2. THE TRANSPORT IS SMB ON 445, NOT NFS ON 2049/111. The
-#    comments below and the port list in the CCNP say NFS. Read
-#    from worker2's rclone container:
+# Not needed: kubelet (CSI + registrar are unix sockets on hostPath),
+# any other node, the internet (rclone is a library; nothing is
+# fetched). The kubelet's liveness httpGet arrives from the `host`
+# entity, which Cilium admits without a rule.
 #
-#      kubectl -n csi-rclone exec csi-rclone-node-4rmtn -c rclone \
-#        -- cat /proc/net/tcp
-#      # remote 10.10.40.2:445  state=06 (TIME_WAIT)  x4
-#      # nothing on 2049, nothing on 111
-#
-#    lessons.md's "crypt over SMB" entry agrees, and so does
-#    storageclasses.yaml's own header. The two errors hid each
-#    other: because (1) makes the allowlist unenforced, an
-#    allowlist naming the wrong ports never produced a symptom.
-#    That is the whole reason this went unnoticed since ADR 0030
-#    — a policy that is never consulted cannot be contradicted
-#    by reality.
-#
-#    Consequence for anyone fixing (1): flipping these pods to
-#    an enforceable posture while the port list still says 2049
-#    would sever every nas-crypt mount in the cluster. Fix the
-#    ports in the same change, and verify with a live probe
-#    (observability/blackbox-exporter now measures
-#    10.10.40.2:445 continuously) rather than from this comment.
-# ============================================================
-#
-# Ingress: only Prometheus scrape on the metrics endpoint.
-# The driver's Node DaemonSet is consumed via the kubelet
-# CSI socket (host-local, not in-cluster network).
-#
-# Egress: kube-DNS + the NAS. The driver doesn't fetch external
-# content (rclone is embedded as a library; no
-# rclone-config-fetch from a remote URL).
+# Verified live 2026-09-09 (not from this comment): the blackbox
+# exporter's NAS probe targets 10.10.40.2:445 continuously
+# (NasUnreachable / NasUnreachableSustained).
 
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: csi-rclone
-  namespace: csi-rclone
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: csi-driver-rclone
-  policyTypes: [Ingress, Egress]
-  ingress:
-    # Prometheus scrape on the driver's metrics port.
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-      ports:
-        - port: metrics
-          protocol: TCP
-  egress:
-    # kube-DNS.
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
----
-# CCNP for egress to the NAS. The crypt layer is wholly in-pod,
-# so only the transport bytes traverse the wire and they are
-# already ciphertext.
-#
-# THE PORTS BELOW ARE WRONG AND UNENFORCED — 2049/111 is NFS,
-# the driver speaks SMB on 445, and the endpointSelector
-# matches no endpoint because these pods are hostNetwork. See
-# the block at the top of this file before changing either.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: csi-rclone-egress
+  name: csi-rclone
   namespace: csi-rclone
 spec:
   endpointSelector:
     matchLabels:
       app.kubernetes.io/name: csi-driver-rclone
+  ingress:
+    # Prometheus scrape of the node plugin's metrics port. The
+    # ServiceMonitor names the port `metrics`; CNP ports are numeric.
+    # 5572 is also in prometheus-allow's port allowlist (rule 17) —
+    # once the pods have pod IPs the scrape no longer rides on the
+    # host/remote-node entities.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: prometheus
+      toPorts:
+        - ports:
+            - port: "5572"
+              protocol: TCP
   egress:
+    # kube-DNS. No L7 DNS rule on purpose: nothing here uses toFQDNs
+    # (the NAS is addressed by IP in every share's rclone INI), so the
+    # DNS proxy would add a failure mode and nothing else.
     - toEndpoints:
         - matchLabels:
-            "k8s:io.kubernetes.pod.namespace": kube-system
-            "k8s:k8s-app": kube-dns
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
       toPorts:
         - ports:
             - port: "53"
               protocol: UDP
-          rules:
-            dns:
-              - matchPattern: "*"
+            - port: "53"
+              protocol: TCP
+    # kube-apiserver — reserved entity; both ports, see header.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # The NAS, SMB only. Same rule shape as
+    # observability/blackbox-exporter/ciliumnetworkpolicy.yaml.
     - toCIDR:
         - "10.10.40.2/32"
       toPorts:
         - ports:
-            - port: "2049"
-              protocol: TCP
-            - port: "111"
+            - port: "445"
               protocol: TCP
