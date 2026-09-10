@@ -231,15 +231,39 @@ gitea:
       ENABLE_PUSH_CREATE_ORG: "true"
       DEFAULT_PUSH_CREATE_PRIVATE: "true"
 
-    # LFS storage on NFS-backed PVC mounted at /data/lfs.
+    # LFS + Packages objects live in the `forgejo-blobs` bucket on
+    # MinIO-on-NAS (ADR 0064 D4, cut over 2026-09-10). Before that
+    # both were csi-rclone crypt mounts at /data/lfs and
+    # /data/packages (ADR 0030), and before that NFS CSI (ADR 0019
+    # D7 / ADR 0023 D12) — the FUSE path's shared memory cgroup took
+    # the registry down repeatedly, and internal-class data does not
+    # need the crypt layer (ADR 0025 D1).
+    #
+    # Only the non-secret half is here. MINIO_ACCESS_KEY_ID /
+    # MINIO_SECRET_ACCESS_KEY for BOTH sections come from the
+    # forgejo-s3 Secret through additionalConfigFromEnvs below.
+    # Endpoint is host:port WITHOUT a scheme (Forgejo's storage
+    # docs); no TLS in-cluster, same as every other MinIO consumer.
+    # MINIO_LOCATION is only used when Forgejo creates the bucket,
+    # which it never does here (setup-minio-buckets.sh owns it);
+    # MinIO-on-NAS has no region configured and accepts any.
+    # Base paths are set explicitly so `forgejo migrate-storage
+    # --minio-base-path` and the runtime agree by construction.
     lfs:
-      STORAGE_TYPE: local
-      PATH: /data/lfs
+      STORAGE_TYPE: minio
+      MINIO_ENDPOINT: minio.minio-on-nas.svc.cluster.local:9000
+      MINIO_BUCKET: forgejo-blobs
+      MINIO_BASE_PATH: lfs/
+      MINIO_LOCATION: us-east-1
+      MINIO_USE_SSL: "false"
 
-    # Packages storage on NFS-backed PVC mounted at /data/packages.
     packages:
-      STORAGE_TYPE: local
-      PATH: /data/packages
+      STORAGE_TYPE: minio
+      MINIO_ENDPOINT: minio.minio-on-nas.svc.cluster.local:9000
+      MINIO_BUCKET: forgejo-blobs
+      MINIO_BASE_PATH: packages/
+      MINIO_LOCATION: us-east-1
+      MINIO_USE_SSL: "false"
       ENABLED: "true"
 
     # Disable mail — operator-internal forge; notifications
