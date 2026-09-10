@@ -148,6 +148,15 @@ spec:
         # post-migration `barman_cloud_cloudnative_pg_io_*` family.
         - port: 9187
           protocol: TCP
+        # csi-rclone node-plugin metrics (ServiceMonitor port `metrics`).
+        # 8th recurrence of the trap this comment warns about, with a
+        # twist: the target had been up for four months WITHOUT this
+        # entry, because the pods were hostNetwork and the scrape rode on
+        # prometheus-apiserver's host/remote-node entities. ADR 0064 D1
+        # (2026-09-10) gave them pod IPs, and the very same target would
+        # have gone TargetDown. Added in the same commit as the flip.
+        - port: 5572
+          protocol: TCP
         # OTel Collector self-metrics (agent DaemonSet + gateway).
         # 6th recurrence, and the one that hid all the others: the
         # collector's ServiceMonitor has existed since the stack

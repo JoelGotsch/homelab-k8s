@@ -21,6 +21,12 @@ image:
 # pods. /dev/fuse + mount propagation Bidirectional are the
 # privileges that make this PSA-privileged.
 node:
+  # ADR 0064 D1: the pods are patched off the host network in
+  # kustomization.yaml (the chart hardcodes hostNetwork: true and has no
+  # value for it), so the DNS policy is the ordinary pod one. The chart
+  # default ClusterFirstWithHostNet would still resolve, but it is the
+  # host-network variant and would mislead the next reader.
+  dnsPolicy: ClusterFirst
   # FUSE-related flags are baked into the driver's Pod spec
   # by the chart; values exposed below are the operator-tunable
   # subset.
@@ -117,6 +123,7 @@ node:
 # Controller — single Deployment, leader-elects.
 controller:
   replicas: 1
+  dnsPolicy: ClusterFirst  # ADR 0064 D1, same reason as node.dnsPolicy
   # Same per-container shape as node (unchanged 0.4.x → 0.5.x).
   resources:
     rclone:

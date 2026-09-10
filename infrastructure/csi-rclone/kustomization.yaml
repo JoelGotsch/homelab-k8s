@@ -42,13 +42,26 @@ resources:
   # is this layer's own storage classes.
   - conformance.yaml
 
-# Post-render patch: both this node DaemonSet AND nfs-csi's csi-nfs-node
-# run hostNetwork=true and the chart defaults their CSI liveness-probe to
-# localhost:29653 — so on every node they collide ("bind: address already
-# in use") and both crashloop. Move csi-rclone's liveness endpoint to 29655
-# (nfs-csi keeps the standard 29653). Must change BOTH the liveness-probe
-# sidecar's --http-endpoint and the rclone container's livenessProbe httpGet
-# that targets it. Fixed 2026-05-27.
+# Post-render patches.
+#
+# 1. hostNetwork: false on BOTH driver workloads — ADR 0064 D1. The chart
+#    hardcodes `hostNetwork: true` in its templates (csi-rclone-node.yaml:22,
+#    csi-rclone-controller.yaml:21) and exposes only dnsPolicy as a value.
+#    Nothing in the driver needs the host network: the kubelet CSI socket,
+#    the registrar socket and /var/lib/kubelet/pods are hostPath mounts, and
+#    hostPath does not depend on the network namespace. Off the host network
+#    the pods are Cilium endpoints, so networkpolicy.yaml is ENFORCED —
+#    read its header before touching either. NAS traffic still leaves
+#    masqueraded to the node IP (bpf masquerade), so the NAS sees no change.
+#    dnsPolicy moves to ClusterFirst in values.yaml (both copies) with it.
+#
+# 2. Liveness endpoint on 29655 (since 2026-05-27). When both this DaemonSet
+#    and nfs-csi's csi-nfs-node were hostNetwork, the chart-default
+#    localhost:29653 collided on every node ("bind: address already in use",
+#    both crashlooping). Off the host network the collision is gone, but a
+#    distinct port costs nothing and keeps this patch stable across future
+#    flips, so it stays. Must change BOTH the liveness-probe sidecar's
+#    --http-endpoint and the rclone container's livenessProbe httpGet.
 patches:
   - target:
       kind: DaemonSet
@@ -61,6 +74,7 @@ patches:
       spec:
         template:
           spec:
+            hostNetwork: false
             containers:
               - name: liveness-probe
                 args:
@@ -72,3 +86,15 @@ patches:
                 livenessProbe:
                   httpGet:
                     port: 29655
+  - target:
+      kind: Deployment
+      name: csi-rclone-controller
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: csi-rclone-controller
+      spec:
+        template:
+          spec:
+            hostNetwork: false
