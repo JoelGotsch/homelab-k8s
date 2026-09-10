@@ -1,9 +1,9 @@
 # Forgejo — self-hosted forge, source of truth per ADR 0023.
-# Single-replica Forgejo + external CNPG Postgres +
-# csi-rclone-NFS-crypt for LFS + Packages (per ADR 0030 §D1
-# refining ADR 0025 D7) — `internal` data but cluster-overlay-
-# encrypted; per-share keys per ADR 0025 D8. App data
-# (config, git repos, runtime state) on Longhorn (LUKS-at-
+# Single-replica Forgejo + external CNPG Postgres. LFS + Packages
+# objects in the forgejo-blobs bucket on MinIO-on-NAS (ADR 0064 D4,
+# since 2026-09-10; `internal` data, plaintext on the NAS per ADR
+# 0025 D1 — before that, csi-rclone crypt mounts under ADR 0030).
+# App data (config, git repos, runtime state) on Longhorn (LUKS-at-
 # rest via ADR 0017). Authentik OIDC, Tailscale-only HTTPRoute.
 #
 # Helm chart: code.forgejo.org/forgejo-helm/forgejo (OCI).
@@ -41,7 +41,6 @@ resources:
   - cnpg-cluster.yaml
   - objectstore.yaml
   - scheduled-backup.yaml
-  - pvc.yaml
   - externalsecret.yaml
   - httproute.yaml
   - httproute-registry.yaml

@@ -374,149 +374,11 @@ spec:
       name: nas-crypt-personal-documents-config
       namespace: csi-rclone
 ---
-# ─────────────────────────────────────────────────────────────────────────────
-# share: forgejo-lfs
-# ─────────────────────────────────────────────────────────────────────────────
-#
-# PREVENTIVE, not diagnosed. No LFS push has been observed to fail — but this
-# is the same driver, the same NAS, the same missing write cache and the same
-# shape of write (one large object, streamed) as the registry blobs below,
-# where it failed four times out of five on 2026-08-25. The two volumes are
-# mounted into the same pod and remount together, so fixing this one costs
-# nothing beyond the restart that one already needs. Left alone it would be a
-# known-broken mount waiting to be rediscovered by whoever next pushes a big
-# LFS object.
-#
-# 10G rather than the registry's 20G: LFS objects here are individually large
-# but pushed one at a time, and this share is quiet.
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: nas-forgejo-lfs-forgejo
-  labels:
-    homelab.internal/nas-share: forgejo-lfs
-    homelab.internal/data-class: internal
-  annotations:
-    homelab.internal/dataset: "Forgejo Git LFS objects (content-addressed, WORM-shape)"
-    # LOWER RISK, but unproven rather than safe. LFS objects are
-    # content-addressed and written once, so nothing should reopen one for
-    # write — that is a claim about Forgejo's write path, not something this
-    # repository has measured. Verify before relying on it. Tracked as T6.
-    homelab.internal/rclone-cache-mode-exemption: "Believed write-once (content-addressed LFS objects), so the read-modify-write hazard should not arise — claimed, not measured. Verify under T6 before treating as safe."
-spec:
-  capacity:
-    storage: 200Gi
-  accessModes: [ReadWriteMany]
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: nas-crypt-forgejo-lfs
-  mountOptions:
-    - vfs-cache-mode=writes
-    - vfs-cache-max-size=10G
-    - vfs-cache-max-age=6h
-  claimRef:
-    apiVersion: v1
-    kind: PersistentVolumeClaim
-    namespace: forgejo
-    name: forgejo-lfs
-  csi:
-    driver: rclone.csi.veloxpack.io
-    volumeHandle: nas-crypt-forgejo-lfs#forgejo-lfs
-    volumeAttributes:
-      remote: "nas-crypt-forgejo-lfs"
-      remotePath: "forgejo/lfs"
-    nodePublishSecretRef:
-      name: nas-crypt-forgejo-lfs-config
-      namespace: csi-rclone
----
-# ─────────────────────────────────────────────────────────────────────────────
-# share: registry-blobs
-# ─────────────────────────────────────────────────────────────────────────────
-#
-# NOT covered by the NAS→Hetzner restic lane, deliberately: the blobs are
-# regenerable container images. See nas-personal-pvcs.yaml. That decision is
-# re-affirmed rather than inherited — ADR 0051 §Consequences.
-#
-# vfs-cache-mode=writes is load-bearing here too, for the same reason as the
-# vault above and with a different symptom. Without a VFS cache a write streams
-# straight at the remote and the file handle is only valid for an uninterrupted
-# sequential write; a stall on the NAS invalidates it and the next write(2)
-# returns EBADF. Forgejo surfaces that as
-#   Error saving package blob in content store:
-#   write /data/packages/tmp/upload-…: bad file descriptor
-# and answers the push with a 500, which buildx reports to CI as the bare word
-# `unknown`. Measured on 2026-08-25, when four of five image pushes failed:
-#
-#   144 blob PUTs succeeded — median 77ms, slowest 10.9s
-#    17 blob PUTs returned 500 — spanning 1.4s to 9.2s
-#
-# The ranges overlap and the slowest write of the day SUCCEEDED, which is what
-# rules out a gateway or proxy timeout: a timeout cuts at a duration, and this
-# cuts at none. Long writes are at risk and some of them survive, which is a
-# dropped FUSE handle. The 500 is raised writing Forgejo's own temporary file,
-# before any response is sent, so no client disconnect can explain it either.
-#
-# An earlier diagnosis cleared the content store by running `df` and `touch`
-# against /data — which is gitea-shared-storage on Longhorn. The blobs are on
-# /data/packages, which is THIS volume. A mount point inside a mounted path is
-# a different filesystem and `df /data` will not say so unless asked about the
-# child. Recorded because the wrong answer cost two release tags.
-#
-# 20G rather than the vault's 10G: the working set is one multi-arch image push
-# (~2-4 GB) and there is no reason to run it close. The node-local cache dir is
-# not under an ephemeral-storage limit, and worker3 had 823G free when this was
-# sized. Same durability note as the vault — a node lost inside the
-# --vfs-write-back window loses an acknowledged write — and it is easier to
-# accept here than anywhere else on this cluster: these blobs are content
-# addressed, verifiable, deliberately not backed up, and re-pushed by CI.
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: nas-registry-blobs-forgejo-packages
-  labels:
-    homelab.internal/nas-share: registry-blobs
-    homelab.internal/data-class: internal
-  annotations:
-    homelab.internal/dataset: "Forgejo Packages blobs (OCI / PyPI / Helm artefacts)"
-    homelab.internal/offsite-backup: "none — regenerable, snapshot-only (deliberate)"
-    # This mount ALREADY produced write failures on 2026-08-07: "transport
-    # endpoint is not connected" and blob-write "bad file descriptor" during a
-    # ~1 GB registry push, reproducibly. That was diagnosed as a cgroup OOM of
-    # the rclone mounter and closed by raising the node limit to 3Gi. The
-    # symptom stopped, so the diagnosis was never falsified — but the same
-    # cache mode implicated here is present, and `vfs-cache-mode=writes`
-    # buffering a whole ~1 GB object is also a plausible cause of that OOM.
-    # Re-examine both together under T6; do not assume 2026-08-07 is closed.
-    homelab.internal/rclone-cache-mode-exemption: "Not migrated, and deliberately flagged: the 2026-08-07 registry-push write failures on this mount were attributed to a mounter OOM, but vfs-cache-mode=writes buffering a whole ~1 GB object is an untested alternative cause. Re-open under T6."
-spec:
-  capacity:
-    storage: 200Gi
-  accessModes: [ReadWriteMany]
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: nas-crypt-registry-blobs
-  mountOptions:
-    - vfs-cache-mode=writes
-    - vfs-cache-max-size=20G
-    - vfs-cache-max-age=6h
-  claimRef:
-    apiVersion: v1
-    kind: PersistentVolumeClaim
-    namespace: forgejo
-    name: forgejo-packages
-  csi:
-    driver: rclone.csi.veloxpack.io
-    volumeHandle: nas-crypt-registry-blobs#forgejo-packages
-    volumeAttributes:
-      remote: "nas-crypt-registry-blobs"
-      remotePath: "forgejo/packages"
-    nodePublishSecretRef:
-      name: nas-crypt-registry-blobs-config
-      namespace: csi-rclone
----
 # ═════════════════════════════════════════════════════════════════════════════
 # BACKUP SOURCE VOLUMES — these stay at the share ROOT, ON PURPOSE
 # ═════════════════════════════════════════════════════════════════════════════
 #
-# Everything above pins an application to one subdirectory. These six do the
+# Everything above pins an application to one subdirectory. These five do the
 # opposite and mount `remotePath: ""` — the whole share — because that is what
 # makes the offsite lane correct: `restic-nas-personal-to-hetzner` backs up by
 # path, so a share-root mount covers every dataset on that share, including
@@ -528,13 +390,18 @@ spec:
 # invisible until a restore. It is also why ADR 0051 rejected templated
 # per-PVC paths (`${pvc.metadata.namespace}/${pvc.metadata.name}`) as the
 # cluster-wide default even though the driver supports them: the template would
-# have hit these six too.
+# have hit these five too.
 #
 # The CronJob mounts every one of these `readOnly: true`, so this share-wide
 # view can never write. csi-rclone decrypts on the node; the backup pod reads
 # plaintext and restic re-encrypts to Hetzner (operator decision 2026-07-16).
 #
-# registry-blobs is deliberately absent — see that PV above.
+# forgejo-lfs and registry-blobs are absent since 2026-09-10 (ADR 0064 D5):
+# Forgejo Packages + LFS moved to the forgejo-blobs bucket on MinIO-on-NAS and
+# their offsite copy is the minio->hetzner lane. Their dataset PVs and share-root
+# PVs were removed from this file; the ciphertext stays on the NAS until the
+# operator deletes the shares (TODO hl-0240). The two classes stay for the
+# conformance probe below.
 
 apiVersion: v1
 kind: PersistentVolume
@@ -721,95 +588,6 @@ spec:
       gid: "0"
     nodePublishSecretRef:
       name: nas-crypt-internal-archive-config
-      namespace: csi-rclone
----
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: nas-forgejo-lfs-backup-root
-  labels:
-    homelab.internal/nas-share: forgejo-lfs
-    homelab.internal/component: backup-source
-  annotations:
-    homelab.internal/dataset: "SHARE ROOT — deliberate. Offsite backup source; see header."
-spec:
-  capacity:
-    storage: 1Gi
-  accessModes: [ReadWriteMany]
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: nas-crypt-forgejo-lfs
-  mountOptions:
-    - allow-other=true
-    - file-perms=0666
-    - dir-perms=0777
-  claimRef:
-    apiVersion: v1
-    kind: PersistentVolumeClaim
-    namespace: backup-cronjobs
-    name: backup-src-forgejo-lfs
-  csi:
-    driver: rclone.csi.veloxpack.io
-    volumeHandle: nas-crypt-forgejo-lfs#backup-src
-    volumeAttributes:
-      remote: "nas-crypt-forgejo-lfs"
-      remotePath: ""
-      allow_other: "true"
-      uid: "0"
-      gid: "0"
-    nodePublishSecretRef:
-      name: nas-crypt-forgejo-lfs-config
-      namespace: csi-rclone
----
-# registry-blobs SHARE ROOT.
-#
-# Added 2026-08-19 for the ADR 0051 migration of the registry-blobs dataset,
-# which is the ONE dataset migrate-nas-dataset.sh could not move: it renames
-# through a share-root mount, and this share had none — it is deliberately
-# outside the offsite lane (Forgejo Packages blobs are regenerable,
-# re-pushable images; decision 2026-07-16, re-affirmed 2026-08-15). The
-# migration runbook §7 offers exactly two ways to close that, and this is the
-# first: give it a share-root mount and run the standard procedure.
-#
-# It is BOTH a migration mount handle and a real offsite backup source: since
-# 2026-08-19 nas-personal-cronjob.yaml mounts it and calls
-# `backup_share /nas/registry-blobs internal`, implementing what ADR 0051's
-# Consequences already required. An earlier version of this comment said the
-# opposite; the manifests had been contradicting the ADR.
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: nas-registry-blobs-backup-root
-  labels:
-    homelab.internal/nas-share: registry-blobs
-    homelab.internal/component: backup-source
-  annotations:
-    homelab.internal/dataset: "SHARE ROOT — deliberate. Migration mount handle AND offsite backup source."
-spec:
-  capacity:
-    storage: 1Gi
-  accessModes: [ReadWriteMany]
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: nas-crypt-registry-blobs
-  mountOptions:
-    - allow-other=true
-    - file-perms=0666
-    - dir-perms=0777
-  claimRef:
-    apiVersion: v1
-    kind: PersistentVolumeClaim
-    namespace: backup-cronjobs
-    name: backup-src-registry-blobs
-  csi:
-    driver: rclone.csi.veloxpack.io
-    volumeHandle: nas-crypt-registry-blobs#backup-src
-    volumeAttributes:
-      remote: "nas-crypt-registry-blobs"
-      remotePath: ""
-      allow_other: "true"
-      uid: "0"
-      gid: "0"
-    nodePublishSecretRef:
-      name: nas-crypt-registry-blobs-config
       namespace: csi-rclone
 ---
 # ─────────────────────────────────────────────────────────────────────────────

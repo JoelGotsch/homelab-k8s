@@ -134,7 +134,13 @@ spec:
                     http://minio.minio-on-nas.svc.cluster.local:9000 \
                     "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY"
 
-                  BUCKETS="homelab-backups-cluster longhorn-backups"
+                  # forgejo-blobs: Forgejo Packages + LFS objects (ADR 0064 D4/D6,
+                  # 2026-09-10) — internal-class, no second copy anywhere else
+                  # (digest-pinned, cosign-signed first-party images; the chart
+                  # mirror). ~30 GiB at join; staging headroom is TODO hl-0241.
+                  # The reader user's policy must list every bucket here
+                  # (setup-minio-buckets.sh special-reader).
+                  BUCKETS="homelab-backups-cluster longhorn-backups forgejo-blobs"
                   # Prune staging dirs for buckets no longer mirrored, so
                   # restic never ships stale data and the PVC can't fill
                   # with an orphaned tree. `mc mirror --remove` only syncs

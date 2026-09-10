@@ -366,16 +366,9 @@ resources:
 # 2026-07-16 re-rendering for the v15.0.5 upgrade — re-rendering
 # from the stale .j2 would have silently dropped the LFS/Packages
 # mounts on the next deploy.
-extraVolumes:
-  - name: lfs
-    persistentVolumeClaim:
-      claimName: forgejo-lfs
-  - name: packages
-    persistentVolumeClaim:
-      claimName: forgejo-packages
-
-extraContainerVolumeMounts:
-  - name: lfs
-    mountPath: /data/lfs
-  - name: packages
-    mountPath: /data/packages
+# No extraVolumes / extraContainerVolumeMounts since ADR 0064 D4 (2026-09-10):
+# Packages + LFS objects live in the forgejo-blobs bucket, so the pod mounts
+# nothing from the NAS. Until then the two csi-rclone PVCs (forgejo-lfs,
+# forgejo-packages — pvc.yaml, deleted with this change) were mounted at
+# /data/lfs and /data/packages here. The .j2 caveat above (chart-level keys,
+# not gitea.additionalVolumes) still applies to any future extra mount.
