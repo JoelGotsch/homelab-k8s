@@ -164,12 +164,23 @@ spec:
                 # self-hosting docs @ 38.142.7 (NODE_EXTRA_CA_CERTS).
                 - name: NODE_EXTRA_CA_CERTS
                   value: /etc/ssl/homelab/ca-bundle.pem
-                # Log level + format are set in config.js
-                # but Renovate also honours these env vars,
-                # which is handy for ad-hoc debug runs.
+                # Logging is host-level only (config.js rejects
+                # logLevel/logFormat) and is read from UNPREFIXED
+                # env: lib/logger/index.ts @ 38.142.7 reads exactly
+                # LOG_LEVEL, LOG_FORMAT, LOG_FILE, LOG_FILE_LEVEL,
+                # LOG_CONTEXT — `if (process.env.LOG_FORMAT !==
+                # 'json')` picks pretty output. Until 2026-09-11 this
+                # was `RENOVATE_LOG_FORMAT: json`, which Renovate
+                # never reads; every run since activation was bunyan
+                # pretty-printed (multi-line records, one Loki entry
+                # per line — nothing in observability/alloy parses
+                # or requires JSON, but one record per line is the
+                # whole point per ADR 0021). docs.renovatebot.com/
+                # examples/self-hosting: "set LOG_LEVEL=debug and
+                # LOG_FORMAT=json in your environment variables".
                 - name: LOG_LEVEL
                   value: "info"
-                - name: RENOVATE_LOG_FORMAT
+                - name: LOG_FORMAT
                   value: "json"
               volumeMounts:
                 - name: config

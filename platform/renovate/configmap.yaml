@@ -52,8 +52,11 @@ data:
       // live run: "WARN: Config validation errors found ...
       // Invalid configuration option: logFormat/logLevel", non-
       // fatal but noisy). They're host-level settings only, set
-      // via the CronJob's LOG_LEVEL / RENOVATE_LOG_FORMAT env
+      // via the CronJob's UNPREFIXED LOG_LEVEL / LOG_FORMAT env
       // vars (for Loki ingestion per ADR 0021) — see cronjob.yaml.
+      // Not RENOVATE_LOG_FORMAT: Renovate never reads that name
+      // (lib/logger/index.ts @ 38.142.7), and it silently pretty-
+      // printed every run until 2026-09-11.
       //
       // Bound the run; if a registry is slow, fail fast and
       // retry next schedule.
