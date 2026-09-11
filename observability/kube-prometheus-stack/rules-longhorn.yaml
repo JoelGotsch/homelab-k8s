@@ -339,18 +339,19 @@ spec:
         # 1h` filters legitimate recurring-jobs bursts.
         - alert: LonghornSnapshotAccumulation
           expr: |
-            count(longhorn_snapshot_actual_size_bytes) > 2000
+            count(longhorn_snapshot_actual_size_bytes) > 1000
           for: 1h
           labels:
             severity: warning
             component: longhorn
           annotations:
-            summary: "Longhorn holds {{ $value }} snapshots cluster-wide (>2000)"
+            summary: "Longhorn holds {{ $value }} snapshots cluster-wide (>1000)"
             description: |
               The Longhorn cluster is holding {{ $value }}
-              snapshots. Steady-state is ~1076 (per the
+              snapshots. Steady-state is ~400 (per the
               recurring-jobs retention in
-              `infrastructure/longhorn/recurring-jobs.yaml`).
+              `infrastructure/longhorn/recurring-jobs.yaml`;
+              arithmetic below).
 
               Common causes:
                 - Recurring-jobs `retain:` value bumped without
@@ -359,6 +360,16 @@ spec:
                   silently — check the RecurringJob CRD status.
                 - An operator-created ad-hoc snapshot was never
                   deleted.
+                - A volume changed groups: a job cleans up only
+                  its own snapshots, on volumes it still selects,
+                  so the old group's snapshots stay. On a
+                  `no-snapshot` volume the daily
+                  snapshot-delete-no-snapshot job removes them;
+                  anywhere else they stay until deleted by hand.
+                - A volume that should be in `no-snapshot` is not,
+                  or still carries its old group:
+                  scripts/sync-longhorn-no-snapshot.sh (dry-run)
+                  lists what has not converged.
 
               Review + prune via Longhorn UI (Volume → Snapshots)
               or via CLI:
@@ -398,13 +409,39 @@ spec:
               retention fills. If it approaches 2000, that is real
               accumulation, not the sweep settling.
 
-              OPEN, for the operator: whether ~1076 is the RPO/disk
-              trade actually wanted. Nothing has ever run at the
-              declared retention, so those `retain:` values have
-              never been tested against real disk. Longhorn headroom
-              at the sweep was 2847Gi free of 5580Gi (51%), and the
-              LonghornNodeSchedulableCapacity* alerts cover the disk
-              side independently of this count.
+              RECALIBRATED AGAIN 2026-09-11 (2000 -> 1000). The
+              operator decided that volumes where a snapshot cannot
+              help a restore take none: every CNPG PGDATA volume,
+              telemetry, caches and scratch moved to the
+              `no-snapshot` group. Recomputed from the planned
+              membership (attached volumes only; recurring jobs skip
+              detached ones):
+
+                default          23 vol x retain  6 =  138
+                secret-personal   4 vol x retain 20 =   80
+                internal          2 vol x retain 42 =   84
+                internal-media    2 vol x retain  7 =   14
+                backup            9 vol x ~1-2      =  ~15
+                no-snapshot      37 vol x        0 =    0
+                leftovers of earlier groups on kept
+                volumes (never expire, see above)   =  ~60
+                                                     -----
+                                                      ~390
+
+              secret-personal counts immich-pg, whose cluster
+              manifest had not switched yet; -40 once it does.
+              1000 keeps the 2026-08-15 call's shape — steady state
+              plus room so ordinary fill cannot fire it — at about
+              2.5x instead of 5x the new baseline.
+
+              The 2026-08-15 arithmetic, for the record: default 36
+              x 6 = 216, internal 10 x 42 = 420, secret-personal 15 x
+              20 = 300, backup 9 x 14 = 126, internal-media 2 x 7 =
+              14, total 1076. (backup x 14 overstated it:
+              backup-daily keeps only the last backup's snapshot
+              while auto-cleanup-recurring-job-backup-snapshot is
+              true.) The LonghornNodeSchedulableCapacity* alerts
+              cover the disk side independently of this count.
             runbook_url: "https://github.com/JoelGotsch/homelab-docs/blob/main/03-runbooks/observability/alert-routing.md"
 
         # ===== LonghornBackupStuckPending (warning) =====
