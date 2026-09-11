@@ -20,12 +20,12 @@ no Renovate runs anywhere; manual bumps fill the gap.
 |---|---|
 | `namespace.yaml` | `renovate` ns; PSA restricted; `homelab.lab/inject-ca=true` so trust-manager drops the `homelab-root-ca` ConfigMap here. |
 | `serviceaccount.yaml` | Dedicated SA; `automountServiceAccountToken: false`. No cluster RBAC needed. |
-| `configmap.yaml` | Renovate global config (`config.js`): `platform: gitea`, endpoint, autodiscover filter, `hostRules` (`hostType: docker`) for both names of the Forgejo Packages registry — `registry.homelab.internal` (in-cluster `registry-direct`) and `forgejo.lab.vyramo.com` (gateway path, what app Dockerfiles pin). Rendered from the `.j2` sibling by `00-render-static.yml`. |
+| `configmap.yaml` | Renovate global config (`config.js`): `platform: forgejo`, endpoint, autodiscover filter, `minimumReleaseAgeBehaviour: timestamp-optional` (Caveat 9), `hostRules`: `allowInternal` grants for the two cluster-VIP hosts plus a `hostType: docker` credential for both names of the Forgejo Packages registry — `registry.homelab.internal` (in-cluster `registry-direct`) and `forgejo.lab.vyramo.com` (gateway path, what app Dockerfiles pin). Rendered from the `.j2` sibling by `00-render-static.yml`. |
 | `externalsecret.yaml` | OpenBao `kv/platform/renovate/forgejo-token` → `RENOVATE_TOKEN`. |
 | `externalsecret-github-token.yaml` | OpenBao `kv/renovate/github` → `GITHUB_COM_TOKEN` (github-releases / github-tags datasources, release notes). Operator-minted; the env ref is `optional` so an unseeded path only darkens the GitHub deps, not the run. |
 | `registry-pull-secret.yaml` | OpenBao `kv/argocd/registry-pull` (the `read:package` bot Argo's repo-server already uses) → `HOMELAB_REGISTRY_USERNAME/PASSWORD` → `config.js` `hostRules`. |
-| `cronjob.yaml` | Weekly Saturday 05:00 Europe/Berlin (`spec.timeZone`) scan, inside the preset's `before 08:00 on saturday` window. Mounts the `homelab-root-ca` bundle for `NODE_EXTRA_CA_CERTS`. |
-| `networkpolicy.yaml` | Vanilla: kube-DNS + Forgejo. CCNP: FQDN-aware allow for known upstream registries. |
+| `cronjob.yaml` | Weekly Saturday 05:00 Europe/Berlin (`spec.timeZone`) scan, inside the preset's `before 08:00 on saturday` window. Runs `renovate/renovate:44.82.0@sha256:965b516a…` (Caveat 3). Mounts the `homelab-root-ca` bundle for `NODE_EXTRA_CA_CERTS`. |
+| `networkpolicy.yaml` | Vanilla: kube-DNS + Forgejo. CCNP: FQDN-aware allow for known upstream registries (incl. `api.opentofu.org` / `registry.opentofu.org` for the OpenTofu-initialised lock file in homelab-infra). |
 
 ## OpenBao paths to seed
 
@@ -159,21 +159,34 @@ updated in each scanned repo.
    move to org-team membership instead (`provision-forgejo-bot-pat.sh`
    already supports `--org-name`/`--org-team`).
 
-3. **`platform: gitea` may lag Forgejo API divergence.**
-   Forgejo's API was Gitea-compatible at fork (Feb 2024) and
-   has slowly diverged. Renovate's Gitea platform driver
-   tracks the Gitea API; if Forgejo introduces a breaking
-   change, Renovate may temporarily fail until upstream
-   patches. The image is pinned `tag@digest` in `cronjob.yaml`
-   (`38.142.7@sha256:8327ee17…`, the multi-arch index digest,
-   since 2026-09-11 — before that it floated on `:38`). The pin
-   does **not** self-update: Renovate's `kubernetes` manager
-   is not enabled for this repo (no `managerFilePatterns` /
-   `fileMatch`), so the bot cannot bump its own runner. Bump
-   deliberately, quarterly, when the release notes confirm
-   Forgejo compat — tag and digest together, digest taken from
-   Docker Hub's tag-level `digest` field and cross-checked
-   against a fresh pod's `imageID`.
+3. **The runner is pinned `tag@digest` and does not bump itself.**
+   `cronjob.yaml` runs `renovate/renovate:44.82.0@sha256:965b516a…`
+   (the multi-arch index digest) since the 2026-09-11 cutover. Earlier
+   that day the same line was pinned to `38.142.7@sha256:8327ee17…`,
+   ending the floating `:38` tag that Kyverno's
+   audit-third-party-image-digest had flagged on every run. Renovate's
+   `kubernetes` manager has no default file pattern and none is
+   configured for this repo — the extraction stats list
+   `helm-values`, `kustomize`, `woodpecker`, `regex` — so the bot
+   never sees this image line. Bump deliberately: take the new
+   tag's `docker-content-digest` from registry-1.docker.io (equals
+   Docker Hub's tag-level `digest`, not the per-arch one), change
+   tag and digest together, and for a major run a dry-run pod first
+   (bare Pod, `restartPolicy: Never`, `RENOVATE_DRY_RUN=full`,
+   `RENOVATE_REPOSITORIES=…`, a scratch ConfigMap for `config.js`;
+   that is how 44 was rehearsed on 2026-09-11 against four repos).
+   `platform: forgejo` is used since that cutover — the `gitea`
+   driver still accepts Forgejo but warns "please use 'forgejo'
+   platform instead" and its readme announces removal; Forgejo's
+   API divergence from Gitea is therefore upstream's problem in the
+   `forgejo` module, not ours to track. Follow-up owed in
+   `homelab-infra/renovate-presets/default.json5`: its two
+   `customManagers` still say `fileMatch`, which 44 auto-migrates to
+   `managerFilePatterns` (`lib/config/migrations/custom/
+   file-match-migration.ts`, wraps each pattern as `/…/`). Rename
+   them now that nothing runs 38 any more — 38 would have rejected
+   `managerFilePatterns` as unknown, which is why the rename could
+   not precede the image.
 
 4. **Dependency Dashboards are per-repo**, not consolidated.
    Each repo emits its own Dashboard issue; cross-repo view
@@ -229,6 +242,41 @@ updated in each scanned repo.
    ```sh
    kubectl -n renovate logs <pod> | grep -A2 'required scope'
    ```
+
+9. **A 7-day soak needs a release timestamp, and most registries do
+   not give one.** Since Renovate 42, `minimumReleaseAge` (the
+   preset's global `7 days`) defaults to
+   `minimumReleaseAgeBehaviour: timestamp-required`: a candidate
+   version with no `releaseTimestamp` is parked under "Pending Status
+   Checks" and never opens. The `docker` datasource only carries
+   timestamps for Docker Hub (`tag_last_pushed`); ghcr.io, quay.io,
+   registry.k8s.io, code.forgejo.org and `registry.homelab.internal`
+   images have none. The 2026-09-11 dry-run rehearsal of 44.82.0 with
+   the default parked exactly those updates while 38 (which treated a
+   missing timestamp as "old enough") listed them; `config.js` sets
+   `timestamp-optional` to keep the 38 semantics. Hub images still
+   soak — `alpine/helm 3.22.0` sat in "Pending Status Checks" under
+   both versions for that reason — but only while Hub's tag listing
+   fits in ten pages: for `library/python` and `woodpeckerci/*` the
+   Hub API answered page 11 with 403, Renovate fell back to the
+   plain registry tag list ("Docker: error fetching data from
+   DockerHub"), and those releases have no timestamp either. So the
+   soak is best-effort for images and reliable for helm indexes,
+   Galaxy, PyPI, github-releases and the Terraform/OpenTofu
+   registries. If an image update you expect is missing from a
+   dashboard, check this before the network policy.
+
+10. **`internalHostAccess` will flip to `block`.** New in 44: every
+    request to a private address logs "HTTP request to an internal
+    host, which `internalHostAccess=block` would refuse" (our Forgejo
+    endpoint and `registry.homelab.internal` are cluster VIPs), and
+    upstream says the default becomes `block` in a future major with
+    the `allow` escape hatch removed after that. `config.js` carries
+    `allowInternal: true` hostRules for both hosts, which is the
+    documented grant: the warning is gone under today's `warn` and
+    the run completes under `block` (both rehearsed 2026-09-11). A
+    new internal host Renovate must reach needs its own grant, or
+    the next major refuses it outright.
 
 ## Related
 

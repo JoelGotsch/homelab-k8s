@@ -20,12 +20,21 @@ metadata:
     app.kubernetes.io/component: config
 data:
   config.js: |
-    // Renovate config — Gitea/Forgejo platform.
+    // Renovate config — Forgejo platform.
     // Per ADR 0023 (Forgejo as source of truth) +
     // homelab-infra/renovate-presets/default.json5 (per-repo
     // configs extend the central preset).
     module.exports = {
-      platform: 'gitea',
+      // `forgejo`, not `gitea`, since the 44.82.0 cutover (2026-09-11).
+      // The gitea driver still works against Forgejo but logs
+      // "Detected Forgejo instance, please use 'forgejo' platform
+      // instead" (lib/modules/platform/gitea/index.ts @ 44.82.0) and
+      // its readme says Forgejo support will be removed from it. The
+      // forgejo driver is the same code with Forgejo's own version
+      // gates (native automerge needs Forgejo >= 10; this is 15.0.5).
+      // `platform: 'forgejo'` does not exist in 38 — the image and
+      // this file move in the same commit.
+      platform: 'forgejo',
       endpoint: 'https://forgejo.{{ homelab_internal_subdomain }}.{{ homelab_domain }}/api/v1',
       gitAuthor: 'Renovate Bot <renovate-bot@invalid.local>',
       // Username MUST match the bot user created in Forgejo.
@@ -50,8 +59,9 @@ data:
       // via the CronJob's UNPREFIXED LOG_LEVEL / LOG_FORMAT env
       // vars (for Loki ingestion per ADR 0021) — see cronjob.yaml.
       // Not RENOVATE_LOG_FORMAT: Renovate never reads that name
-      // (lib/logger/index.ts @ 38.142.7), and it silently pretty-
-      // printed every run until 2026-09-11.
+      // (lib/logger/index.ts @ 38.142.7, lib/logger/bunyan.ts @
+      // 44.82.0), and it silently pretty-printed every run until
+      // 2026-09-11.
       //
       // Bound the run; if a registry is slow, fail fast and
       // retry next schedule.
@@ -63,6 +73,25 @@ data:
       // gracefully rebuilds).
       cacheDir: '/tmp/renovate/cache',
       baseDir: '/tmp/renovate/base',
+      // The preset's 7-day `minimumReleaseAge` soak needs a release
+      // timestamp per candidate version. Since Renovate 42 the
+      // default (`timestamp-required`) parks a version WITHOUT one
+      // under "Pending Status Checks" indefinitely instead of
+      // treating it as old enough, which is what 38 did. The docker
+      // datasource only has timestamps for Docker Hub
+      // (`tag_last_pushed`; releaseTimestampNote @ 44.82.0), so
+      // every ghcr.io / quay.io / registry.k8s.io / code.forgejo.org
+      // / registry.homelab.internal image would silently stop
+      // updating. `timestamp-optional` restores the 38 behaviour:
+      // versions with a timestamp still soak 7 days, versions
+      // without one pass. Not a global-only option, so it could live
+      // in the preset — but the preset is read by 38 until the
+      // cutover and would flag it as an unknown option; global
+      // config is only ever read by the image next to it.
+      // Rehearsed 2026-09-11: with the default, the 44 dry run
+      // marked every non-Hub image update as pending (see README
+      // Caveat 9 and the cutover commit).
+      minimumReleaseAgeBehaviour: 'timestamp-optional',
       // registry.homelab.internal (Forgejo Packages, ADR 0038)
       // refuses anonymous reads — REQUIRE_SIGNIN_VIEW is set on
       // purpose — so first-party image tags were never visible to
@@ -71,11 +100,13 @@ data:
       // `read:package`), delivered as env by registry-pull-
       // secret.yaml + cronjob.yaml. `hostType: docker` keeps the
       // credential off every other request to that host. Shape
-      // verified against configuration-options.md @ 38.142.7
-      // (`hostRules[].matchHost/hostType/username/password`).
-      // The rules are only emitted when both env vars are present:
-      // a half-set pair would send a malformed basic-auth header
-      // instead of failing loudly at 401 like the anonymous case.
+      // verified against configuration-options.md @ 38.142.7 and
+      // again @ 44.82.0 (`hostRules[].matchHost/hostType/username/
+      // password`).
+      // The credential rule is only emitted when both env vars are
+      // present: a half-set pair would send a malformed basic-auth
+      // header instead of failing loudly at 401 like the anonymous
+      // case.
       //
       // TWO hostnames front the SAME Forgejo Packages registry:
       // registry.homelab.internal is the in-cluster `registry-direct`
@@ -90,12 +121,28 @@ data:
       // a PR. `hostType: 'docker'` on the second rule is load-bearing:
       // the same host also carries the platform API, and hostType
       // scopes the credential to the docker datasource so it never
-      // rides along on `gitea` platform requests (RENOVATE_TOKEN keeps
+      // rides along on `forgejo` platform requests (RENOVATE_TOKEN keeps
       // those). No new egress rule: the pod already reaches this
       // host:443 for the API and network policy is L3/L4, not path-
       // aware. Rehearsed 2026-09-11 with a scratch ConfigMap + bare
       // Pod (RENOVATE_DRY_RUN=full) before commit.
-      hostRules: (process.env.HOMELAB_REGISTRY_USERNAME && process.env.HOMELAB_REGISTRY_PASSWORD)
+      //
+      // The two `allowInternal` grants are for Renovate >= 44's
+      // `internalHostAccess` (self-hosted-configuration.md @ 44.82.0):
+      // it defaults to `warn` — every request to an RFC1918 /
+      // loopback / link-local address logs "HTTP request to an
+      // internal host, which `internalHostAccess=block` would refuse"
+      // — and the docs say the default will become `block`, with the
+      // `allow` escape hatch slated for removal. Both hosts here
+      // resolve to cluster VIPs. Only honoured from this (admin)
+      // config, which is where they are. Rehearsed 2026-09-11: with
+      // the grants the warning is gone under `warn` (run D) and the
+      // run completes under `block` (run C); without them the Forgejo
+      // endpoint tripped it on every run (runs A/B).
+      hostRules: [
+        { matchHost: 'forgejo.{{ homelab_internal_subdomain }}.{{ homelab_domain }}', allowInternal: true },
+        { matchHost: 'registry.homelab.internal', allowInternal: true },
+      ].concat((process.env.HOMELAB_REGISTRY_USERNAME && process.env.HOMELAB_REGISTRY_PASSWORD)
         ? [
             {
               matchHost: 'registry.homelab.internal',
@@ -110,5 +157,5 @@ data:
               password: process.env.HOMELAB_REGISTRY_PASSWORD,
             },
           ]
-        : [],
+        : []),
     };

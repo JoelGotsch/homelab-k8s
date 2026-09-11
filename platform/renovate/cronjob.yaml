@@ -68,35 +68,46 @@ spec:
           restartPolicy: OnFailure
           securityContext:
             runAsNonRoot: true
-            runAsUser: 12021     # `ubuntu` user in renovate/renovate image
+            # `ubuntu` in renovate/renovate >= 39 (tools/docker/Dockerfile
+            # `USER 12021`; the 38 image said `USER 1000`). The pod set
+            # 12021 before the 44 cutover already; the 2026-09-11 dry-run
+            # rehearsal on 44.82.0 confirmed the emptyDir mounts at /tmp
+            # and /home/ubuntu are writable under it with fsGroup 0.
+            runAsUser: 12021
             runAsGroup: 0
             fsGroup: 0
             seccompProfile:
               type: RuntimeDefault
           containers:
             - name: renovate
-              # Pinned tag@digest. Until 2026-09-11 this was the
-              # floating `renovate/renovate:38`, which Kyverno's
-              # audit-third-party-image-digest flagged on every run
-              # (autogen-cronjob rule, pattern `*@sha256:*`) and which
-              # rolled the runner forward under us (Caveat 8: a scope
-              # bug only surfaced when the tag moved). The digest is
-              # the multi-arch INDEX digest — Docker Hub's tag-level
-              # `digest` for 38.142.7, identical to what the
-              # 2026-09-10 pod resolved (`.status.containerStatuses[]
-              # .imageID`); the per-arch amd64 manifest (caaa688f…)
-              # would break on an arm64 node.
+              # Pinned tag@digest since 2026-09-11 — first 38.142.7
+              # (the floating `renovate/renovate:38` had rolled the
+              # runner forward under us, Caveat 8, and Kyverno's
+              # audit-third-party-image-digest flagged it on every run),
+              # then 44.82.0 the same day after the dry-run rehearsal.
+              # The digest is the multi-arch INDEX digest
+              # (`docker-content-digest` of the tag at
+              # registry-1.docker.io, = Docker Hub's tag-level `digest`,
+              # = what a pod reports in `.status.containerStatuses[]
+              # .imageID`), not the amd64 manifest (17be2e79…), which
+              # would break on an arm64 node. 38 -> 44 crossed six majors
+              # (39 image UID 12021 / Ubuntu 24.04; 40 autodiscoverFilter
+              # glob syntax; 42 minimumReleaseAge needs a release
+              # timestamp — see config.js; 43 ESM / Node 24 / global-only
+              # options rejected in repo configs; 44 is a mis-flagged
+              # major with no breaking change). Each was checked against
+              # the release notes and the 44.82.0 source tree; the
+              # cutover commit message carries the per-change verdicts.
               #
               # THIS PIN DOES NOT SELF-UPDATE. Renovate's `kubernetes`
-              # manager is not active on homelab-k8s — no
-              # managerFilePatterns/fileMatch is configured for it in
-              # renovate.json5 or the central preset — so the bot
-              # cannot bump its own image here. Deliberate quarterly
-              # bump by the operator until that manager lands:
-              # re-run the Docker Hub tags lookup for the new
-              # version, compare with a fresh pod's imageID, update
-              # tag AND digest together.
-              image: "renovate/renovate:38.142.7@sha256:8327ee1726142dcc504d349d84c0e7f41656867e598ea7669bb7cf23786610a2"
+              # manager has no default file pattern and none is
+              # configured for this repo (the 38 run's extraction stats
+              # for homelab-k8s list helm-values, kustomize, woodpecker
+              # and regex only), so the bot cannot bump its own runner.
+              # Bump deliberately: pick the tag on Docker Hub, take the
+              # INDEX digest, update tag AND digest together, rehearse
+              # with a dry-run pod when a major moves (README Caveat 3).
+              image: "renovate/renovate:44.82.0@sha256:965b516ae9e7209610725b092fb09298fe6e240f242b6773e5852412f80adc5e"
               imagePullPolicy: IfNotPresent
               env:
                 # Renovate's CLI has no --config-file flag (only
@@ -166,18 +177,22 @@ spec:
                   value: /etc/ssl/homelab/ca-bundle.pem
                 # Logging is host-level only (config.js rejects
                 # logLevel/logFormat) and is read from UNPREFIXED
-                # env: lib/logger/index.ts @ 38.142.7 reads exactly
-                # LOG_LEVEL, LOG_FORMAT, LOG_FILE, LOG_FILE_LEVEL,
-                # LOG_CONTEXT — `if (process.env.LOG_FORMAT !==
-                # 'json')` picks pretty output. Until 2026-09-11 this
-                # was `RENOVATE_LOG_FORMAT: json`, which Renovate
-                # never reads; every run since activation was bunyan
-                # pretty-printed (multi-line records, one Loki entry
-                # per line — nothing in observability/alloy parses
-                # or requires JSON, but one record per line is the
-                # whole point per ADR 0021). docs.renovatebot.com/
-                # examples/self-hosting: "set LOG_LEVEL=debug and
-                # LOG_FORMAT=json in your environment variables".
+                # env: lib/logger reads exactly LOG_LEVEL, LOG_FORMAT,
+                # LOG_FILE, LOG_FILE_LEVEL, LOG_CONTEXT — `if
+                # (process.env.LOG_FORMAT !== 'json')` in index.ts @
+                # 38.142.7, `getEnv('LOG_FORMAT') !== 'json'` in
+                # bunyan.ts @ 44.82.0 — and picks pretty output
+                # otherwise. Until 2026-09-11 this was
+                # `RENOVATE_LOG_FORMAT: json`, which neither version
+                # ever reads (the RENOVATE_ env parser maps known option
+                # names and drops the rest silently); every run since
+                # activation was bunyan pretty-printed (multi-line
+                # records, one Loki entry per line — nothing in
+                # observability/alloy parses or requires JSON, but one
+                # record per line is the whole point per ADR 0021).
+                # docs.renovatebot.com/examples/self-hosting: "set
+                # LOG_LEVEL=debug and LOG_FORMAT=json in your
+                # environment variables".
                 - name: LOG_LEVEL
                   value: "info"
                 - name: LOG_FORMAT

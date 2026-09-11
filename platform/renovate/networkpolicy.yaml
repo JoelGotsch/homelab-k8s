@@ -175,6 +175,16 @@ spec:
         # terraform-provider datasource for homelab-infra's
         # hetznercloud provider pin (Hetzner DR, Terraform).
         - matchName: "registry.terraform.io"
+        # Same datasource, OpenTofu flavour: terraform/hetzner-relay's
+        # .terraform.lock.hcl (re-initialised with tofu 2026-09-11) pins
+        # `registry.opentofu.org/hetznercloud/hcloud`, and Renovate >= 44
+        # resolves that registry through api.opentofu.org
+        # (lib/modules/datasource/terraform-provider/index.ts,
+        # queryOpenTofuRegistry). The 2026-09-11 dry-run rehearsal
+        # spent 60s timing out on it and logged "Failed to look up
+        # terraform-provider package hetznercloud/hcloud: no-result".
+        - matchName: "registry.opentofu.org"
+        - matchName: "api.opentofu.org"
         # Language-package registries (first-party Python
         # apps' deps)
         - matchName: "pypi.org"
