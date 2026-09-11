@@ -66,6 +66,12 @@ spec:
           # the Authentik proxy outpost. Added 2026-08-05.
           - {name: model-manager,       owner: homelab,       repo: model-manager-k8s, path: k8s, autoSync: "true"}
           - {name: nextcloud,           owner: homelab,       repo: nextcloud-k8s, path: k8s, autoSync: "true"}
+          # nextcloud-biz: business-partner Nextcloud + Collabora behind the
+          # ADR 0065 TLS-passthrough relay. Registered 2026-09-11 with autoSync
+          # off: the gate is offline render + real-manager SSA rehearsal + Argo
+          # compare at this revision, then the CNP audit ceremony (README
+          # §rollout) before the flip.
+          - {name: nextcloud-biz,       owner: homelab,       repo: nextcloud-biz-k8s, path: k8s, autoSync: "false"}
           - {name: ntfy,                owner: homelab,       repo: ntfy-k8s, path: k8s, autoSync: "true"}
           - {name: ntfy-e2ee-relay,     owner: homelab,       repo: ntfy-e2ee-relay, path: k8s, autoSync: "true"}
           - {name: paperless,           owner: homelab,       repo: paperless-k8s, path: k8s, autoSync: "true"}
