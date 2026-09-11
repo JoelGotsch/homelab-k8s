@@ -73,13 +73,38 @@ data:
       // credential off every other request to that host. Shape
       // verified against configuration-options.md @ 38.142.7
       // (`hostRules[].matchHost/hostType/username/password`).
-      // The rule is only emitted when both env vars are present:
+      // The rules are only emitted when both env vars are present:
       // a half-set pair would send a malformed basic-auth header
       // instead of failing loudly at 401 like the anonymous case.
+      //
+      // TWO hostnames front the SAME Forgejo Packages registry:
+      // registry.homelab.internal is the in-cluster `registry-direct`
+      // LoadBalancer (10.10.30.52:443 -> :8443), the gateway hostname
+      // below is the Cilium Gateway path (same host the `gitea`
+      // platform API uses). App Dockerfiles (forgejo-mcp,
+      // revolut-business-mcp, llm-gateway) pin
+      // `<gateway-host>/ci-packages/python`, and with only the first
+      // rule every run logged "WARN Package lookup failures: Failed to
+      // look up docker package <gateway-host>/ci-packages/python"
+      // (2026-09-10) — anonymous 401, so those base images never got
+      // a PR. `hostType: 'docker'` on the second rule is load-bearing:
+      // the same host also carries the platform API, and hostType
+      // scopes the credential to the docker datasource so it never
+      // rides along on `gitea` platform requests (RENOVATE_TOKEN keeps
+      // those). No new egress rule: the pod already reaches this
+      // host:443 for the API and network policy is L3/L4, not path-
+      // aware. Rehearsed 2026-09-11 with a scratch ConfigMap + bare
+      // Pod (RENOVATE_DRY_RUN=full) before commit.
       hostRules: (process.env.HOMELAB_REGISTRY_USERNAME && process.env.HOMELAB_REGISTRY_PASSWORD)
         ? [
             {
               matchHost: 'registry.homelab.internal',
+              hostType: 'docker',
+              username: process.env.HOMELAB_REGISTRY_USERNAME,
+              password: process.env.HOMELAB_REGISTRY_PASSWORD,
+            },
+            {
+              matchHost: 'forgejo.{{ homelab_internal_subdomain }}.{{ homelab_domain }}',
               hostType: 'docker',
               username: process.env.HOMELAB_REGISTRY_USERNAME,
               password: process.env.HOMELAB_REGISTRY_PASSWORD,

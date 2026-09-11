@@ -20,7 +20,7 @@ no Renovate runs anywhere; manual bumps fill the gap.
 |---|---|
 | `namespace.yaml` | `renovate` ns; PSA restricted; `homelab.lab/inject-ca=true` so trust-manager drops the `homelab-root-ca` ConfigMap here. |
 | `serviceaccount.yaml` | Dedicated SA; `automountServiceAccountToken: false`. No cluster RBAC needed. |
-| `configmap.yaml` | Renovate global config (`config.js`): `platform: gitea`, endpoint, autodiscover filter, `hostRules` for `registry.homelab.internal`. Rendered from the `.j2` sibling by `00-render-static.yml`. |
+| `configmap.yaml` | Renovate global config (`config.js`): `platform: gitea`, endpoint, autodiscover filter, `hostRules` (`hostType: docker`) for both names of the Forgejo Packages registry — `registry.homelab.internal` (in-cluster `registry-direct`) and `forgejo.lab.vyramo.com` (gateway path, what app Dockerfiles pin). Rendered from the `.j2` sibling by `00-render-static.yml`. |
 | `externalsecret.yaml` | OpenBao `kv/platform/renovate/forgejo-token` → `RENOVATE_TOKEN`. |
 | `externalsecret-github-token.yaml` | OpenBao `kv/renovate/github` → `GITHUB_COM_TOKEN` (github-releases / github-tags datasources, release notes). Operator-minted; the env ref is `optional` so an unseeded path only darkens the GitHub deps, not the run. |
 | `registry-pull-secret.yaml` | OpenBao `kv/argocd/registry-pull` (the `read:package` bot Argo's repo-server already uses) → `HOMELAB_REGISTRY_USERNAME/PASSWORD` → `config.js` `hostRules`. |
