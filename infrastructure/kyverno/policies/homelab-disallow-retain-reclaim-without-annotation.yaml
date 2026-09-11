@@ -1,8 +1,8 @@
 # Kyverno ClusterPolicy — Retain-reclaim StorageClass PVCs must carry a
 # retention reason annotation
 #
-# Purpose:   PVCs bound to the new `longhorn-replica{2,3}-retain`
-#            StorageClasses must declare *why* they need Retain-reclaim
+# Purpose:   PVCs bound to a Retain StorageClass (`longhorn-replica{2,3}-retain`,
+#            `longhorn-replica1-best-effort-retain`) must declare *why* they need Retain-reclaim
 #            via the annotation `retention.homelab.internal/reason: <text>`.
 # ADR:       0036 D6
 # Rollout:   Audit -> Enforce after 2 weeks of clean PolicyReports
@@ -63,6 +63,7 @@ spec:
             value:
               - longhorn-replica2-retain
               - longhorn-replica3-retain
+              - longhorn-replica1-best-effort-retain
           # No CNPG-owned-PVC skip: as of ADR 0036 the retention
           # reason lives in the Cluster CR's
           # `spec.inheritedMetadata.annotations["retention.homelab.internal/reason"]`

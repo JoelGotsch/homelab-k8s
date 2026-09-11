@@ -10,8 +10,11 @@ In-cluster block storage per
   three storage classes (replica-1/2/3), backup target →
   MinIO-on-NAS `longhorn-backups` bucket.
 - `storageclasses.yaml` — `longhorn-replica1`,
-  `longhorn-replica2` (default), `longhorn-replica3`. Per
-  ADR 0016 D2.
+  `longhorn-replica2` (default), `longhorn-replica3` (ADR 0016 D2);
+  the Retain variants `longhorn-replica2-retain` and
+  `longhorn-replica3-retain` (ADR 0036 D1); and
+  `longhorn-replica1-best-effort-retain` — one replica kept on the
+  consumer's node, Retain — for Immich's hot data (ADR 0030 D2).
 - `externalsecret.yaml` — projects
   `kv/longhorn/s3-creds` (MinIO svc-account scoped to
   `longhorn-backups`) into the `longhorn-minio-credentials`

@@ -19,6 +19,8 @@
 # - longhorn-replica2-retain  : opt-in Retain for replica=2
 # - longhorn-replica3-retain  : opt-in Retain for replica=3
 # - longhorn-replica1         : regenerable / scratch data
+# - longhorn-replica1-best-effort-retain : one replica kept next to its
+#                               consumer, Retain (first: immich-data)
 #
 # NOTE (operator, 2026-07-10): a `longhorn-static` class is
 # referenced by the Longhorn Helm chart's `defaultLonghornStaticStorageClass`
@@ -110,6 +112,38 @@ reclaimPolicy: Delete
 volumeBindingMode: Immediate
 parameters:
   numberOfReplicas: "1"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+  fsType: "ext4"
+---
+# One replica, kept on the node that uses it, Retain on PVC deletion.
+# Added 2026-09-11 for Immich's hot data (ADR 0030 D2): thumbnails and
+# encoded video that Immich regenerates from the originals, plus the
+# upload/ staging area, which holds a new original until the storage-
+# template move puts it on the NAS. Retain covers that staging window;
+# the PVC carries retention.homelab.internal/reason (ADR 0036 D1).
+#
+# dataLocality best-effort, not strict-local: Longhorn keeps the replica
+# on the consumer's node and rebuilds it there after the consumer moves,
+# while the volume stays usable from any node in the meantime.
+# strict-local ties the consumer to the replica's node, so a drain or a
+# node loss would leave it unschedulable.
+#
+# One replica means the node holding it is a single point of failure:
+# while that node is down, the volume cannot attach anywhere.
+# StorageClass parameters are immutable once created: change them with a
+# new class, not an edit.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-replica1-best-effort-retain
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "1"
+  dataLocality: "best-effort"
   staleReplicaTimeout: "30"
   fromBackup: ""
   fsType: "ext4"

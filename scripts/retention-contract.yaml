@@ -44,6 +44,7 @@ storage_classes:
   retain:
     - longhorn-replica2-retain
     - longhorn-replica3-retain
+    - longhorn-replica1-best-effort-retain
 
 entries:
   - id: restic-staging
