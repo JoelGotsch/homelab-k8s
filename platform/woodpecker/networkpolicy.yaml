@@ -169,6 +169,22 @@ spec:
         - ports:
             - port: "3000"
               protocol: TCP
+    # The internal chart mirror, registry.homelab.internal (ADR 0038/0052),
+    # for the A7 `mirror-charts` pipeline. The name resolves to the LB VIP
+    # 10.10.30.52 and Cilium's socket-LB DNATs that to the registry-direct
+    # pod on :8443 BEFORE egress policy is evaluated, so the destination to
+    # allow is that endpoint — the `matchName: registry.homelab.internal`
+    # toFQDNs entry this policy carried until 2026-09-11 could never match
+    # (lessons.md §Cilium, the same trap Renovate hit on 2026-08-24).
+    # Needs the matching ingress rule in platform/forgejo/networkpolicy.yaml.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: forgejo
+            app.kubernetes.io/name: registry-direct
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
 ---
 # todo-agents Windmill deploy: Cilium Gateway traffic is evaluated twice.
 # The client-to-Gateway hop carries the reserved `ingress` identity; Envoy's
@@ -288,14 +304,11 @@ spec:
         # public clone URL from Forgejo's ROOT_URL, so we
         # also need it here for FQDN-based egress to work.
         - matchName: "FORGEJO_FQDN"   # <- site-config replacement (kustomization.yaml)
-        # The internal chart mirror (ADR 0052). Needed by the ADR 0045/0052 A7
-        # `mirror-charts` pipeline: on a charts.lock.yaml bump it runs
-        # mirror-chart.sh, which pulls from upstream and pushes to the mirror,
-        # then check-chart-lock.sh --online resolves every pin against it.
-        # Without this the pipeline fails at its first `helm pull` — and it
-        # fails as a TCP timeout, not a policy error, because the DNS
-        # visibility rule keeps resolution working (see lessons.md).
-        - matchName: "registry.homelab.internal"
+        # The internal chart mirror (registry.homelab.internal) is NOT listed
+        # here: it resolves to a Service VIP, which a toFQDNs rule can never
+        # match. It is a toEndpoints rule in ci-woodpecker-default above. A
+        # `matchName` for it sat here from ADR 0052 A7 until 2026-09-11 and
+        # admitted nothing.
         # ── Upstream Helm chart hosts ────────────────────────────────────
         # Every `upstream:` in a charts.lock.yaml the A7 `mirror-charts`
         # pipeline runs against: this repo's 26 entries plus one per app repo.

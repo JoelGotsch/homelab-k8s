@@ -468,6 +468,24 @@ spec:
         - ports:
             - port: "8443"
               protocol: TCP
+    # Woodpecker CI step pods — the ADR 0045/0052 A7 `mirror-charts`
+    # pipeline pulls from and pushes to the mirror on every
+    # charts.lock.yaml bump. Missing since that pipeline landed: it had
+    # never reached a registry call before jellyfin-k8s runs #8/#10
+    # (2026-09-11), which failed as `helm pull` timeouts that
+    # mirror-chart.sh reported as "mirror ABSENT". Probed from a pod in
+    # ci-woodpecker before this rule: DNS resolved 10.10.30.52, TCP :443
+    # timed out, forgejo-http:3000 connected. Namespace-scoped, like the
+    # pipeline's egress intent: every step pod there may already run
+    # arbitrary pipeline code, and the registry still requires auth.
+    # Paired with the egress rule in platform/woodpecker/networkpolicy.yaml.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: ci-woodpecker
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
   egress:
     - toEndpoints:
         - matchLabels:
