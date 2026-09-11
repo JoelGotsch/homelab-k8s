@@ -54,6 +54,9 @@
 # retain-6 AND daily retain-7 — which is more snapshots than either lane
 # intends and the opposite of the point. So `default` is dropped, and only
 # when the volume is gaining a real group. Nothing else is ever removed.
+#
+# Moving a volume OUT of a snapshot group — into `no-snapshot` — therefore
+# cannot happen here. That is scripts/sync-longhorn-no-snapshot.sh.
 
 set -euo pipefail
 

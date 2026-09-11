@@ -44,27 +44,57 @@ homelab-infra/scripts/provision-minio-svcacct.sh \
 
 ## RecurringJob class alignment
 
-Cadence + retention table per
-[backup-and-dr.md §"Retention schedules"](../../../homelab-docs/01-architecture/backup-and-dr.md).
-Each PVC opts into a class group via the label
-`recurring-job-group.longhorn.io/<group>: enabled`. Volumes
-without an explicit group join `default` (the catch-all
-hourly cadence — see below for trade-off).
+Cadence + retention per
+[backup-and-dr.md §"Retention schedules"](../../../homelab-docs/01-architecture/backup-and-dr.md);
+`recurring-jobs.yaml` is the source of truth and carries the
+reasoning next to each job. Each PVC opts into a group via the
+label `recurring-job-group.longhorn.io/<group>: enabled`. A volume
+with no recurring-job label at all joins `default`.
 
-| Group | Cron | Retain | Effective window | Class |
+| Group | Job | Cron (UTC) | Retain | Who |
 |---|---|---|---|---|
-| `default` | `0 * * * *` | 168 | 7 days hourly | catch-all (matches secret/personal) |
-| `secret-personal` | `0 * * * *` | 168 | 7 days hourly | Vaultwarden, OpenBao, Authentik (post-app-PVC retrofit) |
-| `internal` | `0 */4 * * *` | 42 | 7 days @ 4-hourly | Forgejo, CrowdSec, llm-gateway |
-| `internal-media` | `0 2 * * *` | 7 | 7 days daily | Jellyfin (multi-TB media) |
-| `default` (`task: backup`) | `0 3 * * *` | 90 | 90-day backups in NAS-MinIO | all volumes |
+| `default` | `snapshot-default` | `35 * * * *` | 6 | catch-all: small unique state without a class group |
+| `secret-personal` | `snapshot-secret-personal` | `25 * * * *` | 20 | unique `secret`/`personal` data, e.g. OpenBao raft snapshots, Grist |
+| `internal` | `snapshot-internal` | `35 */4 * * *` | 42 | Forgejo git data, ntfy |
+| `internal-media` | `snapshot-internal-media` | `35 2 * * *` | 7 | Jellyfin config, nextcloud-hot |
+| `backup` | `backup-daily` | `35 3 * * *` | 14 | opt-in NAS-MinIO backup, list in `scripts/label-backup-volumes.sh` |
+| `no-snapshot` | `snapshot-delete-no-snapshot` | `35 4 * * *` | 0 | **no snapshots**: CNPG Postgres, telemetry, caches, scratch |
+| all but `no-snapshot` | `filesystem-trim-weekly` | `35 5 * * 0` | – | weekly trim |
+| `no-snapshot` | `filesystem-trim-no-snapshot` | `35 5 * * 6` | – | weekly trim, frees deleted snapshots' blocks too |
 
-**Per-app PVC labelling is a follow-up** — TODO sub-item under
-the backup gap-check parent. Today most stateful PVCs lack
-the `recurring-job-group.longhorn.io/<group>: enabled` label
-and therefore land in `default` (hourly snapshots). That's
-safe-by-default but over-snapshots Jellyfin's media volumes.
-Class assignment lands as the consumer apps are revised.
+### Opting a volume out of snapshots
+
+For a **new** PVC, the label is the whole change:
+
+```yaml
+metadata:
+  labels:
+    recurring-job-group.longhorn.io/no-snapshot: "enabled"
+```
+
+A CNPG `Cluster` puts it under `spec.inheritedMetadata.labels`.
+The Kyverno `longhorn-volume-label-propagation` policy copies it
+onto the Longhorn Volume when the volume is created, and a volume
+that carries any recurring-job label never joins `default`.
+
+For an **existing** volume, or a PVC whose manifest cannot carry
+the label (a StatefulSet's `volumeClaimTemplates` are immutable),
+also run:
+
+```sh
+scripts/sync-longhorn-no-snapshot.sh              # dry-run: what would change
+scripts/sync-longhorn-no-snapshot.sh --apply      # converge
+```
+
+Kyverno and `sync-longhorn-recurring-job-labels.sh` only add
+labels, so the old snapshot group would otherwise stay on the
+Volume and keep snapshotting. The script removes it from PVC and
+Volume, sets `spec.unmapMarkSnapChainRemoved: enabled`, and holds
+the declared list of PVCs that are labelled from the script
+rather than a manifest. The existing snapshots go at the next
+04:35 UTC run of `snapshot-delete-no-snapshot`, their blocks at
+the next Saturday trim. A volume in `backup` cannot opt out:
+`backup-daily` needs its last backup's snapshot.
 
 ## Backup pipeline
 

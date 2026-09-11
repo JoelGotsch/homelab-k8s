@@ -5,9 +5,12 @@
 #
 # Volume opt-in: each PVC selects a class group via the label
 # `recurring-job-group.longhorn.io/<group>: enabled`. Volumes
-# without an explicit group join `default` (catch-all,
-# conservative cadence). Per-app PVC labelling retrofit is
-# tracked separately in TODO §"Backup-topology sub-items".
+# without any recurring-job label join `default` (catch-all,
+# conservative cadence). Volumes where a local snapshot cannot
+# help a restore join `no-snapshot` instead and get none — see
+# that group at the bottom of this file for who belongs there and
+# how an existing volume moves. Every group, snapshot or not, is
+# trimmed weekly.
 
 # ─── default group: catch-all conservative ─────────────────
 # Matches the `secret`/`personal` cadence (hourly × 7d). Volumes
@@ -152,9 +155,10 @@ spec:
 # Membership: a volume joins via the label
 # `recurring-job-group.longhorn.io/backup: enabled` (applied to the
 # Longhorn Volume CR by scripts/label-backup-volumes.sh — Volume CRs
-# are runtime objects, not GitOps). Snapshots are unaffected: every
-# volume stays in `default` for local CoW snapshots (the two groups
-# coexist on a volume — verified 2026-07-16).
+# are runtime objects, not GitOps). Snapshots are separate: a backup
+# volume keeps its snapshot group for local CoW snapshots (the two
+# groups coexist on a volume — verified 2026-07-16). A backup volume
+# may NOT join `no-snapshot` — see that group below.
 #
 # CURRENT backup set (see scripts/label-backup-volumes.sh for the
 # authoritative list + rationale):
@@ -199,7 +203,7 @@ spec:
   labels:
     homelab-purpose: tier1-to-nas-minio
 ---
-# ─── weekly filesystem trim, all default-group volumes ─────
+# ─── weekly filesystem trim, every snapshot-keeping group ───
 #
 # Reclaims dead blocks: filesystems delete data but never
 # discard the blocks, so Longhorn keeps treating them as used
@@ -210,10 +214,21 @@ spec:
 # The `discard` mount-option alternative is explicitly
 # discouraged by Longhorn docs (frequent snapshot removal
 # interrupts backup creation) — a scheduled trim is the
-# supported mechanism. Trim frees blocks in the volume head +
-# snapshots already marked removed; blocks captured in live
-# snapshots free up as those rotate out (≤6h for the default
-# group), so the effect lands within hours of each run.
+# supported mechanism. Trim frees blocks in the volume head (and
+# in removed snapshots only on a volume whose
+# spec.unmapMarkSnapChainRemoved is enabled; the global
+# remove-snapshots-during-filesystem-trim stays false); blocks
+# captured in live snapshots free up as those rotate out (≤6h
+# for `default`, ≤7d for the deeper groups).
+#
+# Groups: every group that keeps snapshots, including `backup`
+# and `personal` (no RecurringJob of its own; a volume there
+# holds only snapshots left by a group it used to be in). Was
+# `[default]` alone until 2026-09-11. A volume in two of these
+# groups is trimmed once — StartVolumeJobs skips duplicates
+# (app/recurringjob/util.go filterVolumesForJob, v1.12.1).
+# Detached volumes are skipped (allow-recurring-job-while-
+# volume-detached=false). `no-snapshot` has its own trim below.
 #
 # Sunday 05:35 — keeps the :35 stagger slot, after the 03:35
 # backup run so trims never race backup creation.
@@ -226,8 +241,92 @@ spec:
   name: filesystem-trim-weekly
   cron: "35 5 * * 0"
   task: filesystem-trim
-  groups: [default]
+  groups: [default, secret-personal, internal, internal-media, personal, backup]
   retain: 0
   concurrency: 2
   labels:
     homelab-class: hygiene
+---
+# ─── no-snapshot group: volumes that get NO Longhorn snapshot ─
+#
+# Who belongs here (decided 2026-09-11, homelab-docs
+# 01-architecture/backup-and-dr.md §"Tier 1"): volumes where an
+# on-node snapshot cannot help a restore and only costs disk.
+#   - CNPG Postgres PGDATA. Barman base backups + the WAL archive
+#     give point-in-time recovery; the streaming standby covers a
+#     lost volume. Postgres rewrites its files constantly, so an
+#     hourly snapshot pinned ~200 MiB per hour per volume — 961 GiB
+#     of replicas for 33 GiB of data on 2026-09-11.
+#   - Telemetry, caches, scratch: Prometheus, Loki, Tempo,
+#     restic-staging, model caches, Redis used as cache or queue.
+# Unique data keeps its snapshot group.
+#
+# HOW A VOLUME OPTS OUT: label its PVC
+#   recurring-job-group.longhorn.io/no-snapshot: "enabled"
+# (a CNPG Cluster sets it in spec.inheritedMetadata.labels). Any
+# recurring-job label keeps Longhorn from adding `default`
+# (datastore.labelRecurringJobDefault, v1.12.1), and no job in
+# this group takes a snapshot.
+#   - NEW volume: nothing else to do. The Kyverno
+#     longhorn-volume-label-propagation policy copies the PVC label
+#     onto the Volume when it is created.
+#   - EXISTING volume, or a PVC whose manifest cannot carry the
+#     label (StatefulSet volumeClaimTemplates are immutable): run
+#     scripts/sync-longhorn-no-snapshot.sh, which also holds the
+#     declared list for the second case. Kyverno and the label sync
+#     only ever ADD labels, so the old snapshot group would stay
+#     and keep snapshotting; the script removes it from the PVC and
+#     the Volume, and sets spec.unmapMarkSnapChainRemoved: enabled
+#     on the Volume so trim can free the deleted snapshots' blocks.
+#
+# NOT COMBINABLE with `backup`: backup-daily keeps the snapshot of
+# the last backup for the next incremental one, and the delete job
+# below would remove it every night. The script refuses the pair.
+#
+# Daily: delete every snapshot a no-snapshot volume still has.
+# `snapshot-delete` lists ALL snapshot CRs of the volume — any
+# job's, system snapshots, manual ones — and deletes all but
+# `retain` newest (app/recurringjob/volume.go filterExpiredSnapshots,
+# v1.12.1). The webhook keeps retain 0 for this task (it forces 1
+# only for snapshot/backup tasks; server dry-run 2026-09-11). Steady
+# state is nothing to delete; the job catches what a volume brought
+# with it when it joined, system snapshots left by a replica
+# rebuild, and anything taken by hand. 04:35 keeps the :35 slot,
+# an hour after backup-daily.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: snapshot-delete-no-snapshot
+  namespace: longhorn-system
+spec:
+  name: snapshot-delete-no-snapshot
+  cron: "35 4 * * *"
+  task: snapshot-delete
+  groups: [no-snapshot]
+  retain: 0
+  concurrency: 2
+  labels:
+    homelab-class: no-snapshot
+---
+# Weekly: trim no-snapshot volumes. With
+# spec.unmapMarkSnapChainRemoved enabled, trim frees blocks in the
+# volume head AND in the chain of deleted snapshots behind it, then
+# purges (doRecurringFilesystemTrim -> purgeSnapshots). A separate
+# job from the Sunday trim so this group can be trimmed on its own
+# (kubectl -n longhorn-system create job
+# --from=cronjob/filesystem-trim-no-snapshot <name>), and Saturday
+# so the two trims never share a night.
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: filesystem-trim-no-snapshot
+  namespace: longhorn-system
+spec:
+  name: filesystem-trim-no-snapshot
+  cron: "35 5 * * 6"
+  task: filesystem-trim
+  groups: [no-snapshot]
+  retain: 0
+  concurrency: 2
+  labels:
+    homelab-class: no-snapshot

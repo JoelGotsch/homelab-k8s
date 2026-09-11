@@ -12,7 +12,8 @@
 # 90 → all ~54 volumes, which over-retained the NAS bucket and OOM-crashlooped
 # longhorn-manager via orphaned Pending Backup CRs). Only volumes holding
 # UNIQUE data that isn't already protected elsewhere belong here. Snapshots are
-# separate — every volume keeps local `default` snapshots regardless.
+# separate — a backup volume keeps its snapshot group, and may not also join
+# `no-snapshot` (infrastructure/longhorn/recurring-jobs.yaml explains why).
 #
 # NOT in the backup set (and why):
 #   *-pg-1/2, llm-gateway-1/2  → CNPG; barman base+WAL → NAS + restic offsite
