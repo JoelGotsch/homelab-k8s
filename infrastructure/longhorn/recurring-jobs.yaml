@@ -214,12 +214,14 @@ spec:
 # The `discard` mount-option alternative is explicitly
 # discouraged by Longhorn docs (frequent snapshot removal
 # interrupts backup creation) — a scheduled trim is the
-# supported mechanism. Trim frees blocks in the volume head (and
-# in removed snapshots only on a volume whose
-# spec.unmapMarkSnapChainRemoved is enabled; the global
-# remove-snapshots-during-filesystem-trim stays false); blocks
-# captured in live snapshots free up as those rotate out (≤6h
-# for `default`, ≤7d for the deeper groups).
+# supported mechanism. Trim frees blocks in the volume head and in
+# a continuous chain of system or already-removed snapshots behind
+# it; a valid snapshot is immutable, so blocks it captured free up
+# as it rotates out (≤6h for `default`, ≤7d for the deeper groups).
+# The global remove-snapshots-during-filesystem-trim stays false:
+# it makes trim "mark the latest snapshot and its ancestors as
+# removed" (settings reference, 1.12.1) — it would delete the very
+# snapshots these groups exist to keep.
 #
 # Groups: every group that keeps snapshots, including `backup`
 # and `personal` (no RecurringJob of its own; a volume there
@@ -277,7 +279,11 @@ spec:
 #     only ever ADD labels, so the old snapshot group would stay
 #     and keep snapshotting; the script removes it from the PVC and
 #     the Volume, and sets spec.unmapMarkSnapChainRemoved: enabled
-#     on the Volume so trim can free the deleted snapshots' blocks.
+#     on the Volume (see the trim job below).
+#
+# A snapshot taken by hand on a no-snapshot volume does not survive
+# the next delete run or trim. Before risky work on such a volume
+# take a CNPG backup or a Longhorn backup instead.
 #
 # NOT COMBINABLE with `backup`: backup-daily keeps the snapshot of
 # the last backup for the next incremental one, and the delete job
@@ -308,10 +314,14 @@ spec:
   labels:
     homelab-class: no-snapshot
 ---
-# Weekly: trim no-snapshot volumes. With
-# spec.unmapMarkSnapChainRemoved enabled, trim frees blocks in the
-# volume head AND in the chain of deleted snapshots behind it, then
-# purges (doRecurringFilesystemTrim -> purgeSnapshots). A separate
+# Weekly: trim no-snapshot volumes. spec.unmapMarkSnapChainRemoved:
+# enabled overrides the global for these volumes only: trim marks
+# the latest snapshot and its ancestors removed ("stops at the
+# snapshot containing multiple children") and frees their blocks
+# together with the head's, then purges (doRecurringFilesystemTrim
+# -> purgeSnapshots). That reaches the one snapshot a delete cannot
+# purge — the parent of the volume head stays behind, marked
+# removed (controller/snapshot_controller.go, v1.12.1). A separate
 # job from the Sunday trim so this group can be trimmed on its own
 # (kubectl -n longhorn-system create job
 # --from=cronjob/filesystem-trim-no-snapshot <name>), and Saturday

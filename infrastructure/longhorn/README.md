@@ -92,12 +92,16 @@ scripts/sync-longhorn-no-snapshot.sh --apply      # converge
 Kyverno and `sync-longhorn-recurring-job-labels.sh` only add
 labels, so the old snapshot group would otherwise stay on the
 Volume and keep snapshotting. The script removes it from PVC and
-Volume, sets `spec.unmapMarkSnapChainRemoved: enabled`, and holds
+Volume, sets `spec.unmapMarkSnapChainRemoved: enabled` (trim then
+removes and frees the snapshot chain behind the volume head, which
+a plain delete cannot purge), and holds
 the declared list of PVCs that are labelled from the script
 rather than a manifest. The existing snapshots go at the next
 04:35 UTC run of `snapshot-delete-no-snapshot`, their blocks at
 the next Saturday trim. A volume in `backup` cannot opt out:
-`backup-daily` needs its last backup's snapshot.
+`backup-daily` needs its last backup's snapshot. A snapshot taken by
+hand on a `no-snapshot` volume does not survive the next delete run
+or trim — take a CNPG or Longhorn backup before risky work instead.
 
 ## Backup pipeline
 

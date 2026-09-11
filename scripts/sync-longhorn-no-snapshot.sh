@@ -27,9 +27,11 @@
 # Left alone, the volume would sit in `no-snapshot` AND `secret-personal` and
 # keep being snapshotted hourly. This script removes the old group — from the
 # PVC first, then the Volume, because Kyverno would copy a PVC label straight
-# back onto the Volume — and sets spec.unmapMarkSnapChainRemoved: enabled so
-# the no-snapshot trim frees the blocks of the snapshots the daily delete job
-# removes. It cannot take away `backup` membership: it refuses such a volume.
+# back onto the Volume — and sets spec.unmapMarkSnapChainRemoved: enabled, so
+# the no-snapshot trim marks the snapshot chain behind the volume head removed
+# and frees it (a deleted snapshot whose child is the head cannot be purged,
+# only unmapped). It cannot take away `backup` membership: it refuses such a
+# volume.
 #
 # SCOPE IS DATA, NOT FLAGS
 #
