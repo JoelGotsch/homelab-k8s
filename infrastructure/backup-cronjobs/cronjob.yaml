@@ -160,10 +160,21 @@ spec:
                   # Mirror in incremental mode — `mc mirror` compares object
                   # metadata and skips unchanged. --remove syncs deletions
                   # so the staging tree matches the bucket exactly.
+                  # --disable-multipart: one sequential stream per object
+                  # instead of parallel part transfers with their in-flight
+                  # buffers. The first full staging of forgejo-blobs
+                  # (2026-09-11, 29 GiB / 2,300 objects, none over 0.21 GiB)
+                  # OOMKilled this container at 1Gi twice, ~85 % of the way
+                  # through, with peak working-set well under the limit —
+                  # the kill is page-cache pressure from sustained bulk
+                  # writes into the Longhorn staging volume, not the
+                  # listing. Same flag that fixed the write side of the
+                  # ADR 0064 D4 copy; objects here are far under the 5 GiB
+                  # single-PUT ceiling the flag implies.
                   for bucket in $BUCKETS; do
                     echo "=== mirror src/$bucket → /staging/$bucket ==="
                     mkdir -p "/staging/$bucket"
-                    mc mirror --remove --overwrite \
+                    mc mirror --remove --overwrite --disable-multipart \
                       "src/$bucket" "/staging/$bucket"
                   done
                   echo "=== mirror complete: $(du -sh /staging | cut -f1) staged ==="
@@ -201,9 +212,12 @@ spec:
                 limits:
                   # 512Mi OOMKilled the first attempt of the 2026-08-01
                   # full re-mirror (mc buffers the ~45 GiB bucket listing);
-                  # the retry passed on a warm cache. 1Gi gives the listing
-                  # real headroom — this container runs once nightly.
-                  memory: 1Gi
+                  # the retry passed on a warm cache. 1Gi then OOMKilled
+                  # both attempts of the first forgejo-blobs staging on
+                  # 2026-09-11 (see the --disable-multipart note in the
+                  # script). 2Gi plus sequential transfers; this container
+                  # runs once nightly and the namespace has no quota.
+                  memory: 2Gi
           containers:
             - name: restic
               # NOTE: restic/restic is pulled from Docker Hub (not
