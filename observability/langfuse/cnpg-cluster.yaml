@@ -20,13 +20,15 @@ spec:
   # 17.6-bookworm = latest patched 17.x, Debian-12 base.
   imageName: ghcr.io/cloudnative-pg/postgresql:17.6-bookworm
 
-  # Propagate labels to CNPG-managed children. Picked up by
-  # infrastructure/longhorn/recurring-jobs.yaml's
-  # `secret-personal` group: hourly snapshots × 7d retain.
+  # Propagate labels to CNPG-managed children. `no-snapshot` joins
+  # infrastructure/longhorn/recurring-jobs.yaml's group that takes no
+  # Longhorn snapshots (2026-09-11): Barman base + WAL archive give
+  # PITR and the standby covers a lost volume, while an hourly
+  # snapshot of PGDATA only pinned the pages Postgres rewrote.
   # Langfuse is `personal`-class (LLM input/output text).
   inheritedMetadata:
     labels:
-      recurring-job-group.longhorn.io/secret-personal: "enabled"
+      recurring-job-group.longhorn.io/no-snapshot: "enabled"
 
   # Bumped 10Gi → 20Gi 2026-06-25: actual usage was 10.56 GiB on pg-2
   # (already over declared) due to Longhorn snapshot delta accumulation

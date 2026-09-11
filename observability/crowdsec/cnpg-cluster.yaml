@@ -28,12 +28,14 @@ spec:
   # newer base clears the deb11 package CVEs.
   imageName: ghcr.io/cloudnative-pg/postgresql:17.6-bookworm
 
-  # Propagate labels to CNPG-managed children. Picked up by
-  # infrastructure/longhorn/recurring-jobs.yaml's `internal`
-  # group: 4-hourly snapshots × 7d retain.
+  # Propagate labels to CNPG-managed children. `no-snapshot` joins
+  # infrastructure/longhorn/recurring-jobs.yaml's group that takes no
+  # Longhorn snapshots (2026-09-11): Barman base + WAL archive give
+  # PITR and the standby covers a lost volume, while an hourly
+  # snapshot of PGDATA only pinned the pages Postgres rewrote.
   inheritedMetadata:
     labels:
-      recurring-job-group.longhorn.io/internal: "enabled"
+      recurring-job-group.longhorn.io/no-snapshot: "enabled"
 
   # 5Gi → 15Gi 2026-06-09: WAL accumulated locally since 2026-06-05 when
   # S3 archiving started failing; PV hit 6.01 GB actual against the 5 GiB

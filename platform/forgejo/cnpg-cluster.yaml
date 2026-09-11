@@ -27,9 +27,11 @@ spec:
   # 17.6-bookworm = latest patched 17.x, Debian-12 base.
   imageName: ghcr.io/cloudnative-pg/postgresql:17.6-bookworm
 
-  # Propagate labels to CNPG-managed children. Picked up by
-  # infrastructure/longhorn/recurring-jobs.yaml's `internal`
-  # group: 4-hourly snapshots × 7d retain.
+  # Propagate labels to CNPG-managed children. `no-snapshot` joins
+  # infrastructure/longhorn/recurring-jobs.yaml's group that takes no
+  # Longhorn snapshots (2026-09-11): Barman base + WAL archive give
+  # PITR and the standby covers a lost volume, while an hourly
+  # snapshot of PGDATA only pinned the pages Postgres rewrote.
   #
   # 2026-07-09 ADR 0036: CNPG Postgres data volume moves to the
   # -retain family. Forgejo DB is source-of-truth relational
@@ -39,7 +41,7 @@ spec:
   # homelab-disallow-retain-reclaim-without-annotation policy.
   inheritedMetadata:
     labels:
-      recurring-job-group.longhorn.io/internal: "enabled"
+      recurring-job-group.longhorn.io/no-snapshot: "enabled"
     annotations:
       retention.homelab.internal/reason: "Forgejo DB — issues, PRs, hooks, users; source-of-truth for the forge."
 
