@@ -21,8 +21,9 @@ metadata:
 spec:
   # Moved from Cluster.spec.backup.retentionPolicy — with the plugin,
   # retention belongs to the object store and the sidecar enforces it.
-  # Trace metadata is `personal`-class: 90-day PITR window per backup-and-dr.md.
-  retentionPolicy: "90d"
+  # Trace metadata is `personal`-class: 30-day PITR window per backup-and-dr.md
+  # (90d until 2026-09-11; tier 3 keeps months under GFS).
+  retentionPolicy: "30d"
 
   configuration:
     destinationPath: s3://homelab-backups-cluster/cnpg/langfuse

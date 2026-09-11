@@ -68,6 +68,13 @@ spec:
 
   postgresql:
     parameters:
+      # WAL compression of full-page images (PG >= 15; every image in the fleet is
+      # built --with-lz4). Fleet-wide since 2026-09-11 after the CNPG bucket was
+      # measured at 167 GiB for 7 GiB of databases: authentik alone archived
+      # ~1 GiB/day of WAL for a 220 MiB database, a quarter of it full-page
+      # images. Reload-only (pg_settings context superuser), no restart.
+      # See backup-and-dr.md §Growth.
+      wal_compression: lz4
       max_connections: "200"
       # 256MB shared_buffers within the 2Gi limit (was 128MB).
       shared_buffers: "256MB"
