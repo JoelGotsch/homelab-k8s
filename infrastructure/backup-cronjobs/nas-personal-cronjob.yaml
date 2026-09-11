@@ -240,7 +240,10 @@ spec:
                 readOnlyRootFilesystem: true
               resources:
                 requests: { cpu: 250m, memory: 512Mi }
-                limits: { memory: 2Gi }
+                # 2Gi -> 3Gi on 2026-09-11 with the cluster lane: this one
+                # peaked at 1 701 MiB over the preceding 7 days, and both
+                # lanes run the same restic against the same repository.
+                limits: { memory: 3Gi }
           volumes:
             - { name: personal-photos,    persistentVolumeClaim: { claimName: backup-src-personal-photos } }
             - { name: personal-files,     persistentVolumeClaim: { claimName: backup-src-personal-files } }

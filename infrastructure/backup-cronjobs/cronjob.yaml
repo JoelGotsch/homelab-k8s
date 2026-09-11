@@ -428,7 +428,11 @@ spec:
                   cpu: 250m
                   memory: 512Mi
                 limits:
-                  memory: 2Gi
+                  # 2Gi -> 3Gi on 2026-09-11: this container peaked at
+                  # 2 020 MiB of 2 048 MiB over the preceding 7 days, one
+                  # bigger night from an OOMKill. The namespace has no
+                  # ResourceQuota or LimitRange, so only the limit moves.
+                  memory: 3Gi
           volumes:
             - name: staging
               persistentVolumeClaim:
