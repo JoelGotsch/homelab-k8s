@@ -36,6 +36,7 @@ BACKUP_PVCS=(
   "paperless/paperless-data|personal: insurance copy (docs are on NAS-crypt)"
   "ntfy/ntfy-data|internal: default-offsite (cached msgs/attachments)"
   "nextcloud-biz/nextcloud-biz-html|personal: whole instance — config.php instance secret/passwordsalt + datadirectory (partner files, versions, trashbin); the only copy, no NAS tier (ADR 0065 D6/D7)"
+  "grist/grist-persist|personal: whole Grist instance — every .grist document + the SQLite home DB (users, workspaces, shares) in one volume; the only copy (ADR 0066 D4/D7)"
   "nextcloud/nextcloud-hot|personal: datadirectory (file versions/trashbin) + config.php instance secret/passwordsalt (bulk user files are on NAS-crypt via Workstream C)"
   "langfuse/data-volume-chi-langfuse-langfuse-0-0-0|personal: ClickHouse trace store (private prompt/completion content). RAW-VOLUME backup = crash-consistent, not app-consistent; re-evaluate Sept 2026 vs clickhouse-backup logical + storage size"
 )

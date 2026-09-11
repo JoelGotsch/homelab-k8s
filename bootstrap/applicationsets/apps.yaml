@@ -75,6 +75,12 @@ spec:
           # while login, appstore, HIBP, SMTP, Collabora, barman and the VIP
           # path were driven).
           - {name: nextcloud-biz,       owner: homelab,       repo: nextcloud-biz-k8s, path: k8s, autoSync: "true"}
+          # grist: business-partner Grist behind the same relay, Nextcloud-biz
+          # as its OIDC IdP (ADR 0066). Registered 2026-09-11 with autoSync
+          # off; flips after the rollout gates in grist-k8s/k8s/README.md
+          # (OIDC on the OSS build, sandbox flavour, guest login loop, CNP
+          # audit ceremony) run clean.
+          - {name: grist,               owner: homelab,       repo: grist-k8s, path: k8s, autoSync: "false"}
           - {name: ntfy,                owner: homelab,       repo: ntfy-k8s, path: k8s, autoSync: "true"}
           - {name: ntfy-e2ee-relay,     owner: homelab,       repo: ntfy-e2ee-relay, path: k8s, autoSync: "true"}
           - {name: paperless,           owner: homelab,       repo: paperless-k8s, path: k8s, autoSync: "true"}
