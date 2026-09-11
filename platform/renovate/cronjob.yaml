@@ -75,9 +75,28 @@ spec:
               type: RuntimeDefault
           containers:
             - name: renovate
-              # OPERATOR PINS via Renovate (self-host: the
-              # bot updates its own image pin in this repo).
-              image: "renovate/renovate:38"
+              # Pinned tag@digest. Until 2026-09-11 this was the
+              # floating `renovate/renovate:38`, which Kyverno's
+              # audit-third-party-image-digest flagged on every run
+              # (autogen-cronjob rule, pattern `*@sha256:*`) and which
+              # rolled the runner forward under us (Caveat 8: a scope
+              # bug only surfaced when the tag moved). The digest is
+              # the multi-arch INDEX digest — Docker Hub's tag-level
+              # `digest` for 38.142.7, identical to what the
+              # 2026-09-10 pod resolved (`.status.containerStatuses[]
+              # .imageID`); the per-arch amd64 manifest (caaa688f…)
+              # would break on an arm64 node.
+              #
+              # THIS PIN DOES NOT SELF-UPDATE. Renovate's `kubernetes`
+              # manager is not active on homelab-k8s — no
+              # managerFilePatterns/fileMatch is configured for it in
+              # renovate.json5 or the central preset — so the bot
+              # cannot bump its own image here. Deliberate quarterly
+              # bump by the operator until that manager lands:
+              # re-run the Docker Hub tags lookup for the new
+              # version, compare with a fresh pod's imageID, update
+              # tag AND digest together.
+              image: "renovate/renovate:38.142.7@sha256:8327ee1726142dcc504d349d84c0e7f41656867e598ea7669bb7cf23786610a2"
               imagePullPolicy: IfNotPresent
               env:
                 # Renovate's CLI has no --config-file flag (only

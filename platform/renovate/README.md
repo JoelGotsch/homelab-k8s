@@ -164,9 +164,16 @@ updated in each scanned repo.
    has slowly diverged. Renovate's Gitea platform driver
    tracks the Gitea API; if Forgejo introduces a breaking
    change, Renovate may temporarily fail until upstream
-   patches. Pin the `renovate/renovate` image; bump
-   deliberately when readme + release notes confirm Forgejo
-   compat.
+   patches. The image is pinned `tag@digest` in `cronjob.yaml`
+   (`38.142.7@sha256:8327ee17…`, the multi-arch index digest,
+   since 2026-09-11 — before that it floated on `:38`). The pin
+   does **not** self-update: Renovate's `kubernetes` manager
+   is not enabled for this repo (no `managerFilePatterns` /
+   `fileMatch`), so the bot cannot bump its own runner. Bump
+   deliberately, quarterly, when the release notes confirm
+   Forgejo compat — tag and digest together, digest taken from
+   Docker Hub's tag-level `digest` field and cross-checked
+   against a fresh pod's `imageID`.
 
 4. **Dependency Dashboards are per-repo**, not consolidated.
    Each repo emits its own Dashboard issue; cross-repo view
@@ -214,8 +221,9 @@ updated in each scanned repo.
    since 2026-07-29, when this same 403 was found and fixed there. The
    README's `--scopes` override silently un-did that fix; it has been
    removed rather than corrected. It only started mattering again when
-   the floating `renovate/renovate:38` tag rolled forward (see Caveat 3
-   — which asks for a pinned image the CronJob does not actually pin).
+   the then-floating `renovate/renovate:38` tag rolled forward — the
+   CronJob pins `tag@digest` since 2026-09-11 (Caveat 3), so a runner
+   change is now an operator commit, not a Saturday surprise.
    Read the body, not the FATAL line:
 
    ```sh
