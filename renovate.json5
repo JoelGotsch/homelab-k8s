@@ -127,10 +127,19 @@
       schedule: ["before 08:00 on saturday"],
     },
 
-    // Container images in homelab-k8s manifests — covered
-    // by the central preset's `kubernetes` manager. Per-repo
-    // override: tighten patch-bump cadence to weekly (defaults
-    // to the central preset's monthly).
+    // Container images in plain homelab-k8s manifests — keyed on the
+    // `kubernetes` manager, which NOTHING enables yet: the manager
+    // ships with `managerFilePatterns: []` (its docs: Kubernetes has
+    // no accepted file naming convention, so Renovate will not scan
+    // every *.yaml), and neither the preset nor this file sets a
+    // pattern. As of 2026-09-11 it has never matched a file and this
+    // rule has never fired — no dashboard lists a `kubernetes`
+    // manager under "Detected dependencies", and 127 of the 145
+    // images running in the cluster are invisible to Renovate
+    // (lessons.md §Renovate). Kept as the intended cadence for the
+    // day the preset enables the manager (behind
+    // dependencyDashboardApproval, because the preset's
+    // `pinDigests: true` will then open one PR per image).
     {
       matchManagers: ["kubernetes"],
       matchUpdateTypes: ["patch"],

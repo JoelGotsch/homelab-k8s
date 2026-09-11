@@ -300,6 +300,19 @@ repos:
         # is NOT enforced at admission by Kyverno, so this shift-left guard
         # keeps a new namespace from shipping without a classification.
 
+      - id: check-renovate-window
+        name: the Renovate CronJob fires inside the preset's schedule window (hl-0237)
+        entry: scripts/check-renovate-window.sh
+        language: script
+        pass_filenames: false
+        files: '^(platform/renovate/cronjob\.yaml|renovate\.json5|scripts/check-renovate-window\.sh)$'
+        # The runner fired at 05:00 UTC against a "before 06:00 Europe/Berlin"
+        # window for two months (2026-07-16 .. 2026-09-09): every run exited 0,
+        # updated the dashboards and opened nothing. Cross-repo — reads the
+        # preset in ../homelab-infra and SKIPs (loudly) when it is absent. The
+        # preset side cannot trigger this hook; a window change there is
+        # caught on the next commit touching one of the files above.
+
       - id: check-chart-lock
         name: every pinned chart is locked and points at the mirror (ADR 0052)
         entry: scripts/check-chart-lock.sh
