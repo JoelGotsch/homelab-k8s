@@ -47,6 +47,21 @@ repos:
         # declarations, the classes, or any PVC-bearing manifest here changes.
         files: '(infrastructure/csi-rclone/|.*pvc.*\.ya?ml$|scripts/check-nas-crypt-dataset-paths\.sh$)'
 
+      - id: check-storage-budget
+        name: projected Longhorn promises stay under 80 % of what Longhorn allows per worker (ADR 0067)
+        entry: scripts/check-storage-budget.sh
+        language: script
+        pass_filenames: false
+        files: '(\.ya?ml$|^scripts/check-storage-budget\.sh$)'
+        # Cross-repo: reads this repo's index plus every repo apps.yaml
+        # reconciles at its forgejo/main ref, so it cannot be scoped to the
+        # staged files. Declared inputs (workers, threshold, chart claims) are
+        # scripts/storage-budget.yaml. The script is a byte-identical mirror
+        # of homelab-hooks (ADR 0047 D4, policed by check-synced-scripts); the
+        # app repos run the same file through their homelab-hooks rev. Needs
+        # python3 + PyYAML and every reconciled repo checked out beside this
+        # one; it fails rather than skips without them.
+
       - id: check-backup-share-mounts
         name: every share the offsite job backs up is actually mounted into it
         entry: scripts/check-backup-share-mounts.sh
@@ -222,7 +237,8 @@ repos:
         entry: >-
           bash -c 'for f in check-broken-links.sh check-no-mac-addresses.sh
           check-no-operator-email.sh check-no-bare-domain.sh
-          check-helm-values-keys.sh check-chart-lock.sh; do
+          check-helm-values-keys.sh check-chart-lock.sh
+          check-storage-budget.sh; do
           for r in ../homelab-hooks ../homelab-docs ../homelab-infra ../homelab-k8s; do
           [ -f "$r/scripts/$f" ] && [ -f "scripts/$f" ]
           && ! cmp -s "scripts/$f" "$r/scripts/$f"

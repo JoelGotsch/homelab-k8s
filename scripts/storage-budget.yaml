@@ -1,0 +1,233 @@
+# Storage budget — the declared inputs of check-storage-budget.sh (ADR 0067).
+#
+# The check refuses a commit, in this repo or in any repo apps.yaml reconciles,
+# whose desired state would promise more Longhorn storage on a worker than
+# `threshold_percent` of what Longhorn allows there:
+#
+#   allowed per worker = (disk - disk x reserved %) x over-provisioning %
+#
+# Everything the check can read from manifests it reads from manifests. This
+# file holds only what git does not otherwise say: the worker disks, the
+# threshold, the Longhorn defaults for settings values.yaml leaves unset, and
+# the claims charts generate from values (which cannot be read without a
+# render). The script itself is canonical in homelab-hooks and mirrored here.
+version: 1
+
+# Operator's answer, 2026-09-11: block above 80 % of what Longhorn allows.
+threshold_percent: 80
+
+# The disk Longhorn schedules onto on each worker. Not declared anywhere else in
+# git: observed as nodes.longhorn.io storageMaximum = 1860 GiB on all three
+# workers on 2026-09-11 (a 2 TB NVMe per worker, hardware.md). Replace a worker
+# or its disk -> change its line here; the gate cannot see disks.
+workers:
+  - {name: worker1, longhorn_disk: 1860Gi}
+  - {name: worker2, longhorn_disk: 1860Gi}
+  - {name: worker3, longhorn_disk: 1860Gi}
+
+longhorn:
+  values: infrastructure/longhorn/values.yaml
+  # Used only when values.yaml leaves the setting unset. Source: the pinned
+  # chart's own questions.yaml (longhorn 1.12.1): reserved 30, soft
+  # anti-affinity false; values.yaml's comment and the chart describe the
+  # over-provisioning default as 100. Live on 2026-09-11: reserved 30,
+  # over-provisioning 200 (from values.yaml), soft anti-affinity false.
+  # Reserved % applies when Longhorn creates a node's default disk, so a
+  # change here describes new disks, not existing ones.
+  setting_defaults:
+    storageOverProvisioningPercentage: 100
+    storageReservedPercentageForDefaultDisk: 30
+    replicaSoftAntiAffinity: false
+  # The two classes the chart creates itself rather than storageclasses.yaml.
+  chart_storage_classes:
+    longhorn: {replicas_path: .persistence.defaultClassReplicaCount, default: 3}
+    longhorn-static: {replicas_path: .defaultSettings.defaultReplicaCount, default: 3}
+
+# Claims a chart generates from its values. Each field is a literal or
+# {path: <values path>, default: <value when unset>}; a storage_class that is
+# unset or "" means the cluster default class, as the charts render it.
+# Every `size`/`storage` quantity and `storageClass`/`storageClassName` key in a
+# chart layer's values must appear here — as a claim path or under not_claims —
+# or the check fails. Calibrated against a full kustomize+helm render on
+# 2026-09-11 (ADR 0067): every row below matched the rendered object.
+chart_claims:
+  - repo: homelab-k8s
+    layer: platform/openbao
+    claims:
+      - name: openbao/data
+        kind: StatefulSet VCT
+        size: {path: .server.dataStorage.size, default: 10Gi}
+        storage_class: {path: .server.dataStorage.storageClass}
+        count: {path: .server.ha.replicas, default: 1}
+        enabled: {path: .server.dataStorage.enabled, default: true}
+      - name: openbao/audit
+        kind: StatefulSet VCT
+        size: {path: .server.auditStorage.size, default: 10Gi}
+        storage_class: {path: .server.auditStorage.storageClass}
+        count: {path: .server.ha.replicas, default: 1}
+        enabled: {path: .server.auditStorage.enabled, default: false}
+
+  - repo: homelab-k8s
+    layer: platform/woodpecker
+    claims:
+      - name: woodpecker-server/data
+        kind: StatefulSet VCT
+        size: {path: .server.persistentVolume.size}
+        storage_class: {path: .server.persistentVolume.storageClass}
+        enabled: {path: .server.persistentVolume.enabled, default: true}
+      - name: woodpecker-agent/agent-config
+        kind: StatefulSet VCT
+        size: {path: .agent.persistence.size, default: 1Gi}      # chart default (agent subchart 3.7.3)
+        storage_class: {path: .agent.persistence.storageClass}
+        count: {path: .agent.replicaCount, default: 1}
+        enabled: {path: .agent.persistence.enabled, default: true}
+      # Pipeline workspaces: the Kubernetes backend makes one PVC per running
+      # workflow (live name wp-<id>-0-default), deleted when it ends. Budgeted
+      # at full concurrency: max workflows per agent x agents.
+      - name: pipeline workspaces (wp-*)
+        kind: runtime PVC
+        runtime: true
+        size: {path: .agent.env.WOODPECKER_BACKEND_K8S_VOLUME_SIZE}
+        storage_class: {path: .agent.env.WOODPECKER_BACKEND_K8S_STORAGE_CLASS}
+        count: {path: .agent.env.WOODPECKER_MAX_WORKFLOWS}
+    not_claims: []
+
+  - repo: homelab-k8s
+    layer: platform/forgejo
+    claims:
+      - name: gitea-shared-storage
+        kind: PVC
+        size: {path: .persistence.size}
+        storage_class: {path: .persistence.storageClass}
+        enabled: {path: .persistence.enabled, default: true}
+
+  - repo: homelab-k8s
+    layer: observability/langfuse
+    claims:
+      - name: langfuse-redis-primary/valkey-data
+        kind: StatefulSet VCT
+        size: {path: .redis.primary.persistence.size}
+        storage_class: {path: .redis.primary.persistence.storageClass}
+        enabled: {path: .redis.primary.persistence.enabled, default: true}
+
+  - repo: homelab-k8s
+    layer: observability/loki
+    claims:
+      - name: loki/storage
+        kind: StatefulSet VCT
+        size: {path: .singleBinary.persistence.size}
+        storage_class: {path: .singleBinary.persistence.storageClass}
+        count: {path: .singleBinary.replicas, default: 1}
+        enabled: {path: .singleBinary.persistence.enabled, default: true}
+
+  - repo: homelab-k8s
+    layer: observability/kube-prometheus-stack
+    claims:
+      - name: kube-prometheus-stack-prometheus
+        kind: Prometheus VCT
+        size: {path: .prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.resources.requests.storage}
+        storage_class: {path: .prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName}
+        count: {path: .prometheus.prometheusSpec.replicas, default: 1}
+      - name: kube-prometheus-stack-alertmanager
+        kind: Alertmanager VCT
+        size: {path: .alertmanager.alertmanagerSpec.storage.volumeClaimTemplate.spec.resources.requests.storage}
+        storage_class: {path: .alertmanager.alertmanagerSpec.storage.volumeClaimTemplate.spec.storageClassName}
+        count: {path: .alertmanager.alertmanagerSpec.replicas, default: 1}
+      - name: kube-prometheus-stack-grafana
+        kind: PVC
+        size: {path: .grafana.persistence.size}
+        storage_class: {path: .grafana.persistence.storageClassName}
+        enabled: {path: .grafana.persistence.enabled, default: false}
+
+  - repo: homelab-k8s
+    layer: observability/crowdsec
+    claims:
+      - name: crowdsec-db-pvc
+        kind: PVC
+        size: {path: .lapi.persistentVolume.data.size, default: 1Gi}   # chart default (crowdsec 0.24.2)
+        storage_class: {path: .lapi.persistentVolume.data.storageClassName}
+        enabled: {path: .lapi.persistentVolume.data.enabled, default: true}
+
+  - repo: homelab-k8s
+    layer: observability/tempo
+    claims:
+      - name: tempo/storage
+        kind: StatefulSet VCT
+        size: {path: .persistence.size}
+        storage_class: {path: .persistence.storageClassName}
+        enabled: {path: .persistence.enabled, default: false}
+
+  - repo: immich-k8s
+    layer: k8s
+    claims:
+      - name: immich-machine-learning
+        kind: PVC
+        size: {path: .machine-learning.persistence.cache.size}
+        storage_class: {path: .machine-learning.persistence.cache.storageClass}
+        enabled: {path: .machine-learning.persistence.cache.enabled, default: false}
+
+  - repo: jellyfin-k8s
+    layer: k8s
+    claims:
+      - name: jellyfin-config
+        kind: PVC
+        size: {path: .persistence.config.size}
+        # The chart (jellyfin 3.2.0 templates/persistentVolumeClaim.yaml) reads
+        # persistence.config.storageClass; the values file sets
+        # storageClassName, which the chart ignores — the claim renders with
+        # no class and gets the cluster default (today longhorn-replica2).
+        storage_class: {path: .persistence.config.storageClass}
+        enabled: {path: .persistence.config.enabled, default: true}
+    not_claims:
+      - path: .persistence.config.storageClassName
+        reason: not read by jellyfin 3.2.0; the claim renders with the default class (see the claim above)
+
+  - repo: nextcloud-k8s
+    layer: k8s
+    claims:
+      - name: nextcloud-redis-master/redis-data
+        kind: StatefulSet VCT
+        size: {path: .redis.master.persistence.size}
+        storage_class: {path: .redis.master.persistence.storageClass}
+        enabled: {path: .redis.master.persistence.enabled, default: true}
+
+  - repo: nextcloud-biz-k8s
+    layer: k8s
+    claims:
+      - name: nextcloud-biz-redis-master/redis-data
+        kind: StatefulSet VCT
+        size: {path: .redis.master.persistence.size}
+        storage_class: {path: .redis.master.persistence.storageClass}
+        enabled: {path: .redis.master.persistence.enabled, default: true}
+
+  - repo: paperless-k8s
+    layer: k8s
+    claims:
+      - name: paperless-redis-master/redis-data
+        kind: StatefulSet VCT
+        size: {path: .redis.master.persistence.size}
+        storage_class: {path: .redis.master.persistence.storageClass}
+        enabled: {path: .redis.master.persistence.enabled, default: true}
+      # Rendered with replicas 0 today (bitnami redis replica.replicaCount).
+      - name: paperless-redis-replicas/redis-data
+        kind: StatefulSet VCT
+        size: {path: .redis.replica.persistence.size, default: 8Gi}
+        storage_class: {path: .redis.replica.persistence.storageClass}
+        count: {path: .redis.replica.replicaCount, default: 0}
+
+  - repo: vaultwarden-k8s
+    layer: k8s
+    claims:
+      - name: vaultwarden-data-vaultwarden-0
+        kind: PVC
+        size: {path: .storage.data.size}
+        storage_class: {path: .storage.data.class}
+
+  - repo: vikunja-k8s
+    layer: k8s
+    claims:
+      - name: vikunja-data
+        kind: PVC
+        size: {path: .vikunja.persistence.data.size}
+        storage_class: {path: .vikunja.persistence.data.storageClass}
+        enabled: {path: .vikunja.persistence.data.enabled, default: false}
