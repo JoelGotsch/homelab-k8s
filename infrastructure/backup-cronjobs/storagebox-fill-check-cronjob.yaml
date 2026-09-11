@@ -1,0 +1,179 @@
+# storagebox-fill-check: how full is the Hetzner Storage Box?
+#
+# The box is a 1 TiB quota and was 86 % used when first measured
+# (2026-09-11; the upgrade decision is homelab-docs TODO hl-0250). Until
+# this check nothing measured it. Once a day it runs one `df -B1` over the
+# same SSH login the lanes use and prints the result as one line:
+#
+#   [metric] storagebox_df size_bytes=N used_bytes=N avail_bytes=N
+#
+# Alloy's log-derived-metrics branch (observability/alloy/values.yaml,
+# loki.process "backup_metrics") turns that line into the gauges
+# storagebox_size_bytes, storagebox_used_bytes and storagebox_avail_bytes.
+# It is the route the reboot-cascade janitor already uses: a Job cannot be
+# scraped, there is no Pushgateway by decision (ADR 0062) and Talos has no
+# textfile collector. The alerts are in prometheusrule-footprint.yaml,
+# group backup-footprint.storagebox.
+#
+# A separate CronJob rather than a step inside a lane, and it exits 0
+# whatever it finds. BackupCronJobFailed pages on any failed Job in this
+# namespace, and a full box, or a box this check cannot reach, must not
+# read as a failed backup. When it cannot measure it prints no metric line;
+# HetznerStorageBoxFillUnmeasured reports the gap, unless the blackbox probe
+# saw the box down, in which case HetznerStorageBoxUnreachable already has.
+#
+# 11:05 UTC keeps it clear of every other SFTP user of the box: the MinIO
+# lane (02:15, up to about 2 h), the NAS lane (04:30, up to about 45 min)
+# and the OpenBao upload (hourly at :40). The box never sees two sessions
+# at once.
+#
+# No `set -x` in the script: SSH_KEY is in its environment.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: storagebox-fill-check
+  namespace: backup-cronjobs
+  labels:
+    app.kubernetes.io/name: storagebox-fill-check
+    app.kubernetes.io/component: backup-pipeline
+spec:
+  schedule: "5 11 * * *"
+  concurrencyPolicy: Forbid
+  # A run more than an hour late is skipped rather than drifting toward the
+  # :40 upload; the alerts look back 26 h, so one skipped day is invisible.
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      # No retry: the script exits 0 on every outcome it can observe, so a
+      # failed pod means it never ran (image, mount, admission), which a
+      # second attempt minutes later does not fix.
+      backoffLimit: 0
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: storagebox-fill-check
+            # backup-cronjobs-allow admits pods by this label (kube-DNS and
+            # WAN 22/23). Without it the pod falls into the namespace's
+            # default-deny and ssh never resolves the box.
+            app.kubernetes.io/component: backup-pipeline
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          # ndots:1 for the musl resolver in the restic image; see the same
+          # block in cronjob.yaml for the EAI_AGAIN it prevents.
+          dnsConfig:
+            options:
+              - name: ndots
+                value: "1"
+              - name: single-request-reopen
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: df
+              # The lanes' image and digest: it already carries ssh, awk and
+              # a shell, and runs in this namespace today.
+              image: restic/restic:0.17.3@sha256:8f5a62b422a2cb1277ea0dd6e826fe1acf649e5b9f02d60e5268d5fd1976255a
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -u
+
+                  # Every outcome exits 0 (see the header). A run that cannot
+                  # measure says why and prints no [metric] line.
+                  no_measurement() {
+                    echo "storagebox-fill-check: no measurement: $1"
+                    exit 0
+                  }
+
+                  mkdir -p /tmp/.ssh
+                  echo "$SSH_KEY" > /tmp/.ssh/id_ed25519
+                  chmod 600 /tmp/.ssh/id_ed25519
+                  # Pinned host keys, as in the lanes (restic-known-hosts-configmap.yaml).
+                  cp /etc/restic-ssh/known_hosts /tmp/.ssh/known_hosts
+                  chmod 600 /tmp/.ssh/known_hosts
+
+                  # Bounded: 20 s to connect, and a silent session is dropped
+                  # after 30 s, well inside activeDeadlineSeconds. The path is
+                  # the login's home; the restricted shell allows nothing else.
+                  out=$(ssh -i /tmp/.ssh/id_ed25519 \
+                    -o UserKnownHostsFile=/tmp/.ssh/known_hosts -o BatchMode=yes \
+                    -o ConnectTimeout=20 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 \
+                    -p "${HSB_PORT:-23}" "${HSB_USER}@${HSB_HOST}" df -B1 2>&1)
+                  rc=$?
+
+                  if [ "$rc" -ne 0 ]; then
+                    # Classify from a fixed list instead of echoing ssh's
+                    # stderr, which carries the login and host from
+                    # hetzner-sb-creds.
+                    case "$out" in
+                      *"Host key verification failed"*) why="host key verification failed (restic-known-hosts)" ;;
+                      *"Permission denied"*) why="authentication refused" ;;
+                      *"Could not resolve hostname"*) why="DNS lookup failed" ;;
+                      *"timed out"*) why="connection timed out" ;;
+                      *"Connection refused"*) why="connection refused" ;;
+                      *) why="unclassified ssh error" ;;
+                    esac
+                    no_measurement "ssh exit $rc, $why"
+                  fi
+
+                  # The restricted shell prints the quota filesystem as
+                  #   <login> <size> <used> <avail> <use%> /home
+                  # (checked 2026-09-11). Take the first row whose three byte
+                  # columns are numbers and whose size is positive, so a header
+                  # or a renamed filesystem cannot shift the fields.
+                  row=$(printf '%s\n' "$out" | awk '$2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && $2 > 0 { print $2, $3, $4; exit }')
+                  [ -n "$row" ] || no_measurement "df printed no row with byte counts"
+                  set -- $row
+
+                  echo "[metric] storagebox_df size_bytes=$1 used_bytes=$2 avail_bytes=$3"
+                  awk -v s="$1" -v u="$2" -v a="$3" 'BEGIN { printf "storagebox-fill-check: %.1f %% used (%.1f GiB of %.1f GiB, %.1f GiB free)\n", 100 * u / s, u / 2^30, s / 2^30, a / 2^30 }'
+              env:
+                - name: HOME
+                  value: /tmp
+              envFrom:
+                - secretRef:
+                    name: hetzner-sb-creds
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                # ssh needs a passwd entry for uid 1000; see restic-passwd-configmap.yaml.
+                - name: restic-passwd
+                  mountPath: /etc/passwd
+                  subPath: passwd
+                  readOnly: true
+                - name: restic-passwd
+                  mountPath: /etc/group
+                  subPath: group
+                  readOnly: true
+                - name: restic-known-hosts
+                  mountPath: /etc/restic-ssh
+                  readOnly: true
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+                readOnlyRootFilesystem: true
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 64Mi
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 16Mi
+            - name: restic-passwd
+              configMap:
+                name: restic-passwd
+            - name: restic-known-hosts
+              configMap:
+                name: restic-known-hosts

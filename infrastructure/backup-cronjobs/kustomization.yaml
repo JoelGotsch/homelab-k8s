@@ -13,6 +13,8 @@ resources:
   # Workstream C — NAS personal+ shares → Hetzner (offsite for bulk data).
   - nas-personal-pvcs.yaml
   - nas-personal-cronjob.yaml
+  # Daily Storage Box fill measurement; exits 0, alerts via prometheusrule-footprint.yaml.
+  - storagebox-fill-check-cronjob.yaml
   - networkpolicy.yaml
   - prometheusrule.yaml
   - prometheusrule-footprint.yaml   # Workstream F — backup-size/pileup alerts
@@ -65,5 +67,12 @@ replacements:
         fieldPaths:
           - spec.groups.[name=backup-footprint.langfuse].rules.[alert=LangfuseTraceStoreGrowing].annotations.runbook_url
           - spec.groups.[name=backup-footprint.nas-buckets].rules.[alert=LonghornBackupsBucketRegrowing].annotations.runbook_url
+          - spec.groups.[name=backup-footprint.nas-buckets].rules.[alert=CNPGBackupsBucketRegrowing].annotations.runbook_url
           - spec.groups.[name=backup-footprint.nas-buckets].rules.[alert=NasBackupMetricsMissing].annotations.runbook_url
+          - spec.groups.[name=backup-footprint.nas-capacity].rules.[alert=NasVolume1NearFull].annotations.runbook_url
+          - spec.groups.[name=backup-footprint.nas-capacity].rules.[alert=NasVolume1FillCritical].annotations.runbook_url
+          - spec.groups.[name=backup-footprint.nas-capacity].rules.[alert=NasCapacityMetricsMissing].annotations.runbook_url
+          - spec.groups.[name=backup-footprint.storagebox].rules.[alert=HetznerStorageBoxNearFull].annotations.runbook_url
+          - spec.groups.[name=backup-footprint.storagebox].rules.[alert=HetznerStorageBoxFillCritical].annotations.runbook_url
+          - spec.groups.[name=backup-footprint.storagebox].rules.[alert=HetznerStorageBoxFillUnmeasured].annotations.runbook_url
         options: { delimiter: '/', index: 3 }

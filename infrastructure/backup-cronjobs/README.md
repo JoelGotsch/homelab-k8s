@@ -15,6 +15,7 @@ and
 |---|---|---|---|---|---|
 | `restic-minio-to-hetzner` | MinIO buckets `homelab-backups-cluster` + `longhorn-backups` | tier-3 — Hetzner Storage Box | Restic client-side (operator's password) | 02:15 UTC daily | scaffolded 2026-04-29 |
 | `restic-nas-personal-to-hetzner` | NAS shares `personal-photos` + `personal-files` + `family-shared` + `personal-documents` + `internal-archive` + `forgejo-lfs` via read-only mounts, tagged `nas-personal` + per class + `share:<name>` | tier-3 — Hetzner Storage Box (same repo, class-tagged) | Restic client-side (same repo password) | 04:30 UTC daily | live 2026-07-16 |
+| `storagebox-fill-check` | `df -B1` on the Storage Box over the lanes' SSH login | none (a measurement: Alloy log line → `storagebox_*_bytes`) | n/a | 11:05 UTC daily | live 2026-09-11 |
 | `restic-minio-to-friends-nas` | _same_ | tier-2 — friend's NAS | _same_ | _TBD_ | **not scaffolded** — depends on friend's-NAS hardware ship; sibling CronJob with the same shape pointing at a different Restic repo |
 
 `loki-chunks` is intentionally *not* mirrored — Loki retention
@@ -163,6 +164,33 @@ already in every `forget_class` call).
 | `externalsecret.yaml` | Restic password + Hetzner SB SSH creds + MinIO read-only S3 creds, all from OpenBao. |
 | `cronjob.yaml` | Daily 02:15 UTC. Init container mirrors MinIO; main container runs Restic backup + forget --prune. |
 | `networkpolicy.yaml` | Default-deny + egress to MinIO (in-cluster) + WAN ports 22/23 (Hetzner SFTP) + kube-DNS. |
+| `storagebox-fill-check-cronjob.yaml` | Daily 11:05 UTC. One `df -B1` over SSH, printed as a `[metric] storagebox_df …` line; always exits 0. |
+| `prometheusrule-footprint.yaml` | Size and capacity alerts (see §Footprint and capacity alerts); tested by `prometheusrule-footprint_test.yaml`. |
+
+## Footprint and capacity alerts
+
+Routed by severity (`observability/kube-prometheus-stack/alertmanager-config.yaml`).
+None of these means a backup failed — `BackupCronJobFailed` and
+`ResticSnapshotStale` say that.
+
+| Alert | Fires when | Severity | What to do |
+|---|---|---|---|
+| `HetznerStorageBoxNearFull` | last daily Storage Box reading > 80 % of the quota | warning | Expected from the first run (86 % on 2026-09-11). The fix is the open decision in homelab-docs TODO hl-0250: a bigger box, or shorter cluster-lane retention. |
+| `HetznerStorageBoxFillCritical` | last reading > 90 % | critical | restic needs free space for new packs, prune included. Decide hl-0250 now. |
+| `HetznerStorageBoxFillUnmeasured` | no reading for 50 h while the box's TCP probe stayed up | warning | Read the last `storagebox-fill-check-*` Job log. `no measurement: ssh exit …` names the failure. A metric line with no series means Alloy's `backup_metrics` branch did not match. During a Hetzner outage this stays quiet; `HetznerStorageBoxUnreachable` speaks. |
+| `NasVolume1NearFull` / `NasVolume1FillCritical` | MinIO's usable capacity (NAS Volume 1, the HDD pool) > 80 % for 1 h / > 90 % for 30 m | warning / critical | Find the share or bucket that grew; `backup-atlas.html` in homelab-docs maps them. |
+| `CNPGBackupsBucketRegrowing` | `homelab-backups-cluster` > 200 GiB for 1 h | warning | 153 GiB on 2026-09-11, ≈65 GiB expected after the 2026-09-14 prunes. Find the cluster whose prefix grew; check its ScheduledBackup and `retentionPolicy`. |
+| `LonghornBackupsBucketRegrowing` | `longhorn-backups` > 100 GiB for 1 h | warning | See the alert description. |
+| `NasBackupMetricsMissing` / `NasCapacityMetricsMissing` | the bucket or capacity series absent for 30 m | warning | The minio-on-nas scrape is broken; the size alerts above are blind. |
+
+Run the Storage Box check by hand (outside 02:00–05:30 UTC and not near
+:40, when the lanes and the OpenBao upload use the box):
+
+```sh
+kubectl -n backup-cronjobs create job --from=cronjob/storagebox-fill-check storagebox-fill-check-manual
+kubectl -n backup-cronjobs logs -f job/storagebox-fill-check-manual
+kubectl -n backup-cronjobs delete job storagebox-fill-check-manual
+```
 
 ## Bring-up
 

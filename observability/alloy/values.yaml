@@ -78,10 +78,10 @@ alloy:
 
       // Drop noisy logs we don't need at retention scale.
       loki.process "pods" {
-        // Every entry goes to Loki AND through the janitor_metrics
-        // branch below. The branch forwards nothing, so it cannot
-        // change what Loki stores; it only derives metrics.
-        forward_to = [loki.write.default.receiver, loki.process.janitor_metrics.receiver]
+        // Every entry goes to Loki AND through the janitor_metrics and
+        // backup_metrics branches below. The branches forward nothing, so
+        // they cannot change what Loki stores; they only derive metrics.
+        forward_to = [loki.write.default.receiver, loki.process.janitor_metrics.receiver, loki.process.backup_metrics.receiver]
 
         // Drop k8s probe-noise (kubelet healthcheck pings)
         // — high volume, low signal.
@@ -232,6 +232,72 @@ alloy:
               prefix            = "janitor_"
               description       = "Wall-clock seconds the last reboot-cascade janitor run took."
               source            = "value"
+              action            = "set"
+              max_idle_duration = "1h"
+            }
+          }
+        }
+      }
+
+      // ---------- Log-derived metrics: backup-cronjobs ----------
+      //
+      // Same mechanism as janitor_metrics, for the daily Storage Box fill
+      // check (infrastructure/backup-cronjobs/storagebox-fill-check-cronjob.yaml),
+      // which prints
+      //   [metric] storagebox_df size_bytes=N used_bytes=N avail_bytes=N
+      // The alerts that read these gauges are in
+      // infrastructure/backup-cronjobs/prometheusrule-footprint.yaml.
+      //
+      // The regex ends in `\\s*$`, not `$`: loki.source.kubernetes hands
+      // each entry over WITH its trailing newline, and an RE2 `$` does not
+      // match before it. Replayed through Alloy v1.19.2 on 2026-09-11
+      // (loki.source.api, the line exactly as Loki stores it): ending in
+      // `)$` produced no series, ending in `)\\s*$` produced all three.
+      //
+      // The selector names the check's app label, so another pod in the
+      // namespace printing a similar line cannot set the gauges.
+      //
+      // max_idle_duration = "1h": a gauge only has to live until Prometheus
+      // has scraped it. The alerts read it with last_over_time(...[26h]),
+      // which carries one daily reading to the next and across an Alloy
+      // restart, while the short expiry keeps yesterday's series (possibly
+      // on another node's Alloy) from lingering beside today's.
+      loki.process "backup_metrics" {
+        forward_to = []
+
+        stage.match {
+          selector = "{namespace=\"backup-cronjobs\", app=\"storagebox-fill-check\"} |= \"[metric] storagebox_df \""
+
+          stage.regex {
+            expression = "^\\[metric\\] storagebox_df size_bytes=(?P<size>[0-9]+) used_bytes=(?P<used>[0-9]+) avail_bytes=(?P<avail>[0-9]+)\\s*$"
+          }
+
+          stage.label_drop {
+            values = ["namespace", "pod", "container", "app", "component", "job", "instance"]
+          }
+
+          stage.metrics {
+            metric.gauge {
+              name              = "size_bytes"
+              prefix            = "storagebox_"
+              description       = "Hetzner Storage Box quota size in bytes, from the daily df over SSH."
+              source            = "size"
+              action            = "set"
+              max_idle_duration = "1h"
+            }
+            metric.gauge {
+              name              = "used_bytes"
+              prefix            = "storagebox_"
+              description       = "Hetzner Storage Box bytes used, from the daily df over SSH."
+              source            = "used"
+              action            = "set"
+              max_idle_duration = "1h"
+            }
+            metric.gauge {
+              name              = "avail_bytes"
+              prefix            = "storagebox_"
+              description       = "Hetzner Storage Box bytes still available under the quota, from the daily df over SSH."
+              source            = "avail"
               action            = "set"
               max_idle_duration = "1h"
             }

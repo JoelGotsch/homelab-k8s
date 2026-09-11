@@ -12,6 +12,12 @@
 #     2026-07-16 opt-in regrouping + A5 prune; regrowth = the blanket-backup /
 #     over-retention recurrence class.
 #
+#   - minio_cluster_capacity_usable_{free,total}_bytes (same scrape) → NAS
+#     Volume 1, the HDD pool under MinIO and every crypt share.
+#   - storagebox_{size,used,avail}_bytes → the Hetzner Storage Box, from the
+#     daily storagebox-fill-check CronJob through Alloy's log-derived metrics.
+#     Tests: prometheusrule-footprint_test.yaml (promtool, pre-commit).
+#
 # NOTE (rule 35): the MinIO-bucket alerts are only as good as the scrape. The
 # NasBackupMetricsMissing rule guards the silent-failure path (rule 17: a
 # broken scrape makes the size alerts un-fireable). Failure-inject the bucket
@@ -75,12 +81,39 @@ spec:
               backup-daily's `groups`.
             runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
 
+        - alert: CNPGBackupsBucketRegrowing
+          # homelab-backups-cluster holds every CNPG base backup and WAL
+          # archive: 153 GiB by this metric on 2026-09-11, projected at about
+          # 65 GiB once the 2026-09-14 retention prunes have run. 200 GiB is
+          # past the pre-prune level, so it means the growth came back, not
+          # that the prune has yet to run.
+          expr: |
+            sum(minio_bucket_usage_total_bytes{bucket="homelab-backups-cluster"}) > 200 * 1024 * 1024 * 1024
+          for: 1h
+          labels:
+            severity: warning
+            component: backup-cronjobs
+          annotations:
+            summary: NAS homelab-backups-cluster bucket over 200 GiB
+            description: >-
+              `homelab-backups-cluster` is {{ $value | humanize1024 }}B. It was
+              153 GiB on 2026-09-11 and should settle near 65 GiB after the
+              2026-09-14 prunes, so over 200 GiB means CNPG base backups or WAL
+              are piling up again. Find the cluster whose prefix grew, then
+              check its ScheduledBackup cadence and `retentionPolicy`
+              (backup-and-dr.md §Postgres). The whole bucket is copied to the
+              Storage Box every night, so this growth lands there too.
+            runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+
         - alert: NasBackupMetricsMissing
           # rule 17 — a broken MinIO scrape makes every size alert above
-          # un-fireable (silent). Fire if the bucket metric disappears while
-          # MinIO is expected up.
+          # un-fireable (silent). Fire if a bucket metric disappears while
+          # MinIO is expected up. One absent() per bucket, joined with `or`:
+          # an absent() over a regex stays false while any one bucket reports.
           expr: |
             absent(minio_bucket_usage_total_bytes{bucket="longhorn-backups"})
+              or
+            absent(minio_bucket_usage_total_bytes{bucket="homelab-backups-cluster"})
           for: 30m
           labels:
             severity: warning
@@ -88,8 +121,158 @@ spec:
           annotations:
             summary: MinIO backup-bucket metrics absent (footprint alerts blind)
             description: >-
-              `minio_bucket_usage_total_bytes` for longhorn-backups is absent
+              `minio_bucket_usage_total_bytes` for {{ $labels.bucket }} is absent
               for 30m — the minio-on-nas ServiceMonitor scrape is broken, so the
               NAS backup-footprint alerts can't fire. Check the ServiceMonitor +
               the minio-on-nas NetworkPolicy (monitoring→9000).
+            runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+
+    # NAS Volume 1: the HDD pool (5 × 16 TB, SHR-1) under MinIO's bucket store
+    # and every crypt share. MinIO runs single-node on it, so its usable
+    # capacity is the volume's: 14.27 TiB free of 55.84 TiB on 2026-09-11
+    # (74 % used). Ratio within one series, then max: the pod and instance
+    # labels change on every MinIO restart, and dividing inside a series
+    # keeps free and total from the same scrape.
+    - name: backup-footprint.nas-capacity
+      interval: 5m
+      rules:
+        - alert: NasVolume1NearFull
+          expr: |
+            max(
+              1 - minio_cluster_capacity_usable_free_bytes{job="minio", namespace="minio-on-nas"}
+                / minio_cluster_capacity_usable_total_bytes{job="minio", namespace="minio-on-nas"}
+            ) > 0.80
+          for: 1h
+          labels:
+            severity: warning
+            component: nas-storage
+          annotations:
+            summary: NAS Volume 1 over 80 % used
+            description: >-
+              NAS Volume 1 is {{ $value | humanizePercentage }} used, as MinIO
+              reports it. Everything the cluster keeps on the NAS lives on this
+              pool: the MinIO buckets, the crypt shares, and the DSM home
+              folders beside them. Find what grew (backup-atlas.html lists the
+              shares and buckets) before the pool gets tight.
+            runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+
+        - alert: NasVolume1FillCritical
+          expr: |
+            max(
+              1 - minio_cluster_capacity_usable_free_bytes{job="minio", namespace="minio-on-nas"}
+                / minio_cluster_capacity_usable_total_bytes{job="minio", namespace="minio-on-nas"}
+            ) > 0.90
+          for: 30m
+          labels:
+            severity: critical
+            component: nas-storage
+          annotations:
+            summary: NAS Volume 1 over 90 % used
+            description: >-
+              NAS Volume 1 is {{ $value | humanizePercentage }} used. At this
+              level MinIO writes (CNPG WAL archiving, Longhorn backups) and the
+              crypt shares are close to failing on a full pool. Free space now:
+              find the share or bucket that grew and prune it.
+            runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+
+        - alert: NasCapacityMetricsMissing
+          # Same guard as NasBackupMetricsMissing, for the two capacity series.
+          expr: |
+            absent(minio_cluster_capacity_usable_total_bytes{job="minio", namespace="minio-on-nas"})
+              or
+            absent(minio_cluster_capacity_usable_free_bytes{job="minio", namespace="minio-on-nas"})
+          for: 30m
+          labels:
+            severity: warning
+            component: nas-storage
+          annotations:
+            summary: MinIO capacity metrics absent (NAS Volume 1 alerts blind)
+            description: >-
+              `minio_cluster_capacity_usable_*_bytes` has been absent for 30m,
+              so NasVolume1NearFull and NasVolume1FillCritical cannot fire.
+              Check the minio-on-nas ServiceMonitor and its NetworkPolicy
+              (monitoring→9000).
+            runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+
+    # The Hetzner Storage Box (tier 3), measured once a day at 11:05 UTC by
+    # storagebox-fill-check-cronjob.yaml. The gauges arrive through Alloy's
+    # log-derived metrics (observability/alloy/values.yaml, backup_metrics),
+    # carry the scrape labels of whichever node's Alloy saw the Job, and
+    # disappear from /metrics an hour after the run.
+    #
+    # `last_over_time((max(used) / max(size))[50h:5m])`: the subquery reads the
+    # ratio at each step where a gauge was live, and last_over_time keeps the
+    # most recent one. So the freshest reading wins (a max over separate
+    # per-day series would hold yesterday's higher number after a prune), and
+    # it survives an Alloy restart because it reads TSDB samples. 50 h is two
+    # daily runs, the same window HetznerStorageBoxFillUnmeasured uses, so
+    # when the last reading ages out of these two alerts, that one takes over.
+    #
+    # component: backup-offsite (the Storage Box's), not backup-cronjobs:
+    # HetznerOutageExplainsBackupStaleness attributes every critical with
+    # component backup-cronjobs to a Hetzner outage, and a full box is not
+    # explained by one. An unreachable box produces no reading, so it can
+    # never raise these alerts; it shows as HetznerStorageBoxUnreachable.
+    - name: backup-footprint.storagebox
+      interval: 5m
+      rules:
+        - alert: HetznerStorageBoxNearFull
+          expr: |
+            last_over_time((max(storagebox_used_bytes) / max(storagebox_size_bytes))[50h:5m]) > 0.80
+          for: 15m
+          labels:
+            severity: warning
+            component: backup-offsite
+          annotations:
+            summary: Hetzner Storage Box over 80 % of its quota
+            description: >-
+              The Storage Box is {{ $value | humanizePercentage }} used at the
+              last daily `df` (storagebox-fill-check). It is a 1 TiB quota and
+              was 86 % used when first measured on 2026-09-11. Upgrading the box
+              or shortening the cluster lane's 14/8/12/3 retention is the open
+              decision in homelab-docs TODO hl-0250. This alert is about room,
+              not about a failed backup.
+            runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+
+        - alert: HetznerStorageBoxFillCritical
+          expr: |
+            last_over_time((max(storagebox_used_bytes) / max(storagebox_size_bytes))[50h:5m]) > 0.90
+          for: 15m
+          labels:
+            severity: critical
+            component: backup-offsite
+          annotations:
+            summary: Hetzner Storage Box over 90 % of its quota
+            description: >-
+              The Storage Box is {{ $value | humanizePercentage }} used at the
+              last daily `df`. restic needs free space to write new packs,
+              during prune as well as backup, so one large night can now stop
+              both lanes. Decide homelab-docs TODO hl-0250 now: upgrade the
+              box, or shorten the cluster lane's retention and prune.
+            runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md
+
+        - alert: HetznerStorageBoxFillUnmeasured
+          # No reading for 50 h: two daily runs in a row printed nothing (ssh
+          # failing, the Alloy route broken, the CronJob gone). absent_over_time
+          # over TSDB, not absent() on the live gauge, which is missing 23 h a
+          # day by design. Gated on the blackbox probe: if the box failed its
+          # TCP probe at any point in the last two days, the gap is the
+          # outage's, and HetznerStorageBoxUnreachable has already said so.
+          expr: |
+            absent_over_time(storagebox_size_bytes[50h])
+              unless on()
+            (min(min_over_time(hsb:probe_success:min6h[2d])) == 0)
+          for: 1h
+          labels:
+            severity: warning
+            component: backup-offsite
+          annotations:
+            summary: Hetzner Storage Box fill level not measured for 50 h
+            description: >-
+              No storagebox_size_bytes sample in 50 h, while the box's TCP
+              probe stayed up, so the fill alerts are blind. Read the last
+              storagebox-fill-check Job's log in backup-cronjobs: a
+              "no measurement:" line names the ssh failure; no Job means the
+              CronJob did not run; a clean metric line with no series means
+              the Alloy backup_metrics branch did not match it.
             runbook_url: https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md

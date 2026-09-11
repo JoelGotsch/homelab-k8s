@@ -60,6 +60,21 @@ fixture scenarios 15–18 pin the lines) and the alerts live in
 deliberate: a janitor that stops running produces *absence*, which
 `JanitorNotRunning` alerts on, not a stale last value.
 
+`loki.process "backup_metrics"` is the same mechanism for the daily
+Storage Box fill check in `backup-cronjobs`:
+
+| Source line (stdout of `storagebox-fill-check`) | Series |
+|---|---|
+| `[metric] storagebox_df size_bytes=N used_bytes=N avail_bytes=N` | `storagebox_size_bytes`, `storagebox_used_bytes`, `storagebox_avail_bytes` (gauges, 1h idle expiry) |
+
+Its selector names the check's `app` label, and its regex ends in `\s*$`
+rather than `$`: `loki.source.kubernetes` passes each entry on with its
+trailing newline, and an RE2 `$` does not match before it (replayed
+through Alloy v1.19.2 on 2026-09-11). The alerts live in
+`infrastructure/backup-cronjobs/prometheusrule-footprint.yaml` and read
+the gauges through `last_over_time`, so the 1h expiry only has to outlast
+one scrape.
+
 ## Caveats
 
 1. **Alloy runs as root** for journald read access. Privileged

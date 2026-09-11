@@ -1,0 +1,274 @@
+# promtool unit tests for prometheusrule-footprint.yaml.
+#
+# Run via `scripts/check-prometheusrule-tests.sh` (pre-commit), which extracts
+# `.spec.groups` from the sibling PrometheusRule CR into `rules.yaml`.
+#
+# What these pin, beyond "the threshold is 80 %":
+#   * The Storage Box alerts take the FRESHEST reading, not the largest. Its
+#     gauges live an hour on whichever node's Alloy saw the Job, so two days
+#     can be two series; test (s4) fails if the expression becomes a max over
+#     per-series last values, which would hold a pre-prune number.
+#   * A reading carries across the 23 h a day the gauge is absent, and ages
+#     out at 50 h exactly where HetznerStorageBoxFillUnmeasured takes over (s1).
+#   * An outage of the box keeps HetznerStorageBoxFillUnmeasured quiet (s2).
+#   * NasBackupMetricsMissing names the bucket that went missing while the
+#     other one still reports (c3), the `absent()`-over-a-regex trap.
+#   * A MinIO restart (new pod label) does not break the Volume 1 ratio (n2).
+#
+# Series are 5-minute samples: `v+0x11` is twelve samples, 0 to 55 m.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 5m
+
+tests:
+  # (s1) One reading at 86 %, then nothing. Warning from the first
+  #      evaluation plus `for: 15m`; still firing at 49 h on the carried
+  #      reading; at 52h30m the reading has aged out and Unmeasured fires
+  #      (last sample 55 m + 50 h window + `for: 1h` = 51h55m).
+  - interval: 5m
+    name: "storagebox 86 % - warning, carried across the gap, then unmeasured"
+    input_series:
+      - series: 'storagebox_size_bytes{instance="10.244.5.184:12345", job="alloy"}'
+        values: "1099511627776+0x11"
+      - series: 'storagebox_used_bytes{instance="10.244.5.184:12345", job="alloy"}'
+        values: "943015854080+0x11"
+      - series: 'hsb:probe_success:min6h{instance="u609156.your-storagebox.de:23"}'
+        values: "1+0x700"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: HetznerStorageBoxNearFull
+        exp_alerts:
+          - exp_labels: { severity: warning, component: backup-offsite }
+            exp_annotations:
+              summary: "Hetzner Storage Box over 80 % of its quota"
+              description: "The Storage Box is 85.77% used at the last daily `df` (storagebox-fill-check). It is a 1 TiB quota and was 86 % used when first measured on 2026-09-11. Upgrading the box or shortening the cluster lane's 14/8/12/3 retention is the open decision in homelab-docs TODO hl-0250. This alert is about room, not about a failed backup."
+              runbook_url: "https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md"
+      - eval_time: 30m
+        alertname: HetznerStorageBoxFillCritical
+        exp_alerts: []
+      - eval_time: 49h
+        alertname: HetznerStorageBoxNearFull
+        exp_alerts:
+          - exp_labels: { severity: warning, component: backup-offsite }
+            exp_annotations:
+              summary: "Hetzner Storage Box over 80 % of its quota"
+              description: "The Storage Box is 85.77% used at the last daily `df` (storagebox-fill-check). It is a 1 TiB quota and was 86 % used when first measured on 2026-09-11. Upgrading the box or shortening the cluster lane's 14/8/12/3 retention is the open decision in homelab-docs TODO hl-0250. This alert is about room, not about a failed backup."
+              runbook_url: "https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md"
+      - eval_time: 49h
+        alertname: HetznerStorageBoxFillUnmeasured
+        exp_alerts: []
+      - eval_time: 51h
+        alertname: HetznerStorageBoxFillUnmeasured
+        exp_alerts: []
+      - eval_time: 52h30m
+        alertname: HetznerStorageBoxNearFull
+        exp_alerts: []
+      - eval_time: 52h30m
+        alertname: HetznerStorageBoxFillUnmeasured
+        exp_alerts:
+          - exp_labels: { severity: warning, component: backup-offsite }
+            exp_annotations:
+              summary: "Hetzner Storage Box fill level not measured for 50 h"
+              description: "No storagebox_size_bytes sample in 50 h, while the box's TCP probe stayed up, so the fill alerts are blind. Read the last storagebox-fill-check Job's log in backup-cronjobs: a \"no measurement:\" line names the ssh failure; no Job means the CronJob did not run; a clean metric line with no series means the Alloy backup_metrics branch did not match it."
+              runbook_url: "https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md"
+
+  # (s2) Same data, but the box failed its probe at 8h25m: the gap is the
+  #      outage's, so Unmeasured stays quiet.
+  - interval: 5m
+    name: "storagebox unmeasured during a Hetzner outage - gated"
+    input_series:
+      - series: 'storagebox_size_bytes{instance="10.244.5.184:12345", job="alloy"}'
+        values: "1099511627776+0x11"
+      - series: 'storagebox_used_bytes{instance="10.244.5.184:12345", job="alloy"}'
+        values: "943015854080+0x11"
+      - series: 'hsb:probe_success:min6h{instance="u609156.your-storagebox.de:23"}'
+        values: "1+0x100 0 1+0x600"
+    alert_rule_test:
+      - eval_time: 52h30m
+        alertname: HetznerStorageBoxFillUnmeasured
+        exp_alerts: []
+
+  # (s3) 92 %: warning and critical both (separate names, as the staging-PVC
+  #      pair in prometheusrule.yaml).
+  - interval: 5m
+    name: "storagebox 92 % - warning and critical"
+    input_series:
+      - series: 'storagebox_size_bytes{instance="10.244.5.184:12345", job="alloy"}'
+        values: "1099511627776+0x11"
+      - series: 'storagebox_used_bytes{instance="10.244.5.184:12345", job="alloy"}'
+        values: "1011550697472+0x11"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: HetznerStorageBoxNearFull
+        exp_alerts:
+          - exp_labels: { severity: warning, component: backup-offsite }
+            exp_annotations:
+              summary: "Hetzner Storage Box over 80 % of its quota"
+              description: "The Storage Box is 92% used at the last daily `df` (storagebox-fill-check). It is a 1 TiB quota and was 86 % used when first measured on 2026-09-11. Upgrading the box or shortening the cluster lane's 14/8/12/3 retention is the open decision in homelab-docs TODO hl-0250. This alert is about room, not about a failed backup."
+              runbook_url: "https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md"
+      - eval_time: 30m
+        alertname: HetznerStorageBoxFillCritical
+        exp_alerts:
+          - exp_labels: { severity: critical, component: backup-offsite }
+            exp_annotations:
+              summary: "Hetzner Storage Box over 90 % of its quota"
+              description: "The Storage Box is 92% used at the last daily `df`. restic needs free space to write new packs, during prune as well as backup, so one large night can now stop both lanes. Decide homelab-docs TODO hl-0250 now: upgrade the box, or shorten the cluster lane's retention and prune."
+              runbook_url: "https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md"
+
+  # (s4) 92 % seen by one node's Alloy, then 70 % three hours later on
+  #      another node (after a prune). The newer reading must win.
+  - interval: 5m
+    name: "storagebox freshest reading wins across Alloy instances"
+    input_series:
+      - series: 'storagebox_size_bytes{instance="10.244.5.184:12345", job="alloy"}'
+        values: "1099511627776+0x11"
+      - series: 'storagebox_used_bytes{instance="10.244.5.184:12345", job="alloy"}'
+        values: "1011550697472+0x11"
+      - series: 'storagebox_size_bytes{instance="10.244.3.218:12345", job="alloy"}'
+        values: "_x36 1099511627776+0x11"
+      - series: 'storagebox_used_bytes{instance="10.244.3.218:12345", job="alloy"}'
+        values: "_x36 769658139443+0x11"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: HetznerStorageBoxFillCritical
+        exp_alerts:
+          - exp_labels: { severity: critical, component: backup-offsite }
+            exp_annotations:
+              summary: "Hetzner Storage Box over 90 % of its quota"
+              description: "The Storage Box is 92% used at the last daily `df`. restic needs free space to write new packs, during prune as well as backup, so one large night can now stop both lanes. Decide homelab-docs TODO hl-0250 now: upgrade the box, or shorten the cluster lane's retention and prune."
+              runbook_url: "https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md"
+      - eval_time: 4h30m
+        alertname: HetznerStorageBoxFillCritical
+        exp_alerts: []
+      - eval_time: 4h30m
+        alertname: HetznerStorageBoxNearFull
+        exp_alerts: []
+
+  # (n1) Volume 1 at 74 % (2026-09-11) - silent.
+  - interval: 5m
+    name: "nas volume 1 at 74 % - silent"
+    input_series:
+      - series: 'minio_cluster_capacity_usable_free_bytes{job="minio", namespace="minio-on-nas", pod="minio-a"}'
+        values: "15685150048256+0x40"
+      - series: 'minio_cluster_capacity_usable_total_bytes{job="minio", namespace="minio-on-nas", pod="minio-a"}'
+        values: "61397374746378+0x40"
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: NasVolume1NearFull
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: NasCapacityMetricsMissing
+        exp_alerts: []
+
+  # (n2) 85 % across a MinIO restart at 1 h (new pod label): the warning
+  #      still reaches `for: 1h`; no critical.
+  - interval: 5m
+    name: "nas volume 1 at 85 % across a restart - warning"
+    input_series:
+      - series: 'minio_cluster_capacity_usable_free_bytes{job="minio", namespace="minio-on-nas", pod="minio-a"}'
+        values: "9209606211957+0x11"
+      - series: 'minio_cluster_capacity_usable_total_bytes{job="minio", namespace="minio-on-nas", pod="minio-a"}'
+        values: "61397374746378+0x11"
+      - series: 'minio_cluster_capacity_usable_free_bytes{job="minio", namespace="minio-on-nas", pod="minio-b"}'
+        values: "_x12 9209606211957+0x30"
+      - series: 'minio_cluster_capacity_usable_total_bytes{job="minio", namespace="minio-on-nas", pod="minio-b"}'
+        values: "_x12 61397374746378+0x30"
+    alert_rule_test:
+      - eval_time: 1h30m
+        alertname: NasVolume1NearFull
+        exp_alerts:
+          - exp_labels: { severity: warning, component: nas-storage }
+            exp_annotations:
+              summary: "NAS Volume 1 over 80 % used"
+              description: "NAS Volume 1 is 85% used, as MinIO reports it. Everything the cluster keeps on the NAS lives on this pool: the MinIO buckets, the crypt shares, and the DSM home folders beside them. Find what grew (backup-atlas.html lists the shares and buckets) before the pool gets tight."
+              runbook_url: "https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md"
+      - eval_time: 1h30m
+        alertname: NasVolume1FillCritical
+        exp_alerts: []
+
+  # (n3) 92 %: critical after `for: 30m`.
+  - interval: 5m
+    name: "nas volume 1 at 92 % - critical"
+    input_series:
+      - series: 'minio_cluster_capacity_usable_free_bytes{job="minio", namespace="minio-on-nas", pod="minio-a"}'
+        values: "4911789979710+0x20"
+      - series: 'minio_cluster_capacity_usable_total_bytes{job="minio", namespace="minio-on-nas", pod="minio-a"}'
+        values: "61397374746378+0x20"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: NasVolume1FillCritical
+        exp_alerts:
+          - exp_labels: { severity: critical, component: nas-storage }
+            exp_annotations:
+              summary: "NAS Volume 1 over 90 % used"
+              description: "NAS Volume 1 is 92% used. At this level MinIO writes (CNPG WAL archiving, Longhorn backups) and the crypt shares are close to failing on a full pool. Free space now: find the share or bucket that grew and prune it."
+              runbook_url: "https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md"
+
+  # (n4) Scrape up for buckets but no capacity series - the guard fires.
+  - interval: 5m
+    name: "capacity series absent - guard fires"
+    input_series:
+      - series: 'minio_bucket_usage_total_bytes{bucket="longhorn-backups", job="minio", namespace="minio-on-nas"}'
+        values: "21474836480+0x20"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: NasCapacityMetricsMissing
+        exp_alerts:
+          - exp_labels: { severity: warning, component: nas-storage, job: minio, namespace: minio-on-nas }
+            exp_annotations:
+              summary: "MinIO capacity metrics absent (NAS Volume 1 alerts blind)"
+              description: "`minio_cluster_capacity_usable_*_bytes` has been absent for 30m, so NasVolume1NearFull and NasVolume1FillCritical cannot fire. Check the minio-on-nas ServiceMonitor and its NetworkPolicy (monitoring→9000)."
+              runbook_url: "https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md"
+
+  # (c1) CNPG bucket at 153 GiB (2026-09-11) - silent; both buckets reporting.
+  - interval: 5m
+    name: "cnpg bucket at 153 GiB - silent"
+    input_series:
+      - series: 'minio_bucket_usage_total_bytes{bucket="homelab-backups-cluster", job="minio", namespace="minio-on-nas"}'
+        values: "164282499072+0x40"
+      - series: 'minio_bucket_usage_total_bytes{bucket="longhorn-backups", job="minio", namespace="minio-on-nas"}'
+        values: "21474836480+0x40"
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: CNPGBackupsBucketRegrowing
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: NasBackupMetricsMissing
+        exp_alerts: []
+
+  # (c2) 210 GiB - warning after `for: 1h`.
+  - interval: 5m
+    name: "cnpg bucket at 210 GiB - warning"
+    input_series:
+      - series: 'minio_bucket_usage_total_bytes{bucket="homelab-backups-cluster", job="minio", namespace="minio-on-nas"}'
+        values: "225485783040+0x30"
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: CNPGBackupsBucketRegrowing
+        exp_alerts: []
+      - eval_time: 1h30m
+        alertname: CNPGBackupsBucketRegrowing
+        exp_alerts:
+          - exp_labels: { severity: warning, component: backup-cronjobs }
+            exp_annotations:
+              summary: "NAS homelab-backups-cluster bucket over 200 GiB"
+              description: "`homelab-backups-cluster` is 210GiB. It was 153 GiB on 2026-09-11 and should settle near 65 GiB after the 2026-09-14 prunes, so over 200 GiB means CNPG base backups or WAL are piling up again. Find the cluster whose prefix grew, then check its ScheduledBackup cadence and `retentionPolicy` (backup-and-dr.md §Postgres). The whole bucket is copied to the Storage Box every night, so this growth lands there too."
+              runbook_url: "https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md"
+
+  # (c3) longhorn-backups reports, homelab-backups-cluster does not: the
+  #      guard fires and names the missing bucket.
+  - interval: 5m
+    name: "one bucket series missing - guard names it"
+    input_series:
+      - series: 'minio_bucket_usage_total_bytes{bucket="longhorn-backups", job="minio", namespace="minio-on-nas"}'
+        values: "21474836480+0x20"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: NasBackupMetricsMissing
+        exp_alerts:
+          - exp_labels: { severity: warning, component: backup-cronjobs, bucket: homelab-backups-cluster }
+            exp_annotations:
+              summary: "MinIO backup-bucket metrics absent (footprint alerts blind)"
+              description: "`minio_bucket_usage_total_bytes` for homelab-backups-cluster is absent for 30m — the minio-on-nas ServiceMonitor scrape is broken, so the NAS backup-footprint alerts can't fire. Check the ServiceMonitor + the minio-on-nas NetworkPolicy (monitoring→9000)."
+              runbook_url: "https://github.com/OPERATOR_GITHUB_USER/homelab-k8s/blob/main/infrastructure/backup-cronjobs/README.md"
