@@ -71,6 +71,20 @@ defaultSettings:
   # would strand real data. It only releases volumes nothing is using,
   # on a node the operator has already cordoned. Keep both keys.
   detachManuallyAttachedVolumesWhenCordoned: true
+  # Orphaned replica data and engine/replica instances are deleted
+  # automatically once they have been orphaned for the grace period
+  # (default 300 s, left unset). Accepted items in 1.12.1:
+  # `replica-data`, `instance`; this pair is also the upstream default.
+  # The live value was EMPTY (auto-deletion off), and on 2026-09-11
+  # 244 stale replica directories plus 157 stale engine instances had
+  # piled up since 2026-07-20: ≈684 GiB on worker2 and ≈344 GiB on
+  # worker1, invisible to Longhorn's scheduled-capacity figures
+  # (measured as kubelet node.fs.usedBytes minus live actualSize,
+  # images and pod scratch; homelab-docs TODO hl-0251). 232 of those
+  # directories belonged to volumes that still exist, left behind when
+  # a replica was rebuilt elsewhere. Longhorn does not clean orphans on
+  # nodes that are down or unknown.
+  orphanResourceAutoDeletion: "replica-data;instance"
 
 # Backup target: MinIO-on-NAS `longhorn-backups` bucket per
 # ADR 0016 D4 + ADR 0006 (warm tier). Restic CronJob at
