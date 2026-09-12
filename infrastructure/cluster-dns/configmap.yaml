@@ -62,6 +62,13 @@ data:
     ns      IN A 10.10.30.50
     @       IN A 10.10.30.50
     *       IN A 10.10.30.50
+    ; Must be explicit: the wildcard above answers 10.10.30.50, the Gateway VIP,
+    ; which serves 80/443 only and cannot carry git over SSH. .51 is the
+    ; forgejo-ssh LoadBalancer VIP (statically pinned via lbipam.cilium.io/ips).
+    ; Unbound on flint3 already serves this name; CoreDNS did not, so which
+    ; answer a client got depended on which resolver it picked (measured
+    ; 2026-09-12: @10.10.30.53 -> .50 10/10, @10.10.20.1 -> .51 10/10).
+    ssh.forgejo IN A 10.10.30.51
     cluster IN A 10.10.30.10
     cp1     IN A 10.10.30.11
     cp2     IN A 10.10.30.12
