@@ -31,7 +31,7 @@ Per ADR 0023 D5 + D6 + D8 + D9.
 | `externalsecret.yaml` | `kv/woodpecker/oauth` (Forgejo OAuth client) + `kv/woodpecker/agent-token` (per-agent registration token, seeded post-bring-up via the Woodpecker UI). |
 | `httproute.yaml` | Cilium HTTPRoute for `woodpecker.lab.<HOMELAB-DOMAIN>`; Tailscale-only. |
 | `networkpolicy.yaml` | Server, agent, and ci-woodpecker default-deny + curated egress (FQDN-aware CCNP for upstream registries). |
-| `servicemonitor.yaml` | Prometheus scrape of server `/metrics`. |
+| `podmonitor.yaml` | Prometheus scrape of the server's dedicated `:9001` metrics listener. Replaced `servicemonitor.yaml` 2026-09-12, whose selector named labels the chart never renders — zero targets for 111 days. |
 
 ## OpenBao paths to seed
 

@@ -11,6 +11,18 @@
 
 # Server: ingress from Cilium Gateway (UI) + Forgejo
 # (webhooks). Egress: kube-DNS + Forgejo + agent grpc.
+#
+# INERT SINCE DAY ONE (found 2026-09-12): this policy and woodpecker-agent
+# below select `app.kubernetes.io/name: woodpecker` + `component`, labels the
+# chart never renders — it emits name=server|agent + instance=woodpecker — and
+# `kubectl get cep -n woodpecker` shows ingress/egress enforcing <none> on both
+# pods. They have run default-allow throughout. Correcting the two selectors
+# would enforce, for the first time, rule sets never observed under audit, and
+# the server's egress already lacks the Gateway-routed Forgejo FQDN it clones
+# and OAuths through — so that is an attended PolicyAuditMode rollout (TODO
+# hl-0291, same method as forgejo-pg-cnpg), not a label fix. Until then the
+# two are reasoned exemptions in scripts/selector-exemptions.yaml, and the
+# rule set is kept correct for the day it is enforced (the 9001 scrape rule).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -47,6 +59,15 @@ spec:
       toPorts:
         - ports:
             - port: "9000"
+              protocol: TCP
+    # Prometheus scrape of the dedicated metrics listener (podmonitor.yaml).
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: prometheus
+      toPorts:
+        - ports:
+            - port: "9001"
               protocol: TCP
   egress:
     # kube-DNS.

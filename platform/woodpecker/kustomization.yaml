@@ -27,7 +27,7 @@ resources:
   - externalsecret.yaml
   - httproute.yaml
   - networkpolicy.yaml
-  - servicemonitor.yaml
+  - podmonitor.yaml
 
 # ADR 0036 deferred here: the shared first-party-namespace
 # component assumes a single target namespace, but this

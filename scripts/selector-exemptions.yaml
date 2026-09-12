@@ -1,0 +1,93 @@
+# Reasoned exemptions for scripts/check-selectors-match-render.py.
+#
+# Each entry names ONE authored selector that the check would otherwise fail,
+# with the reason it is allowed to stay and who owns removing it. The check
+# fails on an entry whose selector no longer fails ("stale exemption"), so a
+# fix cannot leave its excuse behind. Two kinds of entry exist and the reason
+# must say which:
+#
+#   model gap  — the selector is right; the pods it names are created at
+#                runtime by an operator and appear in no render.
+#   inert      — the selector is wrong and selects nothing on the live
+#                cluster; it stays only because correcting it is an
+#                attended change (a policy that would enforce for the first
+#                time) or belongs to a separate fix. Every inert entry cites
+#                the TODO row that owns it.
+exemptions:
+  - layer: platform/woodpecker
+    kind: CiliumNetworkPolicy
+    name: woodpecker-server
+    reason: >-
+      inert — the chart renders app.kubernetes.io/name=server +
+      instance=woodpecker, not name=woodpecker + component=server; live
+      CiliumEndpoint shows enforcing <none>. Correcting the selector enforces a
+      rule set never observed under audit, and the server's egress lacks the
+      Gateway-routed Forgejo FQDN it clones through — attended
+      PolicyAuditMode rollout.
+    owner: TODO hl-0291
+  - layer: platform/woodpecker
+    kind: CiliumNetworkPolicy
+    name: woodpecker-agent
+    reason: >-
+      inert — same label mismatch as woodpecker-server (chart renders
+      name=agent + instance=woodpecker); enforcing <none> on the live
+      endpoint. Same attended rollout.
+    owner: TODO hl-0291
+  - layer: infrastructure/trivy-operator
+    kind: CiliumNetworkPolicy
+    name: trivy-scanjobs-egress-fqdn
+    reason: >-
+      model gap — scan Job pods are created at runtime by trivy-operator and
+      carry app.kubernetes.io/managed-by=trivy-operator; no render contains
+      them.
+    owner: check-selectors-match-render.py (extend the operator model if a
+      rendered CR ever declares these pods)
+  - layer: infrastructure/trivy-operator
+    kind: NetworkPolicy
+    name: trivy-operator-scanjobs
+    reason: >-
+      model gap — same runtime-created scan Job pods as
+      trivy-scanjobs-egress-fqdn.
+    owner: check-selectors-match-render.py
+  - layer: observability/crowdsec
+    kind: ServiceMonitor
+    name: crowdsec-agent
+    reason: >-
+      inert — selects app.kubernetes.io/component=agent; the only agent
+      Service (crowdsec-agent-service) carries app=crowdsec-agent-service.
+      Prometheus has no crowdsec target (verified 2026-09-12). Found by this
+      check's first run; the fix needs the Service's metrics port name
+      confirmed and is a separate change.
+    owner: TODO hl-0292
+  - layer: observability/crowdsec
+    kind: ServiceMonitor
+    name: crowdsec-lapi
+    reason: >-
+      inert — selects app.kubernetes.io/component=lapi; no Service in the
+      namespace carries it (the crowdsec-lapi-* Services are CNPG's).
+      Separate fix with crowdsec-agent.
+    owner: TODO hl-0292
+  - layer: observability/langfuse
+    kind: ServiceMonitor
+    name: langfuse-web
+    reason: >-
+      inert — selects app.kubernetes.io/name=langfuse + component=web; no
+      rendered or live Service carries both. Prometheus has no langfuse
+      target (verified 2026-09-12). Separate fix.
+    owner: TODO hl-0292
+  - layer: observability/langfuse
+    kind: ServiceMonitor
+    name: langfuse-worker
+    reason: >-
+      inert — as langfuse-web, with component=worker.
+    owner: TODO hl-0292
+  - layer: infrastructure/clickhouse-operator
+    kind: NetworkPolicy
+    name: clickhouse-operator
+    reason: >-
+      inert — podSelector app=clickhouse-operator; the live operator pod
+      carries app.kubernetes.io/name=altinity-clickhouse-operator +
+      instance=clickhouse-operator and no `app` label, so the policy has
+      never selected it. Correcting it changes what the pod may do — assess
+      as a policy change, not a label fix.
+    owner: TODO hl-0292

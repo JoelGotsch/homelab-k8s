@@ -101,6 +101,16 @@ repos:
         pass_filenames: false
         files: '^(platform/woodpecker/networkpolicy\.yaml|scripts/check-woodpecker-app-egress\.py)$'
 
+      - id: check-selectors-match-render
+        name: every authored selector (monitors, NetworkPolicy, CNP) selects something a render carries
+        entry: python3 scripts/check-selectors-match-render.py
+        language: python
+        additional_dependencies: [PyYAML==6.0.2]
+        pass_filenames: false
+        # Renders every layer (~25 s). Fires on anything that can move a label
+        # or a selector: manifests, values, chart pins, the check, its exemptions.
+        files: '^(infrastructure|platform|observability)/[^/]+/[^/]+\.ya?ml$|^scripts/(check-selectors-match-render\.py|selector-exemptions\.yaml)$'
+
       - id: check-openbao-snapshot-auth
         name: OpenBao snapshot auth is short-lived, scoped, and static-token-free
         entry: scripts/check-openbao-snapshot-auth.sh

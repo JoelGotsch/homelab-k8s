@@ -103,6 +103,18 @@ server:
     # Stopgap until the Postgres cutover (cnpg-cluster.yaml) retires SQLite.
     WOODPECKER_DATABASE_DATASOURCE: "/var/lib/woodpecker/woodpecker.db?_journal_mode=WAL&_busy_timeout=10000&_txlock=immediate"
 
+  # Dedicated metrics listener (2026-09-12). WOODPECKER_METRICS_SERVER_ADDR
+  # starts a second HTTP server that serves only /metrics (cmd/server/server.go
+  # v3.18.1), so scraping never touches the :8000 UI/API listener the Gateway
+  # publishes. podmonitor.yaml scrapes this port on the pod. The chart's own
+  # PodMonitor template is gated on
+  # `.Capabilities.APIVersions.Has "monitoring.coreos.com/v1"`, which a
+  # kustomize `helm template` render never has, so it would render nothing —
+  # hence the hand-written monitor.
+  metrics:
+    enabled: true
+    port: 9001
+
   # Extra env from Secrets. The chart's key is extraSecretNamesForEnvFrom
   # (a list of secret NAMES), NOT `envFrom` — the woodpecker statefulset
   # template only reads the former, so the previous envFrom block was

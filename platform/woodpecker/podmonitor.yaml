@@ -1,0 +1,33 @@
+# Prometheus scrape of woodpecker-server. A PodMonitor, hand-written:
+#
+# - The servicemonitor.yaml this replaces selected
+#   app.kubernetes.io/name=woodpecker + app.kubernetes.io/component=server —
+#   labels the chart never renders (it emits name=server, instance=woodpecker).
+#   For 111 days Prometheus had zero Woodpecker targets, and the 2026-09-12
+#   `database is locked` incident ran for days with nothing to alert on.
+#   The selector below is asserted against a render of this layer by
+#   scripts/check-selectors-match-render.py.
+# - The chart's own PodMonitor template is gated on
+#   `.Capabilities.APIVersions.Has "monitoring.coreos.com/v1"`, which a
+#   kustomize `helm template` render never has, so it renders nothing.
+# - A ServiceMonitor would match both woodpecker-server and
+#   woodpecker-server-headless (same labels) and scrape the pod twice.
+#
+# `release: kube-prometheus-stack` is what the Prometheus CR's
+# podMonitorSelector requires; without it a monitor is created and never read.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: woodpecker-server
+  namespace: woodpecker
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: server
+      app.kubernetes.io/instance: woodpecker
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 60s
