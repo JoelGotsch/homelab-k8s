@@ -158,6 +158,13 @@ server:
   updateStrategy:
     type: OnDelete
 
+  # MAINTENANCE (cutover step b, 2026-09-12): 0 replicas closes the SQLite
+  # file so homelab-infra/scripts/migrate-woodpecker-sqlite-to-postgres.sh
+  # can mount the claim. Step d sets this back to 1. Replicas are Argo-owned;
+  # this commit is the quiesce, never `kubectl scale`.
+  statefulSet:
+    replicaCount: 0
+
   service:
     type: ClusterIP
     port: 80
