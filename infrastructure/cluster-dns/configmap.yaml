@@ -57,7 +57,21 @@ data:
   # (more specific) win per RFC 4592.
   db.zone: |
     $TTL 60
-    @   IN SOA ns hostmaster ( 1 7200 3600 1209600 60 )
+    ; BUMP THE SERIAL (the first number below) ON EVERY EDIT TO THIS ZONE.
+    ; CoreDNS's `file` plugin re-reads a zone only when the SOA serial
+    ; INCREASES -- it polls every minute by default, and an unchanged serial
+    ; means it keeps serving the copy it parsed at start-up. The `reload`
+    ; directive in the server block above watches the COREFILE, not this zone
+    ; (upstream: "To enable automatic reloading of zone file changes, use the
+    ; auto plugin"), so nothing else will catch it.
+    ;
+    ; A zone edited without a serial bump is applied everywhere and served
+    ; nowhere: Argo reports Synced/Healthy, the ConfigMap really does carry the
+    ; new record, the file really does reach the pod, no error is logged, and
+    ; CoreDNS answers from the old zone with the authoritative-answer bit set.
+    ; That is exactly what happened to ssh.forgejo on 2026-09-12 (serial left at
+    ; 1), which looked like a successful deploy for as long as nobody dug.
+    @   IN SOA ns hostmaster ( 2 7200 3600 1209600 60 )
     @   IN NS  ns
     ns      IN A 10.10.30.50
     @       IN A 10.10.30.50
