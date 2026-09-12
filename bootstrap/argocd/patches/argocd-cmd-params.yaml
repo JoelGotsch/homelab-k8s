@@ -32,12 +32,4 @@ data:
   # Logs in JSON for Loki ingestion (per ADR 0021).
   server.log.format: "json"
   controller.log.format: "json"
-
-  # TEMPORARY — hl-0281 payload capture, 2026-09-12. Raises the application
-  # controller to debug so the server-side-apply payload it actually submits
-  # is logged. A ClusterPolicy change confined to `preconditions` has never
-  # landed; every read-only instrument is exhausted and the payload is the
-  # one thing nobody has seen. LOUD: ~70 Applications reconcile continuously
-  # and this lands in Loki. REVERT as soon as the capture completes.
-  controller.log.level: "debug"
   reposerver.log.format: "json"
