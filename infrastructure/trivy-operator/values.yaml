@@ -161,7 +161,7 @@ trivy:
   # 2026-10-13. When Renovate bumps an image, re-check whether its
   # accepted IDs still apply and prune stale ones. 2026-07-14.
   ignoreFile: |
-    # --- Go stdlib (argocd v3.4.5 + dex v2.45.0; no rebuild on the
+    # --- Go stdlib (argocd v3.4.8 + dex v2.45.0; no rebuild on the
     #     pinned tag — maintainer's latest still ships them) ---
     CVE-2023-24538
     CVE-2023-24540
