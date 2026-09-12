@@ -64,6 +64,27 @@ resources:
   # would require background-controller PVC/update RBAC we haven't
   # granted):
   - policies/homelab-mutate-openbao-pvc-retention.yaml
+  # ADOPTED 2026-09-12 (hl-0282). This policy has been in git since 9c928dd
+  # (2026-06-04) and referenced by nothing, so Argo never rendered it and the
+  # live object was hand-applied — `managedFields` showed
+  # `kubectl-client-side-apply` + `kyverno` and no `argocd-controller`. It is a
+  # MUTATE, so it was changing admission on every matching pod from outside
+  # git. Adoption is behaviour-neutral: live-vs-file `spec` differs only in
+  # Kyverno-defaulted fields (`admission`, `emitWarning`,
+  # `skipBackgroundRequests`, `validationFailureAction`).
+  #
+  # Do NOT delete it as obsolete. Verified firing 2026-09-12 by server dry-run:
+  # a pod in ci-woodpecker is admitted with
+  # `{"options":[{"name":"ndots","value":"1"}]}` and the identical pod in
+  # `default` gets no dnsConfig at all. The namespace had zero pods at the
+  # time — absence of pods is not absence of effect.
+  #
+  # It compensates for the DNS search-list trap (ADR 0061 D2 / hl-0016): all
+  # six nodes currently read `search: homelab.internal`, but that value lives
+  # in the PLATFORM layer (`talosctl get resolverspecs`), i.e. the DHCP lease,
+  # so it is one renewal from changing. Retire this only when D2 makes the
+  # resolver declared rather than leased.
+  - policies/ci-woodpecker-dns-ndots.yaml
 
 # site-config: build-only ConfigMap for the imageReferences replacement below
 # (ADR 0045). Marked local-config, so it is used for substitution and never
