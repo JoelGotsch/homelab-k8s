@@ -89,6 +89,14 @@ spec:
         - ports:
             - port: "3000"
               protocol: TCP
+    # woodpecker-pg (CNPG) — the server's datastore since 2026-09-12.
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: woodpecker-pg
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
 ---
 # Agent: ingress only from server (grpc). Egress: kube-DNS +
 # server + kube-API (to manage step Pods in ci-woodpecker).
@@ -467,4 +475,108 @@ spec:
             - port: "443"
               protocol: TCP
             - port: "80"
+              protocol: TCP
+---
+# CNPG DB-pod lockdown for woodpecker-pg (2026-09-12), the forgejo-pg-cnpg
+# quad verbatim with the names swapped — that policy went through the
+# attended PolicyAuditMode rollout on 2026-07-17 and the barman-plugin
+# migration on 2026-08-15, so this rule set is the observed one, not a
+# guess. Unlike the server and agent policies above, this one selects pods
+# that exist (`cnpg.io/cluster` is what CNPG stamps) and enforces from the
+# cluster's first pod; `hubble observe -n woodpecker --verdict DROPPED` is
+# the post-apply check, and the barman lane proof is
+# scripts/verify-cnpg-backup-lane.sh woodpecker woodpecker-pg woodpecker.
+#
+# The quad (netpol-best-practices.md checklist E):
+#   ingress  cnpg-system  -> 8000 (instance manager/status) + 9187 (metrics)
+#   ingress  monitoring   -> 9187 (Prometheus scrape)
+#   ingress  in-ns client -> 5432 (Postgres) + peer 5432 (replication)
+#   egress   kube-apiserver 443 AND 6443 (socket-LB pre-translation)
+#   egress   kube-dns 53 UDP+TCP
+#   egress   minio-on-nas 9000 (barman WAL/base-backup archiving)
+#   egress   peer cnpg.io/cluster 5432 + 8000 (replication + coordination)
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: woodpecker-pg-cnpg
+  namespace: woodpecker
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: woodpecker-pg
+  ingress:
+    # CNPG operator (cnpg-system) — instance-manager status :8000 + metrics.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: cnpg-system
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+            - port: "9187"
+              protocol: TCP
+    # Prometheus scrape of the CNPG metrics exporter.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "9187"
+              protocol: TCP
+    # In-namespace clients (the server, the one-off migration Job) +
+    # streaming replication between instances — both hit pod port 5432.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: woodpecker
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    # Peer instance-manager coordination on :8000 (instance->instance).
+    - fromEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: woodpecker-pg
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+  egress:
+    # kube-apiserver — instance manager reads its Cluster CR. BOTH 443 and
+    # 6443 (socket-LB DNATs ClusterIP:443 -> :6443 before policy eval).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # kube-dns.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # MinIO (minio-on-nas) — barman WAL + base-backup archiving.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: minio-on-nas
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+    # Peer instance: streaming replication on 5432 + coordination on 8000.
+    - toEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: woodpecker-pg
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8000"
               protocol: TCP

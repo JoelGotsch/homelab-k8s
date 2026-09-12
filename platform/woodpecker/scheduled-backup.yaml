@@ -1,0 +1,26 @@
+# Nightly CNPG base backup for woodpecker-pg (2026-09-12). Without one the
+# only base backups are operator-triggered one-shots and the recoverability
+# point ages indefinitely while WAL keeps shipping (forgejo-pg, 2026-07-22).
+# The ObjectStore's retentionPolicy (30d) prunes old bases.
+#
+# schedule is the CNPG 6-field cron (seconds first, UTC). 03:10 UTC is a
+# free slot: the fleet's nightly bases run 00:00–02:50 and the two weekly
+# ones at 01:40 Sun and 03:47 Sun. Woodpecker's own Renovate storm is
+# 03:00–04:00 UTC on Saturdays; a base backup of a ~2 GiB database beside it
+# is fine, and it must not share a minute with another cluster's on MinIO.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: woodpecker-pg-daily
+  namespace: woodpecker
+spec:
+  schedule: "0 10 3 * * *"
+  backupOwnerReference: self
+  immediate: true
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+  # Unset would silently move base backups onto the primary.
+  target: prefer-standby
+  cluster:
+    name: woodpecker-pg

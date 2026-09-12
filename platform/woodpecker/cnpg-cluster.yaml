@@ -1,0 +1,75 @@
+# CNPG Postgres cluster for the Woodpecker server. Replaces the SQLite file
+# on data-woodpecker-server-0 (2026-09-12); same shape as forgejo-pg, the
+# platform-tier reference.
+#
+# Why: README caveat #1 said "switch to CNPG if churn grows", and it did —
+# 324 pipelines in the 72 h to 2026-09-12, 98 of them in the two hours after
+# the Saturday Renovate run. Woodpecker hands the datasource to
+# mattn/go-sqlite3 untouched (no WAL, no busy timeout, xorm pool of 100) on
+# a Longhorn block device; the server logged `database is locked` 22 times
+# in 11 h and every lease renewal that lost the race cost a running pipeline
+# (three killed that night, one of them 33 minutes in with 3 of 4 test shards
+# green). The WAL/busy-timeout DSN suffix in values.yaml is the stopgap; a
+# multi-writer store is the fix.
+#
+# Service exposed: woodpecker-pg-rw.woodpecker.svc:5432. The server reads
+# WOODPECKER_DATABASE_DATASOURCE straight from the CNPG-issued
+# woodpecker-pg-app Secret's `uri` key (vaultwarden pattern) — no copy of the
+# password in OpenBao.
+#
+# No spec.monitoring.enablePodMonitor: the field is deprecated in CNPG 1.30
+# and the cluster-wide cnpg-system/cnpg-instances PodMonitor already scrapes
+# every instance pod in every namespace (lessons.md, CloudNativePG).
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: woodpecker-pg
+  namespace: woodpecker
+spec:
+  instances: 2
+  # Same pin as the fleet: latest patched 17.x, Debian-12 base
+  # (known-caveats: CNPG base-layer CVEs clear only with a new upstream image).
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.6-bookworm
+
+  # `no-snapshot` joins infrastructure/longhorn/recurring-jobs.yaml's group
+  # that takes no Longhorn snapshots: Barman base + WAL archive give PITR and
+  # the standby covers a lost volume; an hourly snapshot of PGDATA only pins
+  # the pages Postgres rewrote. The retention annotation satisfies Kyverno's
+  # homelab-disallow-retain-reclaim-without-annotation on the child PVCs.
+  inheritedMetadata:
+    labels:
+      recurring-job-group.longhorn.io/no-snapshot: "enabled"
+    annotations:
+      retention.homelab.internal/reason: "Woodpecker DB — repos, per-agent tokens, repo secrets, pipeline history; the CI engine's state."
+
+  storage:
+    # The SQLite file it replaces is 1.5 GiB with 111 days of pipeline logs
+    # (log_entries is the bulk). 10Gi leaves room for several years of the
+    # same; expand later rather than over-promise Longhorn now (ADR 0067).
+    size: 10Gi
+    storageClass: longhorn-replica3-retain
+
+  postgresql:
+    parameters:
+      # Fleet-wide since 2026-09-11 (see forgejo-pg): lz4 full-page-image
+      # compression; reload-only.
+      wal_compression: lz4
+      max_connections: "100"
+      shared_buffers: "128MB"
+
+  bootstrap:
+    initdb:
+      database: woodpecker
+      owner: woodpecker
+
+  # Backup: WAL + base to MinIO-on-NAS through the Barman Cloud plugin;
+  # target, credentials and retention live in objectstore.yaml. Restic
+  # mirrors the bucket to tier-2/3 per ADR 0006. Woodpecker's data is
+  # `internal`-class (ADR 0003): repo secrets it holds are CI credentials
+  # already classed with the repos that use them.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: woodpecker-pg-backups

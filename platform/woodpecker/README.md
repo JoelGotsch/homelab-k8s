@@ -26,9 +26,12 @@ Per ADR 0023 D5 + D6 + D8 + D9.
 | `namespace.yaml` | `woodpecker` (control plane) + `ci-woodpecker` (step Pods); both PSA restricted. |
 | `kustomization.yaml` | Helm chart 3.6.5; resources below. |
 | `values.yaml` | Server + agent config. SQLite DB on Longhorn; Forgejo OAuth integration; Kubernetes backend (step Pods spawn in `ci-woodpecker`). |
+| `cnpg-cluster.yaml` | `woodpecker-pg` CNPG Postgres (2 instances, `longhorn-replica3-retain`), the server's datastore since 2026-09-12 — see Caveats #1. |
+| `objectstore.yaml` | Barman Cloud ObjectStore: WAL + base backups to `s3://homelab-backups-cluster/cnpg/woodpecker`, 30d retention. |
+| `scheduled-backup.yaml` | Nightly base backup of `woodpecker-pg` at 03:10 UTC. |
 | `rbac.yaml` | Cross-ns Role + RoleBinding so the agent's SA can manage step Pods in `ci-woodpecker`. Step-Pod SA has no kube-API access. |
 | `quota.yaml` | ResourceQuota + LimitRange on `ci-woodpecker` (per ADR 0023 D5). |
-| `externalsecret.yaml` | `kv/woodpecker/oauth` (Forgejo OAuth client) + `kv/woodpecker/agent-token` (per-agent registration token, seeded post-bring-up via the Woodpecker UI). |
+| `externalsecret.yaml` | `kv/woodpecker/oauth` (Forgejo OAuth client) + `kv/woodpecker/agent-token` (per-agent registration token, seeded post-bring-up via the Woodpecker UI) + `kv/cnpg/woodpecker/s3-creds` (barman lane). |
 | `httproute.yaml` | Cilium HTTPRoute for `woodpecker.lab.<HOMELAB-DOMAIN>`; Tailscale-only. |
 | `networkpolicy.yaml` | Server, agent, and ci-woodpecker default-deny + curated egress (FQDN-aware CCNP for upstream registries). |
 | `podmonitor.yaml` | Prometheus scrape of the server's dedicated `:9001` metrics listener. Replaced `servicemonitor.yaml` 2026-09-12, whose selector named labels the chart never renders — zero targets for 111 days. |
@@ -42,6 +45,7 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 | `kv/data/woodpecker/oauth` | `client_id`, `client_secret` | From Forgejo — operator creates the OAuth2 application in Forgejo (Settings → Applications → OAuth2 Applications → Create), then copies values. |
 | `kv/data/woodpecker/agent-secret` | `token` | Server-side shared "system" agent secret (`WOODPECKER_AGENT_SECRET`). Random, script-seeded: `seed-random-secret.sh kv/woodpecker/agent-secret token`. Pinned 2026-08-16 so the chart stops minting a new one per render (`server.createAgentSecret: false`). Only gates system-token registration of new agents; rotation = re-seed `--force`, refresh the ExternalSecret, delete the server pod (OnDelete) in a no-CI window. |
 | `kv/data/woodpecker/agent-token` | `token` | Per-agent token — operator-filled after the server is up: Woodpecker UI → Settings → Agents → agent detail → token (ADR 0046 manual mint; rotated end-to-end 2026-07-29). Projected as `WOODPECKER_AGENT_TOKEN` + `WOODPECKER_AGENT_SECRET` on the agent. |
+| `kv/data/cnpg/woodpecker/s3-creds` | `access_key_id`, `secret_access_key` | MinIO svc-account scoped to `homelab-backups-cluster/cnpg/woodpecker/`, minted by `homelab-infra/scripts/setup-minio-buckets.sh` from the `cnpg-woodpecker` lane. Standard CNPG-app pattern; consumed by `objectstore.yaml` via the `woodpecker-cnpg-s3` Secret. |
 
 **First-install seed:**
 
@@ -121,15 +125,25 @@ steps:
 
 ## Caveats
 
-1. **SQLite DB on Longhorn** — Woodpecker's job state DB is
-   not CNPG-backed; it's per-pod SQLite on a Longhorn PVC.
-   ADR 0036 requires the small build-history volume to use a
-   Retain-policy class. Source still selects `longhorn-replica2`
-   until the attended KST-03 claim migration; the retention
-   contract records this as a known mismatch. Tier-1 Longhorn
-   snapshots exist, but no independent tier-3 membership is
-   currently declared. If churn grows, switch to CNPG via
-   `WOODPECKER_DATABASE_DRIVER=postgres`.
+1. **Postgres on CNPG since 2026-09-12; the SQLite claim is retired but kept.**
+   The server's datastore is `woodpecker-pg` (`cnpg-cluster.yaml`, 2 instances,
+   `longhorn-replica3-retain`, barman WAL + nightly base to MinIO — the same
+   shape as `forgejo-pg`). `WOODPECKER_DATABASE_DATASOURCE` is read straight
+   from the CNPG-issued `woodpecker-pg-app` Secret's `uri` key; no copy of the
+   password lives in OpenBao. The trigger was the one this caveat used to name
+   ("if churn grows"): 324 pipelines in 72 h, `database is locked` 22× in 11 h
+   on the plain-SQLite DSN, and every lease renewal that lost the lock race
+   killed a running pipeline (`homelab/todo-agents` #114, 2026-09-12; the
+   root-cause write-up is the journal entry of that date).
+
+   `data-woodpecker-server-0` (the 1.5 GiB SQLite file on `longhorn-replica2`)
+   is still mounted and still in the retention contract as `woodpecker-sqlite`;
+   it is the rollback (`git revert` the driver-switch commit — the file was
+   never modified after the cutover). Releasing it — dropping the chart's
+   `server.persistentVolume` and the contract entry — is a follow-up after the
+   first restore test of `woodpecker-pg` passes, not a cleanup to do in
+   passing. The migration itself was one pgloader Job,
+   `homelab-infra/scripts/migrate-woodpecker-sqlite-to-postgres.sh`.
 
    The separate agent `agent-config` claim contains only reconstructable
    configuration. Its live StatefulSet template predates the explicit storage

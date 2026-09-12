@@ -1,0 +1,47 @@
+# Barman Cloud ObjectStore for woodpecker-pg (2026-09-12). Same bucket and
+# per-app prefix convention as every other CNPG cluster: ONE shared bucket
+# `homelab-backups-cluster`, prefix `cnpg/<app>`, a prefix-scoped MinIO user
+# minted by homelab-infra/scripts/setup-minio-buckets.sh from the
+# `cnpg-woodpecker` lane in ansible/inventory/minio-buckets.yml.
+#
+# `serverName` stays unset: the plugin derives it from the Cluster name
+# (`woodpecker-pg`). This is a NEW path — nothing exists under
+# s3://homelab-backups-cluster/cnpg/woodpecker/ — so the first-WAL pre-flight
+# in homelab-docs/03-runbooks/cnpg/cluster-rebuild.md does not apply.
+
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: woodpecker-pg-backups
+  namespace: woodpecker
+spec:
+  # `internal`-class data: 30-day PITR window per backup-and-dr.md (forgejo-pg
+  # keeps the same for the metadata of the same repos).
+  retentionPolicy: "30d"
+
+  configuration:
+    destinationPath: s3://homelab-backups-cluster/cnpg/woodpecker
+    endpointURL: http://minio.minio-on-nas.svc.cluster.local:9000
+    s3Credentials:
+      accessKeyId:
+        name: woodpecker-cnpg-s3
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: woodpecker-cnpg-s3
+        key: SECRET_ACCESS_KEY
+    wal:
+      compression: bzip2
+    data:
+      compression: bzip2
+
+  # Do not omit: the `woodpecker` namespace has no LimitRange (the shared
+  # first-party component is not wired in here, see kustomization.yaml), so
+  # without this the sidecar that streams and bzip2-compresses base backups
+  # runs unbounded.
+  instanceSidecarConfiguration:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        memory: 1Gi

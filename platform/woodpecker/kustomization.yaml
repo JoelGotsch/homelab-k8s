@@ -22,6 +22,9 @@ helmCharts:
 
 resources:
   - namespace.yaml
+  - cnpg-cluster.yaml
+  - objectstore.yaml
+  - scheduled-backup.yaml
   - rbac.yaml
   - quota.yaml
   - externalsecret.yaml

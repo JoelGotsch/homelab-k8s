@@ -13,7 +13,7 @@
 # claim/template merely to make this file green; KST-03 owns attended migration.
 version: 1
 owner_repository: homelab-k8s
-declared_count: 21
+declared_count: 22
 declared_implicit_default_count: 1
 
 scope:
@@ -477,6 +477,28 @@ entries:
     migration_owner: KST-03 OpenBao Raft claim-template migration
     required_restore_test: restore a tier-3 Raft snapshot into a disposable OpenBao cluster and verify expected keys
     reason: OpenBao is the source of truth for homelab secrets
+
+  - id: woodpecker-postgres
+    workload: woodpecker-pg CNPG cluster
+    namespace: woodpecker
+    claim: Cluster/woodpecker-pg instances
+    source:
+      file: platform/woodpecker/cnpg-cluster.yaml
+      value_path: 'select(.kind == "Cluster" and .metadata.name == "woodpecker-pg") | .spec.storage.storageClass'
+      document_index: 0
+      selector_path: spec.storage.storageClass
+    current_storage_class: longhorn-replica3-retain
+    target_storage_class: longhorn-replica3-retain
+    desired_reclaim_policy: Retain
+    state: compliant
+    data_class: internal
+    data_value: Woodpecker repos, per-agent tokens, repo secrets, and pipeline history — the CI engine's state (replaces the SQLite claim, 2026-09-12)
+    backup_tier: declared CNPG WAL/base to tier-1 MinIO, then tier-3 Restic; lane proof via scripts/verify-cnpg-backup-lane.sh
+    rpo: 4 hours policy target; WAL path should reduce this to minutes when healthy
+    rto: 24 hours
+    migration_owner: none
+    required_restore_test: restore the barman base + WAL into a disposable CNPG cluster and verify repos, agents and the latest pipelines are present
+    reason: ADR 0036 requires the CI engine's state to survive accidental claim deletion; the successor to woodpecker-sqlite
 
   - id: woodpecker-sqlite
     workload: Woodpecker server SQLite
