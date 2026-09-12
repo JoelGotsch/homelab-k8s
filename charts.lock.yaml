@@ -199,9 +199,9 @@
   version: 17.1.6
   upstream: oci://code.forgejo.org/forgejo-helm
   mirror: oci://registry.homelab.internal/homelab/forgejo
-  content_digest: sha256:e2dde38c0dd0f1b3e46d5bfdaab8d96814bd88967d4bce94f818dac44a1500a8
-  upstream_artifact_sha256: sha256:3d40e833748e5c92855c7f919f689ba526eeec72a08386e797d65905f9a3ae29
-  mirror_artifact_sha256: sha256:3d40e833748e5c92855c7f919f689ba526eeec72a08386e797d65905f9a3ae29
+  content_digest: sha256:56e2aa75a4879e4882ce99644b8c50a71715d3c750bc6e129b97c6c7a1f53d26
+  upstream_artifact_sha256: sha256:e0272ad415d2a8bb8184622997631efd1d1057b9b685fb7447d887bc4a34e422
+  mirror_artifact_sha256: sha256:e0272ad415d2a8bb8184622997631efd1d1057b9b685fb7447d887bc4a34e422
 - layer: platform/openbao
   name: openbao
   version: 0.29.4
