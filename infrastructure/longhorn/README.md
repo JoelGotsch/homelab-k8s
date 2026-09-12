@@ -23,6 +23,33 @@ In-cluster block storage per
 - `recurring-jobs.yaml` — class-aligned snapshot + backup
   RecurringJob CRs (see below).
 
+## `defaultSettings` apply live — no longhorn-manager restart
+
+Measured 2026-09-12 while setting `nodeDrainPolicy`. The chart renders
+`defaultSettings` into the `longhorn-default-setting` ConfigMap, and
+`longhorn-kubernetes-configmap-controller` **watches that ConfigMap** and calls
+`applyCustomizedDefaultSettingsToDefinitions`, so a live `Setting` CR is rewritten
+within about a minute of the Argo sync. Do not restart the DaemonSet to "make a
+setting take" — one was restarted needlessly that day on the assumption it was
+required.
+
+Read the *Setting*, never the ConfigMap, when checking what is in force — and the
+proof of which ConfigMap produced it is on the Setting itself:
+
+```sh
+kubectl -n longhorn-system get settings.longhorn.io node-drain-policy \
+  -o jsonpath='{.value}{"\n"}{.metadata.annotations}{"\n"}'
+#   allow-if-replica-is-stopped
+#   {"longhorn.io/configmap-resource-version":"197393992"}   ← == the ConfigMap's rv
+```
+
+Two consequences. A hand-edited Setting is reverted to the ConfigMap's value
+(`shouldApplyCustomizedSettingValue` writes whenever `setting.Value != value`), so
+changes belong in `values.yaml`. And a transient
+`Failed to syncing ConfigMap … the object has been modified; please apply your
+changes to the latest version` warning in the manager log is the controller losing
+an optimistic-concurrency race and retrying — benign, not a failed apply.
+
 ## OpenBao paths to seed
 
 Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
