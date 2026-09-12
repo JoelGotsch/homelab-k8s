@@ -79,6 +79,16 @@ spec:
               - longhorn-replica2-retain
               - longhorn-replica3-retain
               - longhorn-replica1-best-effort-retain
+              # TEMPORARY PROBE — hl-0281, 2026-09-12. Matches NO StorageClass
+              # in this cluster (all 18 enumerated at insert time), so it changes
+              # no admission decision for any PVC. It is NOT inert with respect to
+              # the admission path: Kyverno recompiles the policy and the object
+              # still traverses its validating webhook — that is the point, the
+              # failing path has to be exercised under debug logging. This is a
+              # change confined to the schemaless `preconditions` subtree, which is
+              # the only class of change that has never landed on this object.
+              # REVERT with the prepared revert commit as soon as the capture ends.
+              - longhorn-hl0281-probe-nonexistent
           # No CNPG-owned-PVC skip: as of ADR 0036 the retention
           # reason lives in the Cluster CR's
           # `spec.inheritedMetadata.annotations["retention.homelab.internal/reason"]`
