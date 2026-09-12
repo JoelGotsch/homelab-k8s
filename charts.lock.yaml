@@ -196,7 +196,7 @@
   mirror_artifact_sha256: sha256:c65ab5db8c2ae58474b8192e0d0d7caab66859da833540717b78c75754695ff7
 - layer: platform/forgejo
   name: forgejo
-  version: 17.1.5
+  version: 17.1.6
   upstream: oci://code.forgejo.org/forgejo-helm
   mirror: oci://registry.homelab.internal/homelab/forgejo
   content_digest: sha256:e2dde38c0dd0f1b3e46d5bfdaab8d96814bd88967d4bce94f818dac44a1500a8
