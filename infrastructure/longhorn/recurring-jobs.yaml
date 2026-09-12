@@ -321,7 +321,11 @@ spec:
 # together with the head's, then purges (doRecurringFilesystemTrim
 # -> purgeSnapshots). That reaches the one snapshot a delete cannot
 # purge — the parent of the volume head stays behind, marked
-# removed (controller/snapshot_controller.go, v1.12.1). A separate
+# removed (controller/snapshot_controller.go, v1.12.1). Measured on
+# todo-agents 2026-09-12: the delete run freed 1.74 and 1.83 GiB per
+# replica, the trim a further 26 and 52 MB from inside that snapshot,
+# which itself remained. Each no-snapshot volume therefore keeps
+# exactly one snapshot CR, terminating behind its finalizer. A separate
 # job from the Sunday trim so this group can be trimmed on its own
 # (kubectl -n longhorn-system create job
 # --from=cronjob/filesystem-trim-no-snapshot <name>), and Saturday

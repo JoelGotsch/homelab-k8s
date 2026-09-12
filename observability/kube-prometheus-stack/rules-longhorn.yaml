@@ -422,17 +422,22 @@ spec:
                 internal          2 vol x retain 42 =   84
                 internal-media    2 vol x retain  7 =   14
                 backup            9 vol x ~1-2      =  ~15
-                no-snapshot      37 vol x        0 =    0
+                no-snapshot      37 vol x        1 =   37
                 leftovers of earlier groups on kept
                 volumes (never expire, see above)   =  ~60
                                                      -----
-                                                      ~390
+                                                      ~427
+
+              no-snapshot is 1, not 0, per volume: the parent of the
+              volume head cannot be purged while the volume is live,
+              so it stays marked removed and its CR stays terminating
+              (measured on todo-agents, 2026-09-12).
 
               secret-personal counts immich-pg, whose cluster
               manifest had not switched yet; -40 once it does.
               1000 keeps the 2026-08-15 call's shape — steady state
               plus room so ordinary fill cannot fire it — at about
-              2.5x instead of 5x the new baseline.
+              2.3x instead of 5x the new baseline.
 
               The 2026-08-15 arithmetic, for the record: default 36
               x 6 = 216, internal 10 x 42 = 420, secret-personal 15 x

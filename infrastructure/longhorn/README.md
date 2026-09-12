@@ -93,8 +93,10 @@ Kyverno and `sync-longhorn-recurring-job-labels.sh` only add
 labels, so the old snapshot group would otherwise stay on the
 Volume and keep snapshotting. The script removes it from PVC and
 Volume, sets `spec.unmapMarkSnapChainRemoved: enabled` (trim then
-removes and frees the snapshot chain behind the volume head, which
-a plain delete cannot purge), and holds
+frees the blocks the filesystem released *inside* the snapshot
+behind the volume head, which a plain delete cannot reach — it does
+not remove that snapshot, which has nowhere to coalesce while the
+volume is live, so one stays per volume, marked removed), and holds
 the declared list of PVCs that are labelled from the script
 rather than a manifest. The existing snapshots go at the next
 04:35 UTC run of `snapshot-delete-no-snapshot`, their blocks at
