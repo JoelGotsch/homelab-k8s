@@ -44,6 +44,21 @@ spec:
   emitWarning: true
   rules:
     - name: retain-sc-pvc-must-declare-retention-reason
+      # Declared explicitly even though `true` is the CRD default
+      # (clusterpolicies.kyverno.io: spec.rules[].skipBackgroundRequests,
+      # type boolean, default true). Because the API server defaults it,
+      # it exists on the live object but in no rendered manifest — and
+      # Argo's ignoreDifferences for kyverno.io/ClusterPolicy lists
+      # `.spec.rules[].skipBackgroundRequests` among its jqPathExpressions.
+      # With RespectIgnoreDifferences=true that ignore path is expressed at
+      # leaf granularity over an array argocd-controller owns atomically
+      # (managedFields records `f:spec.f:rules: {}`, parent-level, no
+      # sub-keys), and this policy then could not converge: from 2026-09-12
+      # 00:15:58Z every sync logged `serverside-applied` and `Succeeded`
+      # while the object stayed at generation 1 and the added storage class
+      # below never landed. Declaring the default leaves nothing to restore.
+      # See homelab-docs TODO hl-0281 and the 2026-09-12 journal entry.
+      skipBackgroundRequests: true
       match:
         any:
           - resources:
