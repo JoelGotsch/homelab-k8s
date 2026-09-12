@@ -29,11 +29,51 @@ defaultSettings:
   # acts here after its own node controller confirms the node
   # down AND the pod already has a deletionTimestamp, so this is
   # the guarded automated equivalent of the manual taint flow.
-  # Drain-path safety is separately guarded by
-  # nodeDrainPolicy=block-if-contains-last-replica (live default
-  # we rely on; not overridden here) TOGETHER WITH the setting
-  # below — see it for why the pair is required.
+  # Drain-path safety is separately guarded by nodeDrainPolicy
+  # (set explicitly below, no longer the chart default) TOGETHER
+  # WITH the setting below it — see both for why the trio is
+  # required.
   nodeDownPodDeletionPolicy: delete-both-statefulset-and-deployment-pod
+  # 2026-09-12, decided during the v1.13.0 → v1.13.10 roll. The
+  # default block-if-contains-last-replica blocks worker2's drain
+  # forever — under kubectl, talosctl AND tuppr — because
+  # backup-cronjobs/restic-staging is a deliberate 1-replica
+  # volume there (longhorn-replica1 class, no-snapshot label), so
+  # its instance-manager PDB never releases. That made every
+  # unattended roll impossible, not just an inconvenience.
+  #
+  # allow-if-replica-is-stopped relaxes the rule ONLY when the
+  # last healthy replica is *stopped*, i.e. the volume is
+  # detached and serving nobody. A volume with a running replica
+  # is still protected exactly as before. Upstream's warning is
+  # "possible data loss if the node is REMOVED after draining" —
+  # bounded here, because a roll reboots a node and brings it
+  # back; permanently removing a node is a different procedure
+  # that must check this first.
+  #
+  # Rejected alternatives, with the evidence:
+  #  - second replica for restic-staging: pays 225 GiB to protect
+  #    data that is derived twice over (mc mirror FROM MinIO-on-NAS,
+  #    restic TO the Hetzner box), and contradicts the replica1
+  #    class the volume deliberately uses.
+  #  - block-for-eviction-if-contains-last-replica: migrates the
+  #    replica on EVERY worker drain (~225 GiB, 20-40 min measured
+  #    2026-09-11), and needs a drain timeout far past talosctl's
+  #    fixed 5 min.
+  #  - always-allow: upstream warns of data corruption if the last
+  #    replica was running. No.
+  #  - making /staging an emptyDir: the storage is needed either
+  #    way, and an emptyDir is the same bytes on the same xfs
+  #    /var partition (Talos EPHEMERAL, /dev/nvme0n1p4 — Longhorn's
+  #    /var/lib/longhorn lives there too) but unaccounted, so its
+  #    failure mode is node disk-pressure evicting unrelated pods.
+  #    Accounted and isolated beats hidden.
+  #
+  # NOTE this is cluster-wide: any OTHER detached single-replica
+  # volume also becomes drainable. That is a runtime property, so
+  # scripts/talos-roll-worker.sh re-checks it immediately before
+  # each drain rather than trusting an earlier reading.
+  nodeDrainPolicy: allow-if-replica-is-stopped
   # 2026-08-31 worker2 drain: `kubectl drain` hung forever on
   #   Cannot evict pod as it would violate the pod's disruption budget
   # for instance-manager-c6333079c4a6a3743989dbb9574e3e84 (worker2's).
@@ -67,9 +107,12 @@ defaultSettings:
   # with no csi-attacher ticket.
   #
   # It does NOT loosen nodeDrainPolicy — a volume with a live consumer
-  # is untouched, and last-replica protection still blocks a drain that
-  # would strand real data. It only releases volumes nothing is using,
-  # on a node the operator has already cordoned. Keep both keys.
+  # is untouched. It only releases volumes nothing is using, on a node
+  # the operator has already cordoned. Keep both keys: this one detaches
+  # the idle volume, and nodeDrainPolicy (above, 2026-09-12) decides
+  # whether a drain may proceed once the replica is stopped. Before that
+  # change the pair still deadlocked on a 1-replica idle volume, which is
+  # exactly what restic-staging on worker2 did.
   detachManuallyAttachedVolumesWhenCordoned: true
   # Orphaned replica data and engine/replica instances are deleted
   # automatically once they have been orphaned for the grace period
