@@ -304,6 +304,41 @@ repos:
         # sole ownership of first-party registry hosts and ensures the direct
         # proxy follows headless-Service endpoint changes.
 
+      - id: check-zone-serial-bumped
+        name: an edited DNS zone also raises its SOA serial (CoreDNS re-reads only on an increase)
+        entry: scripts/check-zone-serial-bumped.sh
+        language: script
+        pass_filenames: false
+        # Always-on, and deliberately WITHOUT a `files:` pattern: the script
+        # derives its scope from the index — any staged file that carries an
+        # SOA record — so a zone living in a file nobody thought to list is
+        # still covered, and no `--only-X` flag decides scope. Cheap: it reads
+        # staged blobs only, and exits immediately when none carry a zone.
+        #
+        # 2026-09-12: `ssh.forgejo IN A 10.10.30.51` was added to
+        # infrastructure/cluster-dns/configmap.yaml with the serial left at 1.
+        # CoreDNS's `file` plugin re-reads a zone ONLY when the SOA serial
+        # increases, and the block-level `reload` directive watches the
+        # COREFILE, not zone files (upstream sends zone-file watching to the
+        # `auto` plugin). So Argo reported Synced+Healthy, the live ConfigMap
+        # carried the record, the file reached the pod, nothing was logged —
+        # and dig returned the OLD address, authoritative, 10/10. Every
+        # reporting layer said success. Bumping the serial fixed it in ~80 s.
+
+      - id: test-zone-serial-bumped
+        name: the zone SOA serial guard still fails on a missing bump
+        entry: scripts/test-zone-serial-bumped.sh
+        language: script
+        pass_filenames: false
+        files: '^scripts/(check|test)-zone-serial-bumped\.sh$'
+        # In `@ IN SOA ns hostmaster ( 2 7200 3600 1209600 60 )` the serial is
+        # field $7; $6 is the literal `(`. A parser that guesses a column can
+        # never see a serial, which makes its failure branch unreachable and
+        # the hook green while checking nothing — the exact failure mode this
+        # guard exists to prevent. These controls pin both directions on the
+        # real zone file, including "serial 2 -> 10", which a column-guessing
+        # parser cannot pass at the same time as the negative control.
+
       - id: check-site-config
 
         name: site-config.env derived keys consistent + placeholders component-backed
