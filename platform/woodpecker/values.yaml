@@ -80,28 +80,28 @@ server:
     # Retain-policy class. It remains on the current Delete-policy class until
     # the attended KST-03 claim migration; do not change an immutable
     # StatefulSet claim template as an unattended source-only edit.
-    WOODPECKER_DATABASE_DRIVER: "sqlite3"
-    # SQLite tuning (2026-09-12). Upstream hands this string to mattn/go-sqlite3
-    # untouched — no WAL, no busy timeout, and xorm's pool at the Postgres-shaped
-    # default of 100 connections (server/store/datastore/engine.go, v3.18.1) —
-    # so on a Longhorn block device the server logged `database is locked` 22
-    # times in 11 h, and the agent's 20 s lease renewals (two reads and a write
-    # each, server/rpc/rpc.go Extend) missed three in a row often enough to
-    # kill running pipelines. The three parameters mattn parses from a `?`
-    # suffix (sqlite3.go v1.14.44: _journal_mode, _busy_timeout, _txlock):
-    #   WAL        readers stop blocking the writer and vice versa
-    #   busy 10 s  a writer waits for the lock instead of failing at once
-    #   immediate  BEGIN takes the write lock up front; the deferred default
-    #              upgrades read->write mid-transaction, and that upgrade is
-    #              the one wait busy_timeout does not cover (SQLITE_BUSY at once)
-    # No `file:` prefix: for a plain path mattn strips the suffix and opens the
-    # path as-is, whereas a `file:` URI depends on SQLITE_OPEN_URI. The server's
-    # pre-flight os.Stat()s the whole string (cmd/server/setup.go
-    # checkSqliteFileExist), so every start warns "no sqlite3 file found, will
-    # create one" — cosmetic; the open uses the stripped path. WAL is a
-    # property of the file once set; reverting the suffix is safe.
-    # Stopgap until the Postgres cutover (cnpg-cluster.yaml) retires SQLite.
-    WOODPECKER_DATABASE_DATASOURCE: "/var/lib/woodpecker/woodpecker.db?_journal_mode=WAL&_busy_timeout=10000&_txlock=immediate"
+    # Postgres on woodpecker-pg (cnpg-cluster.yaml) since 2026-09-12. The
+    # datasource is the CNPG-issued app Secret's `uri`
+    # (postgresql://woodpecker:<pw>@woodpecker-pg-rw.woodpecker:5432/woodpecker,
+    # no sslmode -> lib/pq's default `require`, which CNPG serves) — the
+    # vaultwarden pattern: no copy of the password in OpenBao. The chart's env
+    # template renders a map with `valueFrom` verbatim (charts/server/
+    # templates/statefulset.yaml, kindIs "map").
+    #
+    # Why not SQLite any more: upstream hands the datasource to
+    # mattn/go-sqlite3 untouched with xorm's pool at 100 connections, and on a
+    # Longhorn block device the server logged `database is locked` 22 times in
+    # 11 h; the agent's 20 s lease renewals (server/rpc/rpc.go Extend) missed
+    # three in a row often enough to kill running pipelines. The WAL +
+    # busy_timeout DSN suffix that ran from 2026-09-12 11:49Z until the cutover
+    # was the stopgap; the SQLite claim data-woodpecker-server-0 stays mounted
+    # as the rollback (revert this commit) until TODO hl-0294.
+    WOODPECKER_DATABASE_DRIVER: "postgres"
+    WOODPECKER_DATABASE_DATASOURCE:
+      valueFrom:
+        secretKeyRef:
+          name: woodpecker-pg-app
+          key: uri
 
   # Dedicated metrics listener (2026-09-12). WOODPECKER_METRICS_SERVER_ADDR
   # starts a second HTTP server that serves only /metrics (cmd/server/server.go

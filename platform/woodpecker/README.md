@@ -25,7 +25,7 @@ Per ADR 0023 D5 + D6 + D8 + D9.
 |---|---|
 | `namespace.yaml` | `woodpecker` (control plane) + `ci-woodpecker` (step Pods); both PSA restricted. |
 | `kustomization.yaml` | Helm chart 3.6.5; resources below. |
-| `values.yaml` | Server + agent config. SQLite DB on Longhorn; Forgejo OAuth integration; Kubernetes backend (step Pods spawn in `ci-woodpecker`). |
+| `values.yaml` | Server + agent config. Postgres on `woodpecker-pg` (datasource from the CNPG app Secret); Forgejo OAuth integration; Kubernetes backend (step Pods spawn in `ci-woodpecker`). |
 | `cnpg-cluster.yaml` | `woodpecker-pg` CNPG Postgres (2 instances, `longhorn-replica3-retain`), the server's datastore since 2026-09-12 — see Caveats #1. |
 | `objectstore.yaml` | Barman Cloud ObjectStore: WAL + base backups to `s3://homelab-backups-cluster/cnpg/woodpecker`, 30d retention. |
 | `scheduled-backup.yaml` | Nightly base backup of `woodpecker-pg` at 03:10 UTC. |
