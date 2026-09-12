@@ -109,30 +109,76 @@ spec:
             - port: "3000"
               protocol: TCP
     # SSH-over-LoadBalancer (forgejo-ssh Service, 10.10.30.51:22):
-    # the Service port 22 DNATs to pod port 2222, and with
-    # externalTrafficPolicy: Cluster the L2-announcer node SNATs
-    # the client IP to its node IP — so the pod observes source
-    # identity `remote-node` (the announcer, currently worker2;
-    # any cluster node may win the election). Port at the pod
+    # the Service port 22 DNATs to pod port 2222. Port at the pod
     # is the post-DNAT pod port 2222, NOT the Service port 22
     # (Cilium socket-LB rewrites before policy lookup — see
     # feedback_gateway_500_503_triage). Without this rule, all
     # external SSH clones land as policy-verdict:none DENIED in
     # Hubble, browser/git just hangs to TCP timeout.
+    #
+    # The L2-announcer node SNATs the client IP to its node IP —
+    # so the pod observes `remote-node` — ONLY WHEN THE ANNOUNCER
+    # IS NOT ALSO RUNNING THE BACKEND POD. That condition was
+    # stated unconditionally here until 2026-09-12 and is the
+    # reason the gap below went unnoticed; see the fromCIDR rule.
     - fromEntities:
         - remote-node
       toPorts:
         - ports:
             - port: "2222"
               protocol: TCP
-    # ADR 0044 in-cluster subnet router (tailscale ns). Tailnet clients
-    # now route 10.10.30.0/24 via the cluster Connector, which forwards
-    # via normal Cilium egress (ADR 0044 D1) → the pod observes the
-    # subnet-router's identity, NOT `remote-node`/`ingress` like the
-    # Flint3 path. Without this, git-over-SSH from tailnet clients times
-    # out (10.10.30.51:22 → pod :2222 DENIED). Web :3000 also, for direct
-    # (non-gateway) reach. Access is authZ'd at the tailnet ACL
+    # ...and when the lease-holding node IS the backend pod's node,
+    # there is no SNAT: the SYN reaches the pod carrying the ROUTED
+    # client address, which for tailnet clients is 10.10.30.1 —
+    # flint3's subnet-router masquerade — a world/CIDR identity,
+    # neither `remote-node` nor `host`. The rule above cannot match
+    # it, so git-over-SSH to 10.10.30.51 fails for exactly as long
+    # as those two land together, then recovers on the next L2
+    # re-election with nothing logged either way.
+    #
+    # Measured 2026-09-11/12 with `cilium-dbg monitor` (Policy
+    # denied, 8/8, 10.10.30.1:56971 -> 10.244.3.92:2222).
+    # `hubble observe --verdict DROPPED` shows NOTHING for it.
+    #
+    # Predicted in homelab-docs TODO.md hl-0007 on 2026-08-20 —
+    # file, trigger condition and remedy — and deferred at P2; the
+    # predicted outage then cost a morning on 2026-09-12. Same bug
+    # class as cluster-dns (fixed 2026-08-20, f4b6b80),
+    # registry-direct, grist-edge and nextcloud-biz-edge.
+    # The hole itself dates to 7265957 (2026-06-10), predating the
+    # ADR 0044 connector entirely.
+    - fromCIDR:
+        - 10.10.30.1/32
+      toPorts:
+        - ports:
+            - port: "2222"
+              protocol: TCP
+    # ADR 0044 in-cluster subnet router (tailscale ns). Intended path:
+    # tailnet clients route 10.10.30.0/24 via the cluster Connector,
+    # which forwards via normal Cilium egress (ADR 0044 D1) → the pod
+    # observes the subnet-router's identity, NOT `remote-node`/`ingress`
+    # like the Flint3 path. Access is authZ'd at the tailnet ACL
     # (tag:k8s-router, ADR 0044 D1). Added 2026-08-09.
+    #
+    # ASPIRATIONAL, NOT ACTIVE, as of 2026-09-12. The Connector is
+    # Online with ConnectorReady=True and advertises 10.10.30.0/24,
+    # and the prefix IS approved (it appears in the router's own
+    # AllowedIPs via autoApprovers) — but its PrimaryRoutes is EMPTY
+    # and flint3 holds 10.10.30.0/24, so tailnet traffic still takes
+    # the flint3 path and arrives as 10.10.30.1 (see the fromCIDR
+    # rule above). Compiled policy on the forgejo endpoint confirms
+    # it: 2222/TCP matched 9286 packets on reserved:remote-node and
+    # ZERO on this rule — over the 11 h since that endpoint came up
+    # (2026-09-11T22:31:25Z; counters reset with the endpoint, so
+    # earlier history is not measurable).
+    #
+    # Kept deliberately: in-cluster tailscale-ns pods may still use
+    # it, and it becomes live again if the Connector is ever made
+    # primary. Whether that SHOULD happen is open — TODO hl-0009
+    # (2026-08-09) recorded "keep flint3 as the active advertiser
+    # until fixed" as one option, and no journal or ADR records the
+    # choice being taken. Do not read this rule as evidence that the
+    # connector path is in use.
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: tailscale
