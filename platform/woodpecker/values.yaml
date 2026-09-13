@@ -131,10 +131,13 @@ server:
   # "system" agent secret now comes from the ESO-managed
   # woodpecker-agent-secret (kv/woodpecker/agent-secret). The agent does not
   # use it — it authenticates with the per-agent token, see the agent block.
+  # woodpecker-grpc-secret (kv/woodpecker/grpc-secret, 2026-09-13) pins the
+  # gRPC JWT signing secret the server otherwise re-randomises per start.
   createAgentSecret: false
   extraSecretNamesForEnvFrom:
     - woodpecker-oauth
     - woodpecker-agent-secret
+    - woodpecker-grpc-secret
 
   persistentVolume:
     enabled: true
