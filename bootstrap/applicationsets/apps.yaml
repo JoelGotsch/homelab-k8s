@@ -53,6 +53,16 @@ spec:
           # The Application NAME stays `conversation-history` (no suffix) — it
           # names the deployed service, not the repository.
           - {name: conversation-history, owner: homelab, repo: conversation-history-k8s, path: k8s, autoSync: "true"}
+          # The V1 multi-tenancy pilot (FND-021). A SEPARATE namespace and a
+          # separate CNPG cluster from the archive above, holding two
+          # workspaces in one pooled store to show that neither can read the
+          # other. Registered with autoSync OFF, like grist and nextcloud-biz
+          # before it: the image it references does not exist yet, the six
+          # database logins and two service credentials are seeded out of band,
+          # and both `chist serve` Deployments ship at replicas 0 until the
+          # bootstrap ceremony in the repo's bootstrap/ has run. Flip it on when
+          # `chist db audit-runtime` passes against the real cluster roles.
+          - {name: conversation-history-pilot, owner: homelab, repo: conversation-history-pilot-k8s, path: k8s, autoSync: "false"}
           - {name: frigate,             owner: homelab,       repo: homelab-k8s, path: apps/frigate,             autoSync: "true"}
           - {name: immich,              owner: homelab,       repo: immich-k8s, path: k8s, autoSync: "true"}
           - {name: immich-public-proxy, owner: homelab,       repo: immich-public-proxy-k8s, path: k8s, autoSync: "true"}
