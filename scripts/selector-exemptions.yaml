@@ -14,26 +14,6 @@
 #                time) or belongs to a separate fix. Every inert entry cites
 #                the TODO row that owns it.
 exemptions:
-  - layer: platform/woodpecker
-    kind: CiliumNetworkPolicy
-    name: woodpecker-server
-    reason: >-
-      inert — the chart renders app.kubernetes.io/name=server +
-      instance=woodpecker, not name=woodpecker + component=server; the Cilium
-      agent shows no rule from this policy on the endpoint (cilium-dbg
-      endpoint get, 2026-09-13 — CEP policy status is empty on Cilium 1.20
-      and proves nothing). In-rule selectors and the Gateway egress are
-      corrected; the endpointSelector flip enforces for the first time —
-      attended PolicyAuditMode rollout.
-    owner: TODO hl-0291
-  - layer: platform/woodpecker
-    kind: CiliumNetworkPolicy
-    name: woodpecker-agent
-    reason: >-
-      inert — same label mismatch as woodpecker-server (chart renders
-      name=agent + instance=woodpecker); no rule from this policy on the
-      live endpoint per cilium-dbg. Same attended rollout.
-    owner: TODO hl-0291
   - layer: infrastructure/trivy-operator
     kind: CiliumNetworkPolicy
     name: trivy-scanjobs-egress-fqdn

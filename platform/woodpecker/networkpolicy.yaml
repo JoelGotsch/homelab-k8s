@@ -25,6 +25,13 @@
 # fix. Until then the two are reasoned exemptions in
 # scripts/selector-exemptions.yaml.
 #
+# hl-0291 WINDOW COMMIT: this revision flips both endpointSelectors to the
+# rendered labels and drops the exemptions. Merge it ONLY inside the attended
+# window, with audit mode already on (scripts/cilium-policy-audit.sh):
+#   enable woodpecker woodpecker-server-0 woodpecker-agent-0 -> merge -> Argo
+#   Synced -> status (both pods list this policy) -> real pipeline + UI login
+#   -> observe woodpecker (expect OK) -> disable -> observe again.
+#
 # 2026-09-13 (hl-0291 prep, still inert): the IN-RULE selectors are corrected
 # to the rendered labels (agent<->server gRPC used the same unrendered labels,
 # so fixing only endpointSelector would have dropped the agent), and the rule
@@ -53,8 +60,8 @@ metadata:
 spec:
   endpointSelector:
     matchLabels:
-      app.kubernetes.io/name: woodpecker
-      app.kubernetes.io/component: server
+      app.kubernetes.io/name: server
+      app.kubernetes.io/instance: woodpecker
   ingress:
     # Cilium Gateway envoy — reserved `ingress` identity.
     - fromEntities:
@@ -149,8 +156,8 @@ metadata:
 spec:
   endpointSelector:
     matchLabels:
-      app.kubernetes.io/name: woodpecker
-      app.kubernetes.io/component: agent
+      app.kubernetes.io/name: agent
+      app.kubernetes.io/instance: woodpecker
   # No ingress rules — agent receives no inbound traffic.
   egress:
     # kube-DNS.
