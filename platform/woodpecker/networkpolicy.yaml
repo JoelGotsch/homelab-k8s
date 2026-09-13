@@ -412,6 +412,12 @@ spec:
         - matchName: "pypi.org"
         - matchName: "files.pythonhosted.org"
         - matchName: "registry.npmjs.org"
+        # Terraform provider index — homelab-infra's `terraform init` step
+        # (2026-09-13, TODO hl-0295; it had never run). Only the index: the
+        # one provider, hetznercloud/hcloud, downloads from GitHub release
+        # assets (allowlisted below). A hashicorp/* provider would also need
+        # releases.hashicorp.com.
+        - matchName: "registry.terraform.io"
         # Prisma engine binaries CDN — `prisma generate` downloads
         # platform-specific schema-engine + query-engine from here
         # at build time. Added 2026-06-29 for llm-gateway v0.0.11
