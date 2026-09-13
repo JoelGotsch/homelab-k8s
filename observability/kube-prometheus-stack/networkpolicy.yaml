@@ -59,6 +59,13 @@ spec:
     # ANY new scrape port MUST be added below. This recurred
     # 2026-06-26 (node-exporter), 2026-07-14 (grafana:3000), and
     # 2026-07-15 (loki/alloy/coredns/jellyfin/cloudflared/forgejo).
+    # GUARDED since 2026-09-13 (TODO hl-0297): the pre-commit hook
+    # check-selectors-match-render resolves every rendered monitor's
+    # endpoint to the number Prometheus dials and fails when no rule
+    # here admits it (scripts/test-scrape-port-guard.py proves that
+    # removing 6060 fails). Its reach ends at this repo's render:
+    # monitors in external app repos, and endpoints it lists as
+    # unresolved under --verbose (kubelet, etcd, argocd), are not checked.
     # auth-gating happens at the metrics-endpoint level (most
     # metrics endpoints are unauthenticated within cluster —
     # standard Prometheus pattern).
