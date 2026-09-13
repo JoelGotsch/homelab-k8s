@@ -38,7 +38,7 @@ Langfuse, migrate."*
 | `kustomization.yaml` | Altinity helm chart 0.26.3 (Renovate-pinned). |
 | `namespace.yaml` | `clickhouse-operator` ns; PSA baseline. |
 | `values.yaml` | Operator + metrics-exporter sidecar; RBAC scope: `namespace_clusterwide` (watches CHIs in any namespace). |
-| `networkpolicy.yaml` | Ingress: Prometheus self-metrics. Egress: kube-DNS, kube-API (watch CHIs), ClickHouse pods in any namespace. |
+| `networkpolicy.yaml` | CiliumNetworkPolicy. Ingress: API-server proxy + Prometheus on 8888/9999. Egress: kube-API 443+6443, kube-DNS, CHI pods in the watched namespaces on 8123/9000. Rules and Hubble evidence in its header. |
 
 ## What this provides
 

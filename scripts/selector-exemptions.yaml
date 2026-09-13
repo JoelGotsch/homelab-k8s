@@ -30,19 +30,3 @@ exemptions:
       model gap — same runtime-created scan Job pods as
       trivy-scanjobs-egress-fqdn.
     owner: check-selectors-match-render.py
-  - layer: infrastructure/clickhouse-operator
-    kind: NetworkPolicy
-    name: clickhouse-operator
-    reason: >-
-      inert — podSelector app=clickhouse-operator; the live operator pod
-      carries app.kubernetes.io/name=altinity-clickhouse-operator +
-      instance=clickhouse-operator and no `app` label, so the policy has
-      never selected it. Correcting it changes what the pod may do — assess
-      as a policy change, not a label fix. Its rules are wrong too (read
-      2026-09-13): egress to `clickhouse.altinity.com/chi: ""` matches only an
-      EMPTY label value (the langfuse pods carry chi=langfuse), and egress to
-      the API server is a podSelector `component=kube-apiserver`, which a K8s
-      NetworkPolicy cannot match on Talos's host-network static pods — the
-      repo's working pattern is a CNP with toEntities kube-apiserver on 443
-      AND 6443. Rewrite as a CNP under PolicyAuditMode.
-    owner: TODO hl-0292

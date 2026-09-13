@@ -1,68 +1,101 @@
-# NetworkPolicy for the Altinity ClickHouse Operator.
+# CiliumNetworkPolicy for the Altinity ClickHouse Operator.
 #
-# Ingress: Prometheus self-metrics scrape (operator + metrics-
-#   exporter both expose).
-# Egress: kube-API (operator watches CRs cluster-wide) +
-#   kube-DNS + ClickHouse pods in any namespace (managed CHIs).
+# Replaces a K8s NetworkPolicy (until 2026-09-13) that never selected
+# anything and had wrong rules besides (TODO hl-0292):
+#   - podSelector `app: clickhouse-operator` — the chart renders
+#     app.kubernetes.io/name=altinity-clickhouse-operator + instance, no `app`;
+#   - egress to `clickhouse.altinity.com/chi: ""` — matches only an EMPTY
+#     value (the langfuse pods carry chi=langfuse; the same trap as
+#     minio-on-nas's `cnpg.io/cluster: ""`, fixed 2026-05-27);
+#   - egress to podSelector `component: kube-apiserver` — Talos runs the API
+#     server as a host-network static pod, which a pod selector cannot match.
+#     The working shape is `toEntities: [kube-apiserver]` on 443 AND 6443
+#     (socket-LB translates ClusterIP:443 to :6443 before policy).
+#
+# Rule set checked against Hubble on every node, 2026-09-13 17:13-17:31Z
+# (default-allow; operator pod restarted inside the window, then one scrape
+# of :8888/metrics through the API-server proxy; every flow seen is listed,
+# all FORWARDED):
+#   operator -> kube-apiserver :6443      CR watches (steady state)
+#   operator -> kube-dns :53              resolving CHI host names
+#   operator -> langfuse CHI pod :8123    metrics-exporter collection
+#   kube-apiserver -> operator :8888      `kubectl get --raw .../proxy/metrics`
+# The metrics-exporter queries ClickHouse ONLY when :8888 is scraped, and
+# nothing scrapes it today (no ServiceMonitor), so the :8123 leg is normally
+# silent. :9000 (native protocol) was not seen; it stays because the
+# operator uses it during a CHI reconcile, which an unchanged Completed CHI
+# does not trigger. Prometheus ingress stays for a future monitor — adding
+# one also needs 8888 in prometheus-allow (the hl-0297 guard checks it).
+#
+# First enforcement is an attended PolicyAuditMode rollout
+# (scripts/cilium-policy-audit.sh enable clickhouse-operator <pod>), with a
+# scrape of :8888 inside the window so the ClickHouse leg is exercised.
 
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
 metadata:
   name: clickhouse-operator
   namespace: clickhouse-operator
 spec:
-  podSelector:
+  endpointSelector:
     matchLabels:
-      app: clickhouse-operator
-  policyTypes: [Ingress, Egress]
+      app.kubernetes.io/name: altinity-clickhouse-operator
+      app.kubernetes.io/instance: clickhouse-operator
   ingress:
-    # Prometheus self-metrics scrape from monitoring ns.
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: monitoring
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-      ports:
-        - port: 8888
-          protocol: TCP
-        - port: 9999
-          protocol: TCP
+    # API-server proxy to the operator and exporter metrics (debugging path).
+    - fromEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "8888"
+              protocol: TCP
+            - port: "9999"
+              protocol: TCP
+    # Prometheus scrape (no monitor exists yet).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: prometheus
+      toPorts:
+        - ports:
+            - port: "8888"
+              protocol: TCP
+            - port: "9999"
+              protocol: TCP
   egress:
-    # kube-DNS for service resolution.
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - port: 53
-          protocol: UDP
-        - port: 53
-          protocol: TCP
-    # kube-API for watching ClickHouseInstallation CRs.
-    - to:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              component: kube-apiserver
-      ports:
-        - port: 6443
-          protocol: TCP
-        - port: 443
-          protocol: TCP
-    # ClickHouse pods in any namespace — operator-managed
-    # instances. Selects on Altinity's chart-default label.
-    - to:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              clickhouse.altinity.com/chi: ""
-      ports:
-        - port: 8123
-          protocol: TCP   # HTTP interface
-        - port: 9000
-          protocol: TCP   # Native client interface
+    # kube-apiserver — CR watches. BOTH 443 and 6443 (socket-LB).
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    # kube-dns.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # ClickHouse pods of every CHI the operator manages. The namespace list
+    # mirrors WATCH_NAMESPACES in values.yaml — a new CHI namespace goes in
+    # BOTH places.
+    - toEndpoints:
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: In
+              values: [langfuse]
+            - key: clickhouse.altinity.com/chi
+              operator: Exists
+      toPorts:
+        - ports:
+            - port: "8123"
+              protocol: TCP   # HTTP interface (exporter + reconcile)
+            - port: "9000"
+              protocol: TCP   # native interface (reconcile)
