@@ -497,7 +497,7 @@ entries:
     rpo: 4 hours policy target; WAL path should reduce this to minutes when healthy
     rto: 24 hours
     migration_owner: none
-    required_restore_test: restore the barman base + WAL into a disposable CNPG cluster and verify repos, agents and the latest pipelines are present
+    required_restore_test: restore the barman base + WAL into a disposable CNPG cluster and verify repos, agents and the latest pipelines are present — scripts/verify-cnpg-restore.sh woodpecker woodpecker-pg (every table's count and max id)
     reason: ADR 0036 requires the CI engine's state to survive accidental claim deletion; the successor to woodpecker-sqlite
 
   - id: woodpecker-sqlite
