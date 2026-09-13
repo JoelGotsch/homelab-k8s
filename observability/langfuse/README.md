@@ -56,7 +56,8 @@ to keep workloads backend-agnostic.
 | `cnpg-cluster.yaml` | CNPG `Cluster` CR: 2 instances longhorn-replica3; 30d WAL retention to MinIO; same pattern as crowdsec-lapi. |
 | `externalsecret.yaml` | ESO ExternalSecrets for ClickHouse, app secrets (NEXTAUTH_SECRET / SALT / ENCRYPTION_KEY plus all six event/batch/media S3 keys), Redis, OIDC, and CNPG MinIO backup credentials. |
 | `networkpolicy.yaml` | Two NetPols: app (web + worker) ingress allow-list + egress to dependencies; ClickHouse ingress allow-list. |
-| `servicemonitor.yaml` | Per-component metrics scrape (web `/api/public/metrics`, worker `/metrics`). |
+
+**No Prometheus scrape of web or worker (removed 2026-09-13, TODO hl-0292).** The layer shipped a `servicemonitor.yaml` for web `/api/public/metrics` and worker `/metrics`. It selected labels no Service carries, so it never produced a target — and there was nothing to scrape: from inside the pods, web `/api/public/metrics` answers `401 {"message":"No authorization header"}` (Langfuse's authenticated usage-metrics JSON API, not Prometheus text) and worker `:3030/metrics` answers `404`, and the worker has no Service. Liveness is covered by the Deployments' probes; the Postgres side by the `langfuse-pg` PodMonitor and ClickHouse volume growth by `LangfuseTraceStoreGrowing`.
 
 ## OpenBao paths to seed
 

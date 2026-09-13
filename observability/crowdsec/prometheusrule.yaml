@@ -91,9 +91,17 @@ spec:
         # CCNP. CIDRGroup keeps the existing entries (CCNP is
         # durable) but new bans don't reach Cilium. Critical
         # because security signal is degrading silently.
+        #
+        # Until 2026-09-13 this queried namespace="crowdsec",
+        # service="crowdsec-lapi" — neither exists (the namespace is
+        # observability-crowdsec, the LAPI Service crowdsec-service) and
+        # no crowdsec target was scraped at all, so it could never fire.
+        # `absent` makes a scrape that disappears again fire too, instead
+        # of going quiet the way the old selector did (TODO hl-0292).
         - alert: CrowdSecLAPIDown
           expr: |
-            up{namespace="crowdsec", service="crowdsec-lapi"} == 0
+            up{namespace="observability-crowdsec", service="crowdsec-service"} == 0
+              or absent(up{namespace="observability-crowdsec", service="crowdsec-service"})
           for: 5m
           labels:
             severity: critical

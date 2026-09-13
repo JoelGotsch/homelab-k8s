@@ -49,38 +49,6 @@ exemptions:
       model gap — same runtime-created scan Job pods as
       trivy-scanjobs-egress-fqdn.
     owner: check-selectors-match-render.py
-  - layer: observability/crowdsec
-    kind: ServiceMonitor
-    name: crowdsec-agent
-    reason: >-
-      inert — selects app.kubernetes.io/component=agent; the only agent
-      Service (crowdsec-agent-service) carries app=crowdsec-agent-service.
-      Prometheus has no crowdsec target (verified 2026-09-12). Found by this
-      check's first run; the fix needs the Service's metrics port name
-      confirmed and is a separate change.
-    owner: TODO hl-0292
-  - layer: observability/crowdsec
-    kind: ServiceMonitor
-    name: crowdsec-lapi
-    reason: >-
-      inert — selects app.kubernetes.io/component=lapi; no Service in the
-      namespace carries it (the crowdsec-lapi-* Services are CNPG's).
-      Separate fix with crowdsec-agent.
-    owner: TODO hl-0292
-  - layer: observability/langfuse
-    kind: ServiceMonitor
-    name: langfuse-web
-    reason: >-
-      inert — selects app.kubernetes.io/name=langfuse + component=web; no
-      rendered or live Service carries both. Prometheus has no langfuse
-      target (verified 2026-09-12). Separate fix.
-    owner: TODO hl-0292
-  - layer: observability/langfuse
-    kind: ServiceMonitor
-    name: langfuse-worker
-    reason: >-
-      inert — as langfuse-web, with component=worker.
-    owner: TODO hl-0292
   - layer: infrastructure/clickhouse-operator
     kind: NetworkPolicy
     name: clickhouse-operator
@@ -89,5 +57,11 @@ exemptions:
       carries app.kubernetes.io/name=altinity-clickhouse-operator +
       instance=clickhouse-operator and no `app` label, so the policy has
       never selected it. Correcting it changes what the pod may do — assess
-      as a policy change, not a label fix.
+      as a policy change, not a label fix. Its rules are wrong too (read
+      2026-09-13): egress to `clickhouse.altinity.com/chi: ""` matches only an
+      EMPTY label value (the langfuse pods carry chi=langfuse), and egress to
+      the API server is a podSelector `component=kube-apiserver`, which a K8s
+      NetworkPolicy cannot match on Talos's host-network static pods — the
+      repo's working pattern is a CNP with toEntities kube-apiserver on 443
+      AND 6443. Rewrite as a CNP under PolicyAuditMode.
     owner: TODO hl-0292

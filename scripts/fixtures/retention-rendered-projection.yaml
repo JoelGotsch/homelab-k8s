@@ -17,7 +17,7 @@ cluster_defaults:
     chart_default_enabled: false
 layers:
 - path: observability/langfuse
-  input_digest_sha256: 48f9169896a375cbe9566bd8a3d113c8cd23ccfce56fba1c104acf5481dcf322
+  input_digest_sha256: 94027b32d471dfdf6becc7b671a3a25cbb89a0f011b8568d15c4a3a785d1d06f
   chart:
     name: langfuse
     repository: oci://registry.homelab.internal/homelab
@@ -195,7 +195,7 @@ layers:
     source_name_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.name
     source_key_path: .s3.mediaUpload.secretAccessKey.secretKeyRef.key
 - path: observability/crowdsec
-  input_digest_sha256: 41be3338668a1c6b96bb90394e1cdc873298152f27a9ed1d6be19a5d3b5851a9
+  input_digest_sha256: 56dc4822608efb5afbc3a7e063f8d1191d41b24ddf0043cbb28917440d646194
   chart:
     name: crowdsec
     repository: oci://registry.homelab.internal/homelab

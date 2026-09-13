@@ -41,7 +41,8 @@ resources:
   - externalsecret.yaml
   - networkpolicy.yaml
   - httproute.yaml
-  - servicemonitor.yaml
+  # servicemonitor.yaml removed 2026-09-13: Langfuse web/worker expose no
+  # Prometheus endpoint (see README, TODO hl-0292).
 
 # Build-only ConfigMap for the HTTPRoute-hostname replacement below.
 components:

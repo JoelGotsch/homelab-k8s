@@ -5,6 +5,16 @@
 # selector than our kube-prometheus-stack release; we ship
 # our own with the right `release: kube-prometheus-stack`
 # label.
+#
+# INERT UNTIL 2026-09-13: both monitors selected
+# `app.kubernetes.io/component=lapi|agent`, which no Service carries — the
+# chart's Services are labelled only `app=crowdsec-service` (LAPI, selects
+# type=lapi) and `app=crowdsec-agent-service` (agent, selects type=agent), and
+# the `crowdsec-lapi-*` Services are CNPG's. Prometheus had no crowdsec target
+# for the layer's whole life. Verified before the fix: both pods serve `cs_*`
+# series on 127.0.0.1:6060/metrics, and ciliumnetworkpolicy.yaml already admits
+# monitoring/prometheus on 6060 for both. Guarded by
+# scripts/check-selectors-match-render.py (TODO hl-0292).
 
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -18,7 +28,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/component: lapi
+      app: crowdsec-service
   endpoints:
     - port: metrics
       path: /metrics
@@ -37,7 +47,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/component: agent
+      app: crowdsec-agent-service
   endpoints:
     - port: metrics
       path: /metrics
