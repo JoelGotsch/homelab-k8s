@@ -353,7 +353,7 @@ duplicate_fixture="$TEMP_ROOT/duplicate-claim.yaml"
 cp "$FIXTURE" "$duplicate_fixture"
 CONTRACT_ID=woodpecker-agent-config yq e -i '
   (.layers[].claims[] | select(.contract_id == strenv(CONTRACT_ID)) | .rendered_claim_id) =
-    "woodpecker-server/data"
+    "langfuse-redis-primary/valkey-data"
 ' "$duplicate_fixture"
 expect_fail "duplicate rendered claim identity cannot mask an omission" \
   --root "$baseline_root" --fixture "$duplicate_fixture" --contract "$CONTRACT"

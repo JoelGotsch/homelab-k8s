@@ -13,7 +13,7 @@
 # claim/template merely to make this file green; KST-03 owns attended migration.
 version: 1
 owner_repository: homelab-k8s
-declared_count: 22
+declared_count: 21
 declared_implicit_default_count: 1
 
 scope:
@@ -498,33 +498,7 @@ entries:
     rto: 24 hours
     migration_owner: none
     required_restore_test: restore the barman base + WAL into a disposable CNPG cluster and verify repos, agents and the latest pipelines are present — scripts/verify-cnpg-restore.sh woodpecker woodpecker-pg (every table's count and max id)
-    reason: ADR 0036 requires the CI engine's state to survive accidental claim deletion; the successor to woodpecker-sqlite
-
-  - id: woodpecker-sqlite
-    workload: Woodpecker server SQLite
-    namespace: woodpecker
-    claim: StatefulSet/woodpecker-server data
-    source:
-      file: platform/woodpecker/values.yaml
-      value_path: '.server.persistentVolume.storageClass'
-      document_index: 0
-      selector_path: server.persistentVolume.storageClass
-      # values.yaml.j2 was the render source until ADR 0045 C2 deleted it;
-      # values.yaml is now the only declaration, so there is no mirror to drift.
-      mirrors: []
-    rendered_claim_id: woodpecker-server/data
-    current_storage_class: longhorn-replica2
-    target_storage_class: longhorn-replica2-retain
-    desired_reclaim_policy: Retain
-    state: known-mismatch
-    data_class: internal
-    data_value: CI pipeline history and jobs in flight
-    backup_tier: tier-1 Longhorn snapshots only; no declared tier-3 membership
-    rpo: 4 hours policy target
-    rto: 24 hours
-    migration_owner: KST-03 Woodpecker server PVC migration
-    required_restore_test: restore the SQLite claim to a disposable Woodpecker server and verify retained build history
-    reason: ADR 0036 requires the small build-history volume to survive accidental claim deletion
+    reason: ADR 0036 requires the CI engine's state to survive accidental claim deletion; the successor to the woodpecker-sqlite claim (released 2026-09-13, hl-0294)
 
   - id: woodpecker-agent-config
     workload: Woodpecker agent configuration
@@ -536,7 +510,7 @@ entries:
       value_path: '.agent.persistence.storageClass'
       document_index: 0
       selector_path: agent.persistence.storageClass
-      # See woodpecker-sqlite: the .j2 mirror is gone. An implicit-default
+      # values.yaml.j2 (ADR 0045 C2) is gone. An implicit-default
       # exception must now carry NO mirror at all — a second copy is exactly
       # what could reintroduce an explicit class behind the exception's back.
       mirrors: []

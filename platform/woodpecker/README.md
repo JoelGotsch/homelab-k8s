@@ -138,13 +138,14 @@ steps:
    root-cause write-up is the journal entry of that date).
 
    `data-woodpecker-server-0` (the 1.5 GiB SQLite file on `longhorn-replica2`)
-   is still mounted and still in the retention contract as `woodpecker-sqlite`;
-   it is the rollback (`git revert` the driver-switch commit — the file was
-   never modified after the cutover). Releasing it — dropping the chart's
-   `server.persistentVolume` and the contract entry — is a follow-up after the
-   first restore test of `woodpecker-pg` passes, not a cleanup to do in
-   passing. The migration itself was one pgloader Job,
-   `homelab-infra/scripts/migrate-woodpecker-sqlite-to-postgres.sh`.
+   was the rollback until the first scripted restore of `woodpecker-pg` passed
+   on 2026-09-13 (`scripts/verify-cnpg-restore.sh woodpecker woodpecker-pg`: 19/19
+   tables, 1,185,610 rows). It was then released the same day (TODO hl-0294):
+   `server.persistentVolume` is off, the `woodpecker-sqlite` contract entry is
+   gone, and the claim, its manual Longhorn snapshot and the completed
+   `woodpecker-sqlite-to-pg` Job were deleted. There is no SQLite rollback; a
+   bad `woodpecker-pg` is recovered from barman. The migration itself was one
+   pgloader Job, `homelab-infra/scripts/migrate-woodpecker-sqlite-to-postgres.sh`.
 
    The separate agent `agent-config` claim contains only reconstructable
    configuration. Its live StatefulSet template predates the explicit storage

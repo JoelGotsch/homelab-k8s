@@ -224,7 +224,7 @@ layers:
     storage_class_mode: explicit
   secret_references: []
 - path: platform/woodpecker
-  input_digest_sha256: 09a2dfd0562f4bb4ef8af70ce3df44069f37f2126dfc5053e33ef565d1154a64
+  input_digest_sha256: 2d283bd7d1fdf771623a8353255a15732a5bcc6338e369cfa7a1c8d857a1e1fb
   chart:
     name: woodpecker
     repository: oci://registry.homelab.internal/homelab
@@ -234,7 +234,7 @@ layers:
     # values.yaml.j2 was the second mirror until ADR 0045 C2 deleted it; the
     # layer has no forbidden_literal_paths, so the list is now empty by design.
     values_mirrors: []
-  declared_claim_count: 2
+  declared_claim_count: 1
   declared_implicit_default_claim_count: 1
   declared_secret_reference_count: 0
   declared_externalsecret_mirror_count: 0
@@ -258,12 +258,4 @@ layers:
     exception_removal_condition: recreate only the Woodpecker agent StatefulSet controller in an attended
       window with the explicit template, preserve and reuse the existing agent-config-* PVC, verify that
       PVC remains longhorn-replica2 and the agent is healthy, then retire this exception atomically
-  - contract_id: woodpecker-sqlite
-    rendered_claim_id: woodpecker-server/data
-    kind: StatefulSet
-    resource_name: woodpecker-server
-    claim_name: data
-    selector_path: spec.volumeClaimTemplates.0.spec.storageClassName
-    storage_class: longhorn-replica2
-    storage_class_mode: explicit
   secret_references: []

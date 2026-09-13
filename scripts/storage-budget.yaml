@@ -70,11 +70,6 @@ chart_claims:
   - repo: homelab-k8s
     layer: platform/woodpecker
     claims:
-      - name: woodpecker-server/data
-        kind: StatefulSet VCT
-        size: {path: .server.persistentVolume.size}
-        storage_class: {path: .server.persistentVolume.storageClass}
-        enabled: {path: .server.persistentVolume.enabled, default: true}
       - name: woodpecker-agent/agent-config
         kind: StatefulSet VCT
         size: {path: .agent.persistence.size, default: 1Gi}      # chart default (agent subchart 3.7.3)

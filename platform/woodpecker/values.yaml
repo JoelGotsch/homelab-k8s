@@ -94,8 +94,10 @@ server:
     # 11 h; the agent's 20 s lease renewals (server/rpc/rpc.go Extend) missed
     # three in a row often enough to kill running pipelines. The WAL +
     # busy_timeout DSN suffix that ran from 2026-09-12 11:49Z until the cutover
-    # was the stopgap; the SQLite claim data-woodpecker-server-0 stays mounted
-    # as the rollback (revert this commit) until TODO hl-0294.
+    # was the stopgap; the SQLite claim data-woodpecker-server-0 was kept as the
+    # rollback until the first scripted restore of woodpecker-pg passed
+    # (scripts/verify-cnpg-restore.sh, 2026-09-13) and was then released
+    # (TODO hl-0294) — there is no SQLite rollback any more.
     WOODPECKER_DATABASE_DRIVER: "postgres"
     WOODPECKER_DATABASE_DATASOURCE:
       valueFrom:
@@ -139,12 +141,25 @@ server:
     - woodpecker-agent-secret
     - woodpecker-grpc-secret
 
+  # No data volume since 2026-09-13 (TODO hl-0294): the server's only state is
+  # woodpecker-pg (WOODPECKER_DATABASE_DRIVER=postgres, logs in the database),
+  # and the 10Gi longhorn-replica2 claim held nothing but the pre-cutover SQLite
+  # file. Turning this off removes volumeClaimTemplates, which the apiserver
+  # treats as immutable — the StatefulSet is recreated with
+  # `kubectl delete sts woodpecker-server --cascade=orphan` (pod keeps running;
+  # Argo recreates the controller), then the pod is deleted in a no-CI window.
   persistentVolume:
-    enabled: true
-    storageClass: longhorn-replica2
-    size: 10Gi
-    accessModes:
-      - ReadWriteOnce
+    enabled: false
+  # readOnlyRootFilesystem is on, and the data volume was the container's only
+  # writable path; keep exactly that surface writable (nothing durable lives
+  # there now) so a stray temp write cannot crash the server.
+  extraVolumes:
+    - name: data
+      emptyDir:
+        sizeLimit: 256Mi
+  extraVolumeMounts:
+    - name: data
+      mountPath: /var/lib/woodpecker
 
   # RWO PVC + replicaCount: 1 deadlocks RollingUpdate. On a
   # StatefulSet (which is what the woodpecker-server chart
