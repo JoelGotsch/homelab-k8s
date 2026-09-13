@@ -73,6 +73,13 @@ spec:
           protocol: TCP
         - port: 3200   # tempo (chart 1.24.4 moved it off 3100, 2026-09-09)
           protocol: TCP
+        # crowdsec LAPI + agent self-metrics. 6th recurrence of the trap
+        # above: the crowdsec ServiceMonitors selected no Service until
+        # 2026-09-13 (TODO hl-0292), so the scrape had never run; the first
+        # real one came back up=0 with Hubble showing `EGRESS DENIED` from
+        # this pod to :6060 and CrowdSecLAPIDown going pending.
+        - port: 6060
+          protocol: TCP
         - port: 8080
           protocol: TCP
         - port: 8081
