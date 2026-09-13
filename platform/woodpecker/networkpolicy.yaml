@@ -14,15 +14,37 @@
 #
 # INERT SINCE DAY ONE (found 2026-09-12): this policy and woodpecker-agent
 # below select `app.kubernetes.io/name: woodpecker` + `component`, labels the
-# chart never renders — it emits name=server|agent + instance=woodpecker — and
-# `kubectl get cep -n woodpecker` shows ingress/egress enforcing <none> on both
-# pods. They have run default-allow throughout. Correcting the two selectors
-# would enforce, for the first time, rule sets never observed under audit, and
-# the server's egress already lacks the Gateway-routed Forgejo FQDN it clones
-# and OAuths through — so that is an attended PolicyAuditMode rollout (TODO
-# hl-0291, same method as forgejo-pg-cnpg), not a label fix. Until then the
-# two are reasoned exemptions in scripts/selector-exemptions.yaml, and the
-# rule set is kept correct for the day it is enforced (the 9001 scrape rule).
+# chart never renders — it emits name=server|agent + instance=woodpecker. They
+# have run default-allow throughout. Evidence is the Cilium agent, NOT the
+# CiliumEndpoint: on Cilium 1.20 `kubectl get cep` carries no policy status for
+# any endpoint (empty even on woodpecker-pg-1, which enforces both ways);
+# `cilium-dbg endpoint get <id>` on the node shows only crowdsec-banned-deny +
+# allow-any-ingress for both pods (2026-09-13). Correcting the two
+# endpointSelectors enforces, for the first time, rule sets never observed
+# under audit — an attended PolicyAuditMode rollout (TODO hl-0291), not a label
+# fix. Until then the two are reasoned exemptions in
+# scripts/selector-exemptions.yaml.
+#
+# 2026-09-13 (hl-0291 prep, still inert): the IN-RULE selectors are corrected
+# to the rendered labels (agent<->server gRPC used the same unrendered labels,
+# so fixing only endpointSelector would have dropped the agent), and the rule
+# set is checked against a Hubble capture of the live default-allow flows
+# (hubble observe -n woodpecker on worker2, 2026-09-13 16:05-16:18Z — two
+# server restarts, Forgejo webhooks and API traffic inside it; every SYN seen
+# is listed, all FORWARDED):
+#   host            -> server :8000   kubelet probes (host is always allowed)
+#   ingress entity  -> server :8000   UI through the Gateway
+#   forgejo pods    -> server :8000   webhooks
+#   agent           -> server :9000   gRPC
+#   prometheus      -> server :9001   PodMonitor scrape
+#   kube-apiserver  -> server :9001   `kubectl get --raw .../proxy/metrics`
+#   server -> woodpecker-pg :5432
+#   agent  -> kube-apiserver :6443  step-pod management
+#   server -> 10.10.30.50:443 (Gateway VIP, forge API + OAuth token refresh).
+#     Hubble shows it as `world` under default-allow; under audit the kyverno
+#     rollout proved such a flow matches `toEntities: [ingress]`, and the
+#     Gateway then evaluates the CLIENT's egress to the backend Forgejo pod
+#     (ADR 0038) — which is why the forgejo :3000 rule stays alongside it.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -51,11 +73,11 @@ spec:
               protocol: TCP
             - port: "9000"
               protocol: TCP
-    # Agent grpc.
+    # Agent grpc (rendered labels: name=agent + instance=woodpecker).
     - fromEndpoints:
         - matchLabels:
-            app.kubernetes.io/name: woodpecker
-            app.kubernetes.io/component: agent
+            app.kubernetes.io/name: agent
+            app.kubernetes.io/instance: woodpecker
       toPorts:
         - ports:
             - port: "9000"
@@ -65,6 +87,16 @@ spec:
         - matchLabels:
             io.kubernetes.pod.namespace: monitoring
             app.kubernetes.io/name: prometheus
+      toPorts:
+        - ports:
+            - port: "9001"
+              protocol: TCP
+    # API-server proxy to the same listener — the operator's no-port-forward
+    # metrics read (`kubectl get --raw
+    # /api/v1/namespaces/woodpecker/pods/woodpecker-server-0:9001/proxy/metrics`),
+    # observed in the 2026-09-13 capture. Read-only metrics, 9001 only.
+    - fromEntities:
+        - kube-apiserver
       toPorts:
         - ports:
             - port: "9001"
@@ -81,7 +113,16 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-    # Forgejo for OAuth + git metadata.
+    # Forgejo for OAuth + git metadata. WOODPECKER_FORGEJO_URL is the
+    # Gateway-routed FQDN, so the connection leaves for the Gateway VIP
+    # (`ingress` entity, :443) and the Gateway then checks this pod's egress
+    # to the Forgejo backend (:3000, ADR 0038) — both rules are needed.
+    - toEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
     - toEndpoints:
         - matchLabels:
             io.kubernetes.pod.namespace: forgejo
@@ -123,11 +164,11 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-    # Server grpc.
+    # Server grpc (rendered labels: name=server + instance=woodpecker).
     - toEndpoints:
         - matchLabels:
-            app.kubernetes.io/name: woodpecker
-            app.kubernetes.io/component: server
+            app.kubernetes.io/name: server
+            app.kubernetes.io/instance: woodpecker
       toPorts:
         - ports:
             - port: "9000"
