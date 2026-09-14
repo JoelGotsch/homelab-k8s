@@ -73,6 +73,13 @@ data:
         type: remap
         inputs: [hubble_events]
         source: |
+          # The static exporter wraps every record: {"flow": {...},
+          # "node_name": "<cluster>/<node>", "time": ...}. The wrapper's
+          # node_name is only present when `node_name` is in the
+          # fieldMask (cilium values); NODE_NAME (downward API, set in
+          # the sidecar spec) is the fallback. The first trial run
+          # (2026-09-14) had `. = parsed` here and labelled every line
+          # verdict=UNKNOWN / source_namespace=external.
           parsed, err = parse_json(.message)
           if err != null {
             # Drop unparseable lines rather than ship them as
@@ -80,7 +87,16 @@ data:
             # a non-JSON line indicates an upstream format change.
             abort
           }
-          . = parsed
+          flow = parsed.flow
+          if flow == null {
+            abort
+          }
+          node = string(parsed.node_name) ?? ""
+          if node == "" {
+            node = get_env_var("NODE_NAME") ?? "unknown"
+          }
+          . = flow
+          .node = replace(node, r'^[^/]+/', "")
           .verdict = string!(.verdict || "UNKNOWN")
           .source_namespace = string!(.source.namespace || "external")
           .destination_namespace = string!(.destination.namespace || "external")
@@ -90,7 +106,17 @@ data:
       loki:
         type: loki
         inputs: [hubble_parse]
-        endpoint: http://loki.monitoring.svc.cluster.local:3100
+        # By ClusterIP, not by name: the sidecar lives in the host-network
+        # cilium-agent pod, whose dnsPolicy is ClusterFirst — for a
+        # host-network pod that is the node's resolver (the router,
+        # 10.10.30.1), which does not answer for cluster.local. The trial
+        # run at 19:47Z on 2026-09-14 failed every push with "dns error:
+        # failed to lookup address information". ClusterFirstWithHostNet
+        # on the cilium DaemonSet would make the CNI agent itself depend
+        # on kube-dns, which depends on the CNI. The address is pinned in
+        # observability/loki/kustomization.yaml (Service loki,
+        # spec.clusterIP), so both ends are one git fact.
+        endpoint: http://10.98.57.58:3100
         encoding:
           codec: json
         # Cardinality-bounded labels. NODE_NAME from downward
@@ -100,7 +126,10 @@ data:
           job: hubble
           verdict: "{{ verdict }}"
           source_namespace: "{{ source_namespace }}"
-          node: "${NODE_NAME}"
+          # From the remap (wrapper node_name or NODE_NAME). The first
+          # trial shipped the literal string "${NODE_NAME}" as the label:
+          # config-file interpolation did not touch it (2026-09-14).
+          node: "{{ node }}"
         # Hubble events are written in batched bursts; out-of-
         # order is normal at the millisecond scale. Loki's
         # ingester accepts when configured with

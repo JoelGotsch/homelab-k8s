@@ -22,3 +22,20 @@ resources:
   - externalsecret.yaml
   - networkpolicy.yaml
   - servicemonitor.yaml
+
+patches:
+  # Pin the loki Service's ClusterIP to the address it has carried since
+  # install. observability/hubble-flow-exporter's Vector sidecar runs in
+  # the host-network cilium-agent pod and cannot resolve cluster.local
+  # names (see the endpoint comment in its configmap.yaml), so it pushes
+  # to this address. clusterIP is immutable; declaring the live value is
+  # a no-op for Argo, and a rebuilt cluster gets the same address as long
+  # as the service CIDR (10.96.0.0/12, Talos cluster config) is kept.
+  # The chart exposes no clusterIP value for the single-binary Service.
+  - target:
+      kind: Service
+      name: loki
+    patch: |
+      - op: add
+        path: /spec/clusterIP
+        value: 10.98.57.58
