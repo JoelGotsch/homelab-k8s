@@ -1,12 +1,15 @@
 # Kyverno values.
 
-# Kyverno's cleanup jobs (webhooksCleanup, policyReportsCleanup) default to
-# bitnami/kubectl, which Bitnami sunset on docker.io (2025) — the old tags
-# 404, so kyverno-clean-reports ImagePullBackOffs. Repoint to the
-# bitnamilegacy archive (same tag). Added 2026-05-27.
-webhooksCleanup:
-  image:
-    repository: bitnamilegacy/kubectl
+# No `webhooksCleanup.image` override. One sat here from 2026-05-27
+# (`repository: bitnamilegacy/kubectl`, for a bitnami/kubectl docker.io 404)
+# until 2026-09-14. Chart 3.9.x defaults the pre-delete hook Jobs to
+# `ghcr.io/kyverno/readiness-checker:<appVersion>`, so the override rendered
+# `ghcr.io/bitnamilegacy/kubectl:v1.19.1` — a tag that does not exist. The
+# hooks (`kyverno-rm-webhooks`, `kyverno-scale-to-zero`) run only on `helm
+# uninstall`, which Argo never issues, so nothing ever pulled it. Verified
+# 2026-09-14: the chart default renders `ghcr.io/kyverno/readiness-checker:
+# v1.19.1`, which exists (manifest HTTP 200); ghcr.io is already pulled by
+# 72 running containers via the Spegel mirror with upstream fallback.
 # `policyReportsCleanup:` used to sit here with the same image override. It
 # was dead config: neither chart 3.8.2 nor 3.9.0 has any such value (grep of
 # both vendored charts, 2026-09-09 — zero references), so it rendered to

@@ -51,7 +51,9 @@ metadata:
 spec:
   # Mutations don't validate — they patch. Admission-time only
   # (see the `mutate:` block for why background/targets is off).
-  background: true
+  # `false` because there is no `targets:` block: a background scan of
+  # this rule has nothing to patch, so every scan was wasted work (2026-09-14).
+  background: false
   rules:
     - name: stamp-openbao-pvc-retention-annotation
       match:
