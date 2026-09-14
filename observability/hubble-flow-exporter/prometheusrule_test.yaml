@@ -1,0 +1,183 @@
+# promtool unit tests for prometheusrule.yaml (hubble-flow-exporter).
+#
+# Run via `scripts/check-prometheusrule-tests.sh` (pre-commit), which
+# extracts `.spec.groups` into a generated `rules.yaml` — hence the bare
+# `rule_files:` reference.
+#
+# The input series carry the label sets the running pipeline exports
+# (read from Prometheus on 2026-09-14): Vector's self-metrics from the
+# PodMonitor have `host` (= node name, host-network pod) and `pod`;
+# Hubble's counters from the hubble ServiceMonitor have `node` and the
+# same `pod`. The rules join on `pod`. These fixtures exist because the
+# previous rule file named two series that do not exist
+# (vector_buffer_byte_size, cilium_hubble_flows_processed_total) and
+# could never fire.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+
+  # (a) Healthy: buffer at 1%, source reading, flows produced. Nothing fires.
+  - interval: 1m
+    name: "(a) healthy pipeline - nothing fires"
+    input_series:
+      - series: 'vector_buffer_size_bytes{component_id="loki", component_kind="sink", host="worker1", pod="cilium-aaaaa", instance="10.10.30.21:9598"}'
+        values: "5000000+0x30"
+      - series: 'vector_buffer_max_size_bytes{component_id="loki", component_kind="sink", host="worker1", pod="cilium-aaaaa", instance="10.10.30.21:9598"}'
+        values: "536870912+0x30"
+      - series: 'vector_component_received_events_total{component_id="hubble_events", component_kind="source", host="worker1", pod="cilium-aaaaa"}'
+        values: "0+3000x30"
+      - series: 'hubble_flows_processed_total{node="worker1", pod="cilium-aaaaa", verdict="FORWARDED", type="Trace"}'
+        values: "0+60000x30"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: HubbleExporterBufferFilling
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: HubbleExporterBufferNearFull
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: HubbleExporterSourceStalled
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: HubbleExporterEventsDropped
+        exp_alerts: []
+
+  # (b) Buffer at 60% of the reported max for the whole window:
+  #     Filling fires, NearFull does not.
+  - interval: 1m
+    name: "(b) buffer at 60 percent - Filling fires, NearFull does not"
+    input_series:
+      - series: 'vector_buffer_size_bytes{component_id="loki", component_kind="sink", host="worker2", pod="cilium-bbbbb", instance="10.10.30.22:9598"}'
+        values: "322122547+0x30"
+      - series: 'vector_buffer_max_size_bytes{component_id="loki", component_kind="sink", host="worker2", pod="cilium-bbbbb", instance="10.10.30.22:9598"}'
+        values: "536870912+0x30"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HubbleExporterBufferFilling
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: hubble-flow-exporter
+              host: worker2
+              pod: cilium-bbbbb
+            exp_annotations:
+              summary: "Hubble exporter Vector buffer >50% on worker2 for 5m"
+              description: |
+                Vector's loki sink buffer (disk-backed hostPath, 512 MiB)
+                on node worker2 (cilium-bbbbb) has been
+                over 50% full for 5 minutes. Loki ingress is slower than
+                Hubble's event rate; back-pressure is about to stall the
+                source. Triage:
+                  kubectl -n monitoring get pods -l app.kubernetes.io/name=loki
+                  kubectl -n monitoring logs <loki-pod> --tail 100
+                  kubectl -n kube-system logs cilium-bbbbb -c hubble-flow-exporter --tail 100
+                Common causes: Loki ingester saturated or rate-limiting
+                (429 in the sidecar log); chunks bucket S3 endpoint slow;
+                the export allowList widened without a Loki limit change.
+      - eval_time: 10m
+        alertname: HubbleExporterBufferNearFull
+        exp_alerts: []
+
+  # (c) Buffer at 95%: both fire.
+  - interval: 1m
+    name: "(c) buffer at 95 percent - NearFull fires"
+    input_series:
+      - series: 'vector_buffer_size_bytes{component_id="loki", component_kind="sink", host="worker3", pod="cilium-ccccc", instance="10.10.30.23:9598"}'
+        values: "510027366+0x30"
+      - series: 'vector_buffer_max_size_bytes{component_id="loki", component_kind="sink", host="worker3", pod="cilium-ccccc", instance="10.10.30.23:9598"}'
+        values: "536870912+0x30"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HubbleExporterBufferNearFull
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: hubble-flow-exporter
+              host: worker3
+              pod: cilium-ccccc
+            exp_annotations:
+              summary: "Hubble exporter Vector buffer >90% on worker3 \u2014 drops imminent"
+              description: |
+                Buffer on worker3 (cilium-ccccc) is >90%
+                full for 2m. Vector's `when_full: block` is about to
+                back-pressure the source; Cilium's static-export file
+                (50 MiB rotation window) is the only remaining buffer.
+                Sustained pressure here drops flows — the exfiltration
+                signal degrades silently. Fix the downstream block first
+                (see HubbleExporterBufferFilling); the sidecar drains on
+                its own once Loki accepts again.
+
+  # (d) Source stalled: Hubble keeps counting flows in the pod, Vector's
+  #     source counter is flat. Fires after the 10m window + 10m for.
+  - interval: 1m
+    name: "(d) flows produced, source flat - SourceStalled fires"
+    input_series:
+      - series: 'vector_component_received_events_total{component_id="hubble_events", component_kind="source", host="worker1", pod="cilium-aaaaa"}'
+        values: "90000+0x40"
+      - series: 'hubble_flows_processed_total{node="worker1", pod="cilium-aaaaa", verdict="FORWARDED", type="Trace"}'
+        values: "0+60000x40"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: HubbleExporterSourceStalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: hubble-flow-exporter
+              escalate_after: "1h"
+              pod: cilium-aaaaa
+            exp_annotations:
+              summary: "Hubble exporter source stalled in cilium-aaaaa (flows produced, none ingested)"
+              description: |
+                Cilium is producing flows in cilium-aaaaa
+                (hubble_flows_processed_total > 1/s) but Vector's
+                hubble_events source has read 0 events in the last
+                10m. Likely a downstream block (full buffer +
+                when_full: block) — pair with the
+                HubbleExporterBufferFilling/NearFull alerts. If the
+                buffer is NOT full: Vector itself is stuck, or the
+                export allowList matched nothing; check the sidecar
+                log and `hubble-export-allowlist` in cilium-config.
+
+  # (e) No traffic at all (both flat): SourceStalled must NOT fire — the
+  #     join on flows produced is what separates "stalled" from "quiet".
+  - interval: 1m
+    name: "(e) nothing produced, nothing read - SourceStalled stays silent"
+    input_series:
+      - series: 'vector_component_received_events_total{component_id="hubble_events", component_kind="source", host="cp1", pod="cilium-ddddd"}'
+        values: "90000+0x40"
+      - series: 'hubble_flows_processed_total{node="cp1", pod="cilium-ddddd", verdict="FORWARDED", type="Trace"}'
+        values: "1000+0x40"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: HubbleExporterSourceStalled
+        exp_alerts: []
+
+  # (f) A discard counter that moves: EventsDropped fires.
+  - interval: 1m
+    name: "(f) discarded events - EventsDropped fires"
+    input_series:
+      - series: 'vector_buffer_discarded_events_total{component_id="loki", component_kind="sink", host="worker2", pod="cilium-bbbbb"}'
+        values: "0+10x20"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: HubbleExporterEventsDropped
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: hubble-flow-exporter
+              host: worker2
+              pod: cilium-bbbbb
+            exp_annotations:
+              summary: "Hubble exporter dropping events on worker2"
+              description: |
+                Vector's loki sink is discarding events on
+                worker2 (cilium-bbbbb). With
+                `when_full: block` configured this should not happen;
+                a non-zero rate means the buffer is no longer blocking
+                or Vector tripped internally. The exfiltration signal
+                has gaps. Investigate:
+                  kubectl -n kube-system logs cilium-bbbbb -c hubble-flow-exporter --tail 200
+                  kubectl -n kube-system exec cilium-bbbbb -c cilium-agent -- ls -la /var/run/cilium/hubble/
