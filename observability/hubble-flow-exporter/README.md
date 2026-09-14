@@ -17,6 +17,31 @@ Decisions captured in
 | Topology | per-node producer → per-node consumer (straight path) | per-node producer → relay aggregate → exporter re-fan to Loki |
 | Failure-mode legibility | "node-3's flows missing → check node-3" | layer triage required |
 
+## Status (2026-09-14)
+
+Re-added after the 2026-05-23 removal (hl-0125). Three things were
+wrong with the original and are fixed in this revision:
+
+1. The Vector config never loaded in any Vector: the `prometheus_exporter`
+   sink was fed the two Log components, which `vector validate` rejects
+   ("Data type mismatch"). Self-metrics now come from an
+   `internal_metrics` source. Validated with `vector validate` at 0.43.1
+   and 0.58.0.
+2. `ciliumnetworkpolicy.yaml` admitted only `host`; five of six sidecars
+   reach Loki as `remote-node`.
+3. Every flow was exported (~2,500/s cluster-wide, two thirds of it
+   Longhorn replication traces) — ~200 GB/day raw into a 90-day Loki.
+   `hubble.export.static.allowList` in cilium values now keeps what ADR
+   0021 D5 is about: DROPPED/ERROR/AUDIT verdicts, every L7 record (DNS
+   and HTTP), and any flow with `reserved:world` on either side (CIDR
+   identities carry that label too). Intra-cluster FORWARDED traces and
+   policy-verdict events are not shipped; the Hubble metrics in
+   Prometheus count those (hl-0308). Measured ~120 flows/s.
+
+The sidecar image is `timberio/vector:0.58.0-distroless-libc` pinned by
+digest in cilium values; Renovate does not track that string (hl-0253),
+bump it by hand.
+
 ## What ships
 
 | Source | Loki labels | Notes |

@@ -32,8 +32,13 @@ spec:
     matchLabels:
       app.kubernetes.io/name: loki
   ingress:
+    # The sidecar runs in the host-network cilium-agent pod, so it is the
+    # node's identity: `host` when it is on Loki's own node, `remote-node`
+    # from the other five. Until 2026-09-14 only `host` was listed, which
+    # would have admitted one node's flows and dropped the rest.
     - fromEntities:
         - host
+        - remote-node
       toPorts:
         - ports:
             - port: "3100"

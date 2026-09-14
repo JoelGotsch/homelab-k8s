@@ -38,6 +38,16 @@ data:
       address: 127.0.0.1:8686
 
     sources:
+      # Vector's own pipeline counters (component_received_events_total,
+      # buffer_*, component_errors_total). They are Metric events and
+      # the prometheus_exporter sink below accepts only those — until
+      # 2026-09-14 that sink was wired to the two Log components, which
+      # `vector validate` rejects ("Data type mismatch between
+      # hubble_events ([Log]) and vector_metrics ([Metric])"), so this
+      # config had never loaded in any Vector.
+      internal_metrics:
+        type: internal_metrics
+
       hubble_events:
         type: file
         include:
@@ -126,6 +136,5 @@ data:
       vector_metrics:
         type: prometheus_exporter
         inputs:
-          - hubble_events
-          - hubble_parse
+          - internal_metrics
         address: 0.0.0.0:9598
