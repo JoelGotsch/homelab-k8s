@@ -1,7 +1,11 @@
 # Cilium egress for alloy's kube-apiserver access.
 #
-# alloy's loki.source.kubernetes streams pod logs *through the
-# kube-apiserver* (not by reading files). Cilium's socket-LB DNATs
+# alloy's discovery.kubernetes watches pods on its node through the
+# kube-apiserver to build the Loki labels and the /var/log/pods path
+# for each container. (Until 2026-09-14 loki.source.kubernetes also
+# streamed the log bytes through it; loki.source.file now reads them
+# from the node, but discovery still needs this path — with it
+# blocked alloy has no targets.) Cilium's socket-LB DNATs
 # the apiserver ClusterIP (10.96.0.1:443) to the control-plane host
 # endpoint (:6443) BEFORE policy eval, so a vanilla NetworkPolicy
 # `podSelector: {component: kube-apiserver}` egress rule never

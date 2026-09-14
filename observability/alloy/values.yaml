@@ -1,10 +1,11 @@
-# Alloy DaemonSet values. Per ADR 0021 D6.
+# Alloy DaemonSet values. Per ADR 0021 D2.
 #
-# Scrapes:
-# - Pod logs from /var/log/pods (Kubernetes-discovered)
-# - Journald from each node (system + Talos audit-log)
+# Ships:
+# - Pod logs, tailed from the node's /var/log/pods (Kubernetes-discovered,
+#   this node only), CRI-parsed, to Loki via loki.write.
+# - Log-derived Prometheus series for two CronJobs (branches below).
 #
-# Ships to Loki via the loki.write component.
+# No journald: Talos has none (see the Node/system logs NOTE below).
 
 # DaemonSet — one Alloy pod per node, including CP nodes
 # (so the audit-log path is captured everywhere).
@@ -34,7 +35,9 @@ alloy:
     content: |-
       // ---------- Discovery ----------
 
-      // Discover Kubernetes pods on this node.
+      // Discover Kubernetes pods on this node. The apiserver is still
+      // needed for THIS (pod metadata -> Loki labels); it is no longer
+      // the path the log bytes take.
       discovery.kubernetes "pods" {
         role = "pod"
         selectors {
@@ -43,8 +46,17 @@ alloy:
         }
       }
 
-      // Standard k8s pod-log relabeling: namespace + pod +
-      // container labels become Loki stream labels.
+      // Standard k8s pod-log relabeling: namespace + pod + container (+
+      // node, app, component) become Loki stream labels, and __path__
+      // names the CRI log file the kubelet writes for that container.
+      //
+      // The pod role emits one target per declared container PORT (and one
+      // for a port-less container), so a container with two ports appears
+      // twice here with the same __path__ and the same visible labels.
+      // loki.source.file keys its tailers on (path, non-__ labels), so the
+      // duplicate collapses to one reader — measured 2026-09-14 with two
+      // such targets against one file: 3 entries in, 3 out,
+      // loki_source_file_files_active_total = 1.
       discovery.relabel "pods" {
         targets = discovery.kubernetes.pods.targets
         rule {
@@ -60,6 +72,10 @@ alloy:
           target_label  = "container"
         }
         rule {
+          source_labels = ["__meta_kubernetes_pod_node_name"]
+          target_label  = "node"
+        }
+        rule {
           source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
           target_label  = "app"
         }
@@ -67,21 +83,87 @@ alloy:
           source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_component"]
           target_label  = "component"
         }
+        // /var/log/pods/<namespace>_<pod>_<uid>/<container>/<n>.log on
+        // Talos (verified on worker1, 2026-09-14). The glob is the one the
+        // local.file_match reference gives; `*.log` matches the live
+        // 0.log and the kubelet's rotated-but-uncompressed files, not the
+        // `0.log.<stamp>.gz` archives.
+        rule {
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          target_label  = "__path__"
+          replacement   = "/var/log/pods/*$1/*.log"
+        }
       }
 
       // ---------- Pod log source ----------
+      //
+      // 2026-09-14: loki.source.file over the node's /var/log/pods replaces
+      // loki.source.kubernetes. The latter streamed every container's
+      // stdout THROUGH the kube-apiserver (`kubectl logs -f` semantics):
+      // ~54 open CONNECT pods/log streams per apiserver, ~160 across the
+      // three, reconnecting 2.7 times a second cluster-wide — every log
+      // byte crossed the control plane twice. The files are already on the
+      // node and already mounted (mounts.varlog below, read-only); Alloy
+      // runs as root (securityContext), which the 0640 root:root files
+      // require. Same label set as before minus loki.source.kubernetes's
+      // own `job`/`instance` (no dashboard or rule read them — grep of
+      // observability/grafana-dashboards and every PrometheusRule,
+      // 2026-09-14), plus `node` and the CRI `stream`.
+      //
+      // Positions live under storagePath (/tmp/alloy, an emptyDir), so a
+      // restarted Alloy has no positions and re-reads every file from the
+      // start. That is the deliberate choice over tail_from_end = true,
+      // which would also start NEW files at their end and lose the first
+      // ~10 s (one sync_period) of every new pod — the crash-loop start-up
+      // lines are the ones worth having, and the reboot-cascade janitor's
+      // Job pods live shorter than that window. Loki's query path drops
+      // exact duplicates (same stream, timestamp and line), so the re-read
+      // costs ingest bandwidth, not correctness; stage.drop older_than in
+      // loki.process "pods" keeps re-read lines outside Loki's 168h
+      // reject_old_samples window from becoming 400s. Persisting positions
+      // on a node hostPath is a separate, privilege-widening decision
+      // (TODO hl-0306).
+      local.file_match "pods" {
+        path_targets = discovery.relabel.pods.output
+      }
 
-      loki.source.kubernetes "pods" {
-        targets    = discovery.relabel.pods.output
+      loki.source.file "pods" {
+        targets    = local.file_match.pods.targets
         forward_to = [loki.process.pods.receiver]
       }
 
-      // Drop noisy logs we don't need at retention scale.
       loki.process "pods" {
         // Every entry goes to Loki AND through the janitor_metrics and
         // backup_metrics branches below. The branches forward nothing, so
         // they cannot change what Loki stores; they only derive metrics.
         forward_to = [loki.write.default.receiver, loki.process.janitor_metrics.receiver, loki.process.backup_metrics.receiver]
+
+        // CRI log lines: `<RFC3339Nano> <stdout|stderr> <F|P> <message>`.
+        // Sets the entry timestamp from the first field, joins P (partial)
+        // continuations into one entry, promotes `stream` to a label and
+        // leaves only the message as the line — so every selector and regex
+        // below sees exactly what loki.source.kubernetes used to deliver,
+        // minus the trailing newline (see the regex notes in the branches).
+        stage.cri {}
+
+        // loki.source.file adds the absolute file path as `filename`. It
+        // carries the pod UID, so it adds no stream cardinality beyond
+        // `pod`, only index bytes; dropped.
+        stage.label_drop {
+          values = ["filename"]
+        }
+
+        // A re-read after an Alloy restart (positions are on an emptyDir,
+        // see above) replays lines up to the kubelet's rotation depth; Loki
+        // rejects anything older than reject_old_samples_max_age (168h
+        // default, not overridden in observability/loki/values.yaml) with a
+        // 400 per batch. Drop them here instead, counted under
+        // loki_process_dropped_lines_total{reason="too_old"}.
+        stage.drop {
+          older_than          = "168h"
+          drop_counter_reason = "too_old"
+        }
 
         // Drop k8s probe-noise (kubelet healthcheck pings)
         // — high volume, low signal.
@@ -130,7 +212,7 @@ alloy:
           }
 
           stage.label_drop {
-            values = ["namespace", "pod", "container", "app", "component", "job", "instance"]
+            values = ["namespace", "pod", "container", "node", "stream", "app", "component", "job", "instance"]
           }
 
           stage.labels {
@@ -167,7 +249,7 @@ alloy:
           }
 
           stage.label_drop {
-            values = ["namespace", "pod", "container", "app", "component", "job", "instance"]
+            values = ["namespace", "pod", "container", "node", "stream", "app", "component", "job", "instance"]
           }
 
           stage.labels {
@@ -200,7 +282,7 @@ alloy:
           }
 
           stage.label_drop {
-            values = ["namespace", "pod", "container", "app", "component", "job", "instance"]
+            values = ["namespace", "pod", "container", "node", "stream", "app", "component", "job", "instance"]
           }
 
           stage.metrics {
@@ -223,7 +305,7 @@ alloy:
           }
 
           stage.label_drop {
-            values = ["namespace", "pod", "container", "app", "component", "job", "instance"]
+            values = ["namespace", "pod", "container", "node", "stream", "app", "component", "job", "instance"]
           }
 
           stage.metrics {
@@ -248,11 +330,15 @@ alloy:
       // The alerts that read these gauges are in
       // infrastructure/backup-cronjobs/prometheusrule-footprint.yaml.
       //
-      // The regex ends in `\\s*$`, not `$`: loki.source.kubernetes hands
-      // each entry over WITH its trailing newline, and an RE2 `$` does not
-      // match before it. Replayed through Alloy v1.19.2 on 2026-09-11
-      // (loki.source.api, the line exactly as Loki stores it): ending in
-      // `)$` produced no series, ending in `)\\s*$` produced all three.
+      // The regex ends in `\\s*$`, not `$`. It was written for
+      // loki.source.kubernetes, which handed each entry over WITH its
+      // trailing newline (an RE2 `$` does not match before it — replayed
+      // through Alloy v1.19.2 on 2026-09-11: `)$` produced no series,
+      // `)\\s*$` all three). loki.source.file + stage.cri (2026-09-14)
+      // deliver the line without it, so `$` alone now matches too — which
+      // is what makes the `$`-anchored janitor stages above work for the
+      // first time (TODO hl-0262). `\\s*$` is kept: it is correct for both
+      // sources, and a regex that tolerates the newline costs nothing.
       //
       // The selector names the check's app label, so another pod in the
       // namespace printing a similar line cannot set the gauges.
@@ -273,7 +359,7 @@ alloy:
           }
 
           stage.label_drop {
-            values = ["namespace", "pod", "container", "app", "component", "job", "instance"]
+            values = ["namespace", "pod", "container", "node", "stream", "app", "component", "job", "instance"]
           }
 
           stage.metrics {
@@ -319,7 +405,8 @@ alloy:
       // FOLLOW-UP (needs operator decision): if node logs should
       // also land in Loki, add a `local.file_match` +
       // `loki.source.file` over /var/log/talos-log-sink/*.log
-      // instead of resurrecting journald.
+      // instead of resurrecting journald — the pod-log source above
+      // is the pattern to copy.
 
       // ---------- Loki client ----------
 
@@ -331,7 +418,9 @@ alloy:
         // NetworkPolicy gates ingress.
       }
 
-  # Alloy needs to read /var/log/pods on each node.
+  # Alloy tails /var/log/pods on each node (loki.source.file above).
+  # Read-only hostPath at /var/log; the files are 0640 root:root, hence
+  # runAsUser: 0 below.
   mounts:
     varlog: true       # /var/log
     dockercontainers: false
@@ -349,7 +438,7 @@ alloy:
       memory: 512Mi
 
   securityContext:
-    runAsUser: 0  # journald requires root read on /var/log/journal
+    runAsUser: 0  # /var/log/pods/*/*/*.log are 0640 root:root on Talos
     privileged: false
     readOnlyRootFilesystem: true
     allowPrivilegeEscalation: false

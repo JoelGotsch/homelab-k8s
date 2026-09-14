@@ -2,7 +2,8 @@
 #
 # Ingress: Prometheus self-metrics scrape (port 12345 by
 #   chart default).
-# Egress: kube-DNS + Loki + kube-API (for pod discovery).
+# Egress: kube-DNS + Loki + kube-API (pod discovery only — the log
+#   bytes are read from the node's /var/log/pods since 2026-09-14).
 
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -44,9 +45,12 @@ spec:
     # kube-API egress is NOT here — a vanilla podSelector can't
     # match the socket-LB-DNAT'd apiserver (rule 12). It lives in
     # ciliumnetworkpolicy-egress.yaml as `toEntities:
-    # [kube-apiserver]`. loki.source.kubernetes streams pod logs
-    # through the apiserver, so without that CNP alloy ships zero
-    # logs even though its pods are healthy.
+    # [kube-apiserver]`. discovery.kubernetes needs it for pod
+    # metadata (namespace/pod/container/node labels and the log
+    # file path); without that CNP alloy discovers no targets and
+    # ships zero logs even though its pods are healthy. Since
+    # 2026-09-14 the log bytes themselves are tailed from
+    # /var/log/pods, not streamed through the apiserver.
     # Loki push — cross-ns (Loki in monitoring).
     - to:
         - namespaceSelector:

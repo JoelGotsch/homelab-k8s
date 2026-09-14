@@ -10,18 +10,25 @@ the operator-facing-agent rename + flow-language refactor).
 
 | Source | Loki labels | Notes |
 |---|---|---|
-| Pod logs from `/var/log/pods` (Kubernetes-discovered on this node) | `namespace`, `pod`, `container`, `app`, `component` | Drops k8s healthz probe-noise |
-| Journald from each node's `/var/log/journal` | `job=journald`, `host`, `unit` | System logs + Talos audit-log path |
+| Pod logs, tailed from the node's `/var/log/pods/<ns>_<pod>_<uid>/<container>/*.log` (`local.file_match` + `loki.source.file`; pods discovered on this node via `discovery.kubernetes`) | `namespace`, `pod`, `container`, `node`, `app`, `component`, `stream` | `stage.cri` parses the CRI line format; drops k8s healthz probe-noise and lines older than Loki's 168h window |
 
-Both ship to `http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push`.
+Ships to `http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push`.
+There is no journald source: Talos has no journald (node logs go to the
+`talos-log-sink` Vector DaemonSet, see the NOTE in `values.yaml`).
+
+Until 2026-09-14 the pod-log source was `loki.source.kubernetes`, which
+streamed every container's stdout through the kube-apiserver (~160 open
+log streams across the three apiservers, 2.7 reconnects/s). The files
+were already host-mounted; the switch is recorded in
+`99-journal/2026-09-14-the-scrape-that-scraped-nothing.md`.
 
 ## Layout
 
 | File | Purpose |
 |---|---|
-| `kustomization.yaml` | Pins grafana/alloy chart 0.10.0. |
+| `kustomization.yaml` | Pins the grafana/alloy chart (Renovate-managed, from the Forgejo mirror). |
 | `values.yaml` | DaemonSet (one per node, all tolerations). Alloy flow-language config inline (River syntax). Validated by `scripts/check-alloy-config.sh` (pre-commit, needs `alloy`). |
-| `networkpolicy.yaml` | Ingress from Prometheus (self-metrics); egress to kube-API (pod discovery) + Loki + kube-DNS. |
+| `networkpolicy.yaml` + `ciliumnetworkpolicy-egress.yaml` | Ingress from Prometheus (self-metrics); egress to Loki + kube-DNS, and (CNP, `toEntities: [kube-apiserver]`) to the kube-API for pod discovery. |
 | `servicemonitor.yaml` | Self-metrics scrape via kube-prometheus-stack. |
 
 ## Bring-up wiring
@@ -68,20 +75,22 @@ Storage Box fill check in `backup-cronjobs`:
 | `[metric] storagebox_df size_bytes=N used_bytes=N avail_bytes=N` | `storagebox_size_bytes`, `storagebox_used_bytes`, `storagebox_avail_bytes` (gauges, 1h idle expiry) |
 
 Its selector names the check's `app` label, and its regex ends in `\s*$`
-rather than `$`: `loki.source.kubernetes` passes each entry on with its
-trailing newline, and an RE2 `$` does not match before it (replayed
-through Alloy v1.19.2 on 2026-09-11). The alerts live in
+rather than `$`: it was written for `loki.source.kubernetes`, which passed
+each entry on with its trailing newline, and an RE2 `$` does not match
+before it (replayed through Alloy v1.19.2 on 2026-09-11). `loki.source.file`
++ `stage.cri` strip it, so since 2026-09-14 both forms match. The alerts live in
 `infrastructure/backup-cronjobs/prometheusrule-footprint.yaml` and read
 the gauges through `last_over_time`, so the 1h expiry only has to outlast
 one scrape.
 
 ## Caveats
 
-1. **Alloy runs as root** for journald read access. Privileged
-   in the k8s sense (no privileged-PSA escape; `runAsUser: 0`
-   only). Acceptable trade-off — journald is the system-level
-   audit + Falco syscall path; without it the operator loses
-   half the security-forensic stream per ADR 0021 D8.
+1. **Alloy runs as root** because the kubelet writes
+   `/var/log/pods/*/*/*.log` as `0640 root:root` (verified on
+   worker1, 2026-09-14). Not privileged in the k8s sense
+   (`runAsUser: 0`, read-only root FS, all capabilities dropped,
+   read-only hostPath). The historical reason (journald) never
+   applied on Talos.
 
 2. **No log enrichment beyond k8s metadata.** Operator can
    add `loki.process` stages (label_extract, JSON parse,
@@ -94,18 +103,24 @@ one scrape.
    (don't drop logs you might need for forensic review).
 
 4. **Pod discovery via the kubernetes role + node-local
-   selector** scales fine. Alloy uses the kube-API watch —
-   one connection per node; reasonable load.
+   selector** — one watch per node for metadata only. The
+   log bytes no longer cross the apiserver (2026-09-14).
 
-5. **No HTTPS to the kube-API.** The egress NetworkPolicy
-   allows :6443 + :443 to api-server pods. Alloy uses the
-   pod's ServiceAccount token from the projected mount;
-   standard k8s pattern.
+5. **Positions are not persisted.** `storagePath` is the `/tmp`
+   emptyDir, so a restarted Alloy re-reads every file on its node
+   from the start (chosen over `tail_from_end`, which would lose
+   the first seconds of every new pod). Loki de-duplicates
+   identical entries at query time; the cost is ingest bandwidth
+   on restart. A hostPath for positions is TODO hl-0306.
 
-6. **Self-metrics on port 12345** — chart default. Quirky
+6. **kube-API egress** is the `toEntities: [kube-apiserver]` CNP
+   on :443 + :6443 (socket-LB DNAT, see the file header). Alloy
+   uses the pod's ServiceAccount token from the projected mount.
+
+7. **Self-metrics on port 12345** — chart default. Quirky
    port choice but documented; the ServiceMonitor matches.
 
-7. **No buffering on disk.** If Loki is unreachable for
+8. **No buffering on disk.** If Loki is unreachable for
    longer than Alloy's in-memory buffer, log lines drop.
    Acceptable for homelab volume; if Loki HA becomes a
    thing, Alloy's `loki.write.default` block can grow a
