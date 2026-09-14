@@ -31,8 +31,17 @@
 #           at this cluster's 800-900 flows/s per worker that is about FIVE
 #           SECONDS. Until 2026-09-14 this subcommand answered "no flows in
 #           the last 15m" from those five seconds (lessons.md). It now
-#           prints how far back every node's buffer actually reaches and
-#           refuses to call a shorter window "OK".
+#           prints how far back every node's buffer actually reaches, and
+#           for the part of the window the buffers do not hold it asks
+#           Prometheus: since 2026-09-14 (hl-0308) the agents' Hubble
+#           metrics are scraped with source/destination = namespace (or the
+#           reserved identity), so `hubble_drop_total{reason="POLICY_DENIED"}`
+#           and `hubble_flows_processed_total{verdict="AUDIT"}` answer
+#           "anything touching <namespace> in the last <since>" for as long
+#           as Prometheus retains (15d). Counters, not flows: they say WHICH
+#           namespace pair and protocol, not which pod or port — for that
+#           use `watch`. Exit 0 = both sources clean; 3 = something in
+#           either; 2 = buffers short AND Prometheus unreachable.
 # watch   — the honest form for a rehearsal: streams AUDIT and DROPPED flows
 #           touching <namespace> from every node for <seconds> (default 90)
 #           while you exercise the workload, then summarises like observe.
@@ -136,15 +145,48 @@ if [ "$cmd" = observe ]; then
     done
   done
   n="$(summarise "$tmp")"
-  if [ "$n" != 0 ]; then
-    printf 'ATTENTION: %s distinct AUDIT/DROPPED flow(s) touching %s in the last %s (listed above).\n' "$n" "$ns" "$since"
+
+  # Prometheus for the whole window (counters survive the buffer). A local
+  # port-forward to the Prometheus Service, torn down on exit.
+  pm=0; prom_ok=0
+  pf_port=$(( 20000 + RANDOM % 10000 ))
+  kubectl -n monitoring port-forward svc/kube-prometheus-stack-prometheus "$pf_port:9090" --address 127.0.0.1 >/dev/null 2>&1 &
+  pf_pid=$!
+  trap 'kill "$pf_pid" 2>/dev/null; rm -f "$tmp"' EXIT
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    curl -sf --max-time 2 "http://127.0.0.1:$pf_port/-/ready" >/dev/null 2>&1 && { prom_ok=1; break; }
+    sleep 1
+  done
+  if [ "$prom_ok" = 1 ]; then
+    q_drop="sum by (source, destination, protocol) (increase(hubble_drop_total{reason=\"POLICY_DENIED\", source=\"$ns\"}[$since]) or increase(hubble_drop_total{reason=\"POLICY_DENIED\", destination=\"$ns\"}[$since])) > 0.5"
+    q_audit="sum by (source, destination, protocol) (increase(hubble_flows_processed_total{verdict=\"AUDIT\", source=\"$ns\"}[$since]) or increase(hubble_flows_processed_total{verdict=\"AUDIT\", destination=\"$ns\"}[$since])) > 0.5"
+    for pair in "DROPPED POLICY_DENIED|$q_drop" "AUDIT|$q_audit"; do
+      tag="${pair%%|*}"; q="${pair#*|}"
+      rows="$(curl -sG --max-time 15 "http://127.0.0.1:$pf_port/api/v1/query" --data-urlencode "query=$q" \
+        | jq -r --arg tag "$tag" '.data.result[]? | "\(.value[1]|tonumber|round)\t\(.metric.source) -> \(.metric.destination) \(.metric.protocol) \($tag)"')"
+      if [ -n "$rows" ]; then
+        printf '%s\n' "$rows" | sort -rn >&2
+        pm=$(( pm + $(printf '%s\n' "$rows" | wc -l) ))
+      fi
+    done
+    printf 'prometheus: %s namespace-pair(s) with AUDIT/POLICY_DENIED counts touching %s in the last %s\n' "$pm" "$ns" "$since" >&2
+  else
+    printf 'prometheus: unreachable through port-forward — counters not consulted\n' >&2
+  fi
+
+  if [ "$n" != 0 ] || [ "$pm" != 0 ]; then
+    printf 'ATTENTION: %s distinct AUDIT/DROPPED flow(s) in the buffers and %s Prometheus pair(s) touching %s in the last %s (listed above).\n' "$n" "$pm" "$ns" "$since"
     exit 3
   fi
-  if [ "$short" = 1 ]; then
-    printf 'INCONCLUSIVE: no AUDIT or DROPPED flows touching %s in what the buffers hold, but at least one node holds less than %s. Use: %s watch %s <seconds> while driving traffic.\n' "$ns" "$since" "$0" "$ns"
+  if [ "$short" = 1 ] && [ "$prom_ok" = 0 ]; then
+    printf 'INCONCLUSIVE: nothing in what the buffers hold, but at least one node holds less than %s and Prometheus was unreachable. Use: %s watch %s <seconds> while driving traffic.\n' "$since" "$0" "$ns"
     exit 2
   fi
-  printf 'OK: no AUDIT or DROPPED flows touching %s in the last %s, on any node (buffers cover the window).\n' "$ns" "$since"
+  if [ "$short" = 1 ]; then
+    printf 'OK: no AUDIT or POLICY_DENIED counts touching %s in the last %s (Prometheus), and nothing in the buffers (which cover only seconds).\n' "$ns" "$since"
+  else
+    printf 'OK: no AUDIT or DROPPED flows touching %s in the last %s, in the buffers or in Prometheus.\n' "$ns" "$since"
+  fi
   exit 0
 fi
 
