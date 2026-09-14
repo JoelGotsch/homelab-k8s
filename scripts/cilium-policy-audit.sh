@@ -14,6 +14,7 @@
 #   cilium-policy-audit.sh enable  <namespace> <pod>...
 #   cilium-policy-audit.sh disable <namespace> <pod>...
 #   cilium-policy-audit.sh observe <namespace> [since]   # default since=15m
+#   cilium-policy-audit.sh watch   <namespace> [seconds] # default 90
 #
 # status  — per pod: node, endpoint id, PolicyAuditMode, policy-enabled
 #           direction, and the NAMES of the policies realised on the
@@ -24,7 +25,19 @@
 # disable — PolicyAuditMode=Disabled on each pod's endpoint (idempotent).
 # observe — AUDIT and DROPPED flows touching <namespace> on EVERY node since
 #           <since>, collapsed to "src -> dst :port verdict" with counts.
-#           Exit 0 when there are none, 3 when there are.
+#           Exit 0 when there are none, 3 when there are, 2 when there are
+#           none but a node's buffer did not reach back as far as <since>.
+#           READ THAT 2: each agent keeps a ring buffer of 4,095 flows, and
+#           at this cluster's 800-900 flows/s per worker that is about FIVE
+#           SECONDS. Until 2026-09-14 this subcommand answered "no flows in
+#           the last 15m" from those five seconds (lessons.md). It now
+#           prints how far back every node's buffer actually reaches and
+#           refuses to call a shorter window "OK".
+# watch   — the honest form for a rehearsal: streams AUDIT and DROPPED flows
+#           touching <namespace> from every node for <seconds> (default 90)
+#           while you exercise the workload, then summarises like observe.
+#           Exit 0 none, 3 some. Run it in one terminal, drive traffic from
+#           another; it does not depend on the buffer at all.
 #
 # Audit mode is a per-endpoint runtime option: it is NOT in git, it is lost
 # when the pod restarts (new endpoint), and while it is on, EVERY policy on
@@ -39,7 +52,7 @@ CTX="$(kubectl config current-context)"
 [ "$CTX" = "admin@homelab" ] || die "kubectl context is '$CTX', expected admin@homelab"
 
 cmd="${1:-}"; shift || true
-case "$cmd" in status|enable|disable|observe) ;; *)
+case "$cmd" in status|enable|disable|observe|watch) ;; *)
   sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2 ;;
 esac
 
@@ -86,23 +99,75 @@ per_pod() {
     "$ns/$pod" "$node" "$id" "$audit" "$enabled" "${rules:-<none>}"
 }
 
+summarise() {  # <flows.json> -> prints the collapsed table on stderr, count on stdout
+  jq -r 'select(.flow) | .flow
+      | "\(.source.namespace // "")/\(.source.pod_name // ((.source.labels // []) | map(select(startswith("reserved:"))) | join(",")))  ->  \(.destination.namespace // "")/\(.destination.pod_name // ((.destination.labels // []) | map(select(startswith("reserved:"))) | join(","))) \(.IP.destination // "") :\(.l4.TCP.destination_port // .l4.UDP.destination_port // "-") \(.verdict) \(.drop_reason_desc // "")"' "$1" \
+    | sed -E 's/-[a-z0-9]{8,10}-[a-z0-9]{5}( |$)/-*\1/g' | sort | uniq -c | sort -rn | tee /dev/stderr | wc -l | tr -d ' '
+}
+
+to_seconds() {  # 90 | 30s | 15m | 2h -> seconds
+  case "$1" in
+    *h) echo $(( ${1%h} * 3600 )) ;;
+    *m) echo $(( ${1%m} * 60 )) ;;
+    *s) echo "${1%s}" ;;
+    *)  echo "$1" ;;
+  esac
+}
+
 if [ "$cmd" = observe ]; then
-  since="${1:-15m}"
+  since="${1:-15m}"; want="$(to_seconds "$since")"
   tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
+  short=0
   for cp in $(kubectl -n kube-system get pods -l k8s-app=cilium -o name); do
+    node="$(kubectl -n kube-system get "$cp" -o jsonpath='{.spec.nodeName}')"
+    # How far back this node's ring buffer reaches: the oldest flow in it.
+    oldest="$(kubectl -n kube-system exec "$cp" -c cilium-agent -- hubble observe --first 1 -o json 2>/dev/null \
+      | jq -r 'select(.flow) | .flow.time' | head -1)"
+    if [ -n "$oldest" ]; then
+      age=$(( $(date -u +%s) - $(date -u -j -f '%Y-%m-%dT%H:%M:%S' "${oldest%%.*}" +%s 2>/dev/null || date -u -d "${oldest%%.*}" +%s) ))
+      printf 'buffer on %-8s reaches back %5ss (asked %s)\n' "$node" "$age" "$since" >&2
+      [ "$age" -ge "$want" ] || short=1
+    else
+      printf 'buffer on %-8s unreadable\n' "$node" >&2; short=1
+    fi
     for v in AUDIT DROPPED; do
       kubectl -n kube-system exec "$cp" -c cilium-agent -- \
         hubble observe --namespace "$ns" --verdict "$v" --since "$since" -o json 2>/dev/null >>"$tmp" || true
     done
   done
-  n="$(jq -r 'select(.flow) | .flow
-      | "\(.source.namespace // "")/\(.source.pod_name // ((.source.labels // []) | map(select(startswith("reserved:"))) | join(",")))  ->  \(.destination.namespace // "")/\(.destination.pod_name // ((.destination.labels // []) | map(select(startswith("reserved:"))) | join(","))) \(.IP.destination // "") :\(.l4.TCP.destination_port // .l4.UDP.destination_port // "-") \(.verdict) \(.drop_reason_desc // "")"' "$tmp" \
-    | sed -E 's/-[a-z0-9]{8,10}-[a-z0-9]{5}( |$)/-*\1/g' | sort | uniq -c | sort -rn | tee /dev/stderr | wc -l | tr -d ' ')"
+  n="$(summarise "$tmp")"
+  if [ "$n" != 0 ]; then
+    printf 'ATTENTION: %s distinct AUDIT/DROPPED flow(s) touching %s in the last %s (listed above).\n' "$n" "$ns" "$since"
+    exit 3
+  fi
+  if [ "$short" = 1 ]; then
+    printf 'INCONCLUSIVE: no AUDIT or DROPPED flows touching %s in what the buffers hold, but at least one node holds less than %s. Use: %s watch %s <seconds> while driving traffic.\n' "$ns" "$since" "$0" "$ns"
+    exit 2
+  fi
+  printf 'OK: no AUDIT or DROPPED flows touching %s in the last %s, on any node (buffers cover the window).\n' "$ns" "$since"
+  exit 0
+fi
+
+if [ "$cmd" = watch ]; then
+  secs="${1:-90}"
+  dir="$(mktemp -d)"; trap 'rm -rf "$dir"' EXIT
+  pods="$(kubectl -n kube-system get pods -l k8s-app=cilium -o name)"
+  printf 'watching AUDIT/DROPPED flows touching %s on %s node(s) for %ss — drive the traffic now\n' \
+    "$ns" "$(printf '%s\n' "$pods" | wc -l | tr -d ' ')" "$secs" >&2
+  for cp in $pods; do
+    # timeout (uutils coreutils in the agent image) ends the stream; 124 is its normal exit.
+    kubectl -n kube-system exec "$cp" -c cilium-agent -- \
+      timeout "$secs" hubble observe --namespace "$ns" --verdict AUDIT --verdict DROPPED --follow -o json \
+      >"$dir/${cp##*/}.json" 2>/dev/null &
+  done
+  wait
+  cat "$dir"/*.json >"$dir/all"
+  n="$(summarise "$dir/all")"
   if [ "$n" = 0 ]; then
-    printf 'OK: no AUDIT or DROPPED flows touching %s in the last %s, on any node.\n' "$ns" "$since"
+    printf 'OK: no AUDIT or DROPPED flows touching %s during the %ss watch, on any node.\n' "$ns" "$secs"
     exit 0
   fi
-  printf 'ATTENTION: %s distinct AUDIT/DROPPED flow(s) touching %s in the last %s (listed above).\n' "$n" "$ns" "$since"
+  printf 'ATTENTION: %s distinct AUDIT/DROPPED flow(s) touching %s during the %ss watch (listed above).\n' "$n" "$ns" "$secs"
   exit 3
 fi
 
