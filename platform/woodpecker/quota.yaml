@@ -2,39 +2,47 @@
 # ci-woodpecker namespace. Bounds runaway pipeline steps from
 # eating the cluster's capacity.
 #
-# Numbers tuned for homelab scale (4 concurrent workflows ×
-# 2 steps each = ~8 step Pods at once). Resize as the
-# operator's pipeline mix grows.
-#
 # ─────────────────────────────────────────────────────────────
-# READ THIS BEFORE TRUSTING THE NUMBERS BELOW (2026-08-28)
+# THIS IS THE ONLY QUOTA AND THE ONLY LIMITRANGE HERE (2026-09-14)
 #
-# This namespace has TWO ResourceQuotas, not one. Kyverno's
-# `homelab-generate-default-quota` also generates `default-quota`
-# here, and when several quotas name the same resource the
-# TIGHTEST binds. So half of what this file says is overridden:
+# Until 2026-09-14 Kyverno also generated `default-quota` and
+# `default-limits` into this namespace, and when two quotas name a
+# resource the TIGHTEST binds: the operative caps were 4 CPU / 8Gi
+# requests and 16Gi limits.memory, not what this file said. CI hit
+# that 16Gi exactly, and a quota REJECTS a Pod rather than queueing
+# it — the step fails at admission and reads like a code failure.
+# The namespace now carries both `bypass.homelab.internal/
+# homelab-generate-default-*` annotations (namespace.yaml), per
+# ADR 0036's "one owner per resource default per namespace".
 #
-#   resource         this file   default-quota   EFFECTIVE
-#   requests.cpu     8           4               4
-#   requests.memory  16Gi        8Gi             8Gi
-#   limits.memory    32Gi        16Gi            16Gi
-#   limits.cpu       32          (unset)         32
-#   pods             20          50 (count/pods) 20
+# Sizing rule: the agent's WOODPECKER_MAX_WORKFLOWS (4, values.yaml)
+# × the heaviest workflow's admission peak, plus ~20%. Concurrency
+# is then bounded by Woodpecker's queue, and this quota only fires
+# on something genuinely wrong. Change MAX_WORKFLOWS → resize here.
 #
-# Only limits.cpu and pods are actually this file's to set.
-# Editing requests.cpu or limits.memory here changes nothing —
-# it changes a number nobody reads, which is worse than leaving
-# it, because the next person sizes a pipeline against it.
+# Heaviest workflow, measured 2026-09-14 from kube-state-metrics
+# over 30 days (per `woodpecker-ci.org/task-uuid`, concurrent sum):
+# conversation-history — every run lands at 9–10 of these, so it
+# is the norm, not an outlier:
 #
-# Always read `.status.hard` off BOTH quotas:
-#   kubectl -n ci-woodpecker get resourcequota -o yaml
+#   resource         1 workflow   × 4    set    real use (× 4)
+#   pods             10           40     48
+#   requests.cpu     1.75         7      8
+#   requests.memory  2.5Gi        10Gi   12Gi   2.6GiB (10.3GiB)
+#   limits.cpu       18.5         74     80
+#   limits.memory    10Gi         40Gi   48Gi
 #
-# The same double-object pattern exists for the LimitRange below
-# (Kyverno also generates `default-limits` with a 512Mi memory
-# default) and in the conversation-history namespace. Two
-# objects setting a default for one resource has no documented
-# tiebreak; do not build on which one currently wins. This is
-# worth an ADR rather than a comment in each namespace.
+# Next heaviest: todo-agents / llm-gateway at 4Gi limits.memory.
+# Re-measure (max over 30d of the per-task-uuid sum of
+# kube_pod_container_resource_{requests,limits}) when a pipeline
+# grows. Do NOT run that as a 30d:1m subquery join casually —
+# it is expensive; a 1h range is enough to confirm one pipeline.
+#
+# Why the limits numbers are safe despite being large: limits do
+# not reserve anything. requests (12Gi, ~13% of the three workers'
+# ~91GiB) are what the scheduler holds for CI, and step Pods are
+# Burstable with a 1:4 request:limit ratio, so under node memory
+# pressure the kernel OOM-kills CI steps before app workloads.
 # ─────────────────────────────────────────────────────────────
 
 apiVersion: v1
@@ -44,27 +52,15 @@ metadata:
   namespace: ci-woodpecker
 spec:
   hard:
-    # Both overridden by default-quota (4 / 8Gi). Kept so this object still
-    # declares an intent, but they are not the operative values — see above.
     requests.cpu: "8"
-    requests.memory: "16Gi"
-    # 16 -> 32 on 2026-08-28. This IS operative: nothing else caps limits.cpu.
-    #
-    # conversation-history's pipeline now declares per-step CPU limits (up to
-    # the LimitRange max of 4) because 84% of its 1,492s was CPU-bound work
-    # metered at the 500m default, and it fans four steps out in parallel
-    # rather than running eight serially. That peaks near 11 limits.cpu for a
-    # single pipeline, so 16 admitted exactly one — and a second concurrent
-    # pipeline would have had its step Pods REJECTED at admission, which
-    # surfaces as a failed step and reads like a code failure.
-    #
-    # Limits do not reserve, they throttle; the cluster has ~95 allocatable
-    # CPU across six nodes, and requests.cpu (effectively 4) is what actually
-    # bounds how much of it CI can hold. So this is a ceiling on burst, not an
-    # allocation.
-    limits.cpu: "32"
-    limits.memory: "32Gi"
-    pods: "20"
+    requests.memory: "12Gi"
+    # conversation-history declares per-step CPU limits (up to the
+    # LimitRange max of 4) because most of its runtime is CPU-bound and
+    # it fans steps out in parallel. limits.cpu throttles, it does not
+    # reserve; requests.cpu above bounds what CI can hold.
+    limits.cpu: "80"
+    limits.memory: "48Gi"
+    pods: "48"
     persistentvolumeclaims: "20"
     requests.storage: "200Gi"
 ---

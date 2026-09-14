@@ -162,11 +162,14 @@ steps:
    restore the explicit chart value atomically. Do not delete/recreate the PVC
    or make that immutable controller change unattended.
 
-2. **Single agent replica + 4 concurrent workflows.** At
-   homelab scale this caps total parallel step Pods at ~8
-   (pipelines × steps-in-flight). Increase
-   `WOODPECKER_MAX_WORKFLOWS` or scale agent replicas if
-   queue depth becomes painful.
+2. **Single agent replica + 4 concurrent workflows.** The
+   heaviest workflow (conversation-history) holds ~10 step
+   Pods at its peak, so 4 concurrent workflows can mean ~40.
+   `quota.yaml` is sized as MAX_WORKFLOWS × that peak, so
+   increasing `WOODPECKER_MAX_WORKFLOWS` or agent replicas
+   **requires resizing the quota in the same commit** —
+   otherwise the extra work is rejected at admission instead
+   of waiting in Woodpecker's queue.
 
 3. **Step Pods can talk to upstream registries via the CCNP
    toFQDNs allowlist** — not unrestricted internet egress.
@@ -192,11 +195,17 @@ steps:
    the node level, so repeated pulls of the same image hit
    the cache. New images on a fresh node = full pull.
 
-7. **Step Pods inherit the `ci-woodpecker` ResourceQuota.**
-   A pipeline declaring step `resources: requests: cpu: 4`
-   when only 2 vCPU remains in the namespace quota will
-   fail to schedule. Operator tunes quota.yaml as the
-   pipeline mix grows.
+7. **Step Pods inherit the `ci-woodpecker` ResourceQuota —
+   and a quota rejects, it does not queue.** A step Pod that
+   would exceed the quota is refused at admission and the
+   step fails immediately (`exceeded quota` in the step
+   error), which reads like a code failure. `quota.yaml` is
+   the only quota in the namespace: the Kyverno-generated
+   `default-quota` / `default-limits` are bypassed on the
+   Namespace since 2026-09-14 (before that the generated
+   16Gi limits.memory silently bound). When a pipeline grows,
+   re-measure its peak and resize — the method is in the
+   `quota.yaml` header.
 
 8. **No SBOM/cosign signing built in.** ADR 0023 D9 calls
    for cosign signing + SBOM generation in CI; that's

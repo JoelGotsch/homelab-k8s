@@ -22,6 +22,17 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: ci-woodpecker
+  annotations:
+    # Opt out of the Kyverno-generated default-quota (16Gi limits.memory,
+    # 8Gi / 4 CPU requests): with two quotas the tightest binds, CI hit
+    # 16Gi, and a quota rejects step Pods instead of queueing them.
+    # quota.yaml is the single, measured quota (MAX_WORKFLOWS × heaviest
+    # workflow). ADR 0036 "one owner per resource default per namespace".
+    bypass.homelab.internal/homelab-generate-default-resourcequota: "CI bursts to MAX_WORKFLOWS x heaviest workflow (~40Gi limits); explicit measured quota in quota.yaml"
+    # Same rule for the LimitRange: two LimitRanges setting a default have
+    # no documented tiebreak. quota.yaml's LimitRange (1Gi default) is the
+    # one that was observed winning; this makes it the only one.
+    bypass.homelab.internal/homelab-generate-default-limitrange: "CI step defaults are owned by the LimitRange in quota.yaml"
   labels:
     # ADR 0036: first-party namespace enrolment (step-Pod runner).
     # quota.yaml is the reference implementation of the shared
