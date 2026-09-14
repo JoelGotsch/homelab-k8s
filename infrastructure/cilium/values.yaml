@@ -205,6 +205,24 @@ hubble:
         - '{"event_type":[{"type":129}]}'
         - '{"source_label":["reserved:world"]}'
         - '{"destination_label":["reserved:world"]}'
+  # Hubble L7 flows carried Authorization, Cookie and Set-Cookie VALUES in
+  # clear (measured 2026-09-14, header names counted only), and the static
+  # export above ships L7 records to Loki through the hubble-flow-exporter
+  # sidecar. Redaction happens in Hubble's L7 parser, before any consumer
+  # (observe, relay, metrics, export). Allow-list, not deny-list: a header
+  # nobody thought of is redacted by default. TODO hl-0315.
+  redact:
+    enabled: true
+    http:
+      urlQuery: true
+      userInfo: true
+      headers:
+        allow:
+          - Accept
+          - Content-Type
+          - Content-Length
+          - User-Agent
+          - X-Request-Id
   relay:
     enabled: true
   ui:
