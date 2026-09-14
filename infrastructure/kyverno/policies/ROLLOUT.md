@@ -1,7 +1,9 @@
 # ADR 0036 Kyverno policy rollout — Audit -> Enforce roadmap
 
-All ADR-0036 governance policies are currently in `Audit`. Migration to
-`Enforce` follows the procedure in `README.md` and the order below,
+All ADR-0036 governance policies are currently in `Audit`
+(`validationActions: [Audit, Warn]` on the `policies.kyverno.io/v1` kinds
+they became on 2026-09-14; "Enforce" below means `validationActions: [Deny]`).
+Migration to Deny follows the procedure in `README.md` and the order below,
 which is intentionally **least-current-violators first** so that early
 flips build operator confidence in the Enforce shape before we hit the
 high-count policies.

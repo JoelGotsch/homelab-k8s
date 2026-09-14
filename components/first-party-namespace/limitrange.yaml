@@ -8,7 +8,7 @@
 #     PodSpec omits them (soft floor — silent, no admission
 #     rejection).
 #   - The `homelab-container-resources-required` Kyverno
-#     ClusterPolicy in Audit-then-Enforce mode rejects
+#     policy (ValidatingPolicy) in Audit-then-Deny mode rejects
 #     PodSpecs missing explicit requests/limits (hard floor —
 #     forces app authors to state their numbers).
 #

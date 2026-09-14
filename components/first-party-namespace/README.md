@@ -86,12 +86,14 @@ metadata:
     bypass.homelab.internal/<policy-name>: "reason: <text>; ticket: <link>; expires: <YYYY-MM-DD>"
 ```
 
-- `<policy-name>` matches the Kyverno ClusterPolicy name
+- `<policy-name>` matches the Kyverno policy name (a
+  `policies.kyverno.io/v1` ValidatingPolicy since 2026-09-14)
   (e.g., `homelab-container-resources-required`,
   `homelab-image-digest-required`).
-- Kyverno's `preconditions` on each policy check for the
-  matching annotation and skip enforcement when present.
-- `expires:` is not enforced by Kyverno; the audit ClusterPolicy
+- A `matchConditions` entry on each policy (was `preconditions`
+  on the old ClusterPolicy kind) checks for the matching
+  annotation and skips enforcement when present.
+- `expires:` is not enforced by Kyverno; the audit policy
   `homelab-bypass-audit` flags annotations whose `expires:`
   is in the past for operator review.
 - A bypass without an `expires:` value SHOULD be paired with

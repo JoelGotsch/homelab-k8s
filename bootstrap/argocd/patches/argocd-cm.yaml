@@ -47,8 +47,9 @@ data:
   # Application's status.resources); Argo re-decoded every update for
   # nothing. Excluding a kind removes it from the cache AND the watch.
   # NOT excluded on purpose: Pods/Jobs/ReplicaSets (resource trees +
-  # health), longhorn.io RecurringJob (managed), kyverno.io ClusterPolicy
-  # (managed), cilium.io policies/pools/CIDR groups (managed),
+  # health), longhorn.io RecurringJob (managed), policies.kyverno.io
+  # policies (managed; kyverno.io ClusterPolicy until 2026-09-14),
+  # cilium.io policies/pools/CIDR groups (managed),
   # postgresql.cnpg.io Cluster/ScheduledBackup (managed).
   # A change here needs a controller restart to purge already-cached objects
   # (Argo docs, "Resource Exclusion/Inclusion").
@@ -68,8 +69,8 @@ data:
       - "*"
       clusters:
       - "*"
-    # kyverno: policy/ephemeral/admission reports (kyverno.io/ClusterPolicy
-    # itself stays — it is managed).
+    # kyverno: policy/ephemeral/admission reports (the policies.kyverno.io
+    # policies themselves stay — they are managed).
     - apiGroups:
       - wgpolicyk8s.io
       - reports.kyverno.io
@@ -152,7 +153,7 @@ data:
   #     metadataPolicy + target.deletionPolicy.
   #   - StorageClass parameters: rclone CSI driver fills
   #     allow_other/uid/gid from install-time values.yaml.
-  #   - ClusterPolicy (kyverno): CRD defaults admission/
+  #   - ClusterPolicy (kyverno, until 2026-09-14): CRD defaults admission/
   #     background/emitWarning/validationFailureAction/
   #     schemaValidation. Autogen rule writeback also conflicts
   #     with SSA (upstream kyverno/kyverno around #11058).

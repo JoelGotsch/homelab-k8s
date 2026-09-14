@@ -1,5 +1,6 @@
-# Kyverno — admission policies for cosign verification +
-# image digest pinning. Per ADR 0019 + ADR 0023.
+# Kyverno — admission policies: cosign verification, image digest pinning
+# (ADR 0019 + ADR 0023) and cluster-wide governance (ADR 0036), all as
+# policies.kyverno.io/v1 CEL kinds since 2026-09-14 (hl-0284).
 
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -23,66 +24,76 @@ resources:
   # and cold-cache verification round-trips completing. Resolution record in
   # networkpolicy.yaml's header.
   - networkpolicy.yaml
-  - clusterpolicies.yaml
   # ADR 0019 D3 — cosign verification.
   - externalsecret-cosign-public-key.yaml
   # Registry creds for imageVerify signature pulls — private Forgejo
   # Packages repos reject anonymous token grants (2026-07-18).
   - registry-pull-secret.yaml
-  - policies/verify-first-party-image-signature.yaml
-  # CEL twin of the image-verification policy, ALONGSIDE the ClusterPolicy for
-  # one step: a server dry-run of an unsigned first-party image must warn from
-  # both kinds (their warning texts differ), a signed one from neither; then
-  # the ClusterPolicy goes and the dry-run is repeated.
+
+  # ---------------------------------------------------------------------------
+  # Policies. All are policies.kyverno.io/v1 kinds (ValidatingPolicy,
+  # MutatingPolicy, GeneratingPolicy, ImageValidatingPolicy) since 2026-09-14
+  # (hl-0284): kyverno.io/v1 ClusterPolicy is deprecated in the running v1.19
+  # and removed in v1.20. Each file's header records the mapping from its
+  # ClusterPolicy predecessor; the per-policy proof (offline suites under
+  # policies/testdata/, cluster PolicyReport fail-set comparison, server
+  # dry-runs) is in homelab-docs/99-journal/2026-09-14-kyverno-cel-migration.md.
+  # scripts/check-kyverno-policy-tests.sh runs the offline suites on commit.
+  #
+  # ADR 0019 D3 — cosign verification (ImageValidatingPolicy, Audit + Warn).
   - policies/cel/verify-first-party-image-signature.yaml
+  # ADR 0019 / ADR 0023 — digest pinning, Audit: first-party images (any
+  # namespace) and third-party images (outside kube-*). Formerly the two
+  # rules of clusterpolicies.yaml.
+  - policies/cel/require-first-party-image-digest.yaml
+  - policies/cel/audit-third-party-image-digest.yaml
   # Audit-only: workloads with `httpGet path: /` probes that aren't
   # explicitly confirmed via probes.homelab.internal/root-route-confirmed
   # annotation. Surfaces the pr-agent-style silent kill-loop trap.
-  - policies/audit-root-route-http-probes.yaml
+  - policies/cel/audit-root-route-http-probes.yaml
   # Mutating: propagate `recurring-job-group.longhorn.io/*` labels
   # from PVCs onto the corresponding Longhorn Volume CRs. Fixes CNPG's
   # inheritedMetadata-doesn't-reach-Volume gap that caused the
-  # 2026-06-25 PG/ClickHouse snapshot-delta PVC-bloat (#73).
+  # 2026-06-25 PG/ClickHouse snapshot-delta PVC-bloat (#73). Admission-time
+  # only since the MutatingPolicy cutover; see the file header and
+  # scripts/sync-longhorn-recurring-job-labels.sh for the sweep.
   - policies/cel/longhorn-volume-label-propagation.yaml
-  # Enforce: digest-pinning REQUIRED for an operator-managed
-  # allowlist of namespaces. Ratchet from audit (cluster-wide,
-  # visibility) to enforce (allowlist, blocking). Add new
+  # Enforce (validationActions: [Deny]): digest-pinning REQUIRED for an
+  # operator-managed allowlist of namespaces. Ratchet from audit
+  # (cluster-wide, visibility) to enforce (allowlist, blocking). Add new
   # namespaces per 04-guides/digest-pin-enforce-allowlist.md.
-  # ValidatingPolicy since 2026-09-14 (hl-0284): ran one step alongside the
-  # ClusterPolicy (background rows identical for every live object, vpol
-  # webhook invoked on each dry-run), then proven alone by the same dry-run.
   - policies/cel/enforce-digest-pinning-allowlist.yaml
   # ADR 0036 — cluster-wide admission governance. All start in
-  # Audit; see policies/ROLLOUT.md for the Enforce migration plan
+  # Audit (+ Warn); see policies/ROLLOUT.md for the Deny migration plan
   # and policies/README.md for the bypass-annotation convention.
   # Validators:
-  - policies/homelab-require-namespace-limitrange.yaml
-  - policies/homelab-require-namespace-resourcequota.yaml
-  - policies/homelab-require-namespace-default-deny-netpol.yaml
-  - policies/homelab-disallow-open-egress-cnp.yaml
-  - policies/homelab-disallow-unlimited-containers.yaml
-  - policies/homelab-disallow-retain-reclaim-without-annotation.yaml
-  - policies/homelab-disallow-inline-secrets.yaml
-  # Generators (paired with the require-* validators above):
+  - policies/cel/homelab-require-namespace-limitrange.yaml
+  - policies/cel/homelab-require-namespace-resourcequota.yaml
+  - policies/cel/homelab-require-namespace-default-deny-netpol.yaml
+  - policies/cel/homelab-disallow-open-egress-cnp.yaml
+  - policies/cel/homelab-disallow-unlimited-containers.yaml
+  - policies/cel/homelab-disallow-retain-reclaim-without-annotation.yaml
+  - policies/cel/homelab-disallow-inline-secrets.yaml
+  # Generators (paired with the require-* validators above; generate runs
+  # before require in the sense that the validators only count objects):
   - policies/cel/homelab-generate-default-limitrange.yaml
   - policies/cel/homelab-generate-default-resourcequota.yaml
   - policies/cel/homelab-generate-default-deny-netpol.yaml
-  # Mutation policies (admission-time only; see the file's `mutate:`
-  # comment for why we don't ship `targets:` / mutate-existing —
-  # would require background-controller PVC/update RBAC we haven't
-  # granted):
+  # Mutation policy (admission-time only; see the file's header for why we
+  # don't ship mutate-existing — would require background-controller
+  # PVC/update RBAC we haven't granted):
   - policies/cel/homelab-mutate-openbao-pvc-retention.yaml
   # ADOPTED 2026-09-12 (hl-0282). This policy has been in git since 9c928dd
   # (2026-06-04) and referenced by nothing, so Argo never rendered it and the
   # live object was hand-applied — `managedFields` showed
   # `kubectl-client-side-apply` + `kyverno` and no `argocd-controller`. It is a
   # MUTATE, so it was changing admission on every matching pod from outside
-  # git. Adoption is behaviour-neutral: live-vs-file `spec` differs only in
-  # Kyverno-defaulted fields (`admission`, `emitWarning`,
-  # `skipBackgroundRequests`, `validationFailureAction`).
+  # git. Adoption was behaviour-neutral: live-vs-file `spec` differed only in
+  # Kyverno-defaulted fields.
   #
-  # Do NOT delete it as obsolete. Verified firing 2026-09-12 by server dry-run:
-  # a pod in ci-woodpecker is admitted with
+  # Do NOT delete it as obsolete. Verified firing 2026-09-12 by server dry-run
+  # (and again 2026-09-14 after the MutatingPolicy cutover): a pod in
+  # ci-woodpecker is admitted with
   # `{"options":[{"name":"ndots","value":"1"}]}` and the identical pod in
   # `default` gets no dnsConfig at all. The namespace had zero pods at the
   # time — absence of pods is not absence of effect.
@@ -94,34 +105,6 @@ resources:
   # resolver declared rather than leased.
   - policies/cel/ci-woodpecker-dns-ndots.yaml
 
-  # ---------------------------------------------------------------------------
-  # CEL migration (hl-0284, 2026-09-14): `kyverno.io/v1 ClusterPolicy` is
-  # deprecated in the running v1.19 and removed in v1.20. Each policy above is
-  # being re-expressed as a `policies.kyverno.io/v1` kind under policies/cel/.
-  # Files under policies/cel/ that are NOT listed here are staged, offline-proven
-  # (policies/testdata/, run by scripts/check-kyverno-policy-tests.sh) and waiting
-  # for their cutover step — nothing under cel/ reaches the cluster until it is
-  # listed. Audit validators run ALONGSIDE their ClusterPolicy twin first so the
-  # two PolicyReport fail sets can be compared before the old one is removed.
-  # Order of the cutover: validators (Audit) -> mutate -> generate -> the
-  # Enforce allowlist policy -> image verification. The three mutate entries
-  # above already point at cel/ (cut over 2026-09-14 after server dry-run
-  # diffs against captures of the ClusterPolicy output matched), and so do
-  # the three generators (swapped atomically in one commit after the old
-  # policies carried orphanDownstreamOnPolicyDelete: true, so the existing
-  # LimitRange/ResourceQuota/NetworkPolicy objects were adopted, not
-  # deleted and re-created).
-  - policies/cel/audit-root-route-http-probes.yaml
-  - policies/cel/audit-third-party-image-digest.yaml
-  - policies/cel/require-first-party-image-digest.yaml
-  - policies/cel/homelab-require-namespace-limitrange.yaml
-  - policies/cel/homelab-require-namespace-resourcequota.yaml
-  - policies/cel/homelab-require-namespace-default-deny-netpol.yaml
-  - policies/cel/homelab-disallow-open-egress-cnp.yaml
-  - policies/cel/homelab-disallow-unlimited-containers.yaml
-  - policies/cel/homelab-disallow-retain-reclaim-without-annotation.yaml
-  - policies/cel/homelab-disallow-inline-secrets.yaml
-
 # site-config: build-only ConfigMap for the imageReferences replacement below
 # (ADR 0045). Marked local-config, so it is used for substitution and never
 # emitted — the render is byte-identical apart from the value it resolves.
@@ -129,26 +112,20 @@ components:
   - ../../components/site-config
 
 # Resolve the apex Forgejo host in verify-first-party-image-signature's
-# imageReferences globs from the single site-config: `FORGEJO_FQDN/homelab/*`
+# matchImageReferences globs from the single site-config: `FORGEJO_FQDN/homelab/*`
 # -> `<forgejo_fqdn>/homelab/*`. Provenance is one hop: this rule ->
 # ConfigMap/site-config.data.forgejo_fqdn -> components/site-config/site-config.env.
 #
 # Each glob is selected BY ITS OWN VALUE, not by list index, so a later-added
-# imageReferences entry cannot silently shift the target: a selector that stops
-# matching is a hard `kustomize build` error ("unable to find field ... in
+# matchImageReferences entry cannot silently shift the target: a selector that
+# stops matching is a hard `kustomize build` error ("unable to find field ... in
 # replacement target"), which is exactly the failure mode a render step lacks.
 # `delimiter: '/', index: 0` swaps only the host token, leaving the org and the
-# glob in the manifest where a reviewer can see them.
+# glob in the manifest where a reviewer can see them. (Until 2026-09-14 the
+# target was the ClusterPolicy's `verifyImages.0.imageReferences.[=...]`.)
 replacements:
   - source: { kind: ConfigMap, name: site-config, fieldPath: data.forgejo_fqdn }
     targets:
-      - select: { kind: ClusterPolicy, name: verify-first-party-image-signature }
-        fieldPaths:
-          - spec.rules.[name=verify-cosign-static-key].verifyImages.0.imageReferences.[=FORGEJO_FQDN/homelab/*]
-          - spec.rules.[name=verify-cosign-static-key].verifyImages.0.imageReferences.[=FORGEJO_FQDN/forgejo-admin/*]
-        options: { delimiter: '/', index: 0 }
-      # Same two globs on the ImageValidatingPolicy twin (matchImageReferences
-      # entries are selected by their own glob value, same reasoning).
       - select: { kind: ImageValidatingPolicy, name: verify-first-party-image-signature }
         fieldPaths:
           - spec.matchImageReferences.[glob=FORGEJO_FQDN/homelab/*].glob

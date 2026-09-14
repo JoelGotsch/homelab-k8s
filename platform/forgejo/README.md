@@ -272,8 +272,9 @@ pull-enabled namespaces (`llm-gateway`, `approval-channel`,
 
 ### Adjacent — Kyverno digest-pinning
 
-The `require-first-party-image-digest` ClusterPolicy in
-`infrastructure/kyverno/clusterpolicies.yaml` requires
+The `require-first-party-image-digest` ValidatingPolicy in
+`infrastructure/kyverno/policies/cel/require-first-party-image-digest.yaml`
+(a ClusterPolicy in `clusterpolicies.yaml` until 2026-09-14) requires
 `registry.homelab.internal/*` and `forgejo.lab/*` images to
 be referenced by `@sha256:...` digest. It is currently
 `validationFailureAction: Audit` (per the bring-up note in

@@ -24,7 +24,7 @@ command -v rg >/dev/null || fail "rg is required"
 if rg -q 'resource\.compareOptions|serverSideDiff:' "$argocd_cm"; then
   fail "argocd-cm contains the obsolete/non-functional server-side diff shape"
 fi
-if rg -q 'resource\.customizations\.ignoreDifferences\.kyverno\.io_ClusterPolicy' \
+if rg -q 'resource\.customizations\.ignoreDifferences\.(kyverno\.io_ClusterPolicy|policies\.kyverno\.io_)' \
   "$argocd_cm"; then
   fail "top-level Kyverno policy behavior must not be hidden globally"
 fi
@@ -44,23 +44,36 @@ explicit_storageclass_count=$(yq ea '[select(.kind == "StorageClass") |
   .min.storage == "100Mi" and (has("max") | not))] | length' "$namespace_limits") == 1 ]] ||
   fail "shared PVC LimitRange must keep its floor without capping NAS claims"
 
+# Every policy is a policies.kyverno.io/v1 CEL kind (hl-0284, 2026-09-14).
+# kyverno.io/v1 ClusterPolicy/Policy is deprecated in v1.19 and gone in v1.20,
+# and the old kinds carried the webhook-stamped defaults this script used to
+# pin (skipBackgroundRequests, allowExistingViolations, signatureAlgorithm).
+# The vendored chart (gitignored charts/) and the test fixtures (testdata/)
+# are the only places the old kind may legitimately appear.
 while IFS= read -r policy; do
-  if yq '[.. | select(tag == "!!map" and has("apiCall")) | .apiCall |
-    select(.method != "GET" and .method != "POST")] | length' "$policy" |
+  if yq ea '[select(.apiVersion == "kyverno.io/v1" or .apiVersion == "kyverno.io/v2beta1")] | length' "$policy" |
     rg -qv '^0$'; then
-    fail "$policy has a context.apiCall without an explicit GET/POST method"
+    fail "$policy uses a deprecated kyverno.io policy kind — express it as a policies.kyverno.io/v1 kind under policies/cel/"
   fi
-done < <(rg --files "$policy_dir" -g '*.yaml' | sort)
+done < <(rg --files "$policy_dir" -g '*.yaml' -g '!testdata/**' | sort)
 
-verify_policy="$policy_dir/verify-first-party-image-signature.yaml"
-[[ $(yq '.spec.rules[].verifyImages[].useCache' "$verify_policy") == true ]] ||
-  fail "image verification cache behavior must be explicit"
-[[ $(yq '.spec.rules[].verifyImages[].attestors[].entries[].signatureAlgorithm' \
-  "$verify_policy") == sha256 ]] ||
+# The CEL kinds do not stamp defaults back, so behaviour that used to hide
+# behind an ignoreDifferences entry is now simply what the file says; pin the
+# fields whose silent flip would change the verification contract.
+verify_policy="$policy_dir/cel/verify-first-party-image-signature.yaml"
+[[ $(yq '.spec.validationConfigurations.mutateDigest' "$verify_policy") == false ]] ||
+  fail "image verification must not mutate digests while it audits (mutateDigest false)"
+[[ $(yq '.spec.validationConfigurations.verifyDigest' "$verify_policy") == true ]] ||
+  fail "image verification must require a digest (verifyDigest true)"
+[[ $(yq '.spec.validationConfigurations.required' "$verify_policy") == true ]] ||
+  fail "image verification must treat an unverified matching image as a failure (required true)"
+[[ $(yq '.spec.attestors[].cosign.key.hashAlgorithm' "$verify_policy") == sha256 ]] ||
   fail "supported image-signature algorithm field must be explicit"
+[[ $(yq '.spec.failurePolicy' "$verify_policy") == Ignore ]] ||
+  fail "image verification webhook must fail open (failurePolicy Ignore) while it only audits"
 
-inline_secret_policy="$policy_dir/homelab-disallow-inline-secrets.yaml"
-[[ $(yq '.spec.background' "$inline_secret_policy") == false ]] ||
+inline_secret_policy="$policy_dir/cel/homelab-disallow-inline-secrets.yaml"
+[[ $(yq '.spec.evaluation.background.enabled' "$inline_secret_policy") == false ]] ||
   fail "inline-secret reporting must not require cluster-wide Secret reads"
 
 kyverno_values="$repo_root/infrastructure/kyverno/values.yaml"
@@ -91,19 +104,16 @@ clickhouse_kustomization="$repo_root/infrastructure/clickhouse-operator/kustomiz
   fail "remove the paired topologySpreadConstraints patch before configuring it"
 
 required_ignores=(
-  '.spec.rules[].skipBackgroundRequests'
-  '.spec.rules[].validate.allowExistingViolations'
-  '.spec.rules[].verifyImages[].attestors[].entries[].keys.signatureAlgorithm'
   '/metadata/labels'
 )
 for expression in "${required_ignores[@]}"; do
   rg -Fq -- "$expression" "$applicationset" ||
     fail "infrastructure ApplicationSet lost narrow ignore: $expression"
 done
-
-if rg -n '(^|[[:space:]])(skipBackgroundRequests|allowExistingViolations):[[:space:]]+false' \
-  "$policy_dir"; then
-  fail "an explicit false value is hidden by infra-kyverno ignoreDifferences"
+# The ClusterPolicy ignore entry left with the last ClusterPolicy (hl-0284).
+# An ignore for a kind that is no longer rendered would hide the day one is.
+if rg -q 'kind: ClusterPolicy' "$applicationset"; then
+  fail "infrastructure ApplicationSet still carries a kyverno.io/ClusterPolicy ignoreDifferences entry, but no ClusterPolicy is rendered"
 fi
 
 required_clickhouse_removals=(

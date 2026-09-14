@@ -52,8 +52,9 @@ NS="backup-cronjobs"
 # Reuse the image the restic CronJob in this namespace already runs, pinned to
 # the same digest. Two reasons, both discovered rather than assumed:
 #
-#   * `enforce-digest-pinning-allowlist` is a Kyverno ClusterPolicy in ENFORCE
-#     mode covering Pods in `backup-cronjobs`. A tag-only image (busybox:1.36.1)
+#   * `enforce-digest-pinning-allowlist` is a Kyverno ValidatingPolicy with
+#     `validationActions: [Deny]` covering Pods in `backup-cronjobs`
+#     (a ClusterPolicy in Enforce mode until 2026-09-14). A tag-only image (busybox:1.36.1)
 #     is rejected outright — the Job would never start.
 #   * Reusing an image already pulled on the nodes and already covered by this
 #     namespace's pull secret means the migration introduces no new supply-chain

@@ -68,20 +68,17 @@ spec:
       # into every object — they'd otherwise keep every infra-*
       # app permanently OutOfSync and hide real drift (rule 7).
       ignoreDifferences:
-        # Kyverno's webhook writes per-rule compatibility/default fields.
-        # Keep these scoped to infra-kyverno rather than hiding top-level
-        # policy behavior globally in argocd-cm. The regression hook rejects
-        # an explicit false value while either field remains ignored.
-        - group: kyverno.io
-          kind: ClusterPolicy
-          jqPathExpressions:
-            - '.spec.rules[].skipBackgroundRequests'
-            - '.spec.rules[].validate.allowExistingViolations'
-            # Kyverno 3.8.2 also writes the deprecated copy of its
-            # default `sha256` value below `keys`. The supported sibling
-            # field is declared explicitly in the policy source; ignore
-            # only this compatibility writeback.
-            - '.spec.rules[].verifyImages[].attestors[].entries[].keys.signatureAlgorithm'
+        # Until 2026-09-14 this list opened with a kyverno.io/ClusterPolicy
+        # entry ignoring `.spec.rules[].skipBackgroundRequests`,
+        # `.spec.rules[].validate.allowExistingViolations` and the deprecated
+        # `keys.signatureAlgorithm` writeback — fields Kyverno's
+        # mutate-policy webhook stamped on every ClusterPolicy. No
+        # ClusterPolicy remains (hl-0284: all policies are policies.kyverno.io
+        # kinds, and `mutate-policy.kyverno.svc` only has rules for
+        # kyverno.io/clusterpolicies,policies), so the entry is gone rather
+        # than kept "just in case": an ignore that matches nothing hides the
+        # day a real one is needed. infra-kyverno stayed Synced across two
+        # hard refreshes after the removal.
         # Altinity ClickHouse operator patches its own
         # Deployment labels at runtime (`clickhouse.altinity.com/*`).
         # Field manager `clickhouse-operator` (op=Update) owns
@@ -159,14 +156,19 @@ spec:
   # `controller.diff.server.side: "true"` (argocd-cmd-params, since 2026-07-21)
   # already makes the controller compute diffs by server-side dry-run, but
   # that path then runs `removeWebhookMutation` to strip whatever admission
-  # webhooks added — and Kyverno's `mutate-policy.kyverno.svc` webhook mutates
-  # every ClusterPolicy on apply. On the kyverno.io/v1 CRD `spec.rules` is an
+  # webhooks added — and Kyverno's `mutate-policy.kyverno.svc` webhook mutated
+  # every ClusterPolicy on apply. On the kyverno.io/v1 CRD `spec.rules` was an
   # atomic list (no x-kubernetes-list-type) and `spec.rules[].preconditions`
-  # is `x-kubernetes-preserve-unknown-fields`, so the stripped and re-merged
-  # object can differ from what the apply produces while carrying the same
+  # `x-kubernetes-preserve-unknown-fields`, so the stripped and re-merged
+  # object could differ from what the apply produced while carrying the same
   # bytes Argo just applied. That is the shape of TODO.md hl-0281 (2026-09-12):
   # `serverside-applied` + `Succeeded` on a policy whose `preconditions`
   # change never landed, generation frozen, every other hypothesis falsified.
+  # 2026-09-14 (hl-0284): no ClusterPolicy remains and the mutate-policy
+  # webhook has no rule for policies.kyverno.io kinds, so the mechanism this
+  # compensates for is gone from this layer. The annotations are KEPT for now
+  # — removing them is a separate observed change (hl-0281), not a side effect
+  # of the migration; the cost is one webhook-inclusive dry-run per refresh.
   # `IncludeMutationWebhook=true` keeps the webhook's result in the predicted
   # live state instead of stripping it (Argo docs, diff-strategies: "Server-
   # Side Diff does not include changes made by mutation webhooks by default").

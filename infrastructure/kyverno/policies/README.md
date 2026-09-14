@@ -1,8 +1,12 @@
 # Kyverno policies — homelab admission governance
 
-This directory holds the `ClusterPolicy` resources that Kyverno enforces at
-admission time and reports on via background scans. The set breaks into two
-families:
+This directory holds the Kyverno policies that are enforced at admission time
+and reported on via background scans. Since 2026-09-14 (hl-0284) every policy
+is a `policies.kyverno.io/v1` CEL kind under `cel/` — `ValidatingPolicy`,
+`MutatingPolicy`, `GeneratingPolicy`, `ImageValidatingPolicy`; the
+`kyverno.io/v1 ClusterPolicy` kind is deprecated in the running Kyverno 1.19
+and removed in 1.20. Each file header records how its ClusterPolicy
+predecessor mapped onto the new shape. The set breaks into two families:
 
 - **Supply-chain / hygiene** (pre-existing): image signature verification,
   digest pinning, probe hygiene, DNS ndots workaround, Longhorn label
@@ -32,9 +36,11 @@ annotation on the target resource:
     bypass.homelab.internal/<policy-name>: <non-empty reason>
 
 Presence of the annotation with a non-empty value makes the policy skip
-the check for that resource. Kyverno emits a warning event (see
-`emitWarning: true` in each policy spec) which our Loki pipeline
-captures so waivers are visible in the audit trail — not silent.
+the check for that resource (a `matchConditions` entry on the CEL kinds;
+`preconditions` on the old kind). Failures are surfaced to the client as
+admission warnings (`validationActions: [Audit, Warn]` — the `Warn` action
+is what the old kind's `emitWarning: true` did) which our Loki pipeline
+captures so violations are visible in the audit trail — not silent.
 
 A handful of policies also honour a *semantic* bypass in addition to the
 mechanistic per-policy one. For example, `homelab-disallow-inline-secrets`
@@ -94,32 +100,59 @@ LimitRange.
 
 Materialised as `default-deny`. Layer allow-CNPs on top per app.
 
-## Audit -> Enforce migration procedure
+## Proving a policy evaluates
+
+A policy that compiles and reports `Ready` can still evaluate nothing
+(2026-08-02 revert 7b1e30e). Two signals, per kind, are the proof:
+
+- **PolicyReport rows** with the policy's name. Rows from the CEL kinds
+  carry `source: KyvernoValidatingPolicy` / `KyvernoMutatingPolicy` /
+  `KyvernoGeneratingPolicy` / `KyvernoImageValidatingPolicy`; rows from
+  the old kind carried `source: kyverno`. The resource a report is about is
+  the report's `.scope` (kind/namespace/name), not `.results[].resources`.
+- **Per-kind metrics**: `kyverno_validating_policy_results_total`,
+  `kyverno_mutating_policy_results_total`,
+  `kyverno_generating_policy_results_total`,
+  `kyverno_image_validating_policy_results_total` (labels `policy_name`,
+  `result`, `execution_cause`, `resource_kind`). `kyverno_policy_results_total`
+  counts the OLD kind only and will read zero for every policy here.
+
+Offline, `scripts/check-kyverno-policy-tests.sh` runs the suites under
+`testdata/` with the CLI pinned to the chart's appVersion; see
+`testdata/README.md` for what the CLI can and cannot represent.
+
+## Audit -> Deny migration procedure
 
 Every governance policy in this directory starts with
-`validationFailureAction: Audit` per project convention (see CLAUDE.md
+`validationActions: [Audit, Warn]` per project convention (see CLAUDE.md
 rule 5 + the `verify-first-party-image-signature` policy header for the
-same shape). Flipping a policy to Enforce is a three-step procedure:
+same shape). Flipping a policy to Deny is a three-step procedure:
 
 1. **Watch the PolicyReport for the policy for at least 14 days.**
    Every namespace that would fail Enforce must either be fixed at the
    source, or explicitly waived with the bypass annotation.
 
-       kubectl get polr -A -l homelab.internal/policy=<policy-name>
-       # or, broader:
        kubectl get polr -A -o json \
-         | jq '.items[].results[] | select(.policy=="<policy-name>" and .result=="fail")'
+         | jq -r '.items[] | .scope as $s | .results[]
+                  | select(.policy=="<policy-name>" and .result=="fail")
+                  | "\($s.kind) \($s.namespace)/\($s.name)"'
 
 2. **Confirm zero un-waived `fail` results for a full 14-day window.**
    The window is calendar days — long enough that a weekly CronJob or a
    monthly rotation task lands within it.
 
-3. **Edit the policy file: `validationFailureAction: Audit -> Enforce`.**
+3. **Edit the policy file: `validationActions: [Audit, Warn] -> [Deny]`.**
    Commit, ArgoCD sync. The next admission of a violating resource is
-   rejected. Watch the reports for surprise blocks in the first 24h:
+   rejected with `Policy <name> failed: <message>` from the policy's own
+   webhook (`vpol.validate.kyverno.svc-fail-<hash>`). Watch the reports for
+   surprise blocks in the first 24h (same jq as step 1; a report's resource
+   is its `.scope`, the old `.results[].resources` path is empty on this
+   Kyverno):
 
        kubectl get policyreport -A -o json \
-         | jq -r '.items[].results[] | select(.policy=="<policy-name>" and .result=="fail") | .resources[0].name'
+         | jq -r '.items[] | .scope as $s | .results[]
+                  | select(.policy=="<policy-name>" and .result=="fail")
+                  | "\($s.kind) \($s.namespace)/\($s.name)"'
        kubectl get clusterpolicyreport -o json | jq '.items[].summary'
 
    Do NOT watch `kubectl get events --field-selector reason=PolicyViolation`:

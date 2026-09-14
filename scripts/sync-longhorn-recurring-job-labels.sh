@@ -13,7 +13,10 @@
 #   2. something copies it onto the Volume CR.
 #
 # For (2) this cluster uses the Kyverno `longhorn-volume-label-propagation`
-# ClusterPolicy, which mutates Volumes on CREATE/UPDATE. It deliberately does
+# MutatingPolicy (a ClusterPolicy with mutate-existing targets until
+# 2026-09-14; now admission-time only, which makes this sweep the ONLY path
+# for a Volume that is never updated), which mutates Volumes on
+# CREATE/UPDATE. It deliberately does
 # NOT use Longhorn's native PVC->Volume sync, because enabling that
 # (`recurring-job.longhorn.io/source: enabled` on the PVC) makes Longhorn treat
 # the PVC as authoritative and strip the `backup` group that
@@ -29,7 +32,7 @@
 # (hourly, retain 6).
 #
 # Root-caused 2026-07-25 (see homelab-docs TODO.md). The documented remedy was
-# "touch the ClusterPolicy, or hand-label the volume" — fine for two
+# "touch the policy, or hand-label the volume" — fine for two
 # stragglers, wrong shape for sixty. This script is the sweep, and re-running
 # it is how you check the state later.
 #

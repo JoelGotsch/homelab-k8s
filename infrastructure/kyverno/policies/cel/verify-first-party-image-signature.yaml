@@ -176,7 +176,14 @@ metadata:
       namespace, projected by the sibling ExternalSecret from
       OpenBao kv/shared/cosign/key field `public`.
 spec:
-  validationActions: [Audit]
+  # Audit + Warn: the ClusterPolicy surfaced every failed verification to the
+  # client as an admission warning (`kubectl` prints them, Loki keeps them);
+  # on the CEL kind that needs Warn — with Audit alone the failure is only in
+  # the PolicyReport and the metric (pkg/webhooks/resource/ivpol/handler.go:
+  # warnings are appended only when Actions.Has(Warn); verified 2026-09-14:
+  # an unsigned first-party image produced the old kind's two warnings and no
+  # new-kind warning until Warn was added).
+  validationActions: [Audit, Warn]
   failurePolicy: Ignore
   evaluation:
     admission:

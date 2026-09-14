@@ -208,6 +208,47 @@ features:
     # live list — `resourceFiltersExcludeNamespaces` below strips them — so
     # they stay policed and reported.
     skipResourceFilters: false
+  # --- Kubernetes-native admission-policy generation (hl-0284 item 10, 2026-09-14) ---
+  # Chart 3.9.1 defaults BOTH of these to true, and until this commit nothing
+  # here overrode them: the live admission controller ran
+  # `--generateValidatingAdmissionPolicy=true` and the reports controller
+  # `--validatingAdmissionPolicyReports=true`. Decision: disable both,
+  # deliberately, for the CEL policies this layer now consists of.
+  #
+  # Why not generate VAPs: generation is per-policy opt-in
+  # (`spec.autogen.validatingAdmissionPolicy.enabled`) and mutually exclusive
+  # with pod-controller autogen — Kyverno skips the VAP and says so in the
+  # policy status. Three validators here (first-party digest, third-party
+  # digest, unlimited-containers) rely on autogen to cover Deployments,
+  # StatefulSets, CronJobs etc.; the three require-* validators read other
+  # objects through `resource.List` and inline-secrets reads namespaceObject
+  # labels, none of which the API server's CEL environment can do; the
+  # Enforce allowlist policy is the one candidate that could compile to a
+  # VAP, and putting one Deny policy on a second engine is not worth a second
+  # failure mode. Evidence for the status quo: after 28 days with the flag
+  # on, the cluster held exactly one VAP, Cilium's `gateway.cilium.io`, and
+  # no Kyverno-generated one.
+  #
+  # Why not report on VAPs: with the flag on the reports controller also
+  # evaluates every ValidatingAdmissionPolicy it can see (Cilium's) against
+  # every matching object and writes the rows into the same PolicyReports;
+  # nothing here consumes them, and the row source (`ValidatingAdmissionPolicy`)
+  # is not something the Enforce procedure in policies/README.md reads.
+  #
+  # RBAC caveat, stated so nobody expects a shrink: the chart grants the
+  # admission controller `validatingadmissionpolicies` /
+  # `validatingadmissionpolicybindings` (and the mutating pair) in its
+  # ClusterRole UNCONDITIONALLY — templates/admission-controller/clusterrole.yaml
+  # carries the comment "Always grant permissions for admission policies to
+  # support per-policy generation overrides even when global
+  # generateValidatingAdmissionPolicy/generateMutatingAdmissionPolicy flags are
+  # disabled". Flipping these flags changes what the controllers DO, not what
+  # they MAY do. Removing that RBAC would mean patching the chart's ClusterRole,
+  # which is outside this change.
+  generateValidatingAdmissionPolicy:
+    enabled: false
+  validatingAdmissionPolicyReports:
+    enabled: false
 
 config:
   # Removes the chart's `[*/*,kube-system,*]` and `[*/*,kyverno,*]` entries
