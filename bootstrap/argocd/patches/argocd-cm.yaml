@@ -112,8 +112,8 @@ data:
   #      in argocd-cmd-params-cm). Argo CD asks the API server
   #      to predict the result with server-side apply dry-run,
   #      so validation and defaulting participate in comparison.
-  #      Per the pinned Argo CD 3.4 docs:
-  #      https://argo-cd.readthedocs.io/en/release-3.4/user-guide/diff-strategies/#server-side-diff
+  #      Per the pinned Argo CD 3.5 docs:
+  #      https://argo-cd.readthedocs.io/en/release-3.5/user-guide/diff-strategies/#server-side-diff
   #
   #   2. Server-Side Apply at sync time (`ServerSideApply=true`
   #      in each ApplicationSet's syncPolicy.syncOptions, see

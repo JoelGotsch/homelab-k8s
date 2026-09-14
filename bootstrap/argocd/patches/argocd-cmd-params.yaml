@@ -16,7 +16,7 @@ data:
   # 2026-08-16.
 
   # Use an API-server dry-run to predict live state during comparisons. This
-  # is the documented Argo CD 3.4 controller-level switch; changing it
+  # is the documented Argo CD 3.5 controller-level switch; changing it
   # requires an application-controller restart.
   controller.diff.server.side: "true"
 
