@@ -24,6 +24,12 @@ metadata:
       glibc skips search-list walking for FQDNs, avoiding the
       tailnet-search-domain AAAA SERVFAIL trap.
 spec:
+  # A convenience mutation never blocks a write. Registered as a Fail webhook
+  # until 2026-09-14 (the API default): with Kyverno unreachable, no CI step
+  # Pod could start in ci-woodpecker at all — worse than a step running with
+  # the default ndots and hitting the search-list trap this works around.
+  # policies/README.md "Failure mode".
+  failurePolicy: Ignore
   autogen:
     podControllers:
       controllers: []

@@ -72,6 +72,35 @@ verify_policy="$policy_dir/cel/verify-first-party-image-signature.yaml"
 [[ $(yq '.spec.failurePolicy' "$verify_policy") == Ignore ]] ||
   fail "image verification webhook must fail open (failurePolicy Ignore) while it only audits"
 
+# Webhook failure mode (2026-09-14, after 8d13415). The CEL kinds default
+# spec.failurePolicy to Fail, and Kyverno registers one webhook per policy with
+# that value — so an Audit-only policy left at the default fails CLOSED: with
+# the admission controller unreachable every matching write in the cluster
+# stalls (the 2026-06-08 OpenBao incident class), where the old Audit
+# ClusterPolicies failed open. Rule: a policy that cannot Deny must be Ignore;
+# a policy that can Deny must say which it is, so the fail-closed scope is a
+# reviewed decision (its webhook inherits the policy's namespaceSelector).
+# Mutations here are conveniences and never block a write.
+while IFS= read -r policy; do
+  kind=$(yq ea 'select(.apiVersion == "policies.kyverno.io/v1") | .kind' "$policy" | head -n1)
+  case "$kind" in
+    ValidatingPolicy|ImageValidatingPolicy)
+      fp=$(yq ea 'select(.apiVersion == "policies.kyverno.io/v1") | .spec.failurePolicy' "$policy" | head -n1)
+      if yq ea 'select(.apiVersion == "policies.kyverno.io/v1") | .spec.validationActions[]' "$policy" | rg -qx 'Deny'; then
+        [[ "$fp" == Fail || "$fp" == Ignore ]] ||
+          fail "$policy can Deny but leaves spec.failurePolicy unset — state Fail (and verify the live webhook's namespaceSelector) or Ignore"
+      else
+        [[ "$fp" == Ignore ]] ||
+          fail "$policy is Audit/Warn-only but its webhook would fail closed — set spec.failurePolicy: Ignore (Audit never blocks a write)"
+      fi
+      ;;
+    MutatingPolicy)
+      [[ $(yq ea 'select(.apiVersion == "policies.kyverno.io/v1") | .spec.failurePolicy' "$policy" | head -n1) == Ignore ]] ||
+        fail "$policy is a convenience mutation and must not block a write — set spec.failurePolicy: Ignore"
+      ;;
+  esac
+done < <(rg --files "$policy_dir/cel" -g '*.yaml' | sort)
+
 inline_secret_policy="$policy_dir/cel/homelab-disallow-inline-secrets.yaml"
 [[ $(yq '.spec.evaluation.background.enabled' "$inline_secret_policy") == false ]] ||
   fail "inline-secret reporting must not require cluster-wide Secret reads"

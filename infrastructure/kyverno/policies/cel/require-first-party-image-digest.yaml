@@ -51,6 +51,15 @@ spec:
   # Audit during the bring-up window (2026-05-23) — see the header. Flip to
   # Deny once Forgejo + Woodpecker are producing signed images.
   validationActions: [Audit]
+  # Audit never blocks a write. Without this line Kyverno registers the
+  # policy's webhook with failurePolicy Fail (the API default), so an
+  # unreachable admission controller stalls every matching write cluster-wide
+  # — the 2026-06-08 OpenBao incident class, and a regression versus the Audit
+  # ClusterPolicy this replaced (found 2026-09-14 after 8d13415). Ignore only
+  # governs webhook unreachability/timeouts and CEL runtime errors; a
+  # validation that evaluates to false is still reported per validationActions.
+  # Full reasoning: policies/README.md "Failure mode".
+  failurePolicy: Ignore
   evaluation:
     admission:
       enabled: true

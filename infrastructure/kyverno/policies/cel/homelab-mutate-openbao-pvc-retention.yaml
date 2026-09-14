@@ -53,6 +53,14 @@ metadata:
       Matches PVCs in the `openbao` namespace with the
       `app.kubernetes.io/name: openbao` label. Idempotent.
 spec:
+  # A convenience mutation never blocks a write. Registered as a Fail webhook
+  # until 2026-09-14 (the API default): with Kyverno unreachable, every PVC
+  # write in the openbao namespace — including a cold-start StatefulSet's
+  # first claims — would have stalled to stamp an annotation that a later
+  # `kubectl annotate` can add. If the stamp is skipped, the Audit validator
+  # homelab-disallow-retain-reclaim-without-annotation reports the PVC.
+  # policies/README.md "Failure mode".
+  failurePolicy: Ignore
   evaluation:
     admission:
       enabled: true

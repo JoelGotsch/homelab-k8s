@@ -24,6 +24,9 @@
 # wedged longhorn-manager and stuck the OpenBao VolumeAttachments.
 # Full incident at 99-journal/2026-06-08-openbao-degradation.md and
 # the root-cause analysis in TODO.md §Open incidents.
+# Spreading the pods is one half of that lesson; the other is that only a
+# policy which can Deny may register a Fail webhook — per-policy
+# `spec.failurePolicy`, see policies/README.md "Failure mode".
 #
 # topologySpreadConstraints with whenUnsatisfiable=ScheduleAnyway is
 # soft enough that scheduling never blocks during a worker disruption

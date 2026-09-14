@@ -121,6 +121,63 @@ Offline, `scripts/check-kyverno-policy-tests.sh` runs the suites under
 `testdata/` with the CLI pinned to the chart's appVersion; see
 `testdata/README.md` for what the CLI can and cannot represent.
 
+## Failure mode: Audit never blocks a write
+
+Two independent knobs decide what a policy does to an admission request,
+and only one of them is the verdict:
+
+- `validationActions` (`Audit`, `Warn`, `Deny`) — what happens when a
+  validation evaluates to **false**.
+- `failurePolicy` (`Ignore`, `Fail`; **the API default is `Fail`**) — what
+  happens when the policy cannot be evaluated at all: the admission
+  controller is unreachable, the webhook call times out
+  (`webhookConfiguration.timeoutSeconds`, default 10 s), or a CEL
+  expression errors at runtime. `kubectl explain
+  validatingpolicies.policies.kyverno.io.spec.failurePolicy`: "failurePolicy
+  does not define how validations that evaluate to false are handled."
+
+Kyverno registers **one webhook per policy** in
+`kyverno-resource-validating-webhook-cfg` /
+`kyverno-resource-mutating-webhook-cfg`, named `vpol.validate.kyverno.svc-
+{fail,ignore}-…` (`mpol.…`, `gpol.…`, `ivpol.…`), carrying the policy's
+`failurePolicy` and its `matchConstraints` as the webhook's `rules` +
+`namespaceSelector`. So the failure mode is decided per policy, and it is
+decided by the file — the old ClusterPolicies' Audit rules failed open, and
+the migration to the CEL kinds (2026-09-14, `8d13415`) silently flipped ten
+Audit-only validators and two mutations to fail **closed**, because the new
+field was left unset. Discovered the same evening; fixed in the follow-up
+commit.
+
+Why this matters here: in the 2026-06-08 OpenBao incident
+(`homelab-docs/99-journal/2026-06-08-openbao-degradation.md`) every Kyverno
+pod sat on one worker; when it went NotReady, a `Fail` mutating webhook
+stalled every write that traversed it — longhorn-manager, the OpenBao
+VolumeAttachments — until the worker came back. A policy whose *only* job
+is to write a PolicyReport row must never be able to do that.
+
+The rules, pinned by `scripts/check-known-argocd-drift.sh` on every commit:
+
+| policy class | `failurePolicy` | why |
+|---|---|---|
+| `validationActions` without `Deny` (Audit, Warn) | `Ignore`, always | it cannot block a write on a verdict, so it must not block one on an outage |
+| `validationActions` with `Deny` | **explicit** `Fail` or `Ignore` | `Fail` is a gate and must stay one — but say so in the file, with the webhook's live `namespaceSelector` as the blast-radius evidence (`enforce-digest-pinning-allowlist`: `In [minio-on-nas, backup-cronjobs]` only) |
+| `MutatingPolicy` | `Ignore`, always | every mutation here is a convenience (an annotation, `ndots`, a label copy); a skipped mutation is recoverable by hand, a stalled cold start is not |
+| `GeneratingPolicy` | (unset) | Kyverno registers `gpol.*` webhooks as `Ignore` regardless — verified live 2026-09-14 |
+
+What `Ignore` costs: an admission-time CEL runtime error on an Audit policy
+is swallowed instead of being recorded per `validationActions`; the
+background scan (`evaluation.background.enabled: true`) still evaluates the
+same expression and reports the error in the PolicyReport, so nothing is
+hidden for long. `Ignore` never changes a verdict — a validation that
+evaluates to false is still reported, and still returns the `Warn` header.
+
+When a policy is flipped to `Deny` (procedure below), step 3 includes
+setting `failurePolicy` explicitly and reading the live webhook's
+`namespaceSelector` back:
+
+    kubectl get validatingwebhookconfigurations kyverno-resource-validating-webhook-cfg -o json \
+      | jq -r '.webhooks[] | "\(.name)\t\(.failurePolicy)\t\(.namespaceSelector.matchExpressions|tostring)"'
+
 ## Audit -> Deny migration procedure
 
 Every governance policy in this directory starts with
@@ -141,7 +198,9 @@ same shape). Flipping a policy to Deny is a three-step procedure:
    The window is calendar days — long enough that a weekly CronJob or a
    monthly rotation task lands within it.
 
-3. **Edit the policy file: `validationActions: [Audit, Warn] -> [Deny]`.**
+3. **Edit the policy file: `validationActions: [Audit, Warn] -> [Deny]`, and
+   set `failurePolicy` explicitly** (see "Failure mode" above — `Fail` only
+   with the webhook's namespaceSelector quoted as the blast radius).
    Commit, ArgoCD sync. The next admission of a violating resource is
    rejected with `Policy <name> failed: <message>` from the policy's own
    webhook (`vpol.validate.kyverno.svc-fail-<hash>`). Watch the reports for

@@ -46,6 +46,16 @@ metadata:
       grows.
 spec:
   validationActions: [Deny]
+  # Fail is deliberate and stated: a Deny policy that fails open is not a
+  # gate. The blast radius is bounded by the webhook Kyverno registers for it,
+  # which carries this policy's namespaceSelector — verified 2026-09-14 on the
+  # live kyverno-resource-validating-webhook-cfg: `vpol.validate.kyverno.svc-
+  # fail-57537884` matches `kubernetes.io/metadata.name In [minio-on-nas,
+  # backup-cronjobs]` only, so Kyverno being unreachable stalls Pod writes in
+  # those two namespaces and nowhere else. Re-check the live webhook's
+  # namespaceSelector whenever the allowlist changes.
+  # policies/README.md "Failure mode".
+  failurePolicy: Fail
   evaluation:
     admission:
       enabled: true
