@@ -105,7 +105,12 @@ bao kv put kv/loki/s3-creds \
 4. **90d default retention with 1y overrides for security-
    forensic streams** — Falco events (`{job="falcosidekick"}`),
    Hubble flows (`{job="hubble"}`), and audit-log units
-   (`{unit=~".*audit.*"}`) extended to 1y per ADR 0021 D8.
+   (`{unit=~".*audit.*"}`) extended to 1y per ADR 0021 D8. The
+   `unit` selector matches nothing: it named the journald source
+   that was never built (Talos has no journald). The audit stream
+   Alloy ships since 2026-09-14 is `{job="kube-apiserver-audit"}`
+   and gets the 90d default until TODO hl-0311 decides its
+   retention; `values.yaml` is unchanged on purpose.
    Operator adds further per-stream overrides in
    `values.yaml`'s `retention_stream` block as new
    security-forensic sources land (e.g., a future
