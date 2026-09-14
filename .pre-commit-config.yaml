@@ -304,6 +304,21 @@ repos:
         # locally checked-out app-owned repos from apps.yaml, so repository
         # cutovers cannot silently move a CNPG layer outside its scan. Local script.
 
+      - id: check-cloudflare-ip-ranges
+        name: cert-manager DNS-01 :53 allowlist equals Cloudflare's published IPv4 ranges and holds the zone's NS (needs network)
+        entry: scripts/check-cloudflare-ip-ranges.sh
+        language: script
+        pass_filenames: false
+        files: '^infrastructure/cert-manager/networkpolicy\.yaml$|^scripts/check-cloudflare-ip-ranges\.sh$'
+        # 2026-09-14: the DNS-01 self-check egress went from `0.0.0.0/0:53`
+        # (an open Kyverno open-egress failure, and a selector that dragged
+        # the CrowdSec ban-list identity into the DNS proxy's restart
+        # snapshot) to Cloudflare's published ranges. A copied list is only
+        # right on the day it is copied, so this compares it to the source
+        # AND resolves the site zone's NS records into it — the second is the
+        # invariant the rule exists for. Needs network and FAILS without it;
+        # scoped to the policy file so ordinary commits never pay for it.
+
       - id: check-registry-critical-path
         name: first-party registry ownership and dynamic upstream invariants
         entry: scripts/check-registry-critical-path.sh

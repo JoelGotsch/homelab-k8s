@@ -148,15 +148,45 @@ spec:
     # wedged at "Waiting for DNS-01 challenge propagation: dial tcp
     # <cloudflare-ns>:53: i/o timeout" for 8 days — found 2026-08-01 with
     # ~3 weeks left on the serving cert. Authoritative NS IPs rotate
-    # across Cloudflare's anycast set, so allow world:53 (RFC1918
-    # excluded); the FQDN allowlist above still gates the control-plane
-    # calls.
+    # across Cloudflare's anycast set, so the first fix (2026-08-01) was
+    # world:53 with RFC1918 excluded; the FQDN allowlist above still
+    # gates the control-plane calls.
+    #
+    # NARROWED 2026-09-14 to Cloudflare's PUBLISHED IPv4 ranges
+    # (https://www.cloudflare.com/ips-v4) — every anycast address of the
+    # zone's nameservers lives inside them, so the self-check still asks
+    # the authoritative servers and no resolver cache enters the renewal
+    # path. world:53 had two real costs:
+    #   1. it was an open Kyverno `homelab-disallow-open-egress-cnp`
+    #      failure (Audit mode, ADR 0036 D4);
+    #   2. a `0.0.0.0/0` selector also selects the CrowdSec ban-list
+    #      identity (CIDRGroup `crowdsec-banned`, ~4.6k prefixes), so
+    #      the DNS proxy's restart snapshot of this endpoint's port-53
+    #      rule overflowed its 1000-IP cap (`--tofqdns-max-ips-per-
+    #      restored-rule`; "Too many IPs for a DNS rule, skipping the
+    #      rest", 4,320/day) — a query sent while an agent restarts
+    #      could be refused until live policy was back.
+    # `scripts/check-cloudflare-ip-ranges.sh` (pre-commit, scoped to this
+    # file) keeps this list equal to the published one and checks that
+    # the zone's NS addresses fall inside it. If Cloudflare ever moves
+    # its authoritative servers off these ranges, that check — and the
+    # 2026-07-24 "propagation … i/o timeout" symptom — is how it shows.
     - toCIDRSet:
-        - cidr: 0.0.0.0/0
-          except:
-            - 10.0.0.0/8
-            - 172.16.0.0/12
-            - 192.168.0.0/16
+        - cidr: 173.245.48.0/20
+        - cidr: 103.21.244.0/22
+        - cidr: 103.22.200.0/22
+        - cidr: 103.31.4.0/22
+        - cidr: 141.101.64.0/18
+        - cidr: 108.162.192.0/18
+        - cidr: 190.93.240.0/20
+        - cidr: 188.114.96.0/20
+        - cidr: 197.234.240.0/22
+        - cidr: 198.41.128.0/17
+        - cidr: 162.158.0.0/15
+        - cidr: 104.16.0.0/13
+        - cidr: 104.24.0.0/14
+        - cidr: 172.64.0.0/13
+        - cidr: 131.0.72.0/22
       toPorts:
         - ports:
             - port: "53"

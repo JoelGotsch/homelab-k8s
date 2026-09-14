@@ -45,6 +45,23 @@ bandwidthManager:
 bpf:
   hostLegacyRouting: false
   masquerade: true
+  # Per-endpoint policy map size. Default 16384; 65536 is the hard cap
+  # (PolicyMapMax = 1 << 16 in pkg/option/config.go). Entries are
+  # (identity x port x proto), so the endpoint with the widest policy
+  # overflows first — here Prometheus, whose `namespaceSelector: {}`
+  # over ~36 scrape ports costs 36 entries per identity, i.e. the map
+  # was full at ~455 identities. It overflowed on 2026-09-09 and
+  # 2026-09-11 (pressure 1.33; 4.1M "Failed to add PolicyMap key … no
+  # space left on device" in one week; 15-17 scrape targets down each
+  # time; prometheus-0 without a sandbox for an hour — lessons.md,
+  # TODO hl-0270). This is HEADROOM ONLY: the cause is identity
+  # cardinality, handled by `extraConfig.labels` below.
+  #
+  # A size change makes the next agent start recreate every policy map
+  # EMPTY ("Removed map pin, recreating and re-pinning map") and refill
+  # it during endpoint regeneration — the usual restart-time gap, not a
+  # new one.
+  policyMapMax: 65536
 cluster:
   id: 1
   name: homelab
@@ -143,6 +160,36 @@ l2NeighDiscovery:
 # the IPPool — required when LB-IPAM is the IP source.
 externalIPs:
   enabled: true
+
+# Supplementary cilium-config keys that have no first-class Helm value.
+extraConfig:
+  # Identity-relevant labels — EXCLUSIONS ONLY. pkg/labelsfilter appends
+  # user patterns to Cilium's defaults, matches each as a start-anchored
+  # regex against the label key, and keeps the default include set as
+  # long as no positive pattern is given. So this narrows nothing but
+  # the six keys named.
+  #
+  # Every CronJob run and every trivy scan job used to mint a
+  # permanent-until-GC identity, because these keys are NOT in the
+  # default exclusion list (only `controller-uid` and
+  # `job-completion-index` are). Measured 2026-09-14: 209 distinct
+  # `job-name` values across live identities, 200 identities created
+  # before noon, the every-minute openbao-seal-watchdog alone ~60/h;
+  # the cluster held 697 identities during the 2026-09-11 roll (TODO
+  # hl-0269). Each identity costs the Prometheus endpoint 36
+  # policy-map entries and every policied endpoint a regeneration
+  # (355k on worker1 in a week).
+  #
+  # KEEP `woodpecker-ci.org/step` and `woodpecker-ci.org/repo-full-name`:
+  # two ci-woodpecker CNPs select on them. `!woodpecker-ci\.org/task-uuid`
+  # is start-anchored and cannot touch them. Verified 2026-09-14 that no
+  # live CNP/CCNP/NetworkPolicy selects on any key excluded here.
+  #
+  # Takes effect for identities allocated after the agents restart (the
+  # chart's config checksum rolls the DaemonSet); pods keep their current
+  # identity until they restart. `!` MUST stay quoted — bare, it is a
+  # YAML tag. Same value in homelab-infra/ansible/files/cilium-values.yaml.
+  labels: '!job-name !batch\.kubernetes\.io/job-name !resource-spec-hash !trivy-operator\.resource\.name !trivy-operator\.resource\.namespace !woodpecker-ci\.org/task-uuid'
 
 operator:
   replicas: 2
