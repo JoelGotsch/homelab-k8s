@@ -211,18 +211,6 @@ hubble:
   # sidecar. Redaction happens in Hubble's L7 parser, before any consumer
   # (observe, relay, metrics, export). Allow-list, not deny-list: a header
   # nobody thought of is redacted by default. TODO hl-0315.
-  redact:
-    enabled: true
-    http:
-      urlQuery: true
-      userInfo: true
-      headers:
-        allow:
-          - Accept
-          - Content-Type
-          - Content-Length
-          - User-Agent
-          - X-Request-Id
   relay:
     enabled: true
   ui:
