@@ -111,6 +111,13 @@ spec:
         name: default-quota
         namespace: "{{ request.object.metadata.name }}"
         synchronize: true
+        # CEL migration (hl-0284): this ClusterPolicy is about to be replaced by
+        # the GeneratingPolicy in cel/. With the default (false) Kyverno DELETES
+        # every downstream LimitRange/ResourceQuota/NetworkPolicy it generated
+        # when the policy object goes away — in a first-party namespace that is
+        # a live guardrail vanishing. Set before the swap so the successor
+        # adopts the existing objects instead of re-creating them after a gap.
+        orphanDownstreamOnPolicyDelete: true
         data:
           metadata:
             labels:

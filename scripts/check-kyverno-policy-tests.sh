@@ -43,6 +43,16 @@ chart_pinned=$(awk '/^helmCharts:/{f=1} f && /version:/{gsub(/"/,"",$2); print $
 [[ "$chart_pinned" == "$KYVERNO_CHART_VERSION" ]] ||
   fail "kustomization pins kyverno chart $chart_pinned but tests/cli-pin.env pairs $KYVERNO_CHART_VERSION with CLI $KYVERNO_CLI_VERSION — look up the new chart's appVersion and bump both lines"
 
+# 1b. When the vendored chart is present locally (infrastructure/kyverno/charts/
+#     is gitignored, so it may not be), its Chart.yaml appVersion is the
+#     authoritative engine version — it must equal the CLI pin.
+chart_yaml="$repo_root/infrastructure/kyverno/charts/kyverno-$KYVERNO_CHART_VERSION/kyverno/Chart.yaml"
+if [[ -f "$chart_yaml" ]]; then
+  app_version=$(awk -F': *' '/^appVersion:/{print $2; exit}' "$chart_yaml")
+  [[ "$app_version" == "$KYVERNO_CLI_VERSION" ]] ||
+    fail "vendored chart $KYVERNO_CHART_VERSION has appVersion $app_version but tests/cli-pin.env pins CLI $KYVERNO_CLI_VERSION — bump KYVERNO_CLI_VERSION"
+fi
+
 # 2. Resolve a CLI of exactly the pinned version: PATH, then cache, then download.
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/homelab/kyverno-cli/$KYVERNO_CLI_VERSION"
 version_of() { "$1" version 2>/dev/null | awk -F': *' '/^Version/{print $2; exit}'; }

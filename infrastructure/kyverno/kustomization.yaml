@@ -38,7 +38,7 @@ resources:
   # from PVCs onto the corresponding Longhorn Volume CRs. Fixes CNPG's
   # inheritedMetadata-doesn't-reach-Volume gap that caused the
   # 2026-06-25 PG/ClickHouse snapshot-delta PVC-bloat (#73).
-  - policies/longhorn-volume-label-propagation.yaml
+  - policies/cel/longhorn-volume-label-propagation.yaml
   # Enforce: digest-pinning REQUIRED for an operator-managed
   # allowlist of namespaces. Ratchet from audit (cluster-wide,
   # visibility) to enforce (allowlist, blocking). Add new
@@ -63,7 +63,7 @@ resources:
   # comment for why we don't ship `targets:` / mutate-existing —
   # would require background-controller PVC/update RBAC we haven't
   # granted):
-  - policies/homelab-mutate-openbao-pvc-retention.yaml
+  - policies/cel/homelab-mutate-openbao-pvc-retention.yaml
   # ADOPTED 2026-09-12 (hl-0282). This policy has been in git since 9c928dd
   # (2026-06-04) and referenced by nothing, so Argo never rendered it and the
   # live object was hand-applied — `managedFields` showed
@@ -84,7 +84,7 @@ resources:
   # in the PLATFORM layer (`talosctl get resolverspecs`), i.e. the DHCP lease,
   # so it is one renewal from changing. Retire this only when D2 makes the
   # resolver declared rather than leased.
-  - policies/ci-woodpecker-dns-ndots.yaml
+  - policies/cel/ci-woodpecker-dns-ndots.yaml
 
   # ---------------------------------------------------------------------------
   # CEL migration (hl-0284, 2026-09-14): `kyverno.io/v1 ClusterPolicy` is
@@ -96,7 +96,9 @@ resources:
   # listed. Audit validators run ALONGSIDE their ClusterPolicy twin first so the
   # two PolicyReport fail sets can be compared before the old one is removed.
   # Order of the cutover: validators (Audit) -> mutate -> generate -> the
-  # Enforce allowlist policy -> image verification.
+  # Enforce allowlist policy -> image verification. The three mutate entries
+  # above already point at cel/ (cut over 2026-09-14 after server dry-run
+  # diffs against captures of the ClusterPolicy output matched).
   - policies/cel/audit-root-route-http-probes.yaml
   - policies/cel/audit-third-party-image-digest.yaml
   - policies/cel/require-first-party-image-digest.yaml
