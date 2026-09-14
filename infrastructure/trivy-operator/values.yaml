@@ -16,6 +16,21 @@ targetNamespaces: ""
 # excluded so we don't recursively scan our own scan jobs.
 excludeNamespaces: "ci-woodpecker,trivy-system"
 
+# Which workload kinds get their own scan Job (rendered into the operator's
+# OPERATOR_TARGET_WORKLOADS env). Chart default adds `pod` and `job`; both are
+# removed here (2026-09-14) because they were the amplifier behind 115 scan
+# Jobs/h: every run of a minute-cadence CronJob (openbao-seal-watchdog and
+# friends) is a new Job with a new Pod, each a new scan target, and
+# `scanJobsInSameNamespace: false` puts every one of them through this
+# namespace. Only 89 VulnerabilityReports exist for the whole cluster, so the
+# scans were re-scanning the same few images under fresh names. ReplicaSet,
+# StatefulSet, DaemonSet and CronJob together cover every image a pod here
+# runs: the only owner-less Pods in the cluster (checked 2026-09-14) are
+# Woodpecker's per-step pods in ci-woodpecker, which `excludeNamespaces` above
+# already skips, and a CronJob's image is scanned once on the CronJob instead
+# of once per run.
+targetWorkloads: "replicaset,replicationcontroller,statefulset,daemonset,cronjob"
+
 # ----------------------------------------------------------------
 # Operator settings.
 # ----------------------------------------------------------------
