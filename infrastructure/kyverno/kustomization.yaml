@@ -56,9 +56,9 @@ resources:
   - policies/homelab-disallow-retain-reclaim-without-annotation.yaml
   - policies/homelab-disallow-inline-secrets.yaml
   # Generators (paired with the require-* validators above):
-  - policies/homelab-generate-default-limitrange.yaml
-  - policies/homelab-generate-default-resourcequota.yaml
-  - policies/homelab-generate-default-deny-netpol.yaml
+  - policies/cel/homelab-generate-default-limitrange.yaml
+  - policies/cel/homelab-generate-default-resourcequota.yaml
+  - policies/cel/homelab-generate-default-deny-netpol.yaml
   # Mutation policies (admission-time only; see the file's `mutate:`
   # comment for why we don't ship `targets:` / mutate-existing —
   # would require background-controller PVC/update RBAC we haven't
@@ -98,7 +98,11 @@ resources:
   # Order of the cutover: validators (Audit) -> mutate -> generate -> the
   # Enforce allowlist policy -> image verification. The three mutate entries
   # above already point at cel/ (cut over 2026-09-14 after server dry-run
-  # diffs against captures of the ClusterPolicy output matched).
+  # diffs against captures of the ClusterPolicy output matched), and so do
+  # the three generators (swapped atomically in one commit after the old
+  # policies carried orphanDownstreamOnPolicyDelete: true, so the existing
+  # LimitRange/ResourceQuota/NetworkPolicy objects were adopted, not
+  # deleted and re-created).
   - policies/cel/audit-root-route-http-probes.yaml
   - policies/cel/audit-third-party-image-digest.yaml
   - policies/cel/require-first-party-image-digest.yaml
