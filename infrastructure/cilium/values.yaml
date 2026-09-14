@@ -142,6 +142,27 @@ hubble:
       # The Prometheus CR selects monitors by this label only.
       labels:
         release: kube-prometheus-stack
+  # L7 redaction (hl-0315, 2026-09-14). HTTP records from L7-policed
+  # endpoints carry request headers in clear — Authorization, Cookie and
+  # Set-Cookie values were seen in Hubble flows (header names checked,
+  # never values) — and the export allowList below ships every L7 record
+  # to Loki for 90 days. With `headers.allow`, every header NOT listed is
+  # replaced by HUBBLE_REDACTED before the flow reaches the ring buffer,
+  # the metrics, the export and `hubble observe` alike; urlQuery strips
+  # GET parameters (tokens in query strings), userInfo the basic-auth
+  # part of URLs. `allow` and `deny` are mutually exclusive in the chart.
+  redact:
+    enabled: true
+    http:
+      urlQuery: true
+      userInfo: true
+      headers:
+        allow:
+          - Accept
+          - Content-Type
+          - Content-Length
+          - User-Agent
+          - X-Request-Id
   # Static flow export → the hubble-flow-exporter sidecar (extraContainers
   # below; consumer side in observability/hubble-flow-exporter). Declared
   # here since 2026-09-14: the export had been running on bootstrap-era
