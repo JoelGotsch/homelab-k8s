@@ -1,4 +1,4 @@
-# CCNP — egress to Cloudflare's edge.
+# CNP — egress to Cloudflare's edge.
 #
 # Split out from networkpolicy.yaml because `toEntities` is a
 # Cilium-only field; including it in a standard NetworkPolicy
@@ -9,9 +9,20 @@
 #
 # cloudflared connects HTTP/2 over TCP/443 by default (set in
 # configmap.yaml `protocol: http2`); falls back to QUIC over
-# UDP/443 if HTTP/2 fails. Registration uses 7844 TCP/UDP.
-# Cloudflare's edge is geographically-rotating anycast — bounded
-# `entity: world` is the right shape (toFQDNs would be brittle).
+# UDP/443 if HTTP/2 fails. Registration uses 7844 TCP/UDP to
+# region1/region2.v2.argotunnel.com.
+#
+# Destination is Cloudflare's PUBLISHED IPv4 ranges
+# (https://www.cloudflare.com/ips-v4), not `toEntities: world`
+# (2026-09-14). The edge is geographically-rotating anycast, but it
+# rotates INSIDE those ranges — the two argotunnel names resolve
+# into 198.41.128.0/17 — so the list is stable while `world` was an
+# open Kyverno homelab-disallow-open-egress-cnp failure on the pod
+# that fronts every public hostname. scripts/check-cloudflare-ip-
+# ranges.sh (pre-commit, scoped to this file) fails the commit when
+# the list stops matching the published one or the argotunnel
+# names resolve outside it. Rehearsed in PolicyAuditMode before
+# enforcement (cilium-policy-audit.sh), same day.
 #
 # Additive to networkpolicy.yaml: Cilium ORs the allow set across
 # both policies targeting the same endpoint. policyTypes lists
@@ -29,8 +40,22 @@ spec:
     matchLabels:
       app.kubernetes.io/name: cloudflared
   egress:
-    - toEntities:
-        - world
+    - toCIDRSet:
+        - cidr: 173.245.48.0/20
+        - cidr: 103.21.244.0/22
+        - cidr: 103.22.200.0/22
+        - cidr: 103.31.4.0/22
+        - cidr: 141.101.64.0/18
+        - cidr: 108.162.192.0/18
+        - cidr: 190.93.240.0/20
+        - cidr: 188.114.96.0/20
+        - cidr: 197.234.240.0/22
+        - cidr: 198.41.128.0/17
+        - cidr: 162.158.0.0/15
+        - cidr: 104.16.0.0/13
+        - cidr: 104.24.0.0/14
+        - cidr: 172.64.0.0/13
+        - cidr: 131.0.72.0/22
       toPorts:
         - ports:
             - port: "443"

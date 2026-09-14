@@ -305,11 +305,11 @@ repos:
         # cutovers cannot silently move a CNPG layer outside its scan. Local script.
 
       - id: check-cloudflare-ip-ranges
-        name: cert-manager DNS-01 :53 allowlist equals Cloudflare's published IPv4 ranges and holds the zone's NS (needs network)
+        name: Cloudflare CIDR allowlists (cert-manager :53, cloudflared :7844) equal the published IPv4 ranges and hold their hosts (needs network)
         entry: scripts/check-cloudflare-ip-ranges.sh
         language: script
         pass_filenames: false
-        files: '^infrastructure/cert-manager/networkpolicy\.yaml$|^scripts/check-cloudflare-ip-ranges\.sh$'
+        files: '^infrastructure/(cert-manager/networkpolicy|cloudflare-tunnel/ciliumnetworkpolicy)\.yaml$|^scripts/check-cloudflare-ip-ranges\.sh$'
         # 2026-09-14: the DNS-01 self-check egress went from `0.0.0.0/0:53`
         # (an open Kyverno open-egress failure, and a selector that dragged
         # the CrowdSec ban-list identity into the DNS proxy's restart

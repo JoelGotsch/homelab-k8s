@@ -1,68 +1,73 @@
 #!/usr/bin/env bash
-# check-cloudflare-ip-ranges.sh — the cert-manager DNS-01 self-check egress
-# list is Cloudflare's PUBLISHED IPv4 ranges, and the zone's nameservers
-# actually live inside it.
+# check-cloudflare-ip-ranges.sh — every CNP rule that allows "Cloudflare" by
+# CIDR lists Cloudflare's PUBLISHED IPv4 ranges exactly, and the hosts the
+# rule exists for actually resolve inside them.
 #
 # WHY (2026-09-14)
 #
-# cert-manager verifies a DNS-01 challenge by asking the zone's AUTHORITATIVE
-# nameservers on :53 before it tells ACME to validate. Those are Cloudflare
-# anycast addresses that rotate, so the first allow was `0.0.0.0/0:53` — an
-# open Kyverno `homelab-disallow-open-egress-cnp` failure, and a selector that
-# also picked up the CrowdSec ban-list identity and overflowed the DNS proxy's
-# restart snapshot ("Too many IPs for a DNS rule", 4,320/day). The rule now
-# lists Cloudflare's published ranges (https://www.cloudflare.com/ips-v4).
+# Two policies talk to Cloudflare's anycast edge, whose addresses rotate:
 #
-# A hand-copied list is only right on the day it is copied. This check holds
-# two invariants on every commit touching the policy:
+#   cert-manager (`cert-manager-apiserver-acme`, :53) verifies a DNS-01
+#   challenge by asking the zone's AUTHORITATIVE nameservers before it tells
+#   ACME to validate. The first allow was `0.0.0.0/0:53` — an open Kyverno
+#   `homelab-disallow-open-egress-cnp` failure, and a selector that also
+#   picked up the CrowdSec ban-list identity and overflowed the DNS proxy's
+#   restart snapshot ("Too many IPs for a DNS rule", 4,320/day).
 #
-#   1. the committed CIDR set on the :53 rule == the published set, exactly;
-#   2. every A record of every NS of the site zone falls inside that set —
-#      the thing the rule is FOR. Invariant 1 could hold while Cloudflare
-#      serves the zone from somewhere new; only 2 catches that, and the
-#      symptom otherwise is the 2026-07-24 one: "Waiting for DNS-01 challenge
-#      propagation: dial tcp <ns>:53: i/o timeout" for days, found with weeks
-#      left on the cert.
+#   cloudflared (`cloudflared-edge-egress`, :7844 and :443) registers its
+#   tunnel at region1/region2.v2.argotunnel.com. The first allow was
+#   `toEntities: world` on those four ports — the same Kyverno failure, on
+#   the pod that terminates every public hostname of the site.
+#
+# Both rules now list Cloudflare's published ranges
+# (https://www.cloudflare.com/ips-v4). A hand-copied list is only right on
+# the day it is copied, so this check holds two invariants per policy on
+# every commit touching it:
+#
+#   1. the committed CIDR set on the rule == the published set, exactly;
+#   2. every A record of every host the rule is FOR falls inside that set.
+#      Invariant 1 could hold while Cloudflare serves the zone, or the
+#      tunnel edge, from somewhere it does not publish; only 2 catches that.
+#      The symptom otherwise is the 2026-07-24 one for cert-manager
+#      ("Waiting for DNS-01 challenge propagation: dial tcp <ns>:53: i/o
+#      timeout" for days) and, for cloudflared, every public hostname of
+#      the site returning Cloudflare's 530 while the pods log
+#      "failed to dial to edge".
+#
+# TARGETS below is the table: policy file | policy name | port whose
+# toCIDRSet rule(s) are in scope | hosts to resolve. `ns:` means "the NS
+# records of the site zone" (read from site-config); `host:` is a literal
+# comma-separated list. Add a row when another policy pins Cloudflare.
 #
 # NETWORK: both invariants need the network (HTTPS to cloudflare.com, DNS).
 # This script FAILS when it cannot reach them — it never skips. A check that
 # passes because its input was unreachable is the "green while checking
 # nothing" shape lessons.md tracks. It is scoped by the pre-commit `files:`
-# pattern to the policy and to itself, so it only runs when the list is being
-# changed; CI does not run pre-commit for this repo (2026-09-14).
+# pattern to the policies and to itself, so it only runs when a list is
+# being changed; CI does not run pre-commit for this repo (2026-09-14).
 #
-# Exit 0 = both invariants hold. Exit 1 = a difference, an NS outside the set,
-# a missing tool, or an unreachable source — each with the fix printed.
+# Exit 0 = both invariants hold for every target. Exit 1 = a difference, a
+# host outside its set, a missing tool, or an unreachable source — each with
+# the fix printed.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-POLICY_FILE="infrastructure/cert-manager/networkpolicy.yaml"
-POLICY_NAME="cert-manager-apiserver-acme"
 PUBLISHED_URL="https://www.cloudflare.com/ips-v4"
 SITE_CONFIG="components/site-config/site-config.env"
+
+TARGETS=(
+  "infrastructure/cert-manager/networkpolicy.yaml|cert-manager-apiserver-acme|53|ns:"
+  "infrastructure/cloudflare-tunnel/ciliumnetworkpolicy.yaml|cloudflared-edge-egress|7844|host:region1.v2.argotunnel.com,region2.v2.argotunnel.com"
+)
 
 fail() { printf 'check-cloudflare-ip-ranges: FAIL — %s\n' "$*" >&2; exit 1; }
 
 for tool in yq curl dig python3; do
   command -v "$tool" >/dev/null 2>&1 || fail "$tool is required (brew install ${tool/dig/bind})"
 done
-[ -f "$POLICY_FILE" ] || fail "$POLICY_FILE not found"
 [ -f "$SITE_CONFIG" ] || fail "$SITE_CONFIG not found"
-
-# 1. Committed set: every CIDR on the :53 toCIDRSet rule(s) of the named CNP.
-#    Multi-document file, so eval-all + select on kind/name; the port filter
-#    keeps a future non-DNS toCIDRSet rule in the same policy out of scope.
-committed="$(
-  yq eval-all '
-    select(.kind == "CiliumNetworkPolicy" and .metadata.name == "'"$POLICY_NAME"'")
-    | .spec.egress[]
-    | select(.toCIDRSet != null and ([.toPorts[].ports[].port] | contains(["53"])))
-    | .toCIDRSet[].cidr
-  ' "$POLICY_FILE" | sort -u
-)"
-[ -n "$committed" ] || fail "no toCIDRSet rule on port 53 found in $POLICY_NAME ($POLICY_FILE)"
 
 published="$(
   curl --fail --silent --show-error --location --max-time 20 "$PUBLISHED_URL" \
@@ -70,47 +75,85 @@ published="$(
 )" || fail "could not fetch $PUBLISHED_URL — this check needs network and does not skip; retry with connectivity"
 [ -n "$published" ] || fail "$PUBLISHED_URL returned an empty list"
 
-if ! diff_out="$(diff <(printf '%s\n' "$published") <(printf '%s\n' "$committed"))"; then
-  printf 'check-cloudflare-ip-ranges: FAIL — %s differs from %s\n' "$POLICY_FILE" "$PUBLISHED_URL" >&2
-  printf '  (< published, > committed)\n%s\n' "$diff_out" >&2
-  printf '  Fix: make the :53 toCIDRSet in %s exactly the published list, then re-run.\n' "$POLICY_NAME" >&2
-  exit 1
-fi
-
-# 2. The zone's nameservers resolve to addresses inside the committed set.
 domain="$(sed -n 's/^domain=//p' "$SITE_CONFIG" | tr -d '"' | head -1)"
 [ -n "$domain" ] || fail "no domain= in $SITE_CONFIG"
 
-ns_list="$(dig +short NS "$domain" | sed 's/\.$//' | sort -u)"
-[ -n "$ns_list" ] || fail "dig NS $domain returned nothing — DNS unreachable or zone has no NS; this check does not skip"
+resolve_a() {
+  # A records of one hostname, IPv4 only; fails loudly on an empty answer.
+  local host="$1" ips
+  ips="$(dig +short A "$host" | /usr/bin/grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+  [ -n "$ips" ] || fail "dig A $host returned no IPv4 address — DNS unreachable or the name is gone; this check does not skip"
+  printf '%s\n' "$ips"
+}
 
-ns_ips=""
-for ns in $ns_list; do
-  ips="$(dig +short A "$ns" | /usr/bin/grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true)"
-  [ -n "$ips" ] || fail "dig A $ns returned no IPv4 address"
-  ns_ips="$ns_ips $(printf '%s' "$ips" | tr '\n' ' ')"
-done
+summary=""
+for target in "${TARGETS[@]}"; do
+  IFS='|' read -r policy_file policy_name port hosts_spec <<<"$target"
+  [ -f "$policy_file" ] || fail "$policy_file not found"
 
-# Containment in python's stdlib ipaddress: no PyYAML, no third-party module,
-# so the macOS system python3 is enough.
-outside="$(
-  printf '%s\n' "$committed" | python3 -c '
+  # 1. Committed set: every CIDR on the :$port toCIDRSet rule(s) of the named
+  #    CNP. Multi-document file, so eval-all + select on kind/name; the port
+  #    filter keeps an unrelated toCIDRSet rule in the same policy out of scope.
+  committed="$(
+    yq eval-all '
+      select(.kind == "CiliumNetworkPolicy" and .metadata.name == "'"$policy_name"'")
+      | .spec.egress[]
+      | select(.toCIDRSet != null and ([.toPorts[].ports[].port] | contains(["'"$port"'"])))
+      | .toCIDRSet[].cidr
+    ' "$policy_file" | sort -u
+  )"
+  [ -n "$committed" ] || fail "no toCIDRSet rule on port $port found in $policy_name ($policy_file)"
+
+  if ! diff_out="$(diff <(printf '%s\n' "$published") <(printf '%s\n' "$committed"))"; then
+    printf 'check-cloudflare-ip-ranges: FAIL — %s (%s, :%s) differs from %s\n' "$policy_file" "$policy_name" "$port" "$PUBLISHED_URL" >&2
+    printf '  (< published, > committed)\n%s\n' "$diff_out" >&2
+    printf '  Fix: make the :%s toCIDRSet in %s exactly the published list, then re-run.\n' "$port" "$policy_name" >&2
+    exit 1
+  fi
+
+  # 2. The hosts the rule is for resolve to addresses inside the committed set.
+  case "$hosts_spec" in
+    ns:)
+      hosts="$(dig +short NS "$domain" | sed 's/\.$//' | sort -u)"
+      [ -n "$hosts" ] || fail "dig NS $domain returned nothing — DNS unreachable or zone has no NS; this check does not skip"
+      what="NS of the site zone"
+      ;;
+    host:*)
+      hosts="$(printf '%s' "${hosts_spec#host:}" | tr ',' '\n')"
+      what="tunnel edge host(s)"
+      ;;
+    *) fail "unknown hosts spec '$hosts_spec' in TARGETS" ;;
+  esac
+
+  host_ips=""
+  for h in $hosts; do
+    host_ips="$host_ips $(resolve_a "$h" | tr '\n' ' ')"
+  done
+
+  # Containment in python's stdlib ipaddress: no PyYAML, no third-party
+  # module, so the macOS system python3 is enough.
+  outside="$(
+    printf '%s\n' "$committed" | python3 -c '
 import ipaddress, sys
 nets = [ipaddress.ip_network(l.strip()) for l in sys.stdin if l.strip()]
 for ip in sys.argv[1:]:
     a = ipaddress.ip_address(ip)
     if not any(a in n for n in nets):
         print(ip)
-' $ns_ips
-)"
-if [ -n "$outside" ]; then
-  printf 'check-cloudflare-ip-ranges: FAIL — nameserver address(es) for %s are OUTSIDE the committed :53 allowlist:\n' "$domain" >&2
-  printf '  %s\n' $outside >&2
-  printf '  Cloudflare is serving the zone from ranges it does not publish at %s; cert-manager DNS-01 self-checks to these will time out.\n' "$PUBLISHED_URL" >&2
-  exit 1
-fi
+' $host_ips
+  )"
+  if [ -n "$outside" ]; then
+    printf 'check-cloudflare-ip-ranges: FAIL — address(es) of the %s are OUTSIDE the :%s allowlist of %s:\n' "$what" "$port" "$policy_name" >&2
+    printf '  %s\n' $outside >&2
+    printf '  Cloudflare is serving these from ranges it does not publish at %s; connections from the policied pods to them will time out.\n' "$PUBLISHED_URL" >&2
+    exit 1
+  fi
 
-n_cidr="$(printf '%s\n' "$committed" | /usr/bin/grep -c .)"
-n_ns="$(printf '%s\n' "$ns_list" | /usr/bin/grep -c .)"
-n_ip="$(printf '%s\n' $ns_ips | /usr/bin/grep -c .)"
-echo "check-cloudflare-ip-ranges: OK — $n_cidr CIDRs match $PUBLISHED_URL; $n_ip address(es) of $n_ns NS for the site zone are inside them"
+  n_cidr="$(printf '%s\n' "$committed" | /usr/bin/grep -c .)"
+  n_host="$(printf '%s\n' "$hosts" | /usr/bin/grep -c .)"
+  n_ip="$(printf '%s\n' $host_ips | /usr/bin/grep -c .)"
+  summary="$summary
+  $policy_name :$port — $n_cidr CIDRs match; $n_ip address(es) of $n_host $what inside them"
+done
+
+echo "check-cloudflare-ip-ranges: OK — published list $PUBLISHED_URL$summary"
