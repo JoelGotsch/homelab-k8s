@@ -394,3 +394,40 @@ extraVolumes:
     hostPath:
       path: /var/lib/vector/hubble-flow-exporter
       type: DirectoryOrCreate
+
+# ── helm 4 render parity (2026-09-14) ─────────────────────────────────────
+# The Cilium chart defaults these four keys to `~`, and its templates test them
+# with `hasKey`. Helm 3 keeps a null CHART default (hasKey true); helm 4 drops it
+# (hasKey false) — so Argo CD 3.5, which renders with helm 4, would silently
+# remove three cilium-config keys and the agent's `--k8s-api-server-urls=` flag.
+# A `null` HERE does not help: helm 3 deletes a key set to null in user values,
+# helm 4 keeps it (verified by render, 3.19.4 vs 4.2.1). Only non-null values
+# render identically under both, so each is set to its explicit empty form:
+#
+# - debug-verbose, nodeport-addresses, policy-cidr-match-mode: render exactly
+#   today's `""` under both (join of [] is "", quoted).
+# - k8s.apiServerURLs "": the agent flag stays exactly `--k8s-api-server-urls=`,
+#   and cilium-config GAINS `k8s-api-server-urls: ""` (its template emits the
+#   key for any non-nil value). Same meaning: the option is a []string
+#   defaulting to []string{}; an empty flag parses to []string{} (pflag
+#   readAsCSV("")), and an empty config-map value decodes to []string{}
+#   (cilium/hive's decoder: mapstructure v2.5.0 StringToSliceHookFunc returns
+#   []string{} for ""). Checked at cilium v1.20.1's vendored sources.
+#
+# The config-map checksum changes with this block (the chart hashes the raw
+# template output, where a nil `debug.verbose` prints "<no value>"), so it rolls
+# the agents and the operator ONCE, under helm 3, before the Argo upgrade — and
+# the upgrade itself then renders this layer byte-identically.
+debug:
+  verbose: ""
+nodePort:
+  addresses: []
+policyCIDRMatchMode: []
+k8s:
+  apiServerURLs: ""
+# One node at a time (chart default 2). An agent restart briefly interrupts
+# its node's DNS proxy and policy regeneration; on six nodes, halving the
+# blast radius of a bad config costs a few minutes per rollout.
+updateStrategy:
+  rollingUpdate:
+    maxUnavailable: 1
