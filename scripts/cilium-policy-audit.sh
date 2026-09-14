@@ -158,8 +158,22 @@ if [ "$cmd" = observe ]; then
     sleep 1
   done
   if [ "$prom_ok" = 1 ]; then
-    q_drop="sum by (source, destination, protocol) (increase(hubble_drop_total{reason=\"POLICY_DENIED\", source=\"$ns\"}[$since]) or increase(hubble_drop_total{reason=\"POLICY_DENIED\", destination=\"$ns\"}[$since])) > 0.5"
-    q_audit="sum by (source, destination, protocol) (increase(hubble_flows_processed_total{verdict=\"AUDIT\", source=\"$ns\"}[$since]) or increase(hubble_flows_processed_total{verdict=\"AUDIT\", destination=\"$ns\"}[$since])) > 0.5"
+    # increase() alone is blind to a series BORN inside the window: its first
+    # sample already holds the count, so increase() is 0. A policy's first
+    # AUDIT verdict creates exactly such a series (2026-09-14, hl-0291: an
+    # ICMPv4 remote-node -> woodpecker AUDIT series at 1 read increase 0). The
+    # `unless ... offset` arm adds the current value of every series that did
+    # not exist <since> ago. A series reset by an agent restart existed before,
+    # so it stays with increase(), which handles resets.
+    born_or_grew() {  # <metric selector> -> "increase > 0.5, or born inside the window"
+      printf '(increase(%s[%s]) > 0.5) or (%s > 0.5 unless %s offset %s)' "$1" "$since" "$1" "$1" "$since"
+    }
+    sel_drop_s="hubble_drop_total{reason=\"POLICY_DENIED\", source=\"$ns\"}"
+    sel_drop_d="hubble_drop_total{reason=\"POLICY_DENIED\", destination=\"$ns\"}"
+    sel_audit_s="hubble_flows_processed_total{verdict=\"AUDIT\", source=\"$ns\"}"
+    sel_audit_d="hubble_flows_processed_total{verdict=\"AUDIT\", destination=\"$ns\"}"
+    q_drop="sum by (source, destination, protocol) ($(born_or_grew "$sel_drop_s") or $(born_or_grew "$sel_drop_d"))"
+    q_audit="sum by (source, destination, protocol) ($(born_or_grew "$sel_audit_s") or $(born_or_grew "$sel_audit_d"))"
     for pair in "DROPPED POLICY_DENIED|$q_drop" "AUDIT|$q_audit"; do
       tag="${pair%%|*}"; q="${pair#*|}"
       rows="$(curl -sG --max-time 15 "http://127.0.0.1:$pf_port/api/v1/query" --data-urlencode "query=$q" \
