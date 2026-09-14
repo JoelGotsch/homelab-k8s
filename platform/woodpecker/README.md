@@ -220,10 +220,14 @@ steps:
    allow to the selected backend endpoint/port; Envoy evaluates the upstream
    hop against the original pod identity and answers plaintext HTTP 403 when
    that second allow is absent. The todo-agents sync exception selects only
-   Woodpecker's built-in sanitized repository label `homelabtodo-agents` and
+   Woodpecker's built-in sanitized repository label `homelab-todo-agents` and
    step labels `wmill-push` / `wmill-drift`, then permits `ingress:443` and
    `windmill/windmill-app:8000`. Do not widen the namespace-wide default policy
-   to reach application backends.
+   to reach application backends. The label value is the **agent's**
+   sanitizer output and changes with its version (v3.15 gave
+   `homelabtodo-agents`, v3.18.1 gives `homelab-todo-agents`), so
+   `scripts/check-woodpecker-app-egress.py` derives it and fails when the agent
+   tag moves past the version it was ported from.
 
 ## Related
 

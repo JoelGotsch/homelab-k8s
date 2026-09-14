@@ -11,6 +11,7 @@ it does not need, which is why the check is per-policy rather than shared.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -18,11 +19,49 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[1]
 POLICY = REPO / "platform/woodpecker/networkpolicy.yaml"
+VALUES = REPO / "platform/woodpecker/values.yaml"
+
+# The agent, not the server, creates step Pods and writes their labels, so the
+# selector values below depend on the agent's label sanitizer. It changed
+# between v3.15 and v3.18.1: v3.15 stripped `/` (homelab/todo-agents ->
+# homelabtodo-agents), v3.18.1 replaces it with `-` (homelab-todo-agents). The
+# upgrade on 2026-09-12 left both exceptions selecting nothing while this check
+# stayed green, because it compared the policy against the same stale literal.
+# The expected value is now derived from a port of the sanitizer, and an agent
+# bump fails here until someone re-reads the new version's toLabelValue.
+SANITIZER_AGENT_TAG = "v3.18.1"
 NAME = "ci-woodpecker-todo-agents-windmill"
 EVALS_NAME = "ci-woodpecker-homelab-skills-evals"
 
 
+def woodpecker_label_value(value: str) -> str:
+    """Port of pipeline/backend/kubernetes/utils.go toLabelValue (v3.18.1).
+
+    Truncation-with-hash (values over 63 characters) is not ported; the
+    function refuses such input rather than guessing.
+    """
+    res = value.lower()
+    res = re.sub(r"[^-_.a-z0-9]+", "-", res)
+    res = re.sub(r"[-_.]{2,}", "-", res)
+    res = res.strip("-_.")
+    if len(res) > 63:
+        raise SystemExit(f"label value for {value!r} needs upstream truncation; not ported")
+    return res
+
+
+def _check_agent_tag() -> None:
+    values = yaml.safe_load(VALUES.read_text())
+    tag = values["agent"]["image"]["tag"]
+    if tag != SANITIZER_AGENT_TAG:
+        raise SystemExit(
+            f"woodpecker agent is {tag}, but the label sanitizer port mirrors "
+            f"{SANITIZER_AGENT_TAG}: re-read toLabelValue in {tag}, update the port, "
+            "then SANITIZER_AGENT_TAG"
+        )
+
+
 def main() -> int:
+    _check_agent_tag()
     documents = [item for item in yaml.safe_load_all(POLICY.read_text()) if item]
     matches = [
         item
@@ -35,7 +74,7 @@ def main() -> int:
     policy: dict[str, Any] = matches[0]
     endpoint_selector = policy["spec"]["endpointSelector"]
     if endpoint_selector.get("matchLabels") != {
-        "woodpecker-ci.org/repo-full-name": "homelabtodo-agents",
+        "woodpecker-ci.org/repo-full-name": woodpecker_label_value("homelab/todo-agents"),
     } or endpoint_selector.get("matchExpressions") != [
         {
             "key": "woodpecker-ci.org/step",
@@ -95,7 +134,9 @@ def _check_skills_evals(documents: list[dict[str, Any]]) -> None:
     spec = matches[0]["spec"]
     selector = spec["endpointSelector"]
     if selector.get("matchLabels") != {
-        "woodpecker-ci.org/repo-full-name": "homelabhomelab-skills",
+        "woodpecker-ci.org/repo-full-name": woodpecker_label_value(
+            "homelab/homelab-skills"
+        ),
     } or selector.get("matchExpressions") != [
         {"key": "woodpecker-ci.org/step", "operator": "In", "values": ["evals"]}
     ]:

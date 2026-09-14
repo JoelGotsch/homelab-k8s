@@ -267,11 +267,14 @@ spec:
 # The client-to-Gateway hop carries the reserved `ingress` identity; Envoy's
 # upstream hop to windmill-app is then evaluated against the original CI pod's
 # identity.  Missing either rule produces Envoy's plaintext HTTP 403 before a
-# request reaches Windmill.  Scope this exception to Woodpecker 3.15's built-in
+# request reaches Windmill.  Scope this exception to Woodpecker's built-in
 # repo + step labels rather than granting every CI pod Windmill access. The
-# backend sanitizes `homelab/todo-agents` to `homelabtodo-agents` for the
-# Kubernetes label value (pipeline/backend/kubernetes.toDNSName). Both the
-# push deploy and nightly model-variable drift step need the same two hops.
+# agent sanitizes `homelab/todo-agents` to `homelab-todo-agents` for the
+# Kubernetes label value (v3.18.1 pipeline/backend/kubernetes toLabelValue;
+# v3.15 stripped the slash instead, and the 2026-09-12 upgrade left this rule
+# selecting nothing — scripts/check-woodpecker-app-egress.py now derives the
+# value and pins the agent version). Both the push deploy and nightly
+# model-variable drift step need the same two hops.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -280,7 +283,7 @@ metadata:
 spec:
   endpointSelector:
     matchLabels:
-      woodpecker-ci.org/repo-full-name: homelabtodo-agents
+      woodpecker-ci.org/repo-full-name: homelab-todo-agents
     matchExpressions:
       - key: woodpecker-ci.org/step
         operator: In
@@ -318,9 +321,9 @@ spec:
 # requirement collapses to this single in-cluster rule.
 #
 # Scoped to the `evals` step of one repository, same as the todo-agents
-# exception: the backend sanitizes `homelab/homelab-skills` to
-# `homelabhomelab-skills` for the label value
-# (pipeline/backend/kubernetes.toDNSName).
+# exception: the agent sanitizes `homelab/homelab-skills` to
+# `homelab-homelab-skills` for the label value (v3.18.1 toLabelValue; see the
+# todo-agents rule above for the v3.15 difference).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -329,7 +332,7 @@ metadata:
 spec:
   endpointSelector:
     matchLabels:
-      woodpecker-ci.org/repo-full-name: homelabhomelab-skills
+      woodpecker-ci.org/repo-full-name: homelab-homelab-skills
     matchExpressions:
       - key: woodpecker-ci.org/step
         operator: In
