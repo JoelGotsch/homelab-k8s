@@ -52,14 +52,27 @@ prometheus:
             requests:
               storage: 50Gi
 
-    # Resources — homelab scale. Operator tunes after first
-    # week of real cardinality.
+    # Resources. Raised 2026-09-14 from requests 1Gi / limit 4Gi:
+    # the prometheus container was OOMKilled once in the seven days
+    # to 2026-09-14 (kube-state-metrics
+    # `kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}`
+    # = 1 for the previous pod uid), and cAdvisor's
+    # `max_over_time(container_memory_working_set_bytes[7d])` peaked at
+    # 3.93 GiB against the 4Gi limit — the working set was living at the
+    # ceiling, so any compaction or a burst of rule evaluation tipped it
+    # over. 443k head series at ~5.9 KiB RSS each is ~2.5 GiB steady;
+    # the request is set to the steady floor and the limit to 5Gi so a
+    # compaction has ~1 GiB above the 3.9 GiB peak. The apiserver
+    # histogram drop below (kubeApiServer.serviceMonitor) removes ~88k
+    # of those series; the limit is sized for the pre-drop peak on
+    # purpose, so the headroom is real rather than borrowed from the
+    # drop. Retention is unchanged.
     resources:
       requests:
         cpu: 200m
-        memory: 1Gi
+        memory: 2Gi
       limits:
-        memory: 4Gi
+        memory: 5Gi
 
     # Ingest the additional-scrape-configs Secret if present
     # (per observability/prometheus/external-hosts/).
@@ -353,6 +366,111 @@ prometheusOperator:
 # component isn't running, was replaced, or is single-
 # replica-by-design so the cluster-alert semantics don't
 # apply.
+
+# ---------- kube-apiserver scrape: histogram cardinality (2026-09-14) ----------
+# job=apiserver was 150k of 443k head series and 110k of those were
+# `_bucket` series: a histogram costs (label combinations) × (le buckets),
+# and the apiserver labels every request histogram by verb × resource ×
+# subresource × scope × component × group × version, so one family
+# reaches 24k series on a six-node cluster. Prometheus was OOMKilled at
+# its 4Gi limit once in the seven days to 2026-09-14 (see
+# prometheusSpec.resources above).
+#
+# `metricRelabelings` here REPLACES the chart default list, so the chart's
+# own `le`-bucket thinning rule is restated verbatim as the first entry
+# (charts/kube-prometheus-stack-87.21.0/kube-prometheus-stack/values.yaml,
+# kubeApiServer.serviceMonitor.metricRelabelings). Re-copy it whenever
+# the chart pin moves.
+#
+# The second rule drops seven histogram families entirely. Series counts
+# are from 2026-09-14 (`count by (__name__) ({job="apiserver"})`):
+#   apiserver_request_duration_seconds_bucket        23,850  — per-verb/resource
+#     latency distribution (the SLI variant below keeps the availability
+#     and burn-rate rules working)
+#   apiserver_request_body_size_bytes_bucket         17,504  — request-body size
+#     distribution per resource
+#   etcd_request_duration_seconds_bucket             15,940  — apiserver-side
+#     etcd call latency per operation/type (etcd's own server-side
+#     histograms come from the kubeEtcd scrape below once its listener
+#     is open)
+#   apiserver_watch_cache_read_wait_seconds_bucket    8,596  — watch-cache
+#     wait time per resource
+#   apiserver_watch_list_duration_seconds_bucket      8,478  — streaming
+#     list duration per resource
+#   apiserver_response_sizes_bucket                   8,464  — response-size
+#     distribution per verb/resource
+#   apiserver_watch_events_sizes_bucket               5,607  — watch-event
+#     size distribution per resource
+#   total                                           ~88,400 series (~20%)
+#
+# VERIFIED USED BY NOTHING on 2026-09-14: grep of every dashboard under
+# observability/grafana-dashboards/, every PrometheusRule in this repo,
+# and the chart's bundled rules-1.14/ and dashboards-1.14/ finds no
+# reference to any of the seven. What stays: the `_count` and `_sum`
+# series of every family (rates and averages still work — only the
+# per-bucket quantile shape is gone), apiserver_request_sli_duration_
+# seconds_bucket (the chart's KubeAPIErrorBudgetBurn / availability
+# recording rules read it), apiserver_request_total,
+# apiserver_request_terminations_total and
+# apiserver_client_certificate_expiration_seconds.
+#
+# RULE: before adding a dashboard or alert that needs one of these
+# families, remove it from the regex in the same commit and re-run the
+# grep above — a panel over a dropped series shows "No data", never an
+# error.
+kubeApiServer:
+  serviceMonitor:
+    metricRelabelings:
+      # Chart default, restated verbatim (see above) — drop excessively
+      # noisy apiserver buckets.
+      - action: drop
+        regex: (etcd_request|apiserver_request_slo|apiserver_request_sli|apiserver_request)_duration_seconds_bucket;(0\.15|0\.2|0\.3|0\.35|0\.4|0\.45|0\.6|0\.7|0\.8|0\.9|1\.25|1\.5|1\.75|2|3|3\.5|4|4\.5|6|7|8|9|15|20|40|45|50)(\.0)?
+        sourceLabels:
+          - __name__
+          - le
+      # Seven histogram families used by no dashboard or rule (counts
+      # and rationale above).
+      - action: drop
+        regex: (apiserver_request_duration_seconds|apiserver_request_body_size_bytes|etcd_request_duration_seconds|apiserver_watch_cache_read_wait_seconds|apiserver_watch_list_duration_seconds|apiserver_response_sizes|apiserver_watch_events_sizes)_bucket
+        sourceLabels:
+          - __name__
+
+# ---------- etcd scrape (2026-09-14) ----------
+# `kubeEtcd.enabled: true` (the chart default) has been on since the
+# 2026-05-23 install and scraped NOTHING for 113 days. The chart renders a
+# headless Service `kube-system/kube-prometheus-stack-kube-etcd` with
+# `selector: {component: etcd}`; Talos runs etcd as a machined service,
+# not a static pod, so no pod carries that label and the Endpoints object
+# has stayed empty:
+#   kubectl -n kube-system get endpoints kube-prometheus-stack-kube-etcd -o yaml
+#   # -> no `subsets:` at all
+# No target, so no `up{job="kube-etcd"} == 0`, so nothing fired — the
+# etcd dashboard and every etcd quota/latency alert were dead from day one.
+#
+# `endpoints` makes the chart render the Endpoints object itself with
+# these control-plane IPs (talos/cluster-topology.yaml in homelab-infra),
+# port 2381 (chart default), plain HTTP. Talos's etcd only listens for
+# metrics on 127.0.0.1:2381 by default — confirmed 2026-09-14 by an
+# in-cluster curl to all three CPs: "Failed to connect ... port 2381" —
+# so these targets scrape DOWN until the machine-config patch
+# homelab-infra/talos/patches/etcd-metrics-listener.yaml
+# (`cluster.etcd.extraArgs.listen-metrics-urls: http://0.0.0.0:2381`, the
+# form the Talos etcd-metrics guide gives) is applied to the three
+# control planes with scripts/talos-apply.sh. Until then the etcd job is
+# DOWN and visible, which is the honest state; `up{job="kube-etcd"} == 0`
+# on all three is expected, not a regression. Once the listener is open,
+# the chart's etcd dashboard and etcd rules start working with no further
+# change here. Network policy: the CP IPs are node addresses, so the
+# port allowlist in networkpolicy.yaml (`prometheus-allow`, pod
+# destinations only) does not apply; the `prometheus-apiserver`
+# CiliumNetworkPolicy in the same file admits egress to the `host` and
+# `remote-node` entities on every port, which is what already carries
+# the kubelet (:10250) and node-exporter (:9100) scrapes.
+kubeEtcd:
+  endpoints:
+    - 10.10.30.11
+    - 10.10.30.12
+    - 10.10.30.13
 
 # Cilium runs in kube-proxy-replacement mode (ADR 0016).
 # No kube-proxy DaemonSet exists; the rule fires forever on
