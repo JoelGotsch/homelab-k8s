@@ -113,16 +113,35 @@ hubble:
       certValidityDuration: 365
       schedule: "0 0 1 */3 *"   # rotate leaves quarterly; CA persists
   metrics:
+    # Served on every agent at :9965 since install. Until 2026-09-14
+    # nothing collected them: the chart's `hubble` ServiceMonitor had
+    # no `release: kube-prometheus-stack` label, so Prometheus ignored
+    # it (the cilium-agent :9962 scrape only exists because
+    # observability/prometheus/cilium-podmonitor.yaml was hand-written
+    # on 2026-07-18). And `drop`/`flow` carried no source/destination
+    # context, so even scraped they could not answer "which namespace".
+    #
+    # Why this matters: an agent's Hubble ring buffer is 4,095 flows,
+    # ~5 s on a worker at 800-900 flows/s; the flow-to-Loki sidecar
+    # (hl-0125) has been out since 2026-05-23. These counters are the
+    # only memory of AUDIT/DROPPED verdicts longer than that.
+    # `namespace|reserved-identity`: namespace when the peer is a pod,
+    # else `reserved:world` / `reserved:host` / ... (first non-empty,
+    # docs.cilium.io/en/v1.20/observability/metrics/ "Context Options").
+    # Labels come out as `source` and `destination`.
     enabled:
     - dns:query;ignoreAAAA
-    - drop
+    - drop:sourceContext=namespace|reserved-identity;destinationContext=namespace|reserved-identity
     - tcp
-    - flow
+    - flow:sourceContext=namespace|reserved-identity;destinationContext=namespace|reserved-identity
     - icmp
     - http
     serviceMonitor:
       enabled: true
       trustCRDsExist: true
+      # The Prometheus CR selects monitors by this label only.
+      labels:
+        release: kube-prometheus-stack
   relay:
     enabled: true
   ui:
