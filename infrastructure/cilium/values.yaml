@@ -142,6 +142,48 @@ hubble:
       # The Prometheus CR selects monitors by this label only.
       labels:
         release: kube-prometheus-stack
+  # Static flow export → the hubble-flow-exporter sidecar (extraContainers
+  # below; consumer side in observability/hubble-flow-exporter). Declared
+  # here since 2026-09-14: the export had been running on bootstrap-era
+  # ConfigMap keys that neither repo declared, written for a sidecar that
+  # was removed on 2026-05-23 (hl-0125).
+  #
+  # allowList is the volume decision (ADR 0021 D5 wants the exfiltration
+  # signal, not every packet): the cluster emits ~2,500 flows/s, two thirds
+  # of them Longhorn replication traces. Entries are ORed; each is a JSON
+  # FlowFilter (api/v1/flow/flow.proto). Kept: DROPPED/ERROR/AUDIT
+  # verdicts; every L7 record (event_type 129 — DNS, HTTP); any flow with
+  # `reserved:world` on either side — CIDR identities carry that label
+  # too, so allowlisted egress is included. Not kept: intra-cluster
+  # FORWARDED traces and policy-verdict events (event_type 4 and 5);
+  # Prometheus counts those via hubble.metrics. ~120 flows/s measured.
+  # Field names are the proto's (`Type`, `IP`, `is_reply`, `event_type`).
+  export:
+    static:
+      enabled: true
+      filePath: /var/run/cilium/hubble/events.log
+      fileMaxSizeMb: 10
+      fileMaxBackups: 5
+      fileCompress: true
+      fieldMask:
+        - time
+        - verdict
+        - drop_reason_desc
+        - traffic_direction
+        - is_reply
+        - Type
+        - event_type
+        - IP
+        - l4
+        - l7
+        - source
+        - destination
+        - node_name
+      allowList:
+        - '{"verdict":["DROPPED","ERROR","AUDIT"]}'
+        - '{"event_type":[{"type":129}]}'
+        - '{"source_label":["reserved:world"]}'
+        - '{"destination_label":["reserved:world"]}'
   relay:
     enabled: true
   ui:
@@ -261,3 +303,67 @@ securityContext:
     - NET_ADMIN
     - SYS_ADMIN
     - SYS_RESOURCE
+
+# hubble-flow-exporter sidecar (hl-0125, re-added 2026-09-14): Vector in
+# the cilium-agent pod, reading the node's static export file and shipping
+# to Loki. Pipeline, labels and alerts are owned by
+# observability/hubble-flow-exporter; this block only says WHERE it runs.
+# The 2026-05-23 removal was because the ConfigMap did not exist when the
+# DaemonSet rolled; it has existed since, and the volume stays `optional`
+# on purpose — a required ConfigMap would block the cilium-agent container
+# itself on a fresh bootstrap (the bootstrap override in homelab-infra
+# sets extraContainers: [] for that phase). Image pinned by digest;
+# Renovate does not track this string (hl-0253).
+extraContainers:
+  - name: hubble-flow-exporter
+    image: timberio/vector:0.58.0-distroless-libc@sha256:6c93dfe2554cc7e38316d618961cd657d5271c7a7aa727e0007502b28cb82c2e
+    imagePullPolicy: IfNotPresent
+    args:
+      - --config-yaml
+      - /etc/hubble-flow-exporter/vector.yaml
+    env:
+      - name: NODE_NAME
+        valueFrom:
+          fieldRef:
+            fieldPath: spec.nodeName
+      - name: VECTOR_LOG
+        value: warn
+    ports:
+      - containerPort: 9598
+        name: hubble-export
+        protocol: TCP
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
+      readOnlyRootFilesystem: true
+      # events.log is 0600 root (written by cilium-agent); see the layer
+      # README, caveat 1.
+      runAsUser: 0
+    volumeMounts:
+      - mountPath: /var/run/cilium
+        name: cilium-run
+        readOnly: true
+      - mountPath: /etc/hubble-flow-exporter
+        name: hubble-flow-exporter-config
+        readOnly: true
+      - mountPath: /var/lib/vector
+        name: hubble-flow-exporter-data
+extraVolumes:
+  - name: hubble-flow-exporter-config
+    configMap:
+      name: hubble-flow-exporter-config
+      optional: true
+      items:
+        - key: vector.yaml
+          path: vector.yaml
+  - name: hubble-flow-exporter-data
+    hostPath:
+      path: /var/lib/vector/hubble-flow-exporter
+      type: DirectoryOrCreate
