@@ -44,7 +44,7 @@ set -euo pipefail
 err()  { printf 'ERROR: %s\n' "$*" >&2; }
 note() { printf '  %s\n' "$*"; }
 
-HELM_BIN="${HELM_BIN:-helm3}"
+HELM_BIN="${HELM_BIN:-helm}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 REGISTRY="${REGISTRY:-registry.homelab.internal}"
 ORG="${ORG:-homelab}"
@@ -79,7 +79,7 @@ usage: $0 [--dry-run | --apply] [chart-name ...]
                  (only for entries that verified clean — never for a divergent
                  one, or the lock would launder a mismatch into the record)
 
-Reads charts.lock.yaml in the current repo. env: HELM_BIN (default helm3),
+Reads charts.lock.yaml in the current repo. env: HELM_BIN (default helm),
 PYTHON_BIN (default python3; must provide PyYAML), REGISTRY, ORG, CA_FILE,
 BAO_ADDR/BAO_CACERT for the push credential.
 EOF

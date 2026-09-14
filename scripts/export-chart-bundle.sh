@@ -30,7 +30,7 @@ set -euo pipefail
 err()  { printf 'ERROR: %s\n' "$*" >&2; }
 note() { printf '  %s\n' "$*"; }
 
-HELM_BIN="${HELM_BIN:-helm3}"
+HELM_BIN="${HELM_BIN:-helm}"
 REGISTRY="${REGISTRY:-registry.homelab.internal}"
 ORG="${ORG:-homelab}"
 CA_FILE="${CA_FILE:-$HOME/.config/homelab/ca.pem}"

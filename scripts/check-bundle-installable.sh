@@ -29,7 +29,7 @@ set -euo pipefail
 err()  { printf 'ERROR: %s\n' "$*" >&2; }
 note() { printf '  %s\n' "$*"; }
 
-HELM_BIN="${HELM_BIN:-helm3}"
+HELM_BIN="${HELM_BIN:-helm}"
 BUNDLE_DIR="${BUNDLE_DIR:-$HOME/.config/homelab/chart-bundle}"
 REGISTRY="${REGISTRY:-registry.homelab.internal}"
 ORG="${ORG:-homelab}"

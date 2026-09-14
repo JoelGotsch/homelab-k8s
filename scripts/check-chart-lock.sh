@@ -37,7 +37,7 @@ set -euo pipefail
 err()  { printf 'ERROR: %s\n' "$*" >&2; }
 note() { printf '  %s\n' "$*"; }
 
-HELM_BIN="${HELM_BIN:-helm3}"
+HELM_BIN="${HELM_BIN:-helm}"
 CA_FILE="${CA_FILE:-$HOME/.config/homelab/ca.pem}"
 ONLINE=false
 case "${1:-}" in

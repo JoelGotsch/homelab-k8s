@@ -40,7 +40,7 @@ err()  { printf 'ERROR: %s\n' "$*" >&2; }
 note() { printf '  %s\n' "$*"; }
 
 KUSTOMIZE_BIN="${KUSTOMIZE_BIN:-kustomize}"
-HELM_BIN="${HELM_BIN:-helm3}"
+HELM_BIN="${HELM_BIN:-helm}"
 
 # Layers already understood and tracked. Listing one here does NOT make it
 # acceptable — it records that the finding is filed, so the check can gate NEW

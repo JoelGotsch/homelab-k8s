@@ -89,7 +89,7 @@ import yaml
 REPO = Path(__file__).resolve().parent.parent
 EXEMPTIONS = REPO / "scripts" / "selector-exemptions.yaml"
 KUSTOMIZE = os.environ.get("KUSTOMIZE_BIN", "kustomize")
-HELM = os.environ.get("HELM_BIN", "helm3")
+HELM = os.environ.get("HELM_BIN", "helm")
 
 SELECTOR_KINDS = {
     "ServiceMonitor": ("spec", "selector"),

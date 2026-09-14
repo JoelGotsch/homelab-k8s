@@ -40,7 +40,7 @@ set -euo pipefail
 err()  { printf 'ERROR: %s\n' "$*" >&2; }
 note() { printf '  %s\n' "$*"; }
 
-HELM_BIN="${HELM_BIN:-helm3}"
+HELM_BIN="${HELM_BIN:-helm}"
 # Relative to the Storage Box user's home, matching its existing top-level
 # layout (cluster-backups-tier-3/, openbao-snapshots/). An absolute path is not
 # writable there.

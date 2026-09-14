@@ -5,7 +5,7 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 layer="$repo_root/platform/authentik"
-helm_bin="${HELM_BIN:-helm3}"
+helm_bin="${HELM_BIN:-helm}"
 
 for command in "$helm_bin" yq; do
   command -v "$command" >/dev/null 2>&1 || {
