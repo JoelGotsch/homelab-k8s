@@ -193,6 +193,8 @@ extraConfig:
 
 operator:
   replicas: 2
+  # See rollOutCiliumPods below — same mechanism for the operator.
+  rollOutPods: true
   resources:
     limits:
       memory: 512Mi
@@ -211,6 +213,17 @@ resources:
     cpu: 100m
     memory: 256Mi
 routingMode: native
+# Stamp the cilium-config checksum onto the agent DaemonSet (and, via
+# operator.rollOutPods, the operator Deployment) so a config change ROLLS
+# the pods. Without it a values change edits the ConfigMap and nothing
+# else: on 2026-09-14 `labels` + `bpf-policy-map-max` landed in
+# cilium-config while every agent kept running the old config, and Argo
+# reported Synced/Healthy because the DaemonSet template had not changed.
+# The chart default is false; the alternative is `kubectl rollout restart`,
+# a manual edit to the running system (the 2026-07-13 restartedAt
+# annotation is one such). Rolling on every config change is the point —
+# the agent reads cilium-config only at start.
+rollOutCiliumPods: true
 securityContext:
   capabilities:
     ciliumAgent:
