@@ -280,6 +280,13 @@ agent:
     # defense per ADR 0023 D5.
     WOODPECKER_BACKEND_K8S_POD_NODE_SELECTOR: ""
     WOODPECKER_BACKEND_K8S_SECCTX_NONROOT: "false"
+    # Attached to every step Pod: the read:package credential for
+    # registry.homelab.internal, so the chart workflows can run the first-party
+    # ci-tools image (ADR 0068). The Secret is registry-pull-secret.yaml, in
+    # ci-woodpecker. A missing Secret does not block a Pod — the kubelet logs
+    # FailedToRetrieveImagePullSecret and pulls anonymously — so a public image
+    # keeps working if ESO is behind; only ci-tools pulls would fail.
+    WOODPECKER_BACKEND_K8S_PULL_SECRET_NAMES: "registry-homelab-internal-pull"
     # How many pipeline steps the agent runs in parallel.
     # Bound to keep node pressure manageable at homelab scale.
     WOODPECKER_MAX_WORKFLOWS: "4"

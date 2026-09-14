@@ -28,6 +28,7 @@ resources:
   - rbac.yaml
   - quota.yaml
   - externalsecret.yaml
+  - registry-pull-secret.yaml
   - httproute.yaml
   - networkpolicy.yaml
   - podmonitor.yaml
