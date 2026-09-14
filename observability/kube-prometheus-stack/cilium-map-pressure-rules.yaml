@@ -1,0 +1,94 @@
+# PrometheusRules for Cilium BPF map pressure (TODO hl-0271).
+#
+# Why this exists: on 2026-09-11 the Prometheus endpoint's per-endpoint
+# policy map (cilium_policy_v3_*) reached 1.33 of its 16384 entries. The
+# only visible symptom was prometheus-0 sitting in Init:0/1 for an hour
+# with a pod event blaming a `cilium-cni` API timeout, while the agent
+# logged 4.1M "Failed to add PolicyMap key … no space left on device" in
+# a week and the same overflow had already happened two days earlier
+# (lessons.md: "A full BPF policy map reports itself as a cilium-cni API
+# timeout"). `cilium_bpf_map_pressure` had the answer the whole time — it
+# was scraped, stored, and watched by no rule.
+#
+# Metric shape: one gauge per agent pod and map name, value = entries /
+# max entries. For the per-endpoint policy maps the agent reports the
+# MAXIMUM across its endpoints under the single label
+# `map_name="cilium_policy_v3_*"`, so the alert names the node (via the
+# agent pod) and the description says how to find the endpoint. Values
+# above 1.0 are real: the agent counts the entries it WANTS in the map,
+# and everything past 1.0 was refused.
+#
+# Why Prometheus can still see its own overflow: existing map entries
+# survive a full map — only NEW keys fail. The scrape of the agents'
+# host-network :9962 rides on entries that were present long before the
+# overflow, which is how the 1.33 reading exists in the first place.
+#
+# Two tiers, mirroring worker-cascade-rules.yaml:
+#   - warning at 0.85 for 5m: the 2026-09-09 episode climbed from 0.90
+#     to 1.08 in 15 minutes, so 0.85 is the last stop with time to act.
+#   - critical at >= 1.0 immediately: entries are being refused NOW and
+#     whatever the widest-policy endpoint is (Prometheus, a gateway) is
+#     losing flows. Routed to Signal like every other critical.
+#
+# Tests: cilium-map-pressure-rules_test.yaml (promtool, pre-commit).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cilium-map-pressure-rules
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: cilium.bpf-map-pressure
+      interval: 1m
+      rules:
+        # ── CiliumBPFMapPressureHigh ─────────────────────────────────────────
+        - alert: CiliumBPFMapPressureHigh
+          expr: |
+            max by (pod, instance, map_name) (cilium_bpf_map_pressure) > 0.85
+          for: 5m
+          labels:
+            severity: warning
+            component: cilium
+          annotations:
+            summary: "Cilium BPF map {{ $labels.map_name }} on agent {{ $labels.pod }} is at {{ $value | humanizePercentage }} of its size"
+            description: |
+              Map `{{ $labels.map_name }}` on agent `{{ $labels.pod }}` ({{ $labels.instance }})
+              is at {{ $value | humanizePercentage }}. Above 100% the agent refuses new
+              entries and the affected endpoint silently loses flows.
+
+              For `cilium_policy_v3_*` this is the FULLEST endpoint policy map on the
+              node; entries are (identity x port x proto), so the widest policy fills
+              first. Find it and the identity count driving it:
+                kubectl -n kube-system exec {{ $labels.pod }} -c cilium-agent -- cilium-dbg bpf policy get --all | awk '/^Endpoint ID:/{if(id!="")print id, n; id=$3; n=0; next} /^(Allow|Deny)/{n++} END{print id, n}' | sort -k2 -rn | head -3
+                kubectl get ciliumidentity --no-headers | wc -l
+              Identity churn is the usual cause (Job/scan labels minting one identity per
+              run — see `extraConfig.labels` in infrastructure/cilium/values.yaml). The
+              map size is `bpf.policyMapMax` in the same file. Both need an agent restart.
+            runbook_url: "https://github.com/JoelGotsch/homelab/blob/main/lessons.md"
+
+        # ── CiliumBPFMapFull ──────────────────────────────────────────────────
+        - alert: CiliumBPFMapFull
+          expr: |
+            max by (pod, instance, map_name) (cilium_bpf_map_pressure) >= 1
+          for: 0m
+          labels:
+            severity: critical
+            component: cilium
+          annotations:
+            summary: "Cilium BPF map {{ $labels.map_name }} on agent {{ $labels.pod }} is FULL ({{ $value | humanizePercentage }}) — entries are being refused"
+            description: |
+              Map `{{ $labels.map_name }}` on agent `{{ $labels.pod }}` ({{ $labels.instance }})
+              wants {{ $value | humanizePercentage }} of its capacity. Every entry past
+              100% was refused: the endpoint owning that map is dropping flows it is
+              allowed to have, and a pod scheduled to this node may fail to get a
+              sandbox with a `cilium-cni` API timeout that blames the agent.
+
+              The agent log names the victim:
+                kubectl -n kube-system logs {{ $labels.pod }} -c cilium-agent --since=30m | grep "Failed to add PolicyMap key" | head -3
+              Identities unreferenced by any pod are collected on a ~45 min cycle
+              (heartbeat 30m + gc 15m); an operator restart resets that clock. Do not
+              delete identities by hand — see lessons.md "Cilium identity GC is
+              two-phase".
+            runbook_url: "https://github.com/JoelGotsch/homelab/blob/main/lessons.md"

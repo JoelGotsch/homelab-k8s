@@ -1,0 +1,137 @@
+# promtool unit tests for cilium-map-pressure-rules.yaml.
+#
+# Run via `scripts/check-prometheusrule-tests.sh` (pre-commit), which extracts
+# `.spec.groups` from the sibling PrometheusRule CR into a `rules.yaml` beside a
+# copy of this file — hence the bare `rule_files:` reference below.
+#
+# The series shapes are the real ones from the 2026-09-09 and 2026-09-11
+# overflows (worker1 / worker2 agent, map `cilium_policy_v3_*`), so the
+# thresholds are pinned to what actually happened:
+#
+#   (a) today's steady state, 0.73, must stay silent at both tiers;
+#   (b) the 2026-09-09 ramp: 0.90 for five minutes then 1.08 — the warning
+#       fires once the ramp has been above 0.85 for 5m, and NOT before;
+#   (c) the 2026-09-11 spike straight to 1.33 — critical fires on the first
+#       evaluation, without waiting for the warning's 5m;
+#   (d) a different, healthy map on the same agent must not ride along.
+#
+# NOTE ON TIMESTAMPS: promtool's clock starts at the Unix epoch; eval_time is
+# minutes since then.
+
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+
+  # (a) Steady state: 0.73 for twenty minutes. Nothing fires.
+  - interval: 1m
+    name: "(a) 73% steady - silent at both tiers"
+    input_series:
+      - series: 'cilium_bpf_map_pressure{container="cilium-agent", endpoint="prometheus", instance="10.10.30.21:9962", job="monitoring/cilium-agent", map_name="cilium_policy_v3_*", namespace="kube-system", pod="cilium-jkrn9"}'
+        values: "0.73+0x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CiliumBPFMapPressureHigh
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CiliumBPFMapFull
+        exp_alerts: []
+
+  # (b) THE 2026-09-09 SHAPE: 0.73 for five minutes, then 0.90 — above the
+  #     warning line from t=5m. `for: 5m` means pending until t=10m; assert
+  #     silent at 9m, firing at 11m with the agent pod as its identity.
+  - interval: 1m
+    name: "(b) 90% ramp - warning fires after 5m above the line, not before"
+    input_series:
+      - series: 'cilium_bpf_map_pressure{container="cilium-agent", endpoint="prometheus", instance="10.10.30.21:9962", job="monitoring/cilium-agent", map_name="cilium_policy_v3_*", namespace="kube-system", pod="cilium-jkrn9"}'
+        values: "0.73+0x4 0.90+0x15"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: CiliumBPFMapPressureHigh
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: CiliumBPFMapFull
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: CiliumBPFMapPressureHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              component: cilium
+              pod: cilium-jkrn9
+              instance: 10.10.30.21:9962
+              map_name: cilium_policy_v3_*
+            exp_annotations:
+              summary: "Cilium BPF map cilium_policy_v3_* on agent cilium-jkrn9 is at 90% of its size"
+              description: |
+                Map `cilium_policy_v3_*` on agent `cilium-jkrn9` (10.10.30.21:9962)
+                is at 90%. Above 100% the agent refuses new
+                entries and the affected endpoint silently loses flows.
+
+                For `cilium_policy_v3_*` this is the FULLEST endpoint policy map on the
+                node; entries are (identity x port x proto), so the widest policy fills
+                first. Find it and the identity count driving it:
+                  kubectl -n kube-system exec cilium-jkrn9 -c cilium-agent -- cilium-dbg bpf policy get --all | awk '/^Endpoint ID:/{if(id!="")print id, n; id=$3; n=0; next} /^(Allow|Deny)/{n++} END{print id, n}' | sort -k2 -rn | head -3
+                  kubectl get ciliumidentity --no-headers | wc -l
+                Identity churn is the usual cause (Job/scan labels minting one identity per
+                run — see `extraConfig.labels` in infrastructure/cilium/values.yaml). The
+                map size is `bpf.policyMapMax` in the same file. Both need an agent restart.
+              runbook_url: "https://github.com/JoelGotsch/homelab/blob/main/lessons.md"
+
+  # (c) THE 2026-09-11 SHAPE: 0.90 for three minutes, then 1.33. Critical
+  #     fires on the first evaluation at 1.33 (t=3m); the warning is still
+  #     pending then (only 3m above 0.85) and must be silent.
+  - interval: 1m
+    name: "(c) 133% spike - critical fires immediately, warning still pending"
+    input_series:
+      - series: 'cilium_bpf_map_pressure{container="cilium-agent", endpoint="prometheus", instance="10.10.30.22:9962", job="monitoring/cilium-agent", map_name="cilium_policy_v3_*", namespace="kube-system", pod="cilium-t29mp"}'
+        values: "0.90+0x2 1.33+0x10"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: CiliumBPFMapPressureHigh
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: CiliumBPFMapFull
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              component: cilium
+              pod: cilium-t29mp
+              instance: 10.10.30.22:9962
+              map_name: cilium_policy_v3_*
+            exp_annotations:
+              summary: "Cilium BPF map cilium_policy_v3_* on agent cilium-t29mp is FULL (133%) — entries are being refused"
+              description: |
+                Map `cilium_policy_v3_*` on agent `cilium-t29mp` (10.10.30.22:9962)
+                wants 133% of its capacity. Every entry past
+                100% was refused: the endpoint owning that map is dropping flows it is
+                allowed to have, and a pod scheduled to this node may fail to get a
+                sandbox with a `cilium-cni` API timeout that blames the agent.
+
+                The agent log names the victim:
+                  kubectl -n kube-system logs cilium-t29mp -c cilium-agent --since=30m | grep "Failed to add PolicyMap key" | head -3
+                Identities unreferenced by any pod are collected on a ~45 min cycle
+                (heartbeat 30m + gc 15m); an operator restart resets that clock. Do not
+                delete identities by hand — see lessons.md "Cilium identity GC is
+                two-phase".
+              runbook_url: "https://github.com/JoelGotsch/homelab/blob/main/lessons.md"
+
+  # (d) Scope guard: a healthy map on the same agent (lxc at 0.001) beside the
+  #     policy map at 0.73 — nothing fires, and the healthy series does not
+  #     inherit the policy map's value through the aggregation.
+  - interval: 1m
+    name: "(d) other maps on the same agent stay out of it"
+    input_series:
+      - series: 'cilium_bpf_map_pressure{container="cilium-agent", endpoint="prometheus", instance="10.10.30.21:9962", job="monitoring/cilium-agent", map_name="cilium_policy_v3_*", namespace="kube-system", pod="cilium-jkrn9"}'
+        values: "0.73+0x20"
+      - series: 'cilium_bpf_map_pressure{container="cilium-agent", endpoint="prometheus", instance="10.10.30.21:9962", job="monitoring/cilium-agent", map_name="lxc", namespace="kube-system", pod="cilium-jkrn9"}'
+        values: "0.001+0x20"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CiliumBPFMapPressureHigh
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CiliumBPFMapFull
+        exp_alerts: []

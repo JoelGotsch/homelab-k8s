@@ -40,6 +40,7 @@ resources:
   - kube-job-failed-rules.yaml  # 2026-08-24 — CronJob-aware replacement for the stock KubeJobFailed (disabled in values.yaml)
   - storage-health-rules.yaml  # 2026-09-09 csi-rclone FUSE cascade — mount-cgroup pressure, stuck Terminating, node-plugin churn
   - janitor-rules.yaml  # 2026-09-09 — reboot-cascade-janitor convergence (log-derived metrics via Alloy): looping remediation, janitor not running
+  - cilium-map-pressure-rules.yaml  # 2026-09-14 — BPF map pressure (hl-0271): the 2026-09-11 policy-map overflow had a metric and no rule
 
 configMapGenerator:
   - name: alert-formatter-script
