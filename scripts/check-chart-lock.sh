@@ -99,10 +99,20 @@ if [ "$ONLINE" = true ]; then
       Refresh it after a CA rotation."; exit 1; }
   while IFS=$'\t' read -r name version mirror; do
     [ -n "$name" ] || continue
-    if "$HELM_BIN" show chart "$mirror" --version "$version" --ca-file "$CA_FILE" >/dev/null 2>&1; then
+    # helm's own error is kept, not discarded: "not in the mirror", "not logged
+    # in" (401) and "wrong CA" are three different fixes, and until v1.8.2 all
+    # three printed the first one. helm's error names the URL, never a credential.
+    if why="$("$HELM_BIN" show chart "$mirror" --version "$version" --ca-file "$CA_FILE" 2>&1 >/dev/null)"; then
       continue
     fi
     err "$name $version does NOT resolve on the mirror."
+    note "  helm: $(printf '%s\n' "$why" | tail -n 1)"
+    case "$why" in
+      *401*|*nauthorized*|*"basic credential not found"*)
+        note "  That is an authentication failure, not a missing chart: the registry"
+        note "  refuses anonymous reads. Log in first (helm registry login)."
+        problems=$((problems + 1)); continue ;;
+    esac
     bare="${version#v}"
     if [ "$bare" != "$version" ] && "$HELM_BIN" show chart "$mirror" --version "$bare" --ca-file "$CA_FILE" >/dev/null 2>&1; then
       note "  The tag is '$bare'. The pin carries a leading 'v' that the chart's own"

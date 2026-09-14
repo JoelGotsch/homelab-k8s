@@ -258,7 +258,7 @@ repos:
           bash -c 'for f in check-broken-links.sh check-no-mac-addresses.sh
           check-no-operator-email.sh check-no-bare-domain.sh
           check-helm-values-keys.sh check-chart-lock.sh
-          check-storage-budget.sh; do
+          check-storage-budget.sh mirror-chart.sh; do
           for r in ../homelab-hooks ../homelab-docs ../homelab-infra ../homelab-k8s; do
           [ -f "$r/scripts/$f" ] && [ -f "scripts/$f" ]
           && ! cmp -s "scripts/$f" "$r/scripts/$f"
@@ -283,6 +283,8 @@ repos:
         # app repo consuming it ran the degraded version for days. Nothing
         # reported that, because the list did not cover the file. A sync check
         # is only worth its runtime over the files it actually names.
+        # mirror-chart.sh added 2026-09-14 (ADR 0068): canonical in homelab-hooks
+        # since v1.8.0 and baked into ci-tools, so the copy here became a mirror.
         # Plan B5 step 3. Historical note: canonical copies lived in homelab-docs/
         # scripts/ (per each script's own header); editing one copy
         # without re-syncing the siblings silently forks the guard
