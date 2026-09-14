@@ -459,6 +459,15 @@ spec:
         # assets (allowlisted below). A hashicorp/* provider would also need
         # releases.hashicorp.com.
         - matchName: "registry.terraform.io"
+        # Ansible Galaxy — homelab-infra's `render-equality` step runs
+        # `ansible-galaxy install -r ansible/requirements.yml` (TODO hl-0299,
+        # operator-approved 2026-09-14). Two hops, traced with `curl -L` from
+        # the laptop that day: the API and artifact URL on galaxy.ansible.com
+        # 302 (via /api/pulp/content/) to a signed S3 URL on the dualstack
+        # bucket host below. The `ansible-galaxy.s3.amazonaws.com` a pipeline
+        # comment had proposed since July is NOT on that path.
+        - matchName: "galaxy.ansible.com"
+        - matchName: "ansible-galaxy-ng.s3.dualstack.us-east-1.amazonaws.com"
         # Prisma engine binaries CDN — `prisma generate` downloads
         # platform-specific schema-engine + query-engine from here
         # at build time. Added 2026-06-29 for llm-gateway v0.0.11
