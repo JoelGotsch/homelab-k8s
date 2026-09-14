@@ -63,7 +63,10 @@ while IFS= read -r f; do
       *) echo "FAIL: $f — namespace '$name' has invalid data-class '$dc' (want: $VALID)"; fail=1 ;;
     esac
   done
-done < <(grep -rl "kind: Namespace" --include="*.yaml" apps/ infrastructure/ platform/ observability/ 2>/dev/null | grep -v '/charts/')
+done < <(grep -rl "kind: Namespace" --include="*.yaml" apps/ infrastructure/ platform/ observability/ 2>/dev/null | grep -v -e '/charts/' -e '/testdata/')
+# `testdata/` holds policy-test fixtures (Namespaces that exist only inside a
+# `kyverno test` run), not reconciled desired state — the same exclusion name
+# scripts/retention-contract.yaml uses.
 
 if [ "$fail" -eq 0 ]; then
   echo "OK: $checked first-party namespace(s) declare a valid data-class"

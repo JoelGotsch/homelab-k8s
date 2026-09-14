@@ -1,0 +1,128 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cel-proof-ndots
+  namespace: ci-woodpecker
+spec:
+  restartPolicy: Never
+  containers:
+  - name: c
+    image: registry.homelab.internal/ci-packages/minio:RELEASE.2024-12-18T13-15-44Z@sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3
+    resources:
+      requests:
+        memory: 16Mi
+      limits:
+        memory: 32Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cel-proof-ndots-opts
+  namespace: ci-woodpecker
+spec:
+  restartPolicy: Never
+  dnsConfig:
+    options:
+    - name: timeout
+      value: '2'
+  containers:
+  - name: c
+    image: registry.homelab.internal/ci-packages/minio:RELEASE.2024-12-18T13-15-44Z@sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3
+    resources:
+      requests:
+        memory: 16Mi
+      limits:
+        memory: 32Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cel-proof-ndots-other-ns
+  namespace: default
+spec:
+  restartPolicy: Never
+  containers:
+  - name: c
+    image: registry.homelab.internal/ci-packages/minio:RELEASE.2024-12-18T13-15-44Z@sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3
+    resources:
+      requests:
+        memory: 16Mi
+      limits:
+        memory: 32Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cel-proof-openbao-retain
+  namespace: openbao
+  labels:
+    app.kubernetes.io/name: openbao
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: longhorn-replica2-retain
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cel-proof-openbao-delete-sc
+  namespace: openbao
+  labels:
+    app.kubernetes.io/name: openbao
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: longhorn-replica2
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cel-proof-openbao-has-reason
+  namespace: openbao
+  labels:
+    app.kubernetes.io/name: openbao
+  annotations:
+    retention.homelab.internal/reason: already
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: longhorn-replica2-retain
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: pvc-04e32124-836c-45e1-929f-db9218a882f5
+  namespace: longhorn-system
+  labels:
+    backup-target: default
+    longhornvolume: pvc-04e32124-836c-45e1-929f-db9218a882f5
+    setting.longhorn.io/remove-snapshots-during-filesystem-trim: ignored
+    setting.longhorn.io/replica-auto-balance: ignored
+    setting.longhorn.io/snapshot-data-integrity: ignored
+spec:
+  size: '37580963840'
+  numberOfReplicas: 3
+---
+apiVersion: longhorn.io/v1beta2
+kind: Volume
+metadata:
+  name: pvc-00000000-0000-0000-0000-000000000000
+  namespace: longhorn-system
+  labels:
+    backup-target: default
+    longhornvolume: pvc-04e32124-836c-45e1-929f-db9218a882f5
+    setting.longhorn.io/remove-snapshots-during-filesystem-trim: ignored
+    setting.longhorn.io/replica-auto-balance: ignored
+    setting.longhorn.io/snapshot-data-integrity: ignored
+spec:
+  size: '37580963840'
+  numberOfReplicas: 3

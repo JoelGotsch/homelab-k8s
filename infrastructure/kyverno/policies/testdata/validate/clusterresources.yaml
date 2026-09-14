@@ -1,0 +1,168 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: ClusterResource
+metadata:
+  name: cr
+spec:
+  resources:
+  - apiVersion: v1
+    kind: LimitRange
+    metadata:
+      name: default-limits
+      namespace: ns-complete
+      labels:
+        homelab.internal/component: default-limits
+        homelab.internal/generated-by: kyverno
+      annotations:
+        policies.kyverno.io/managed-by: homelab-generate-default-limitrange
+    spec:
+      limits:
+      - default:
+          memory: 512Mi
+        defaultRequest:
+          cpu: 50m
+          memory: 128Mi
+        type: Container
+  - apiVersion: v1
+    kind: ResourceQuota
+    metadata:
+      name: default-quota
+      namespace: ns-complete
+      labels:
+        homelab.internal/component: default-quota
+        homelab.internal/generated-by: kyverno
+      annotations:
+        policies.kyverno.io/managed-by: homelab-generate-default-resourcequota
+    spec:
+      hard:
+        count/pods: '50'
+        limits.memory: 16Gi
+        requests.cpu: '4'
+        requests.memory: 8Gi
+  - apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: default-deny
+      namespace: ns-complete
+      labels:
+        homelab.internal/component: default-deny
+        homelab.internal/generated-by: kyverno
+      annotations:
+        policies.kyverno.io/managed-by: homelab-generate-default-deny-netpol
+    spec:
+      podSelector: {}
+      policyTypes:
+      - Ingress
+      - Egress
+  - apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: baseline
+      namespace: ns-labelled-netpol
+      labels:
+        homelab.internal/component: default-deny
+        homelab.internal/generated-by: kyverno
+      annotations:
+        policies.kyverno.io/managed-by: homelab-generate-default-deny-netpol
+    spec:
+      podSelector: {}
+      policyTypes:
+      - Ingress
+      - Egress
+  - apiVersion: v1
+    kind: LimitRange
+    metadata:
+      name: default-limits
+      namespace: ns-labelled-netpol
+      labels:
+        homelab.internal/component: default-limits
+        homelab.internal/generated-by: kyverno
+      annotations:
+        policies.kyverno.io/managed-by: homelab-generate-default-limitrange
+    spec:
+      limits:
+      - default:
+          memory: 512Mi
+        defaultRequest:
+          cpu: 50m
+          memory: 128Mi
+        type: Container
+  - apiVersion: v1
+    kind: ResourceQuota
+    metadata:
+      name: default-quota
+      namespace: ns-labelled-netpol
+      labels:
+        homelab.internal/component: default-quota
+        homelab.internal/generated-by: kyverno
+      annotations:
+        policies.kyverno.io/managed-by: homelab-generate-default-resourcequota
+    spec:
+      hard:
+        count/pods: '50'
+        limits.memory: 16Gi
+        requests.cpu: '4'
+        requests.memory: 8Gi
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: fp-ns
+      labels:
+        homelab.internal/first-party: 'true'
+        kubernetes.io/metadata.name: fp-ns
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: minio-on-nas
+      labels:
+        kubernetes.io/metadata.name: minio-on-nas
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: backup-cronjobs
+      labels:
+        kubernetes.io/metadata.name: backup-cronjobs
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: default
+      labels:
+        kubernetes.io/metadata.name: default
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: vikunja
+      labels:
+        kubernetes.io/metadata.name: vikunja
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: pr-agent
+      labels:
+        kubernetes.io/metadata.name: pr-agent
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: argocd
+      labels:
+        kubernetes.io/metadata.name: argocd
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: model-manager
+      labels:
+        kubernetes.io/metadata.name: model-manager
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: authentik
+      labels:
+        kubernetes.io/metadata.name: authentik
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: tailscale
+      labels:
+        kubernetes.io/metadata.name: tailscale
+  crds:
+  - crds/ciliumnetworkpolicies.cilium.io.yaml
+  - crds/ciliumclusterwidenetworkpolicies.cilium.io.yaml

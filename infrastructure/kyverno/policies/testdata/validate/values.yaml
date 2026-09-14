@@ -1,0 +1,39 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Value
+metadata:
+  name: values
+namespaceSelector:
+- name: fp-ns
+  labels:
+    homelab.internal/first-party: 'true'
+    kubernetes.io/metadata.name: fp-ns
+- name: plain-ns
+  labels:
+    kubernetes.io/metadata.name: plain-ns
+- name: minio-on-nas
+  labels:
+    kubernetes.io/metadata.name: minio-on-nas
+- name: backup-cronjobs
+  labels:
+    kubernetes.io/metadata.name: backup-cronjobs
+- name: default
+  labels:
+    kubernetes.io/metadata.name: default
+- name: vikunja
+  labels:
+    kubernetes.io/metadata.name: vikunja
+- name: pr-agent
+  labels:
+    kubernetes.io/metadata.name: pr-agent
+- name: argocd
+  labels:
+    kubernetes.io/metadata.name: argocd
+- name: model-manager
+  labels:
+    kubernetes.io/metadata.name: model-manager
+- name: authentik
+  labels:
+    kubernetes.io/metadata.name: authentik
+- name: tailscale
+  labels:
+    kubernetes.io/metadata.name: tailscale

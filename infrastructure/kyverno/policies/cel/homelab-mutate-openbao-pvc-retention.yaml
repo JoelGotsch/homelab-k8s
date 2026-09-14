@@ -1,0 +1,99 @@
+# Kyverno ClusterPolicy — stamp retention.homelab.internal/reason on
+# OpenBao StatefulSet-owned PVCs
+#
+# Purpose:   OpenBao's Helm chart (`server.dataStorage` /
+#            `server.auditStorage`) does not expose PVC-level
+#            annotations. The Kyverno policy
+#            `homelab-disallow-retain-reclaim-without-annotation` (ADR
+#            0036 D1) requires PVCs on `longhorn-replica*-retain` to
+#            carry `retention.homelab.internal/reason`. Every other
+#            first-party app either sets the annotation via chart
+#            values (Vaultwarden, Forgejo) or via CNPG inheritedMetadata
+#            (CNPG clusters). OpenBao is the exception. This policy
+#            fills the gap by mutating the annotation onto OpenBao's
+#            PVCs at admission time.
+# ADR:       0036 D1
+# Rollout:   Ships Enforce-ready — mutations are idempotent and
+#            non-blocking; unlike validators, there's no operator-
+#            visible disruption on flip.
+#
+# Rationale: OpenBao raft data (`server.dataStorage`) + audit log
+#            (`server.auditStorage`) are the highest-consequence
+#            volumes in the cluster. Delete-on-PVC-delete would be
+#            catastrophic; Retain is correct. The retention reason is
+#            "OpenBao raft cluster state + audit log — irreplaceable
+#            without a full restore-from-tier-3-backup ceremony (ADR
+#            0018, runbook `openbao/routine-unseal.md`)." Documented
+#            here rather than a values.yaml chart-schema patch because
+#            the chart upstream doesn't own this concept.
+#
+# Bypass:    Set `bypass.homelab.internal/homelab-mutate-openbao-pvc-retention`
+#            on the PVC — the mutation skips. (Practically never
+#            needed; noted for uniform pattern with the other
+#            homelab-* policies.)
+
+# CEL form (MutatingPolicy), migrated 2026-09-14 (hl-0284). The three
+# preconditions are matchConditions; the annotation is stamped by an
+# ApplyConfiguration whose value is held in a variable so the text stays
+# readable. Admission-only (`background: false` before), no mutate-existing.
+apiVersion: policies.kyverno.io/v1
+kind: MutatingPolicy
+metadata:
+  name: homelab-mutate-openbao-pvc-retention
+  annotations:
+    policies.kyverno.io/title: "Stamp retention reason on OpenBao PVCs"
+    policies.kyverno.io/category: "Storage / Longhorn"
+    policies.kyverno.io/severity: low
+    policies.kyverno.io/subject: PersistentVolumeClaim
+    policies.kyverno.io/description: |
+      Kyverno mutation: stamps
+      `retention.homelab.internal/reason` on OpenBao raft-data and
+      audit-log PVCs, since the Helm chart's `server.dataStorage` /
+      `server.auditStorage` blocks don't expose PVC annotations.
+      Matches PVCs in the `openbao` namespace with the
+      `app.kubernetes.io/name: openbao` label. Idempotent.
+spec:
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: false
+    mutateExisting:
+      enabled: false
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [openbao]
+    objectSelector:
+      matchLabels:
+        app.kubernetes.io/name: openbao
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [persistentvolumeclaims]
+  matchConditions:
+    - name: no-policy-bypass
+      expression: >-
+        object.metadata.?annotations['bypass.homelab.internal/homelab-mutate-openbao-pvc-retention'].orValue('') == ''
+    - name: retain-storageclass
+      expression: >-
+        object.spec.?storageClassName.orValue('') in ['longhorn-replica2-retain', 'longhorn-replica3-retain']
+    - name: reason-not-yet-set
+      expression: >-
+        object.metadata.?annotations['retention.homelab.internal/reason'].orValue('') == ''
+  variables:
+    - name: reason
+      expression: >-
+        "OpenBao raft cluster state + audit log — irreplaceable\nwithout a full restore-from-tier-3-backup ceremony\n(ADR 0018; runbook openbao/routine-unseal.md). Stamped\nby Kyverno policy homelab-mutate-openbao-pvc-retention\nbecause the OpenBao Helm chart does not expose\nper-PVC annotations under server.{dataStorage,auditStorage}."
+  mutations:
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          Object{
+            metadata: Object.metadata{
+              annotations: {"retention.homelab.internal/reason": variables.reason}
+            }
+          }

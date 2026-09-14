@@ -1,0 +1,54 @@
+# CEL form (policies.kyverno.io/v1 MutatingPolicy), migrated 2026-09-14
+# (hl-0284). JSONPatch, not ApplyConfiguration: `dnsConfig.options` is
+# `listType=atomic`, and ApplyConfiguration refuses atomic fields at RUNTIME
+# ("invalid ApplyConfiguration: may not mutate atomic arrays, maps or structs:
+# .spec.dnsConfig.options") — the policy itself compiles and reports Ready, so
+# the first ci-woodpecker Pod would have been denied, not mutated. Caught by
+# `kyverno test` (policies/testdata/mutate), not by the server dry-run of the
+# policy. The old `patchStrategicMerge` REPLACED the options list (no merge
+# key), so the JSON patch does the same: replace `options` when `dnsConfig`
+# exists, add `dnsConfig` when it does not. Autogen is off because the paths
+# are JSON pointers, which autogen would have to rewrite; Woodpecker creates
+# bare Pods (every report row is a Pod), so Pod admission is the whole scope.
+# Admission-only, like the old `background: false`.
+apiVersion: policies.kyverno.io/v1
+kind: MutatingPolicy
+metadata:
+  name: ci-woodpecker-dns-ndots
+  annotations:
+    policies.kyverno.io/title: "ci-woodpecker step pods: ndots=1"
+    policies.kyverno.io/category: "DNS Workarounds"
+    policies.kyverno.io/severity: "low"
+    policies.kyverno.io/description: |
+      Forces dnsConfig.options.ndots=1 on every pod in ci-woodpecker so
+      glibc skips search-list walking for FQDNs, avoiding the
+      tailnet-search-domain AAAA SERVFAIL trap.
+spec:
+  autogen:
+    podControllers:
+      controllers: []
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: false
+    mutateExisting:
+      enabled: false
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [ci-woodpecker]
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  mutations:
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: >-
+          has(object.spec.dnsConfig)
+            ? [JSONPatch{op: "add", path: "/spec/dnsConfig/options", value: [{"name": "ndots", "value": "1"}]}]
+            : [JSONPatch{op: "add", path: "/spec/dnsConfig", value: {"options": [{"name": "ndots", "value": "1"}]}}]

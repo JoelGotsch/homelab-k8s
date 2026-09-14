@@ -1,0 +1,165 @@
+---
+# RBAC: Kyverno's background + admission controllers run with a minimal
+# default ClusterRole. Mutating a non-stock CR like longhorn.io/Volume
+# requires explicit get/list/watch/update permission on that resource.
+# Kyverno aggregates extra rules at runtime via the labels
+# `rbac.kyverno.io/aggregate-to-{background,admission}-controller=true`.
+# Without these the policy CREATE is denied by Kyverno's own admission
+# webhook ("auth check fails, additional privileges are required for
+# the service account ...").
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno:longhorn-volume-mutate
+  labels:
+    app.kubernetes.io/component: background-controller
+    app.kubernetes.io/instance: kyverno
+    app.kubernetes.io/part-of: kyverno
+    rbac.kyverno.io/aggregate-to-background-controller: "true"
+    rbac.kyverno.io/aggregate-to-admission-controller: "true"
+    rbac.kyverno.io/aggregate-to-reports-controller: "true"
+rules:
+  - apiGroups: ["longhorn.io"]
+    resources: ["volumes"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # The mutate-existing path needs to read PVs + PVCs that the policy's
+  # apiCall context blocks fetch; the default kyverno role already has
+  # core/* read, but state it explicitly so RBAC is self-documenting.
+  - apiGroups: [""]
+    resources: ["persistentvolumes", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+---
+# Mutating policy: propagate `recurring-job-group.longhorn.io/*` and
+# `recurring-job.longhorn.io/*` labels from a PVC onto the corresponding
+# Longhorn Volume CR.
+#
+# Why: Longhorn's recurring-job selection is keyed on labels on the
+# `Volume` CR, not the PVC. For user-managed PVCs we set those labels
+# at the PVC level and Longhorn's CSI provisioner copies them through.
+# CNPG (postgresql.cnpg.io) and the Altinity ClickHouseInstallation
+# operator both materialise PVCs from a `volumeClaimTemplates`-style
+# source, and CNPG's `inheritedMetadata.labels` does NOT propagate
+# down into Longhorn's `Volume` CR — it only labels Pods/PVCs.
+#
+# Result: a CNPG cluster carrying
+#   inheritedMetadata.labels.recurring-job-group.longhorn.io/secret-personal: "enabled"
+# silently falls through to the `default` recurring-job-group, which has
+# retain=100 hourly snapshots. The snapshot deltas accumulate on the
+# Longhorn volume's actualSize (NOT the Postgres data dir size), and the
+# volume eventually exceeds its declared PVC capacity even though the
+# real DB data is tiny. This was the root cause of the 2026-06-25 PG /
+# ClickHouse PVC-bloat incident (#73).
+#
+# This ClusterPolicy mutates Volume CRs on CREATE/UPDATE to mirror the
+# recurring-job labels of the corresponding PVC, so the selector
+# plumbing actually works.
+#
+# Resolution chain:
+#   Longhorn Volume.metadata.name (= PV name)
+#     → PersistentVolume of the same name (Volume.metadata.name == PV name)
+#     → PV.spec.claimRef.{namespace,name}
+#     → PVC
+#     → PVC.metadata.labels (filtered to recurring-job labels)
+#
+# Volume.status.kubernetesStatus.pvName is *also* the PV name, but
+# `metadata.name` is reliable from the moment Volume is created, while
+# the status block is populated asynchronously by longhorn-manager.
+---
+# CEL form (MutatingPolicy), migrated 2026-09-14 (hl-0284). Three deliberate
+# differences from the ClusterPolicy above it in git history:
+#
+# 1. The mutation is applied to the ADMITTED Volume itself, not to a `targets`
+#    copy patched later by the background controller. A server-side dry-run
+#    of a Volume UPDATE therefore shows the labels in the response — the old
+#    rule showed nothing at admission (measured 2026-09-14: `kubectl replace
+#    --dry-run=server` of a Volume minus its recurring-job label came back
+#    still minus it), because mutate-existing work is asynchronous.
+# 2. No `mutateExisting`. On the new kind, a same-trigger/same-target policy
+#    with mutateExisting "will mutate ALL existing resources of that type
+#    when a trigger occurs" (MutatingPolicy docs, "Same Trigger and Target"),
+#    i.e. every Volume event would re-patch every Volume. The old
+#    `mutateExistingOnPolicyUpdate: true` sweep is replaced by
+#    scripts/sync-longhorn-recurring-job-labels.sh, which already exists
+#    because that sweep was insufficient (lessons.md, 2026-09-12).
+# 3. Lookups use `resource.List(...)` + filter, never `resource.Get`: a
+#    Longhorn Volume is created BEFORE its PersistentVolume exists (the CSI
+#    provisioner creates the PV after CreateVolume returns), so a Get would
+#    error on every CREATE — with the old kind that surfaced as the 59
+#    `error` results in kyverno_policy_results_total; on a MutatingPolicy a
+#    matchCondition error is decided by failurePolicy. `failurePolicy: Ignore`
+#    is set as well, so a lookup failure can never block Longhorn.
+#    At CREATE the PV is absent -> no labels -> matchCondition false -> skip;
+#    the next Volume UPDATE (attach, replica change) finds the bound PVC.
+apiVersion: policies.kyverno.io/v1
+kind: MutatingPolicy
+metadata:
+  name: longhorn-volume-label-propagation
+  annotations:
+    policies.kyverno.io/title: "Longhorn Volume: mirror PVC recurring-job labels"
+    policies.kyverno.io/category: "Storage / Longhorn"
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/subject: "Volume (longhorn.io/v1beta2)"
+    policies.kyverno.io/description: |
+      Copies `recurring-job-group.longhorn.io/*` and
+      `recurring-job.longhorn.io/*` labels from the backing PVC onto
+      the Longhorn Volume CR. Fixes the CNPG / ClickHouseInstallation
+      operator gap where volumeClaimTemplates labels don't reach the
+      Volume CR, causing selectors to fall through to the `default`
+      recurring-job-group.
+spec:
+  failurePolicy: Ignore
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: false
+    mutateExisting:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [longhorn.io]
+        apiVersions: [v1beta2]
+        operations: [CREATE, UPDATE]
+        resources: [volumes]
+  variables:
+    # 1. PV of the same name as the Volume (Volume.metadata.name == PV name).
+    - name: pvs
+      expression: >-
+        dyn(resource.List("v1", "persistentvolumes", "")).items.filter(p, p.metadata.name == object.metadata.name)
+    - name: claimNamespace
+      expression: >-
+        size(variables.pvs) > 0 ? variables.pvs[0].spec.?claimRef.?namespace.orValue('') : ''
+    - name: claimName
+      expression: >-
+        size(variables.pvs) > 0 ? variables.pvs[0].spec.?claimRef.?name.orValue('') : ''
+    # 2. The bound PVC, if the namespace is known.
+    - name: pvcs
+      expression: >-
+        variables.claimNamespace != ''
+          ? dyn(resource.List("v1", "persistentvolumeclaims", variables.claimNamespace)).items.filter(c, c.metadata.name == variables.claimName)
+          : []
+    # 3. Its recurring-job labels.
+    - name: pvcLabels
+      expression: >-
+        size(variables.pvcs) > 0 ? variables.pvcs[0].metadata.?labels.orValue({}) : {}
+    - name: rjKeys
+      expression: >-
+        variables.pvcLabels.filter(k,
+          k.startsWith('recurring-job-group.longhorn.io/') || k.startsWith('recurring-job.longhorn.io/'))
+  matchConditions:
+    - name: pvc-resolved
+      expression: variables.claimNamespace != ''
+    - name: has-recurring-job-labels
+      expression: size(variables.rjKeys) > 0
+  mutations:
+    - patchType: JSONPatch
+      jsonPatch:
+        # One `add` per label; `/` in a label key is `~1` in a JSON pointer.
+        # `add` on an existing key replaces its value, which is the merge the
+        # old patchStrategicMerge performed.
+        expression: >-
+          variables.rjKeys.map(k, JSONPatch{
+            op: "add",
+            path: "/metadata/labels/" + k.replace("~", "~0").replace("/", "~1"),
+            value: variables.pvcLabels[k]
+          })

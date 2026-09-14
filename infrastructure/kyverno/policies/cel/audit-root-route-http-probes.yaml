@@ -1,0 +1,121 @@
+# Audit-only ClusterPolicy: flag workloads whose liveness/readiness/startup
+# probes use `httpGet path: /` but whose container almost certainly does
+# NOT serve a root route — the silent "probe-induced kill loop" trap.
+#
+# === Why this exists ===
+# 2026-06-12: pr-agent crashlooped because both probes were `httpGet path: /`,
+# but the FastAPI surface (`gitea_app`) only mounts `POST /api/v1/gitea_webhooks`
+# — no `/`, no `/health`. Every probe 404'd, the kubelet killed pods ~60s
+# after boot, and the pod looked deceptively healthy:
+#
+#   status.phase: Running
+#   lastState.terminated.reason: Completed
+#   lastState.terminated.exitCode: 0
+#
+# Exit 0 + reason=Completed is what kubelet writes when it SIGTERMs a pod
+# because of probe failure and the app shuts down cleanly. There is no
+# "Error" / "OOMKilled" signal that this is a crash — it looks like a
+# graceful exit. That's what made it dangerous.
+#
+# Root cause documented in:
+#   homelab-docs/99-journal/2026-06-22-openbao-seal-cascade-and-pipeline-rebuild.md
+#   § "Concrete debugging mistakes worth recording" item #1.
+#
+# The pr-agent fix landed in commit `99eada9` — switched both probes to
+# `tcpSocket: http` (port-open is sufficient signal; FastAPI binds
+# immediately, no L7 dependency).
+#
+# === Why audit-only ===
+# Some workloads legitimately serve `/` (nginx, hubble-ui frontend, OTel
+# collector's :13133 healthcheck, node-exporter's /). Enforcing on those
+# would block legitimate Helm chart deploys. Audit gives operator-visible
+# PolicyReport entries via `kubectl get policyreport -A` without blocking
+# admission. The annotation override
+#
+#     probes.homelab.internal/root-route-confirmed: "true"
+#
+# silences the report for a workload that legitimately serves `/`. This
+# preserves the homelab convention of operator-acknowledgement annotations
+# in the `homelab.internal/` domain (see require-first-party-image-digest
+# for the analogous pattern).
+#
+# === Migration path ===
+# Flip `validationFailureAction: Enforce` once every existing offender is
+# either annotated or has been switched to tcpSocket / a real healthcheck
+# path. See the journal entry for the per-workload triage list.
+
+# CEL form (policies.kyverno.io/v1 ValidatingPolicy), migrated 2026-09-14 from
+# the kyverno.io/v1 ClusterPolicy of the same name (hl-0284). Scope mirrors the
+# old rule: Pods (autogen to every Pod controller, the Kyverno default when the
+# single resource rule is core/v1 pods), kube-system/kube-public/kube-node-lease
+# excluded via namespaceSelector — NOT excludeResourceRules, which would switch
+# autogen off (pkg/cel/autogen/support.go CanAutoGen, v1.19.1). The old pattern
+# anchored on `=(path)`, i.e. only checked a path that is present; the API
+# server defaults httpGet.path to "/" so on persisted objects the two agree.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: audit-root-route-http-probes
+  annotations:
+    policies.kyverno.io/title: "audit: probes at httpGet path / without operator confirmation"
+    policies.kyverno.io/category: "Workload Hygiene"
+    policies.kyverno.io/severity: "medium"
+    policies.kyverno.io/description: |
+      Surfaces workloads whose liveness/readiness/startup probes target
+      `httpGet path: /` without the operator annotation
+      `probes.homelab.internal/root-route-confirmed: "true"`. The
+      pattern silently crashloops apps whose HTTP surface has no root
+      route (kubelet kills pods that 404 the probe; pod looks like
+      "exit 0 / Completed", not a crash). See the 2026-06-22 journal
+      entry, item #1, for the pr-agent incident that motivated this.
+spec:
+  validationActions: [Audit]
+  # No Pod-controller autogen, deliberately: the old rule excluded by
+  # `resources.annotations`, and Kyverno skips autogen for rules that filter
+  # on that field (cluster-policy autogen docs), so it only ever reported on
+  # Pods — 15 Pods and 0 controllers in the 2026-09-14 PolicyReports. An
+  # empty controllers list keeps that scope; the CEL default would be every
+  # controller kind and would change the fail set. Widen deliberately if ever.
+  autogen:
+    podControllers:
+      controllers: []
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: true
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [kube-system, kube-public, kube-node-lease]
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchConditions:
+    - name: not-confirmed-by-operator
+      expression: >-
+        object.metadata.?annotations['probes.homelab.internal/root-route-confirmed'].orValue('') != 'true'
+  validations:
+    - expression: >-
+        object.spec.containers.all(c,
+          c.?livenessProbe.?httpGet.?path.orValue('') != '/' &&
+          c.?readinessProbe.?httpGet.?path.orValue('') != '/' &&
+          c.?startupProbe.?httpGet.?path.orValue('') != '/')
+      message: >-
+        One or more probes (liveness/readiness/startup) target `httpGet path: /`.
+        This is the chart-default copy-paste shape that silently crashlooped
+        pr-agent on 2026-06-12 (the FastAPI surface had no root route; probes
+        404'd; kubelet SIGTERMed every ~60s; the pod showed exit-code 0 /
+        reason=Completed, which looks like graceful exit, not a crash). If THIS
+        workload genuinely serves `/`, add the annotation
+        probes.homelab.internal/root-route-confirmed: "true" to the Pod template
+        (Deployment/StatefulSet/DaemonSet .spec.template.metadata.annotations)
+        to silence this report. Otherwise, switch the probe to `tcpSocket: {
+        port: http }` (sufficient: process binding the port proves it started)
+        or to a real healthcheck path that the app actually mounts. Background:
+        homelab-docs/99-journal/2026-06-22-openbao-seal-cascade-and-pipeline-rebuild.md
+        § "Concrete debugging mistakes worth recording" item #1.

@@ -49,8 +49,15 @@ fi
 while IFS= read -r f; do
   dir=$(dirname "$f")
   k="$dir/kustomization.yaml"
-  # bootstrap/argocd patches resolve via the parent kustomization
-  [ -f "$k" ] || k="$(dirname "$dir")/kustomization.yaml"
+  # A placeholder file is rendered by its NEAREST ANCESTOR kustomization:
+  # bootstrap/argocd patches resolve one level up, and files two levels
+  # down (infrastructure/kyverno/policies/cel/, 2026-09-14) two levels up.
+  # Until 2026-09-14 this looked only one level up, so a file any deeper was
+  # blamed on a kustomization that does not exist. Stop at the repo root.
+  while [ ! -f "$k" ] && [ "$dir" != "." ] && [ "$dir" != "/" ]; do
+    dir=$(dirname "$dir")
+    k="$dir/kustomization.yaml"
+  done
   # Match a real `components:` LIST ENTRY, not any mention of the path.
   # Until 2026-08-20 this was `grep -q 'components/site-config'`, which every
   # converted layer now satisfies from the provenance comment above its

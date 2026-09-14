@@ -1,0 +1,109 @@
+# Kyverno ClusterPolicy — disallow open-world egress on CiliumNetworkPolicy
+#
+# Purpose:   Reject CiliumNetworkPolicy resources that grant open egress via
+#            `toEntities: [world]` or `toCIDR: 0.0.0.0/0` (also `/1`, `::/0`).
+#            Force the operator to be explicit about which upstream a pod
+#            can reach.
+# ADR:       0036 D4
+# Rollout:   Audit -> Enforce after 2 weeks of clean PolicyReports
+#
+# Rationale: CNP rules are additive/OR (CLAUDE.md rule 15); a single
+#            forgotten `toEntities: [world]` block silently negates every
+#            careful narrow allow in the file. This was the shape that
+#            allowed unrestricted egress on the CI Woodpecker step pods
+#            for an extended window; the fix (see
+#            `homelab-k8s/platform/woodpecker/networkpolicy.yaml` +
+#            feedback-ci-egress-allowlist.md) was to switch to per-FQDN
+#            allowlists. This policy makes recurrence loud at admission
+#            time.
+#
+#            Traps this policy has to avoid stepping in itself:
+#              - `toEntities: [ingress]` is REQUIRED for Gateway traffic
+#                (CLAUDE.md rule 11); do NOT flag `ingress`, only `world`.
+#              - `toEntities: [kube-apiserver]` on ports 443 AND 6443 is a
+#                homelab convention (rule 12); do NOT flag it.
+#              - `toCIDR: 0.0.0.0/1` + `128.0.0.0/1` is the classic
+#                "split-the-world" evasion; flag both.
+#
+# Bypass:    Annotate the CNP with
+#              bypass.homelab.internal/homelab-disallow-open-egress-cnp: "<reason>"
+#            (e.g. "monitoring collector needs upstream anonymous fetch").
+
+# CEL form (ValidatingPolicy), migrated 2026-09-14 (hl-0284). The two old rules
+# are two validations under one policy; each `deny.conditions.any` list became
+# an `exists()` over the same JMESPath projection. A bypassed CNP no longer
+# reports `skip` — a failed matchCondition removes the resource from the policy
+# entirely, so the tailscale operator's waived CNP disappears from this
+# policy's report instead of appearing as skip. Same enforcement, different
+# bookkeeping.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: homelab-disallow-open-egress-cnp
+  annotations:
+    policies.kyverno.io/title: "CiliumNetworkPolicy: disallow open-world egress"
+    policies.kyverno.io/category: "Network Security"
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: CiliumNetworkPolicy
+    policies.kyverno.io/description: |
+      Reject CNP egress rules that use `toEntities: [world]` or a
+      whole-internet CIDR (`0.0.0.0/0`, `0.0.0.0/1`, `128.0.0.0/1`,
+      `::/0`). Bypass with
+      `bypass.homelab.internal/homelab-disallow-open-egress-cnp`.
+spec:
+  validationActions: [Audit, Warn]
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: true
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [cilium.io]
+        apiVersions: [v2]
+        operations: [CREATE, UPDATE]
+        resources:
+          - ciliumnetworkpolicies
+          - ciliumclusterwidenetworkpolicies
+  matchConditions:
+    - name: no-policy-bypass
+      expression: >-
+        object.metadata.?annotations['bypass.homelab.internal/homelab-disallow-open-egress-cnp'].orValue('') == ''
+  variables:
+    - name: egress
+      expression: object.?spec.?egress.orValue([])
+    - name: egressDeny
+      expression: object.?spec.?egressDeny.orValue([])
+    - name: openCidrs
+      expression: "['0.0.0.0/0', '0.0.0.0/1', '128.0.0.0/1', '::/0']"
+  validations:
+    # rule 1 of the old policy: no-world-entity-egress
+    - expression: >-
+        !variables.egress.exists(e, 'world' in e.?toEntities.orValue([])) &&
+        !variables.egressDeny.exists(e, 'world' in e.?toEntities.orValue([]))
+      messageExpression: >-
+        'CiliumNetworkPolicy `' + object.metadata.name + '` grants open-world egress via
+        `toEntities: [world]`. Cilium CNPs are additive/OR — a single world-egress rule negates
+        every narrow allow in the file. Replace with explicit `toFQDNs` or a specific `toCIDR`
+        allowlist, or annotate with bypass.homelab.internal/homelab-disallow-open-egress-cnp:
+        "<reason>" to waive.'
+      message: >-
+        CiliumNetworkPolicy grants open-world egress via `toEntities: [world]`. Cilium CNPs
+        are additive/OR — a single world-egress rule negates every narrow allow in the file.
+        Replace with explicit `toFQDNs` or a specific `toCIDR` allowlist, or annotate with
+        bypass.homelab.internal/homelab-disallow-open-egress-cnp: "<reason>" to waive.
+    # rule 2 of the old policy: no-whole-internet-cidr-egress
+    - expression: >-
+        !variables.egress.exists(e,
+          e.?toCIDR.orValue([]).exists(c, c in variables.openCidrs) ||
+          e.?toCIDRSet.orValue([]).exists(s, s.?cidr.orValue('') in variables.openCidrs))
+      messageExpression: >-
+        'CiliumNetworkPolicy `' + object.metadata.name + '` grants egress to a whole-internet
+        CIDR (`0.0.0.0/0`, `0.0.0.0/1`, `128.0.0.0/1`, or `::/0`). Replace with a narrower CIDR
+        or use `toFQDNs` for FQDN allowlisting, or annotate with
+        bypass.homelab.internal/homelab-disallow-open-egress-cnp: "<reason>" to waive.'
+      message: >-
+        CiliumNetworkPolicy grants egress to a whole-internet CIDR (`0.0.0.0/0`, `0.0.0.0/1`,
+        `128.0.0.0/1`, or `::/0`). Replace with a narrower CIDR or use `toFQDNs` for FQDN
+        allowlisting, or annotate with
+        bypass.homelab.internal/homelab-disallow-open-egress-cnp: "<reason>" to waive.

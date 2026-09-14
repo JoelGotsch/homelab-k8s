@@ -1,0 +1,228 @@
+# Kyverno ClusterPolicy — verify cosign signatures on every
+# first-party image. Per ADR 0019 D3.
+#
+# Restores the policy that was REMOVED 2026-05-23 (see the
+# 70-line comment block in ../clusterpolicies.yaml) now that
+# Forgejo Packages + Woodpecker CI + the cosign-sign step are
+# operational and producing signed images. The restoration
+# differs from that comment's sketch in three deliberate ways:
+#
+#   1. Static-key attestor (NOT keyless).
+#      Reason: the homelab doesn't run Fulcio / Rekor and the
+#      preference (operator + ADR 0019 D3 audit) is explicit
+#      static-key over keyless for a single-operator one-
+#      cluster lab. Also sidesteps the schema issue named in
+#      the 05-23 removal comment (keyless attestor requires
+#      `rekor.url` even in Audit mode; the static `keys:`
+#      attestor has no such constraint).
+#   2. Public key via Secret-ref (NOT inline string).
+#      Reason: the keypair lives in OpenBao at
+#      kv/shared/cosign/key; the public half is projected
+#      into the kyverno ns Secret `cosign-public-key` by the
+#      sibling ExternalSecret. Rotation = `bao kv put` →
+#      ESO sync → Kyverno picks up automatically. Inline-
+#      string attestors would force a repo edit + ArgoCD
+#      sync on every rotation.
+#   3. mutateDigest: true.
+#      Kyverno rewrites the Pod spec's image reference to
+#      the pinned digest at admission time. Combines with
+#      the require-first-party-image-digest sibling policy:
+#      tag-based references are accepted at submission, but
+#      the workload that actually runs is the digest the
+#      signature was produced against. Per ADR 0019 D3's
+#      "unsigned images don't run" property.
+#
+# MATCH SHAPE
+#
+#   imageReferences uses glob-syntax. The two patterns cover:
+#     - registry.homelab.internal/* — the ADR 0019 D1-option-b
+#       CNAME alias used by the CI pipeline today.
+#     - FORGEJO_FQDN/homelab/* — the apex Forgejo endpoint,
+#       for any manifest that bypasses the alias
+#       (e.g. operator-pinned full path in a values.yaml).
+#       `homelab` is the org namespace since the 2026-07-30
+#       phase-2 package migration; the forgejo-admin pattern
+#       stays during the transition for historical manifests.
+#
+# THIRD-PARTY EXCEPTION LIST
+#
+#   This policy intentionally does NOT include third-party
+#   images. ADR 0019 D3's "exception list" framing flips the
+#   default for third-party from match→exclude rather than
+#   excluded→include. Concretely: the sibling
+#   audit-third-party-image-digest policy (in
+#   ../clusterpolicies.yaml) provides visibility on third-
+#   party images; a future verify-third-party-image-signature
+#   policy would name specific upstream images we trust by
+#   key (e.g. `ghcr.io/grafana/loki:* signed by Grafana's
+#   keyless identity`). That's deferred until at least one
+#   upstream image we run is keyless-signed and we've decided
+#   to verify it.
+#
+# REKOR / TRANSPARENCY LOG
+#
+#   The cosign-sign step in CI passes `--tlog-upload=false`
+#   (see homelab-infra/scripts/templates/woodpecker-cosign-
+#   step.yml). The signature artifact in Forgejo Packages
+#   has no Rekor entry to look up. Symmetric setting on the
+#   verify side is `rekor.ignoreTlog: true`. Both sides
+#   MUST agree.
+#
+# FAILURE ACTION
+#
+#   Starts in Audit. Per the infra-apply discipline (minimal
+#   blast radius for any first real apply): the first tagged
+#   build of llm-gateway with the cosign-sign step might
+#   produce a signature with subtly wrong digest-pinning or
+#   key-format; flipping straight to Enforce would block
+#   that workload from rolling out. After one successful
+#   end-to-end signed-image deploy is observed (PolicyReport
+#   shows `pass` for the llm-gateway Pod), edit this file:
+#   verifyImages[0].failureAction → Enforce, commit, ArgoCD
+#   sync. The Audit-mode PolicyReport entries are visible
+#   via:
+#     kubectl get policyreport -A | grep verify-first-party
+#
+#   NOTE on Kyverno schema: failureAction lives PER
+#   verifyImages-entry (not at policy spec level — that's
+#   `validationFailureAction`, which controls validate rules,
+#   not verifyImages rules). This is the gotcha that needs
+#   reading the v1.10+ CRD schema closely; previously folks
+#   would set spec.validationFailureAction and wonder why
+#   verifyImages didn't switch to Enforce.
+#
+# WEBHOOK FAILURE POLICY
+#
+#   `webhookConfiguration.failurePolicy: Fail` (the default
+#   in Kyverno 1.11+). If Kyverno itself is down, admissions
+#   for first-party-image Pods are rejected — which is the
+#   correct stance for a supply-chain gate: a broken
+#   verifier MUST fail closed, not silently admit. The
+#   tradeoff is a hard dependency on Kyverno being healthy
+#   for any first-party-image deploy. Acceptable in homelab
+#   scale; first-party workloads are not on the
+#   cluster-bringup critical path (Kyverno + ESO + the
+#   verify policy must be up first).
+#
+# VERIFICATION ONCE LIVE
+#
+#   Pass case — first-party signed image:
+#     kubectl apply -f - <<'YAML'
+#     apiVersion: v1
+#     kind: Pod
+#     metadata: {name: signed-test, namespace: default}
+#     spec:
+#       containers:
+#         - name: app
+#           image: registry.homelab.internal/llm-gateway@sha256:<digest>
+#     YAML
+#   → admitted. PolicyReport entry `result: pass`.
+#
+#   No-match case — unsigned third-party image:
+#     kubectl run nginx-unsigned --image=docker.io/library/nginx:1.25
+#   → admitted (does not match first-party imageReferences
+#     glob). Per ADR 0019 D3 framing, this is correct: third-
+#     party images don't pass through THIS policy.
+#
+#   Fail case — first-party image WITHOUT a signature
+#   (forced by bypassing the signing step):
+#     kubectl run llm-gateway-unsigned \
+#       --image=registry.homelab.internal/llm-gateway:nosig
+#   → Audit mode: PolicyReport `result: fail`, Pod admitted
+#     (admin sees the violation in policyreport).
+#     Enforce mode: admission webhook rejects with the
+#     verifyImages failureMessage.
+
+# CEL form (policies.kyverno.io/v1 ImageValidatingPolicy), migrated 2026-09-14
+# (hl-0284). Mapping, each checked against the v1.19.1 source:
+# - imageReferences -> matchImageReferences globs (gobwas/glob, `*` crosses
+#   `/` exactly as the old wildcard did). skipImageReferences has no field:
+#   entries OR together (pkg/cel/matching/image.go), so the
+#   registry.homelab.internal include and its three skips are ONE CEL entry,
+#   `ref` being the image string (pkg/cel/compiler/keys.go ImageRefKey).
+#   The two Forgejo globs stay globs so kustomization.yaml's site-config
+#   replacement can keep selecting them by value.
+# - `images.containers` etc. hold only images that passed matchImageReferences
+#   (pkg/image/verification/evaluator/policy.go, filteredImages), so the
+#   validation may verify every element without flagging third-party images.
+# - keys.secret -> key.expression reading the same Secret through
+#   resource.Get; Secret data is base64 on the wire, hence base64.decode.
+# - rekor.ignoreTlog / ctlog.ignoreSCT -> ctlog.insecureIgnoreTlog /
+#   insecureIgnoreSCT; imageRegistryCredentials.secrets -> credentials.secrets
+#   (must live in the kyverno namespace — it does).
+# - failureAction Audit -> validationActions [Audit]; mutateDigest / verifyDigest
+#   / required -> validationConfigurations; webhookConfiguration.failurePolicy
+#   Ignore -> spec.failurePolicy.
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: verify-first-party-image-signature
+  annotations:
+    policies.kyverno.io/category: Supply Chain
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Every first-party container image (registry.homelab.internal/*
+      and the Forgejo Packages registry under the homelab and
+      forgejo-admin orgs — this policy's matchImageReferences is the
+      authoritative list) MUST be cosign-
+      signed by the homelab's signing key. The signature is
+      produced by the cosign-sign step in each first-party
+      .woodpecker.yml (template:
+      homelab-infra/scripts/templates/woodpecker-cosign-step.yml)
+      and stored as an OCI artifact alongside the image in
+      Forgejo Packages. The verification public key is sourced
+      from the `cosign-public-key` Secret in the kyverno
+      namespace, projected by the sibling ExternalSecret from
+      OpenBao kv/shared/cosign/key field `public`.
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: true
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchImageReferences:
+    - glob: "FORGEJO_FQDN/homelab/*"
+    - glob: "FORGEJO_FQDN/forgejo-admin/*"
+    # registry.homelab.internal/* minus the old skipImageReferences.
+    - expression: >-
+        ref.startsWith('registry.homelab.internal/') &&
+        !ref.startsWith('registry.homelab.internal/ci-packages/pr-agent') &&
+        !ref.startsWith('registry.homelab.internal/ci-packages/minio') &&
+        !ref.startsWith('registry.homelab.internal/ci-packages/mc')
+  credentials:
+    secrets:
+      - registry-homelab-internal-pull
+  validationConfigurations:
+    mutateDigest: false
+    verifyDigest: true
+    required: true
+  variables:
+    - name: cosignPublicKey
+      expression: >-
+        string(base64.decode(resource.Get("v1", "secrets", "kyverno", "cosign-public-key").data["cosign.pub"]))
+  attestors:
+    - name: homelab
+      cosign:
+        key:
+          expression: variables.cosignPublicKey
+          hashAlgorithm: sha256
+        ctlog:
+          insecureIgnoreTlog: true
+          insecureIgnoreSCT: true
+  validations:
+    - expression: >-
+        images.containers.all(ref, verifyImageSignatures(ref, [attestors.homelab]) > 0) &&
+        images.initContainers.all(ref, verifyImageSignatures(ref, [attestors.homelab]) > 0) &&
+        images.ephemeralContainers.all(ref, verifyImageSignatures(ref, [attestors.homelab]) > 0)
+      message: >-
+        First-party image is not signed by the homelab cosign key (kv/shared/cosign/key). Sign it in
+        CI with the woodpecker-cosign-step template, or fix the image reference.

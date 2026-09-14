@@ -1,0 +1,74 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: ClusterResource
+metadata:
+  name: cr
+spec:
+  crds:
+  - crds/volumes.longhorn.io.yaml
+  resources:
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: ci-woodpecker
+      labels:
+        kubernetes.io/metadata.name: ci-woodpecker
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: default
+      labels:
+        kubernetes.io/metadata.name: default
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: openbao
+      labels:
+        kubernetes.io/metadata.name: openbao
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: longhorn-system
+      labels:
+        kubernetes.io/metadata.name: longhorn-system
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: authentik
+      labels:
+        kubernetes.io/metadata.name: authentik
+  - apiVersion: v1
+    kind: PersistentVolume
+    metadata:
+      name: pvc-04e32124-836c-45e1-929f-db9218a882f5
+    spec:
+      claimRef:
+        namespace: authentik
+        name: authentik-pg-1
+      storageClassName: longhorn-replica3
+      capacity:
+        storage: 35Gi
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: authentik-pg-1
+      namespace: authentik
+      labels:
+        app.kubernetes.io/component: database
+        app.kubernetes.io/managed-by: cloudnative-pg
+        app.kubernetes.io/name: postgresql
+        cnpg.io/cluster: authentik-pg
+        cnpg.io/instanceName: authentik-pg-1
+        cnpg.io/instanceRole: primary
+        cnpg.io/pvcRole: PG_DATA
+        recurring-job-group.longhorn.io/no-snapshot: enabled
+        role: primary
+      annotations:
+        retention.homelab.internal/reason: "Authentik IdP DB \u2014 users, OIDC clients,\
+          \ flows, policies; loss = full re-enrolment cascade."
+    spec:
+      storageClassName: longhorn-replica3
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 35Gi

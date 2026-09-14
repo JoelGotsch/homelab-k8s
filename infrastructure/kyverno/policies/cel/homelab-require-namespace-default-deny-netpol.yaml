@@ -1,0 +1,88 @@
+# Kyverno ClusterPolicy — require a default-deny NetworkPolicy in every
+# first-party namespace
+#
+# Purpose:   Every first-party namespace must ship a default-deny NetworkPolicy
+#            (name `default-deny` or label
+#            `homelab.internal/component: default-deny`) so lateral movement
+#            from a compromised pod is blocked-by-default within the ns.
+# ADR:       0036 D3
+# Rollout:   Audit -> Enforce after 2 weeks of clean PolicyReports
+#
+# Rationale: Cilium CNPs are additive/OR (CLAUDE.md rule 15); adding narrow
+#            allows without a broad deny-first leaves the pod open. The
+#            homelab convention is to ship a namespace-scoped default-deny
+#            NetworkPolicy as its own shared component (see the platform
+#            shared-manifests set) and layer CNPs on top. Missing this
+#            baseline is silently permissive — the workload appears secured
+#            because named CNPs exist, but any traffic not covered by a
+#            named CNP is still allowed.
+#
+#            We deliberately validate for a *K8s NetworkPolicy* named
+#            `default-deny` (or bearing
+#            `homelab.internal/component: default-deny` label) rather than
+#            a CiliumNetworkPolicy, because K8s NetPol enforces at the
+#            base L3/L4 layer even if Cilium's CRD watches lag on restart.
+#            CNP-only deny leaves a window during agent restarts. Both
+#            are compatible; requiring the K8s one as baseline is the
+#            defensive choice.
+#
+# Bypass:    Annotate the Namespace with
+#              bypass.homelab.internal/homelab-require-namespace-default-deny-netpol: "<reason>"
+
+# CEL form (ValidatingPolicy), migrated 2026-09-14 (hl-0284). The context
+# apiCall + JMESPath filter became `dyn(resource.List(...)).items.filter(...)`;
+# the `dyn()` is load-bearing: resource.List returns CEL type `any`, and the
+# cluster's typed compiler rejects a comprehension over `any` ("cannot be range
+# of a comprehension") while `.size()` on it compiles. Found by server-side
+# dry-run on 2026-09-14, not by the CLI.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: homelab-require-namespace-default-deny-netpol
+  annotations:
+    policies.kyverno.io/title: "Namespace: default-deny NetworkPolicy required"
+    policies.kyverno.io/category: "Network Security"
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Namespace
+    policies.kyverno.io/description: |
+      Every Namespace labelled `homelab.internal/first-party: "true"` must
+      contain a NetworkPolicy either named `default-deny` or carrying the
+      label `homelab.internal/component: default-deny`. Bypass with the
+      annotation `bypass.homelab.internal/homelab-require-namespace-default-deny-netpol`.
+spec:
+  validationActions: [Audit, Warn]
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: true
+  matchConstraints:
+    objectSelector:
+      matchLabels:
+        homelab.internal/first-party: "true"
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [namespaces]
+  matchConditions:
+    - name: no-policy-bypass
+      expression: >-
+        object.metadata.?annotations['bypass.homelab.internal/homelab-require-namespace-default-deny-netpol'].orValue('') == ''
+  variables:
+    - name: matchingCount
+      expression: >-
+        dyn(resource.List("networking.k8s.io/v1", "networkpolicies", object.metadata.name)).items.filter(n,
+          n.metadata.name == 'default-deny' ||
+          n.metadata.?labels['homelab.internal/component'].orValue('') == 'default-deny').size()
+  validations:
+    - expression: variables.matchingCount >= 1
+      # Static fallback: reported when messageExpression itself fails to evaluate
+      # (a messageExpression error must not turn into an empty report row).
+      message: >-
+        Namespace is labelled `homelab.internal/first-party: "true"` but has no default-deny NetworkPolicy. Add one named `default-deny` (or with label `homelab.internal/component: default-deny`), or annotate the Namespace with bypass.homelab.internal/homelab-require-namespace-default-deny-netpol: "<reason>" to waive.
+      messageExpression: >-
+        'Namespace `' + object.metadata.name + '` is labelled `homelab.internal/first-party: "true"` but has no
+        default-deny NetworkPolicy. Add one named `default-deny` (or with label
+        `homelab.internal/component: default-deny`), or annotate the Namespace with
+        bypass.homelab.internal/homelab-require-namespace-default-deny-netpol: "<reason>" to waive.'

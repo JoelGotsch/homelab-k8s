@@ -1,0 +1,32 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kyverno-cel-migration-generate
+policies:
+- ../../cel/homelab-generate-default-deny-netpol.yaml
+- ../../cel/homelab-generate-default-limitrange.yaml
+- ../../cel/homelab-generate-default-resourcequota.yaml
+resources:
+- resources.yaml
+results:
+- isGeneratingPolicy: true
+  kind: Namespace
+  policy: homelab-generate-default-limitrange
+  resources:
+  - cel-proof-gen
+  generatedResource: generated-limitrange.yaml
+  result: pass
+- isGeneratingPolicy: true
+  kind: Namespace
+  policy: homelab-generate-default-resourcequota
+  resources:
+  - cel-proof-gen
+  generatedResource: generated-resourcequota.yaml
+  result: pass
+- isGeneratingPolicy: true
+  kind: Namespace
+  policy: homelab-generate-default-deny-netpol
+  resources:
+  - cel-proof-gen
+  generatedResource: generated-deny-netpol.yaml
+  result: pass

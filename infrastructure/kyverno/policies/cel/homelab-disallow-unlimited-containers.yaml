@@ -1,0 +1,89 @@
+# Kyverno ClusterPolicy — every container must declare memory requests+limits
+#
+# Purpose:   Every container in a workload (Pod/Deployment/StatefulSet/
+#            DaemonSet/Job/CronFob) must declare both
+#            `resources.requests.memory` and `resources.limits.memory`.
+# ADR:       0036 D5
+# Rollout:   Audit -> Enforce after 2 weeks of clean PolicyReports
+#
+# Rationale: The 2026-07-08 Longhorn incident + the 2026-06-26 memory
+#            baseline sweep found ~40% of first-party containers ship
+#            without any memory limit. A single Java/Node process without
+#            a limit can consume the node's remaining allocatable and
+#            OOM-kill neighbouring pods (including longhorn-manager,
+#            which then triggers cascading volume unhealthy state). Memory
+#            has no throttling — once you cross the limit you're killed;
+#            once you don't have a limit you eat everything.
+#
+#            CPU is a SEPARATE policy (`homelab-warn-unlimited-cpu`) because
+#            CPU limits have subtle throttling downsides (CFS quota
+#            starvation on multi-core workloads) — audit-only, no
+#            enforcement plan.
+#
+# Bypass:    Annotate the workload with
+#              bypass.homelab.internal/homelab-disallow-unlimited-containers: "<reason>"
+
+# CEL form (ValidatingPolicy), migrated 2026-09-14 (hl-0284). This is the
+# policy whose 2026-08-01 CEL rewrite (b86e723) compiled, reported Ready and
+# enforced nothing, because Kyverno 1.18's typed compiler rejected
+# `has(c.resources.requests)` ("undefined field 'requests'") and the rule went
+# inert (reverted in 7b1e30e). This form uses optional chaining
+# (`c.?resources.?requests.?memory.hasValue()`) and no `has()` on a map-typed
+# field. Proof of evaluation is not "Ready": it is the matching fail set in
+# the PolicyReports and a non-zero
+# kyverno_policy_results_total{policy_name="homelab-disallow-unlimited-containers"}
+# after the first background scan — see the 2026-09-14 journal entry.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: homelab-disallow-unlimited-containers
+  annotations:
+    policies.kyverno.io/title: "Containers: memory request+limit required"
+    policies.kyverno.io/category: "Resource Governance"
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: |
+      Every container (regular + init + ephemeral) must set
+      `resources.requests.memory` AND `resources.limits.memory`. Bypass
+      with the annotation
+      `bypass.homelab.internal/homelab-disallow-unlimited-containers`.
+spec:
+  validationActions: [Audit, Warn]
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: true
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [kube-system, kube-public, kube-node-lease]
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchConditions:
+    - name: no-policy-bypass
+      expression: >-
+        object.metadata.?annotations['bypass.homelab.internal/homelab-disallow-unlimited-containers'].orValue('') == ''
+  validations:
+    - expression: >-
+        object.spec.containers.all(c,
+          c.?resources.?requests.?memory.hasValue() && c.?resources.?limits.?memory.hasValue()) &&
+        object.spec.?initContainers.orValue([]).all(c,
+          c.?resources.?requests.?memory.hasValue() && c.?resources.?limits.?memory.hasValue()) &&
+        object.spec.?ephemeralContainers.orValue([]).all(c,
+          c.?resources.?requests.?memory.hasValue() && c.?resources.?limits.?memory.hasValue())
+      messageExpression: >-
+        'Workload `' + request.namespace + '/' + object.metadata.name + '` has a container without
+        memory requests+limits. Every container (regular, init, ephemeral) must set both under
+        `resources.{requests,limits}.memory` — see the per-ns default LimitRange for starting
+        values. Waive with bypass.homelab.internal/homelab-disallow-unlimited-containers: "<reason>"'
+      message: >-
+        Workload has a container without memory requests+limits. Every container (regular,
+        init, ephemeral) must set both under `resources.{requests,limits}.memory` — see the
+        per-ns default LimitRange for starting values. Waive with
+        bypass.homelab.internal/homelab-disallow-unlimited-containers: "<reason>"

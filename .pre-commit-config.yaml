@@ -142,6 +142,16 @@ repos:
         pass_filenames: false
         files: '(bootstrap/applicationsets/infrastructure\.yaml|infrastructure/(kyverno|clickhouse-operator)/|scripts/check-known-argocd-drift\.sh$)'
 
+      - id: check-kyverno-policy-tests
+        name: Kyverno CEL policy test suites pass under the pinned CLI
+        entry: scripts/check-kyverno-policy-tests.sh
+        language: script
+        pass_filenames: false
+        # The CLI version is pinned in policies/testdata/cli-pin.env to the chart's
+        # appVersion; a chart bump in kustomization.yaml must move the pin too,
+        # which is why the kustomization is in this file set.
+        files: '(infrastructure/kyverno/(kustomization\.yaml|policies/)|scripts/check-kyverno-policy-tests\.sh$)'
+
       - id: test-openbao-snapshot-workload
         name: OpenBao snapshot workload failure and credential-hygiene tests
         entry: scripts/test-openbao-snapshot-workload.sh

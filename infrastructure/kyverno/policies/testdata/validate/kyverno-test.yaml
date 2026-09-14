@@ -1,0 +1,241 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kyverno-cel-migration-validate
+policies:
+- ../../cel/audit-root-route-http-probes.yaml
+- ../../cel/audit-third-party-image-digest.yaml
+- ../../cel/enforce-digest-pinning-allowlist.yaml
+- ../../cel/homelab-disallow-inline-secrets.yaml
+- ../../cel/homelab-disallow-open-egress-cnp.yaml
+- ../../cel/homelab-disallow-retain-reclaim-without-annotation.yaml
+- ../../cel/homelab-disallow-unlimited-containers.yaml
+- ../../cel/homelab-require-namespace-default-deny-netpol.yaml
+- ../../cel/homelab-require-namespace-limitrange.yaml
+- ../../cel/homelab-require-namespace-resourcequota.yaml
+- ../../cel/require-first-party-image-digest.yaml
+resources:
+- resources.yaml
+clusterResources:
+- clusterresources.yaml
+variables: values.yaml
+results:
+- kind: Pod
+  policy: audit-root-route-http-probes
+  resources:
+  - model-manager-69567b6bcc-lx6ht
+  result: fail
+  isValidatingPolicy: true
+- kind: Pod
+  policy: audit-root-route-http-probes
+  resources:
+  - root-route-healthz
+  result: pass
+  isValidatingPolicy: true
+- kind: Pod
+  policy: audit-root-route-http-probes
+  resources:
+  - root-route-confirmed
+  result: skip
+  isValidatingPolicy: true
+- kind: Pod
+  policy: homelab-disallow-unlimited-containers
+  resources:
+  - argocd-redis-848d698f9f-wqcht
+  - unlimited-init-fail
+  - unlimited-limit-only
+  result: fail
+  isValidatingPolicy: true
+- kind: Pod
+  policy: homelab-disallow-unlimited-containers
+  resources:
+  - unlimited-pass
+  result: pass
+  isValidatingPolicy: true
+- kind: Pod
+  policy: homelab-disallow-unlimited-containers
+  resources:
+  - unlimited-bypass
+  result: skip
+  isValidatingPolicy: true
+- kind: Pod
+  policy: require-first-party-image-digest
+  resources:
+  - pr-agent-5dbdcc5d9f-q87kq
+  - minio-unpinned
+  result: fail
+  isValidatingPolicy: true
+- kind: Pod
+  policy: require-first-party-image-digest
+  resources:
+  - firstparty-pinned
+  result: pass
+  isValidatingPolicy: true
+- kind: Pod
+  policy: require-first-party-image-digest
+  resources:
+  - thirdparty-pinned
+  - thirdparty-unpinned
+  result: skip
+  isValidatingPolicy: true
+- kind: Pod
+  policy: audit-third-party-image-digest
+  resources:
+  - pr-agent-5dbdcc5d9f-q87kq
+  - thirdparty-unpinned
+  - model-manager-69567b6bcc-lx6ht
+  result: fail
+  isValidatingPolicy: true
+- kind: Pod
+  policy: audit-third-party-image-digest
+  resources:
+  - thirdparty-pinned
+  - firstparty-pinned
+  result: pass
+  isValidatingPolicy: true
+- kind: Pod
+  policy: enforce-digest-pinning-allowlist
+  resources:
+  - minio-unpinned
+  - minio-init-unpinned
+  - backup-cronjobs-unpinned
+  result: fail
+  isValidatingPolicy: true
+- kind: Pod
+  policy: enforce-digest-pinning-allowlist
+  resources:
+  - minio-pinned
+  result: pass
+  isValidatingPolicy: true
+- kind: ReplicaSet
+  policy: enforce-digest-pinning-allowlist
+  resources:
+  - minio-655665f464
+  result: fail
+  isValidatingPolicy: true
+- kind: PersistentVolumeClaim
+  policy: homelab-disallow-retain-reclaim-without-annotation
+  resources:
+  - vikunja-data
+  - best-effort-retain-no-reason
+  result: fail
+  isValidatingPolicy: true
+- kind: PersistentVolumeClaim
+  policy: homelab-disallow-retain-reclaim-without-annotation
+  resources:
+  - retain-with-reason
+  result: pass
+  isValidatingPolicy: true
+- kind: PersistentVolumeClaim
+  policy: homelab-disallow-retain-reclaim-without-annotation
+  resources:
+  - retain-bypass
+  - delete-sc
+  result: skip
+  isValidatingPolicy: true
+- kind: CiliumNetworkPolicy
+  policy: homelab-disallow-open-egress-cnp
+  resources:
+  - cnp-world-fail
+  - cnp-cidr-fail
+  - cnp-cidrset-fail
+  - cnp-egressdeny-world-fail
+  result: fail
+  isValidatingPolicy: true
+- kind: CiliumNetworkPolicy
+  policy: homelab-disallow-open-egress-cnp
+  resources:
+  - authentik-pg-cnpg
+  - cnp-narrow-cidr-pass
+  result: pass
+  isValidatingPolicy: true
+- kind: CiliumNetworkPolicy
+  policy: homelab-disallow-open-egress-cnp
+  resources:
+  - tailscale-operator
+  result: skip
+  isValidatingPolicy: true
+- kind: CiliumClusterwideNetworkPolicy
+  policy: homelab-disallow-open-egress-cnp
+  resources:
+  - ccnp-world-fail
+  result: fail
+  isValidatingPolicy: true
+- kind: Secret
+  policy: homelab-disallow-inline-secrets
+  resources:
+  - inline-fail
+  result: fail
+  isValidatingPolicy: true
+- kind: Secret
+  policy: homelab-disallow-inline-secrets
+  resources:
+  - eso-pass
+  - waived-pass
+  - nonfp-pass
+  result: pass
+  isValidatingPolicy: true
+- kind: Secret
+  policy: homelab-disallow-inline-secrets
+  resources:
+  - policy-bypass
+  - tls-skip
+  result: skip
+  isValidatingPolicy: true
+- kind: Namespace
+  policy: homelab-require-namespace-limitrange
+  resources:
+  - ns-complete
+  - ns-labelled-netpol
+  result: pass
+  isValidatingPolicy: true
+- kind: Namespace
+  policy: homelab-require-namespace-limitrange
+  resources:
+  - ns-empty
+  result: fail
+  isValidatingPolicy: true
+- kind: Namespace
+  policy: homelab-require-namespace-limitrange
+  resources:
+  - ns-bypass
+  result: skip
+  isValidatingPolicy: true
+- kind: Namespace
+  policy: homelab-require-namespace-resourcequota
+  resources:
+  - ns-complete
+  - ns-labelled-netpol
+  result: pass
+  isValidatingPolicy: true
+- kind: Namespace
+  policy: homelab-require-namespace-resourcequota
+  resources:
+  - ns-empty
+  result: fail
+  isValidatingPolicy: true
+- kind: Namespace
+  policy: homelab-require-namespace-resourcequota
+  resources:
+  - ns-bypass
+  result: skip
+  isValidatingPolicy: true
+- kind: Namespace
+  policy: homelab-require-namespace-default-deny-netpol
+  resources:
+  - ns-complete
+  - ns-labelled-netpol
+  result: pass
+  isValidatingPolicy: true
+- kind: Namespace
+  policy: homelab-require-namespace-default-deny-netpol
+  resources:
+  - ns-empty
+  result: fail
+  isValidatingPolicy: true
+- kind: Namespace
+  policy: homelab-require-namespace-default-deny-netpol
+  resources:
+  - ns-bypass
+  result: skip
+  isValidatingPolicy: true

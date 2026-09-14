@@ -1,0 +1,55 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kyverno-cel-migration-mutate
+policies:
+- ../../cel/ci-woodpecker-dns-ndots.yaml
+- ../../cel/homelab-mutate-openbao-pvc-retention.yaml
+- ../../cel/longhorn-volume-label-propagation.yaml
+resources:
+- resources.yaml
+clusterResources:
+- clusterresources.yaml
+variables: values.yaml
+results:
+- isMutatingPolicy: true
+  kind: Pod
+  policy: ci-woodpecker-dns-ndots
+  resources:
+  - ci-woodpecker/cel-proof-ndots
+  - ci-woodpecker/cel-proof-ndots-opts
+  patchedResources: patched.yaml
+  result: pass
+- isMutatingPolicy: true
+  kind: Pod
+  policy: ci-woodpecker-dns-ndots
+  resources:
+  - default/cel-proof-ndots-other-ns
+  result: skip
+- isMutatingPolicy: true
+  kind: PersistentVolumeClaim
+  policy: homelab-mutate-openbao-pvc-retention
+  resources:
+  - openbao/cel-proof-openbao-retain
+  patchedResources: patched.yaml
+  result: pass
+- isMutatingPolicy: true
+  kind: PersistentVolumeClaim
+  policy: homelab-mutate-openbao-pvc-retention
+  resources:
+  - openbao/cel-proof-openbao-delete-sc
+  - openbao/cel-proof-openbao-has-reason
+  result: skip
+- isMutatingPolicy: true
+  kind: Volume
+  policy: longhorn-volume-label-propagation
+  resources:
+  - longhorn-system/pvc-04e32124-836c-45e1-929f-db9218a882f5
+  patchedResources: patched.yaml
+  result: pass
+- isMutatingPolicy: true
+  kind: Volume
+  policy: longhorn-volume-label-propagation
+  resources:
+  - longhorn-system/pvc-00000000-0000-0000-0000-000000000000
+  result: skip

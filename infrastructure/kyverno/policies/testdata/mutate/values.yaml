@@ -1,0 +1,17 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Value
+metadata:
+  name: values
+namespaceSelector:
+- name: ci-woodpecker
+  labels:
+    kubernetes.io/metadata.name: ci-woodpecker
+- name: default
+  labels:
+    kubernetes.io/metadata.name: default
+- name: openbao
+  labels:
+    kubernetes.io/metadata.name: openbao
+- name: longhorn-system
+  labels:
+    kubernetes.io/metadata.name: longhorn-system

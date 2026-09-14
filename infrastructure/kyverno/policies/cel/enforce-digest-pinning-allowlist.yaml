@@ -1,0 +1,83 @@
+# Kyverno ClusterPolicy — ENFORCE digest pinning for an
+# operator-managed allowlist of namespaces.
+#
+# Why a separate policy rather than mutating the existing
+# `audit-third-party-image-digest`:
+#
+#   The audit policy generates PolicyReport entries cluster-wide
+#   for visibility. Flipping the same policy to Enforce would
+#   blast-radius every namespace at once. The ratchet pattern is:
+#
+#     1. Choose a namespace where you've verified all images are
+#        digest-pinned (manually inspected manifests + confirmed
+#        Renovate is configured to keep digests fresh).
+#     2. Add it to `match.any.resources.namespaces` below.
+#     3. Argo syncs → Kyverno admits/rejects on next deploy.
+#     4. Watch for false positives for ~24h before moving the
+#        next namespace.
+#
+# Adding namespace convention: see
+# `homelab-docs/04-guides/digest-pin-enforce-allowlist.md`.
+#
+# This policy's match scope is ADDITIVE to the cluster-wide audit
+# policy — pods in the allowlist namespaces are validated by BOTH
+# (audit reports + enforce admission). The enforce match is the
+# binding one; audit just creates breadcrumbs.
+# CEL form (ValidatingPolicy), migrated 2026-09-14 (hl-0284). The allowlist is a
+# namespaceSelector on kubernetes.io/metadata.name; the three foreach lists are
+# three `all()` comprehensions over containers / initContainers /
+# ephemeralContainers, each skipping an empty image exactly as the old
+# `element.image != ''` precondition did. `request.namespace` (not
+# object.metadata.namespace) so the message survives autogen, which rewrites
+# `object.metadata` to the Pod template's metadata.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: enforce-digest-pinning-allowlist
+  annotations:
+    policies.kyverno.io/title: "Enforce digest pinning (allowlist)"
+    policies.kyverno.io/category: Supply Chain
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: |
+      Block Pod admission in allowlisted namespaces unless ALL
+      containers (regular + init + ephemeral) reference images
+      by `@sha256:...` digest. Per ADR 0019 D3 — ratchet from
+      audit-only to namespace-scoped enforce as confidence
+      grows.
+spec:
+  validationActions: [Deny]
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: true
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values:
+            - minio-on-nas
+            - backup-cronjobs
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  validations:
+    - expression: >-
+        object.spec.containers.all(c, c.image == '' || c.image.contains('@sha256:')) &&
+        object.spec.?initContainers.orValue([]).all(c, c.image == '' || c.image.contains('@sha256:')) &&
+        object.spec.?ephemeralContainers.orValue([]).all(c, c.image == '' || c.image.contains('@sha256:'))
+      messageExpression: >-
+        'Pods in ' + request.namespace + ' must reference every container image by digest
+        (image:tag@sha256:...). One or more containers do not. Generate the digest via
+        `crane digest <image>:<tag>` and append `@sha256:...` to the manifest. Renovate
+        with `pinDigests: true` keeps this synced.
+        See homelab-docs/04-guides/digest-pin-enforce-allowlist.md.'
+      message: >-
+        Pods in this namespace must reference every container image by digest
+        (image:tag@sha256:...). One or more containers do not. Generate the digest via
+        `crane digest <image>:<tag>` and append `@sha256:...` to the manifest. Renovate
+        with `pinDigests: true` keeps this synced.
+        See homelab-docs/04-guides/digest-pin-enforce-allowlist.md.

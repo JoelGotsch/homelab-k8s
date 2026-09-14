@@ -1,0 +1,1048 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: model-manager-69567b6bcc-lx6ht
+  namespace: model-manager
+  labels:
+    app.kubernetes.io/name: model-manager
+    pod-template-hash: 69567b6bcc
+  annotations: {}
+spec:
+  containers:
+  - name: nginx
+    image: nginxinc/nginx-unprivileged:1.27-alpine
+    resources:
+      limits:
+        memory: 64Mi
+      requests:
+        cpu: 10m
+        memory: 32Mi
+    livenessProbe:
+      failureThreshold: 3
+      httpGet:
+        path: /
+        port: 8080
+        scheme: HTTP
+      initialDelaySeconds: 5
+      periodSeconds: 20
+      successThreshold: 1
+      timeoutSeconds: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: root-route-confirmed
+  namespace: model-manager
+  labels:
+    app.kubernetes.io/name: model-manager
+    pod-template-hash: 69567b6bcc
+  annotations:
+    probes.homelab.internal/root-route-confirmed: 'true'
+spec:
+  containers:
+  - name: nginx
+    image: nginxinc/nginx-unprivileged:1.27-alpine
+    resources:
+      limits:
+        memory: 64Mi
+      requests:
+        cpu: 10m
+        memory: 32Mi
+    livenessProbe:
+      failureThreshold: 3
+      httpGet:
+        path: /
+        port: 8080
+        scheme: HTTP
+      initialDelaySeconds: 5
+      periodSeconds: 20
+      successThreshold: 1
+      timeoutSeconds: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: root-route-healthz
+  namespace: model-manager
+  labels:
+    app.kubernetes.io/name: model-manager
+    pod-template-hash: 69567b6bcc
+  annotations: {}
+spec:
+  containers:
+  - name: nginx
+    image: nginxinc/nginx-unprivileged:1.27-alpine
+    resources:
+      limits:
+        memory: 64Mi
+      requests:
+        cpu: 10m
+        memory: 32Mi
+    livenessProbe:
+      failureThreshold: 3
+      httpGet:
+        path: /healthz
+        port: 8080
+        scheme: HTTP
+      initialDelaySeconds: 5
+      periodSeconds: 20
+      successThreshold: 1
+      timeoutSeconds: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: argocd-redis-848d698f9f-wqcht
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-redis
+    pod-template-hash: 848d698f9f
+  annotations: {}
+spec:
+  containers:
+  - name: redis
+    image: public.ecr.aws/docker/library/redis:8.2.3-alpine
+    resources: {}
+  initContainers:
+  - name: secret-init
+    image: quay.io/argoproj/argocd:v3.4.8
+    resources: {}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: unlimited-pass
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-redis
+    pod-template-hash: 848d698f9f
+  annotations: {}
+spec:
+  containers:
+  - name: redis
+    image: public.ecr.aws/docker/library/redis:8.2.3-alpine
+    resources:
+      requests:
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+  initContainers:
+  - name: secret-init
+    image: quay.io/argoproj/argocd:v3.4.8
+    resources:
+      requests:
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: unlimited-init-fail
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-redis
+    pod-template-hash: 848d698f9f
+  annotations: {}
+spec:
+  containers:
+  - name: redis
+    image: public.ecr.aws/docker/library/redis:8.2.3-alpine
+    resources:
+      requests:
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+  initContainers:
+  - name: init
+    image: busybox
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: unlimited-bypass
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-redis
+    pod-template-hash: 848d698f9f
+  annotations:
+    bypass.homelab.internal/homelab-disallow-unlimited-containers: test
+spec:
+  containers:
+  - name: redis
+    image: public.ecr.aws/docker/library/redis:8.2.3-alpine
+    resources: {}
+  initContainers:
+  - name: secret-init
+    image: quay.io/argoproj/argocd:v3.4.8
+    resources: {}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: unlimited-limit-only
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-redis
+    pod-template-hash: 848d698f9f
+  annotations: {}
+spec:
+  containers:
+  - name: redis
+    image: public.ecr.aws/docker/library/redis:8.2.3-alpine
+    resources:
+      limits:
+        memory: 128Mi
+  initContainers:
+  - name: secret-init
+    image: quay.io/argoproj/argocd:v3.4.8
+    resources:
+      limits:
+        memory: 128Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pr-agent-5dbdcc5d9f-q87kq
+  namespace: pr-agent
+  labels:
+    app.kubernetes.io/name: pr-agent
+    pod-template-hash: 5dbdcc5d9f
+  annotations: {}
+spec:
+  containers:
+  - name: pr-agent
+    image: registry.homelab.internal/ci-packages/pr-agent:gitea_app-0.34
+    resources:
+      limits:
+        memory: 1Gi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    livenessProbe:
+      failureThreshold: 3
+      initialDelaySeconds: 15
+      periodSeconds: 30
+      successThreshold: 1
+      tcpSocket:
+        port: http
+      timeoutSeconds: 1
+    readinessProbe:
+      failureThreshold: 3
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      successThreshold: 1
+      tcpSocket:
+        port: http
+      timeoutSeconds: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: firstparty-pinned
+  namespace: pr-agent
+  labels:
+    app.kubernetes.io/name: pr-agent
+    pod-template-hash: 5dbdcc5d9f
+  annotations: {}
+spec:
+  containers:
+  - name: pr-agent
+    image: registry.homelab.internal/ci-packages/pr-agent:gitea_app-0.34@sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3
+    resources:
+      limits:
+        memory: 1Gi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    livenessProbe:
+      failureThreshold: 3
+      initialDelaySeconds: 15
+      periodSeconds: 30
+      successThreshold: 1
+      tcpSocket:
+        port: http
+      timeoutSeconds: 1
+    readinessProbe:
+      failureThreshold: 3
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      successThreshold: 1
+      tcpSocket:
+        port: http
+      timeoutSeconds: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: thirdparty-pinned
+  namespace: pr-agent
+  labels:
+    app.kubernetes.io/name: pr-agent
+    pod-template-hash: 5dbdcc5d9f
+  annotations: {}
+spec:
+  containers:
+  - name: pr-agent
+    image: docker.io/library/python:3.12-slim@sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3
+    resources:
+      limits:
+        memory: 1Gi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    livenessProbe:
+      failureThreshold: 3
+      initialDelaySeconds: 15
+      periodSeconds: 30
+      successThreshold: 1
+      tcpSocket:
+        port: http
+      timeoutSeconds: 1
+    readinessProbe:
+      failureThreshold: 3
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      successThreshold: 1
+      tcpSocket:
+        port: http
+      timeoutSeconds: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: thirdparty-unpinned
+  namespace: pr-agent
+  labels:
+    app.kubernetes.io/name: pr-agent
+    pod-template-hash: 5dbdcc5d9f
+  annotations: {}
+spec:
+  containers:
+  - name: pr-agent
+    image: docker.io/library/python:3.12-slim
+    resources:
+      limits:
+        memory: 1Gi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    livenessProbe:
+      failureThreshold: 3
+      initialDelaySeconds: 15
+      periodSeconds: 30
+      successThreshold: 1
+      tcpSocket:
+        port: http
+      timeoutSeconds: 1
+    readinessProbe:
+      failureThreshold: 3
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      successThreshold: 1
+      tcpSocket:
+        port: http
+      timeoutSeconds: 1
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: minio-655665f464
+  namespace: minio-on-nas
+  labels:
+    app: minio
+    pod-template-hash: 655665f464
+    release: minio
+spec:
+  selector:
+    matchLabels:
+      app: minio
+      pod-template-hash: 655665f464
+      release: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+        pod-template-hash: 655665f464
+        release: minio
+      annotations: {}
+    spec:
+      containers:
+      - name: minio
+        image: registry.homelab.internal/ci-packages/minio:RELEASE.2024-12-18T13-15-44Z
+        resources:
+          limits:
+            memory: 1Gi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: minio-unpinned
+  namespace: minio-on-nas
+spec:
+  containers:
+  - name: minio
+    image: registry.homelab.internal/ci-packages/minio:RELEASE.2024-12-18T13-15-44Z
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: minio-pinned
+  namespace: minio-on-nas
+spec:
+  containers:
+  - name: minio
+    image: registry.homelab.internal/ci-packages/minio:RELEASE.2024-12-18T13-15-44Z@sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: minio-init-unpinned
+  namespace: minio-on-nas
+spec:
+  containers:
+  - name: minio
+    image: registry.homelab.internal/ci-packages/minio:RELEASE.2024-12-18T13-15-44Z@sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3
+  initContainers:
+  - name: i
+    image: busybox:1.36
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: minio-other-ns
+  namespace: default
+spec:
+  containers:
+  - name: minio
+    image: registry.homelab.internal/ci-packages/minio:RELEASE.2024-12-18T13-15-44Z
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: backup-cronjobs-unpinned
+  namespace: backup-cronjobs
+spec:
+  containers:
+  - name: minio
+    image: registry.homelab.internal/ci-packages/minio:RELEASE.2024-12-18T13-15-44Z
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vikunja-data
+  namespace: vikunja
+  labels:
+    app.kubernetes.io/instance: vikunja
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: vikunja
+    app.kubernetes.io/version: 2.5.0
+    helm.sh/chart: vikunja-2.2.1
+  annotations: {}
+spec:
+  storageClassName: longhorn-replica3-retain
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: retain-with-reason
+  namespace: vikunja
+  labels:
+    app.kubernetes.io/instance: vikunja
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: vikunja
+    app.kubernetes.io/version: 2.5.0
+    helm.sh/chart: vikunja-2.2.1
+  annotations:
+    retention.homelab.internal/reason: test
+spec:
+  storageClassName: longhorn-replica3-retain
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: retain-bypass
+  namespace: vikunja
+  labels:
+    app.kubernetes.io/instance: vikunja
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: vikunja
+    app.kubernetes.io/version: 2.5.0
+    helm.sh/chart: vikunja-2.2.1
+  annotations:
+    bypass.homelab.internal/homelab-disallow-retain-reclaim-without-annotation: test
+spec:
+  storageClassName: longhorn-replica3-retain
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: delete-sc
+  namespace: vikunja
+  labels:
+    app.kubernetes.io/instance: vikunja
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: vikunja
+    app.kubernetes.io/version: 2.5.0
+    helm.sh/chart: vikunja-2.2.1
+  annotations: {}
+spec:
+  storageClassName: longhorn-replica2
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: best-effort-retain-no-reason
+  namespace: vikunja
+  labels:
+    app.kubernetes.io/instance: vikunja
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: vikunja
+    app.kubernetes.io/version: 2.5.0
+    helm.sh/chart: vikunja-2.2.1
+  annotations: {}
+spec:
+  storageClassName: longhorn-replica1-best-effort-retain
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: tailscale-operator
+  namespace: tailscale
+  annotations:
+    bypass.homelab.internal/homelab-disallow-open-egress-cnp: 'tailscale subnet router:
+      direct WireGuard peers are UDP to any address:port and DERP relays rotate (tailscale.com/kb/1082),
+      so no destination allowlist can exist; world is narrowed to TCP 443+80 and UDP,
+      the advertised VLAN is a toCIDR rule'
+spec:
+  egress:
+  - toEntities:
+    - cluster
+    - host
+    - remote-node
+    - kube-apiserver
+  - toEntities:
+    - world
+    toPorts:
+    - ports:
+      - port: '443'
+        protocol: TCP
+      - port: '80'
+        protocol: TCP
+      - endPort: 65535
+        port: '1'
+        protocol: UDP
+  - toCIDR:
+    - 10.10.30.0/24
+  - toEndpoints:
+    - matchLabels:
+        k8s-app: kube-dns
+        k8s:io.kubernetes.pod.namespace: kube-system
+    toPorts:
+    - ports:
+      - port: '53'
+        protocol: UDP
+      - port: '53'
+        protocol: TCP
+  endpointSelector: {}
+  ingress:
+  - fromEntities:
+    - host
+    - remote-node
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cnp-world-fail
+  namespace: tailscale
+  annotations: {}
+spec:
+  egress:
+  - toEntities:
+    - cluster
+    - host
+    - remote-node
+    - kube-apiserver
+  - toEntities:
+    - world
+    toPorts:
+    - ports:
+      - port: '443'
+        protocol: TCP
+      - port: '80'
+        protocol: TCP
+      - endPort: 65535
+        port: '1'
+        protocol: UDP
+  - toCIDR:
+    - 10.10.30.0/24
+  - toEndpoints:
+    - matchLabels:
+        k8s-app: kube-dns
+        k8s:io.kubernetes.pod.namespace: kube-system
+    toPorts:
+    - ports:
+      - port: '53'
+        protocol: UDP
+      - port: '53'
+        protocol: TCP
+  endpointSelector: {}
+  ingress:
+  - fromEntities:
+    - host
+    - remote-node
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: authentik-pg-cnpg
+  namespace: authentik
+  annotations: {}
+spec:
+  egress:
+  - toEntities:
+    - kube-apiserver
+    toPorts:
+    - ports:
+      - port: '443'
+        protocol: TCP
+      - port: '6443'
+        protocol: TCP
+  - toEndpoints:
+    - matchLabels:
+        k8s-app: kube-dns
+        k8s:io.kubernetes.pod.namespace: kube-system
+    toPorts:
+    - ports:
+      - port: '53'
+        protocol: UDP
+      - port: '53'
+        protocol: TCP
+  - toEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: minio-on-nas
+    toPorts:
+    - ports:
+      - port: '9000'
+        protocol: TCP
+  - toEndpoints:
+    - matchLabels:
+        cnpg.io/cluster: authentik-pg
+    toPorts:
+    - ports:
+      - port: '5432'
+        protocol: TCP
+      - port: '8000'
+        protocol: TCP
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: authentik-pg
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: cnpg-system
+    toPorts:
+    - ports:
+      - port: '8000'
+        protocol: TCP
+      - port: '9187'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: monitoring
+    toPorts:
+    - ports:
+      - port: '9187'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: authentik
+    toPorts:
+    - ports:
+      - port: '5432'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        cnpg.io/cluster: authentik-pg
+    toPorts:
+    - ports:
+      - port: '8000'
+        protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cnp-cidr-fail
+  namespace: authentik
+  annotations: {}
+spec:
+  egress:
+  - toCIDR:
+    - 0.0.0.0/0
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: authentik-pg
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: cnpg-system
+    toPorts:
+    - ports:
+      - port: '8000'
+        protocol: TCP
+      - port: '9187'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: monitoring
+    toPorts:
+    - ports:
+      - port: '9187'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: authentik
+    toPorts:
+    - ports:
+      - port: '5432'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        cnpg.io/cluster: authentik-pg
+    toPorts:
+    - ports:
+      - port: '8000'
+        protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cnp-cidrset-fail
+  namespace: authentik
+  annotations: {}
+spec:
+  egress:
+  - toCIDRSet:
+    - cidr: ::/0
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: authentik-pg
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: cnpg-system
+    toPorts:
+    - ports:
+      - port: '8000'
+        protocol: TCP
+      - port: '9187'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: monitoring
+    toPorts:
+    - ports:
+      - port: '9187'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: authentik
+    toPorts:
+    - ports:
+      - port: '5432'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        cnpg.io/cluster: authentik-pg
+    toPorts:
+    - ports:
+      - port: '8000'
+        protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cnp-egressdeny-world-fail
+  namespace: authentik
+  annotations: {}
+spec:
+  egress:
+  - toEntities:
+    - kube-apiserver
+    toPorts:
+    - ports:
+      - port: '443'
+        protocol: TCP
+      - port: '6443'
+        protocol: TCP
+  - toEndpoints:
+    - matchLabels:
+        k8s-app: kube-dns
+        k8s:io.kubernetes.pod.namespace: kube-system
+    toPorts:
+    - ports:
+      - port: '53'
+        protocol: UDP
+      - port: '53'
+        protocol: TCP
+  - toEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: minio-on-nas
+    toPorts:
+    - ports:
+      - port: '9000'
+        protocol: TCP
+  - toEndpoints:
+    - matchLabels:
+        cnpg.io/cluster: authentik-pg
+    toPorts:
+    - ports:
+      - port: '5432'
+        protocol: TCP
+      - port: '8000'
+        protocol: TCP
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: authentik-pg
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: cnpg-system
+    toPorts:
+    - ports:
+      - port: '8000'
+        protocol: TCP
+      - port: '9187'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: monitoring
+    toPorts:
+    - ports:
+      - port: '9187'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: authentik
+    toPorts:
+    - ports:
+      - port: '5432'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        cnpg.io/cluster: authentik-pg
+    toPorts:
+    - ports:
+      - port: '8000'
+        protocol: TCP
+  egressDeny:
+  - toEntities:
+    - world
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: cnp-narrow-cidr-pass
+  namespace: authentik
+  annotations: {}
+spec:
+  egress:
+  - toCIDR:
+    - 10.0.0.0/8
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: authentik-pg
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: cnpg-system
+    toPorts:
+    - ports:
+      - port: '8000'
+        protocol: TCP
+      - port: '9187'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: monitoring
+    toPorts:
+    - ports:
+      - port: '9187'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: authentik
+    toPorts:
+    - ports:
+      - port: '5432'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        cnpg.io/cluster: authentik-pg
+    toPorts:
+    - ports:
+      - port: '8000'
+        protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: ccnp-world-fail
+  annotations: {}
+spec:
+  egress:
+  - toEntities:
+    - world
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: authentik-pg
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: cnpg-system
+    toPorts:
+    - ports:
+      - port: '8000'
+        protocol: TCP
+      - port: '9187'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: monitoring
+    toPorts:
+    - ports:
+      - port: '9187'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: authentik
+    toPorts:
+    - ports:
+      - port: '5432'
+        protocol: TCP
+  - fromEndpoints:
+    - matchLabels:
+        cnpg.io/cluster: authentik-pg
+    toPorts:
+    - ports:
+      - port: '8000'
+        protocol: TCP
+---
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: inline-fail
+  namespace: fp-ns
+---
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: eso-pass
+  namespace: fp-ns
+  labels:
+    external-secrets.io/backend: openbao
+---
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: waived-pass
+  namespace: fp-ns
+  annotations:
+    bypass.homelab.internal/inline-secret: test
+---
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: policy-bypass
+  namespace: fp-ns
+  annotations:
+    bypass.homelab.internal/homelab-disallow-inline-secrets: test
+---
+apiVersion: v1
+kind: Secret
+type: kubernetes.io/tls
+metadata:
+  name: tls-skip
+  namespace: fp-ns
+---
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: nonfp-pass
+  namespace: plain-ns
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ns-complete
+  labels:
+    kubernetes.io/metadata.name: ns-complete
+    homelab.internal/first-party: 'true'
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ns-empty
+  labels:
+    kubernetes.io/metadata.name: ns-empty
+    homelab.internal/first-party: 'true'
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ns-labelled-netpol
+  labels:
+    kubernetes.io/metadata.name: ns-labelled-netpol
+    homelab.internal/first-party: 'true'
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: plain-ns
+  labels:
+    kubernetes.io/metadata.name: plain-ns
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ns-bypass
+  labels:
+    kubernetes.io/metadata.name: ns-bypass
+    homelab.internal/first-party: 'true'
+  annotations:
+    bypass.homelab.internal/homelab-require-namespace-limitrange: t
+    bypass.homelab.internal/homelab-require-namespace-resourcequota: t
+    bypass.homelab.internal/homelab-require-namespace-default-deny-netpol: t

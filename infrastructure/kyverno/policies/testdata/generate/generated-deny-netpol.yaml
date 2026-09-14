@@ -1,0 +1,15 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: cel-proof-gen
+  labels:
+    homelab.internal/component: default-deny
+    homelab.internal/generated-by: kyverno
+  annotations:
+    policies.kyverno.io/managed-by: homelab-generate-default-deny-netpol
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress

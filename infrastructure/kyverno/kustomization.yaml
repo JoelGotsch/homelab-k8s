@@ -86,6 +86,28 @@ resources:
   # resolver declared rather than leased.
   - policies/ci-woodpecker-dns-ndots.yaml
 
+  # ---------------------------------------------------------------------------
+  # CEL migration (hl-0284, 2026-09-14): `kyverno.io/v1 ClusterPolicy` is
+  # deprecated in the running v1.19 and removed in v1.20. Each policy above is
+  # being re-expressed as a `policies.kyverno.io/v1` kind under policies/cel/.
+  # Files under policies/cel/ that are NOT listed here are staged, offline-proven
+  # (policies/testdata/, run by scripts/check-kyverno-policy-tests.sh) and waiting
+  # for their cutover step — nothing under cel/ reaches the cluster until it is
+  # listed. Audit validators run ALONGSIDE their ClusterPolicy twin first so the
+  # two PolicyReport fail sets can be compared before the old one is removed.
+  # Order of the cutover: validators (Audit) -> mutate -> generate -> the
+  # Enforce allowlist policy -> image verification.
+  - policies/cel/audit-root-route-http-probes.yaml
+  - policies/cel/audit-third-party-image-digest.yaml
+  - policies/cel/require-first-party-image-digest.yaml
+  - policies/cel/homelab-require-namespace-limitrange.yaml
+  - policies/cel/homelab-require-namespace-resourcequota.yaml
+  - policies/cel/homelab-require-namespace-default-deny-netpol.yaml
+  - policies/cel/homelab-disallow-open-egress-cnp.yaml
+  - policies/cel/homelab-disallow-unlimited-containers.yaml
+  - policies/cel/homelab-disallow-retain-reclaim-without-annotation.yaml
+  - policies/cel/homelab-disallow-inline-secrets.yaml
+
 # site-config: build-only ConfigMap for the imageReferences replacement below
 # (ADR 0045). Marked local-config, so it is used for substitution and never
 # emitted — the render is byte-identical apart from the value it resolves.

@@ -1,0 +1,73 @@
+# Kyverno cluster policies — per ADR 0019 D3 + ADR 0023.
+#
+# Two-tier policy structure (matches ADR 0019 D3's framing
+# "first-party signed + digest-pinned, third-party with
+# exception list"):
+#
+# 1. ENFORCE on FIRST-PARTY images:
+#    - require-first-party-image-digest (Enforce)
+#    - verify-first-party-image-signature (Enforce)
+#    First-party = forgejo.lab/homelab/* or
+#    registry.homelab.internal/* (operator-built images).
+#    These MUST be digest-pinned + cosign-signed.
+#
+# 2. AUDIT on THIRD-PARTY images:
+#    - audit-third-party-image-digest (Audit)
+#    Visibility without blocking. Generates PolicyReport
+#    entries that surface "this chart still uses :tag"
+#    findings without breaking helm releases. Operator
+#    promotes individual third-party images to enforce-
+#    digest via an exception list as the ecosystem matures.
+#
+# Why this shape (vs the prior broad-Enforce-with-exclude
+# pattern, refined 2026-05-02 audit follow-up): chart-
+# managed workloads (cilium, kps, loki, alloy, falco,
+# langfuse, etc.) pull upstream images via tag
+# (e.g. `quay.io/grafana/loki:3.x.x`). Enforcing digest on
+# those would break every chart deploy. First-party-only
+# Enforce + third-party Audit is the canonical "supply-
+# chain enforcement at the admission gate without breaking
+# upstream chart adoption" shape.
+
+# CEL form (ValidatingPolicy), migrated 2026-09-14 (hl-0284) out of
+# clusterpolicies.yaml. The old `{{ images.containers.*.registry }} AnyIn`
+# precondition is the `exists()` matchCondition on the registry token of each
+# container image; the pattern `containers[].image: "*@sha256:*"` is the
+# `all()` validation. Note the old list named `forgejo.lab`, which is not the
+# Forgejo registry's real host, so — as before — only registry.homelab.internal
+# images are in scope; kept verbatim so the fail sets stay comparable.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: require-first-party-image-digest
+  annotations:
+    policies.kyverno.io/category: Supply Chain
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: |
+      First-party images (forgejo.lab/homelab/* and
+      registry.homelab.internal/*) MUST be referenced by
+      digest, not tag. Per ADR 0019 D3.
+spec:
+  # Audit during the bring-up window (2026-05-23) — see the header. Flip to
+  # Deny once Forgejo + Woodpecker are producing signed images.
+  validationActions: [Audit]
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: true
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchConditions:
+    - name: any-first-party-image
+      expression: >-
+        object.spec.containers.exists(c,
+          c.image.split('/')[0] in ['forgejo.lab', 'registry.homelab.internal'])
+  validations:
+    - expression: object.spec.containers.all(c, c.image.contains('@sha256:'))
+      message: >-
+        First-party image must be referenced by digest (sha256:...), not tag. Per ADR 0019 D3.

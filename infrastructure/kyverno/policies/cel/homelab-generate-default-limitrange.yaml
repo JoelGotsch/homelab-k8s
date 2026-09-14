@@ -1,0 +1,113 @@
+# Kyverno ClusterPolicy — auto-generate a default LimitRange into every
+# first-party namespace
+#
+# Purpose:   When a Namespace with `homelab.internal/first-party: "true"`
+#            is created (or reconciled), generate a namespace-scoped
+#            LimitRange named `default-limits` if it does not yet exist.
+# ADR:       0036 D8
+# Rollout:   Audit -> Enforce after 2 weeks of clean PolicyReports
+#            (Note: generate rules have no admission-block semantics; the
+#            Audit/Enforce distinction here is about PolicyReport
+#            surfacing on generate-failed events, per Kyverno v1.10+.)
+#
+# Rationale: Paired with `homelab-require-namespace-limitrange` (the
+#            validator). The validator says "this ns is missing a
+#            LimitRange"; this generator makes the missing-baseline case
+#            self-heal. `synchronize: true` means an accidental delete of
+#            the generated LimitRange is undone on the next reconcile
+#            (matches CLAUDE.md rule 8: controllers writing runtime state
+#            need explicit `data: {}` declarations — same idea here, the
+#            operator-managed shape gets restored).
+#
+#            Defaults come from ADR 0036:
+#              default:        memory 512Mi (no CPU limit — ADR 0042)
+#              defaultRequest: cpu 50m,  memory 128Mi
+#            Namespaces that need different defaults should ship their
+#            own LimitRange named anything OTHER than `default-limits`;
+#            this generator only manages the one it created.
+#
+# Bypass:    Annotate the Namespace with
+#              bypass.homelab.internal/homelab-generate-default-limitrange: "<reason>"
+#            to prevent generation (e.g. a namespace that intentionally
+#            wants a stricter LimitRange with the same shape name).
+
+# CEL form (GeneratingPolicy), migrated 2026-09-14 (hl-0284). The generated
+# object is declared as a CEL map (the GA expression form; the YAML `template`
+# form is beta at v1.19). Same name, namespace, labels, annotation and spec as
+# the old `generate.data`; the engine adds its own generate.kyverno.io/* labels
+# on top, as the old one did.
+apiVersion: policies.kyverno.io/v1
+kind: GeneratingPolicy
+metadata:
+  name: homelab-generate-default-limitrange
+  annotations:
+    policies.kyverno.io/title: "Namespace: auto-generate default LimitRange"
+    policies.kyverno.io/category: "Resource Governance"
+    policies.kyverno.io/severity: low
+    policies.kyverno.io/subject: LimitRange
+    policies.kyverno.io/description: |
+      When a Namespace with `homelab.internal/first-party: "true"` is
+      created/updated, generate a default LimitRange named
+      `default-limits`. `synchronize: true`. Bypass with
+      `bypass.homelab.internal/homelab-generate-default-limitrange`.
+spec:
+  evaluation:
+    synchronize:
+      enabled: true
+    generateExisting:
+      enabled: true
+    orphanDownstreamOnPolicyDelete:
+      enabled: false
+  matchConstraints:
+    objectSelector:
+      matchLabels:
+        homelab.internal/first-party: "true"
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [namespaces]
+  matchConditions:
+    - name: no-policy-bypass
+      expression: >-
+        object.metadata.?annotations['bypass.homelab.internal/homelab-generate-default-limitrange'].orValue('') == ''
+    - name: not-an-excluded-namespace
+      expression: >-
+        !(object.metadata.name in [
+          "kyverno", "longhorn-system", "longhorn-va-janitor", "cnpg-system", "cert-manager",
+          "external-secrets", "trust-manager", "trivy-system", "clickhouse-operator",
+          "cloudflare-tunnel", "csi-rclone-system", "minio-on-nas", "nfs-csi", "spegel",
+          "backup-cronjobs", "monitoring", "observability-crowdsec", "observability-benchmarks",
+          "observability-tempo", "kube-system", "argocd", "openbao", "approval-channel",
+          "authentik", "forgejo", "immich", "langfuse", "llm-gateway", "nextcloud", "paperless",
+          "vaultwarden"
+        ])
+  variables:
+    - name: nsName
+      expression: object.metadata.name
+    - name: downstream
+      expression: >-
+        [{
+          "apiVersion": dyn("v1"),
+          "kind": dyn("LimitRange"),
+          "metadata": dyn({
+            "name": "default-limits",
+            "namespace": string(variables.nsName),
+            "labels": {
+              "homelab.internal/generated-by": "kyverno",
+              "homelab.internal/component": "default-limits"
+            },
+            "annotations": {
+              "policies.kyverno.io/managed-by": "homelab-generate-default-limitrange"
+            }
+          }),
+          "spec": dyn({
+            "limits": [{
+              "type": "Container",
+              "default": {"memory": "512Mi"},
+              "defaultRequest": {"cpu": "50m", "memory": "128Mi"}
+            }]
+          })
+        }]
+  generate:
+    - expression: generator.Apply(variables.nsName, variables.downstream)
