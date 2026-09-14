@@ -85,9 +85,24 @@ alloy:
         }
         // /var/log/pods/<namespace>_<pod>_<uid>/<container>/<n>.log on
         // Talos (verified on worker1, 2026-09-14). The glob is the one the
-        // local.file_match reference gives; `*.log` matches the live
-        // 0.log and the kubelet's rotated-but-uncompressed files, not the
-        // `0.log.<stamp>.gz` archives.
+        // local.file_match reference gives. `<n>` is the container's
+        // restart count, so `*.log` matches EVERY incarnation still on
+        // disk (0.log, 1.log, ...) and not the kubelet's rotated
+        // `0.log.<stamp>[.gz]` files. With `filename` dropped below, the
+        // incarnations of one container share one Loki stream and are read
+        // in parallel, so on a positions-less start the older file's lines
+        // arrive after the newer file's head and Loki refuses them —
+        // `entry too far behind, oldest acceptable timestamp is <stream
+        // head - max_chunk_age/2>` (400; seen on the 2026-09-14 switch,
+        // 18 batches on worker1 in ten minutes, all from files dated
+        // before the current incarnation). Those lines predate the running
+        // container and never reached Loki under loki.source.kubernetes
+        // either, so nothing is lost relative to before; in steady state a
+        // restart's new file is newer than the old one's tail and the
+        // problem does not arise. Note loki_write_dropped_entries_total
+        // counts the whole batch when one entry is refused, while Loki has
+        // already stored the batch's valid entries — read the error lines,
+        // not that counter, to size the loss.
         rule {
           source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
           separator     = "/"
