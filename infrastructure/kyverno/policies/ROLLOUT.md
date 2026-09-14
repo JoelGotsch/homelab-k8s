@@ -18,7 +18,10 @@ high-count policies.
    handful of bootstrap secrets to need the `inline-secret` bypass.
 3. **CNP open-egress policy** — countable violators (feedback file
    already lists the CI Woodpecker case as fixed; a few monitoring
-   collectors expected).
+   collectors expected). 2026-09-14: the last four `fail`s were cleared
+   (cert-manager :53 and cloudflared → Cloudflare's published ranges,
+   llm-gateway → `toFQDNs`, tailscale → declared bypass, each rehearsed
+   in PolicyAuditMode); the 14-day clock runs from that date.
 4. **Namespace-baseline require-* policies** — every first-party
    namespace should have all three baselines once the paired
    generators run one reconcile cycle. Flip after generators observed
@@ -36,7 +39,7 @@ high-count policies.
 |------------------------------------------------------------|---------|---------------------------------------------------------------------------------|--------------------------------------------------------|
 | `homelab-disallow-retain-reclaim-without-annotation`       | Audit   | On `longhorn-replica{2,3}-retain` SC ship + 14d clean PolicyReports             | 0 at day-one (SC not yet used)                         |
 | `homelab-disallow-inline-secrets`                          | Audit   | 14d clean after operator sweep of first-party ns Secrets                        | ~5-10 (bootstrap + helm-hook secrets across the fleet) |
-| `homelab-disallow-open-egress-cnp`                         | Audit   | 14d clean after CNP audit (CI Woodpecker already fixed; check monitoring set)   | ~3-5 (monitoring collectors expected)                  |
+| `homelab-disallow-open-egress-cnp`                         | Audit   | 14d clean from 2026-09-14 (cluster-wide 206 pass / 2 skip / 0 fail that day) → flip on or after 2026-09-28 | 0 at clock start (was 4: cert-manager, cloudflared, llm-gateway fixed; tailscale declared via bypass) |
 | `homelab-require-namespace-limitrange`                     | Audit   | 14d after `homelab-generate-default-limitrange` observed stable                 | 0 (generator materialises baseline)                    |
 | `homelab-require-namespace-resourcequota`                  | Audit   | 14d after `homelab-generate-default-resourcequota` observed stable              | 0 (generator materialises baseline)                    |
 | `homelab-require-namespace-default-deny-netpol`            | Audit   | 14d after `homelab-generate-default-deny-netpol` observed stable                | 0 (generator materialises baseline)                    |
