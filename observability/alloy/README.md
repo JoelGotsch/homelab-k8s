@@ -11,6 +11,7 @@ the operator-facing-agent rename + flow-language refactor).
 | Source | Loki labels | Notes |
 |---|---|---|
 | Pod logs, tailed from the node's `/var/log/pods/<ns>_<pod>_<uid>/<container>/*.log` (`local.file_match` + `loki.source.file`; pods discovered on this node via `discovery.kubernetes`) | `namespace`, `pod`, `container`, `node`, `app`, `component`, `stream` | `stage.cri` parses the CRI line format; drops k8s healthz probe-noise and lines older than Loki's 168h window |
+| kube-apiserver audit log, tailed from `/var/log/audit/kube/kube-apiserver.log` on the control planes (`local.file_match` + `loki.source.file`; the directory is empty on workers) | `job="kube-apiserver-audit"`, `node` | `stage.json` lifts `verb`, `user.username`→`user`, `objectRef.resource`→`resource`, `responseStatus.code`→`code`, `stage`, `level` into **structured metadata** (not labels); entry time = `stageTimestamp`; same 168h `stage.drop`. What the apiserver writes is decided by `homelab-infra/talos/patches/kube-apiserver-audit-policy.yaml` (2026-09-14). Query: `{job="kube-apiserver-audit"} \| user="admin" \| verb="delete"` |
 
 Ships to `http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push`.
 There is no journald source: Talos has no journald (node logs go to the
@@ -85,12 +86,16 @@ one scrape.
 
 ## Caveats
 
-1. **Alloy runs as root** because the kubelet writes
-   `/var/log/pods/*/*/*.log` as `0640 root:root` (verified on
-   worker1, 2026-09-14). Not privileged in the k8s sense
-   (`runAsUser: 0`, read-only root FS, all capabilities dropped,
-   read-only hostPath). The historical reason (journald) never
-   applied on Talos.
+1. **Alloy runs as root with `CAP_DAC_READ_SEARCH`** because the
+   kubelet writes `/var/log/pods/*/*/*.log` as `0640 root:root`
+   (verified on worker1, 2026-09-14) and the apiserver writes
+   `/var/log/audit/kube/` as `0700 nobody:nogroup` with `0600` files —
+   root with every capability dropped cannot stat those (verified from
+   the running pods the same day). Not privileged in the k8s sense
+   (`runAsUser: 0`, read-only root FS, every other capability dropped,
+   read-only hostPath); `DAC_READ_SEARCH` bypasses read/search checks
+   only, never write. The historical reason (journald) never applied
+   on Talos.
 
 2. **No log enrichment beyond k8s metadata.** Operator can
    add `loki.process` stages (label_extract, JSON parse,

@@ -406,6 +406,99 @@ alloy:
         }
       }
 
+      // ---------- kube-apiserver audit log (control planes) ----------
+      //
+      // 2026-09-14. Talos writes the apiserver audit log to
+      // /var/log/audit/kube/kube-apiserver.log — one audit.k8s.io/v1 Event
+      // per line, rotated by the apiserver itself (--audit-log-maxsize=100
+      // --audit-log-maxbackup=10 --audit-log-maxage=30, Talos defaults).
+      // Until today nothing read it and, under the Talos default policy,
+      // the ring held ~2 h; with homelab-infra's kube-apiserver-audit-policy
+      // patch it holds days, and this source makes Loki the archive. The
+      // directory exists on every node (empty on workers), so the match is
+      // simply empty there.
+      //
+      // The ACTIVE file only, not `*.log`: the apiserver rotates by renaming
+      // to kube-apiserver-<stamp>.log and the tailer follows the renamed
+      // inode to EOF before reopening the new one. A glob over the backups
+      // would hand every rotated file a second reader from byte 0 on each
+      // positions-less restart (see the pods source: positions live on an
+      // emptyDir) — 10 × 100 MB of duplicates per control plane.
+      //
+      // Files are 0600 nobody:nogroup in a 0700 directory. Root with every
+      // capability dropped cannot even stat them (verified from the running
+      // pods, 2026-09-14: `[ -f …/kube-apiserver.log ]` false, CapPrm all
+      // zero), hence CAP_DAC_READ_SEARCH in securityContext below — read
+      // and search only, no write bypass, and the mount is read-only anyway.
+      //
+      // Stream labels are `job` and `node` — nothing else. verb, user,
+      // resource, code, stage and level go into STRUCTURED METADATA (Loki
+      // 3.x, schema v13 in observability/loki/values.yaml), so
+      //   {job="kube-apiserver-audit"} | user="admin" | verb="delete"
+      // works without user × resource × verb × code becoming streams: the
+      // user set alone is unbounded (every ServiceAccount) and would have
+      // been thousands of streams per node.
+      local.file_match "apiserver_audit" {
+        path_targets = [{
+          __path__ = "/var/log/audit/kube/kube-apiserver.log",
+          job      = "kube-apiserver-audit",
+          node     = sys.env("HOSTNAME"),
+        }]
+      }
+
+      loki.source.file "apiserver_audit" {
+        targets    = local.file_match.apiserver_audit.targets
+        forward_to = [loki.process.apiserver_audit.receiver]
+      }
+
+      loki.process "apiserver_audit" {
+        forward_to = [loki.write.default.receiver]
+
+        // The path is the same on every control plane; `node` names it.
+        stage.label_drop {
+          values = ["filename"]
+        }
+
+        // stageTimestamp is when the apiserver finished the stage. Using it
+        // as the entry time puts a re-read after an Alloy restart at the
+        // right instant instead of "now"; Loki de-duplicates the replay.
+        stage.json {
+          expressions = {
+            ts       = "stageTimestamp",
+            stage    = "stage",
+            level    = "level",
+            verb     = "verb",
+            user     = "user.username",
+            resource = "objectRef.resource",
+            code     = "responseStatus.code",
+          }
+        }
+        stage.timestamp {
+          source = "ts"
+          format = "RFC3339Nano"
+        }
+        stage.structured_metadata {
+          values = {
+            stage    = "",
+            level    = "",
+            verb     = "",
+            user     = "",
+            resource = "",
+            code     = "",
+          }
+        }
+
+        // Same reason as loki.process "pods": a positions-less restart can
+        // replay the whole 100 MB active file, and anything older than
+        // Loki's reject_old_samples window would be a 400 per batch. Dropped
+        // here instead, counted under
+        // loki_process_dropped_lines_total{reason="too_old"}.
+        stage.drop {
+          older_than          = "168h"
+          drop_counter_reason = "too_old"
+        }
+      }
+
       // ---------- Node/system logs ----------
       // NOTE: no `loki.source.journal` here. Talos does not run
       // systemd-journald and has no /var/log/journal — the block
@@ -433,9 +526,11 @@ alloy:
         // NetworkPolicy gates ingress.
       }
 
-  # Alloy tails /var/log/pods on each node (loki.source.file above).
-  # Read-only hostPath at /var/log; the files are 0640 root:root, hence
-  # runAsUser: 0 below.
+  # Alloy tails /var/log/pods on each node and, on control planes,
+  # /var/log/audit/kube (loki.source.file above). Read-only hostPath at
+  # /var/log; the pod-log files are 0640 root:root, hence runAsUser: 0
+  # below, and the audit files 0600 nobody:nogroup in a 0700 directory,
+  # hence CAP_DAC_READ_SEARCH.
   mounts:
     varlog: true       # /var/log
     dockercontainers: false
@@ -459,6 +554,12 @@ alloy:
     allowPrivilegeEscalation: false
     capabilities:
       drop: [ALL]
+      # Read + directory-search bypass only (no DAC_OVERRIDE: that would
+      # also bypass write checks). Needed for /var/log/audit/kube, which is
+      # 0700 nobody:nogroup with 0600 files; root without it gets EACCES
+      # (verified 2026-09-14). The namespace is PSA `privileged`, so the
+      # added capability is admitted; the hostPath is read-only regardless.
+      add: [DAC_READ_SEARCH]
 
 # Disable the chart's default ServiceMonitor — we ship our
 # own with the right label.
