@@ -30,6 +30,11 @@ resources:
   # Packages repos reject anonymous token grants (2026-07-18).
   - registry-pull-secret.yaml
   - policies/verify-first-party-image-signature.yaml
+  # CEL twin of the image-verification policy, ALONGSIDE the ClusterPolicy for
+  # one step: a server dry-run of an unsigned first-party image must warn from
+  # both kinds (their warning texts differ), a signed one from neither; then
+  # the ClusterPolicy goes and the dry-run is repeated.
+  - policies/cel/verify-first-party-image-signature.yaml
   # Audit-only: workloads with `httpGet path: /` probes that aren't
   # explicitly confirmed via probes.homelab.internal/root-route-confirmed
   # annotation. Surfaces the pr-agent-style silent kill-loop trap.
@@ -43,12 +48,9 @@ resources:
   # allowlist of namespaces. Ratchet from audit (cluster-wide,
   # visibility) to enforce (allowlist, blocking). Add new
   # namespaces per 04-guides/digest-pin-enforce-allowlist.md.
-  - policies/enforce-digest-pinning-allowlist.yaml
-  # CEL twin of the Enforce policy, run ALONGSIDE the ClusterPolicy for one
-  # step: a server dry-run of an unpinned Pod in minio-on-nas must be denied
-  # by both (the two kinds word their denial differently, so the dry-run
-  # output attributes each), then the ClusterPolicy goes and the dry-run is
-  # repeated against the ValidatingPolicy alone.
+  # ValidatingPolicy since 2026-09-14 (hl-0284): ran one step alongside the
+  # ClusterPolicy (background rows identical for every live object, vpol
+  # webhook invoked on each dry-run), then proven alone by the same dry-run.
   - policies/cel/enforce-digest-pinning-allowlist.yaml
   # ADR 0036 — cluster-wide admission governance. All start in
   # Audit; see policies/ROLLOUT.md for the Enforce migration plan
@@ -144,6 +146,13 @@ replacements:
         fieldPaths:
           - spec.rules.[name=verify-cosign-static-key].verifyImages.0.imageReferences.[=FORGEJO_FQDN/homelab/*]
           - spec.rules.[name=verify-cosign-static-key].verifyImages.0.imageReferences.[=FORGEJO_FQDN/forgejo-admin/*]
+        options: { delimiter: '/', index: 0 }
+      # Same two globs on the ImageValidatingPolicy twin (matchImageReferences
+      # entries are selected by their own glob value, same reasoning).
+      - select: { kind: ImageValidatingPolicy, name: verify-first-party-image-signature }
+        fieldPaths:
+          - spec.matchImageReferences.[glob=FORGEJO_FQDN/homelab/*].glob
+          - spec.matchImageReferences.[glob=FORGEJO_FQDN/forgejo-admin/*].glob
         options: { delimiter: '/', index: 0 }
 
   # Same host into the imageVerify pull credential's `auths` map. Kyverno
