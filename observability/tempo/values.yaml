@@ -60,6 +60,16 @@ tempo:
   # Tempo accepts OTLP (gRPC + HTTP) directly; no Jaeger /
   # Zipkin compat needed at this scale.
   receivers:
+    # The chart default enables an OpenCensus receiver as `opencensus: null`
+    # (present = on, default endpoint :55678). Helm 4 (Argo CD 3.5) drops null
+    # chart defaults, which would switch it off in a render nobody reviewed; a
+    # `null` here does not help either (helm 3 deletes it, helm 4 keeps it).
+    # `{}` renders the same under both and means the same receiver with its
+    # default config. Nothing sends OpenCensus — the only sender is the OTel
+    # Collector over OTLP (values-gateway.yaml) and tempo-allow admits
+    # 4317/4318/3200 only — so turning it off is fine too, but that is a
+    # separate decision from making the helm upgrade a no-op.
+    opencensus: {}
     otlp:
       protocols:
         grpc:
