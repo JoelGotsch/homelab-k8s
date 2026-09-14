@@ -22,15 +22,17 @@
 #
 # Heaviest workflow, measured 2026-09-14 from kube-state-metrics
 # over 30 days (per `woodpecker-ci.org/task-uuid`, concurrent sum):
-# conversation-history — every run lands at 9–10 of these, so it
-# is the norm, not an outlier:
+# conversation-history — every run lands at 9–10Gi limits, so it
+# is the norm, not an outlier. The same day its pipeline gained a
+# `minio` service (+1 pod, 50m/128Mi requests, 500m/512Mi limits;
+# declared by its owner, not yet measured), included below:
 #
 #   resource         1 workflow   × 4    set    real use (× 4)
-#   pods             10           40     48
-#   requests.cpu     1.75         7      8
-#   requests.memory  2.5Gi        10Gi   12Gi   2.6GiB (10.3GiB)
-#   limits.cpu       18.5         74     80
-#   limits.memory    10Gi         40Gi   48Gi
+#   pods             12           48     58
+#   requests.cpu     1.8          7.2    9
+#   requests.memory  2.625Gi      10.5Gi 13Gi   2.6GiB (10.3GiB) pre-minio
+#   limits.cpu       19           76     92
+#   limits.memory    11.5Gi       46Gi   56Gi
 #
 # Next heaviest: todo-agents / llm-gateway at 4Gi limits.memory.
 # Re-measure (max over 30d of the per-task-uuid sum of
@@ -39,7 +41,7 @@
 # it is expensive; a 1h range is enough to confirm one pipeline.
 #
 # Why the limits numbers are safe despite being large: limits do
-# not reserve anything. requests (12Gi, ~13% of the three workers'
+# not reserve anything. requests (13Gi, ~14% of the three workers'
 # ~91GiB) are what the scheduler holds for CI, and step Pods are
 # Burstable with a 1:4 request:limit ratio, so under node memory
 # pressure the kernel OOM-kills CI steps before app workloads.
@@ -52,15 +54,15 @@ metadata:
   namespace: ci-woodpecker
 spec:
   hard:
-    requests.cpu: "8"
-    requests.memory: "12Gi"
+    requests.cpu: "9"
+    requests.memory: "13Gi"
     # conversation-history declares per-step CPU limits (up to the
     # LimitRange max of 4) because most of its runtime is CPU-bound and
     # it fans steps out in parallel. limits.cpu throttles, it does not
     # reserve; requests.cpu above bounds what CI can hold.
-    limits.cpu: "80"
-    limits.memory: "48Gi"
-    pods: "48"
+    limits.cpu: "92"
+    limits.memory: "56Gi"
+    pods: "58"
     persistentvolumeclaims: "20"
     requests.storage: "200Gi"
 ---
