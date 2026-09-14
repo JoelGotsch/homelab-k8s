@@ -154,3 +154,34 @@ spec:
           kind: CustomResourceDefinition
           name: validatingpolicies.policies.kyverno.io
           jsonPointers: [/spec/conversion, /metadata/labels]
+  # infra-kyverno only: diff with the SAME pipeline that applies.
+  #
+  # `controller.diff.server.side: "true"` (argocd-cmd-params, since 2026-07-21)
+  # already makes the controller compute diffs by server-side dry-run, but
+  # that path then runs `removeWebhookMutation` to strip whatever admission
+  # webhooks added — and Kyverno's `mutate-policy.kyverno.svc` webhook mutates
+  # every ClusterPolicy on apply. On the kyverno.io/v1 CRD `spec.rules` is an
+  # atomic list (no x-kubernetes-list-type) and `spec.rules[].preconditions`
+  # is `x-kubernetes-preserve-unknown-fields`, so the stripped and re-merged
+  # object can differ from what the apply produces while carrying the same
+  # bytes Argo just applied. That is the shape of TODO.md hl-0281 (2026-09-12):
+  # `serverside-applied` + `Succeeded` on a policy whose `preconditions`
+  # change never landed, generation frozen, every other hypothesis falsified.
+  # `IncludeMutationWebhook=true` keeps the webhook's result in the predicted
+  # live state instead of stripping it (Argo docs, diff-strategies: "Server-
+  # Side Diff does not include changes made by mutation webhooks by default").
+  # `ServerSideDiff=true` is stated explicitly so the app does not depend on
+  # the global param staying set. Both are Application-level
+  # `compare-options` annotations — placing them on a managed resource is
+  # inert (lessons.md, tempo 2026-09-09). Scoped to this one app because the
+  # webhook cost of the dry-run is paid on every refresh; nothing else here
+  # sits behind a mutating webhook of its own.
+  #
+  # Verified after landing (2026-09-14): see the hl-0281 row for the result of
+  # two hard refreshes.
+  templatePatch: |
+    {{- if eq .path.basename "kyverno" }}
+    metadata:
+      annotations:
+        argocd.argoproj.io/compare-options: ServerSideDiff=true,IncludeMutationWebhook=true
+    {{- end }}
