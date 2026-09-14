@@ -127,7 +127,12 @@ data:
         # in-memory-only design.
         buffer:
           type: disk
-          max_size: 268435456   # 256 MiB
+          # 512 MiB. Vector's disk buffer needs at least 268435488 bytes
+          # (256 MiB + 32) and refuses to build otherwise — exit 78,
+          # "parameter 'max_buffer_size' was invalid". The original
+          # 268435456 (exactly 256 MiB) was 32 bytes short; `vector
+          # validate` does not build buffers, so it passed (2026-09-14).
+          max_size: 536870912
           when_full: block
 
       # Self-metrics: Vector's pipeline counters (events_in,
