@@ -127,7 +127,7 @@ spec:
                           # came up (task #54); previously absent.
         - port: 80   # ntfy server
           protocol: TCP
-        - port: 8000   # ntfy-e2ee-relay
+        - port: 8000   # ntfy-e2ee-relay; kyverno controllers metrics-port (ServiceMonitors since 2026-09-14)
           protocol: TCP
         - port: 2801   # falcosidekick
           protocol: TCP

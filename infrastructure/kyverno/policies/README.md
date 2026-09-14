@@ -116,8 +116,19 @@ same shape). Flipping a policy to Enforce is a three-step procedure:
 
 3. **Edit the policy file: `validationFailureAction: Audit -> Enforce`.**
    Commit, ArgoCD sync. The next admission of a violating resource is
-   rejected. Watch `kubectl get events -A --field-selector reason=PolicyViolation`
-   for surprise blocks in the first 24h.
+   rejected. Watch the reports for surprise blocks in the first 24h:
+
+       kubectl get policyreport -A -o json \
+         | jq -r '.items[].results[] | select(.policy=="<policy-name>" and .result=="fail") | .resources[0].name'
+       kubectl get clusterpolicyreport -o json | jq '.items[].summary'
+
+   Do NOT watch `kubectl get events --field-selector reason=PolicyViolation`:
+   since 2026-09-14 Kyverno is configured with
+   `features.omitEvents.eventTypes: [PolicyApplied, PolicySkipped, PolicyViolation]`
+   (values.yaml), so no PolicyViolation events are emitted — they were 72% of
+   every Event in etcd with no consumer. A blocked admission is still visible
+   to the client as the webhook's denial message, and `PolicyError` events
+   (engine failures) are still emitted.
 
 If a surprise block appears: **do not revert the flag**. Instead, either
 add the bypass annotation to the offending resource (with a real reason

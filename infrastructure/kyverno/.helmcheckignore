@@ -1,0 +1,41 @@
+# .helmcheckignore — check-helm-values-keys.sh baseline for infrastructure/kyverno
+# (kyverno/kyverno chart, pinned in kustomization.yaml).
+#
+# One key path per line; `#` comments and blanks ignored. An entry `a.b`
+# acknowledges `a.b` and every key nested under it (`a.b.*`). With this file
+# present the layer is GATED: any key not in the chart's values tree and not
+# listed here blocks the commit.
+#
+# Why this file exists (2026-09-14): `admissionController.resources` sat in
+# values.yaml from the ADR 0036 rollout and rendered to nothing — the chart
+# reads `admissionController.container.resources` — so the live admission
+# controller ran on the chart-default 384Mi limit while the comment claimed
+# 1Gi. The hook flagged the key all along; the layer just had no baseline, so
+# the flag was a warning nobody read. Triage method for a new flag:
+# `grep -rn '.Values.<key>' infrastructure/kyverno/charts/*/` — chart reads it
+# → back-compat-OK below; it doesn't → real dropped wrong-key, fix values.yaml.
+
+# ── Back-compat-OK ──────────────────────────────────────────────────────────
+# List-item subpaths: the chart's defaults are empty lists (`[]`), so the
+# item keys never appear in `helm show values`, but the templates `toYaml`/
+# `range` over them and they render correctly.
+admissionController.extraVolumes             # chart: `with .Values.admissionController.extraVolumes`
+admissionController.extraVolumeMounts        # chart: `with .Values.admissionController.extraVolumeMounts`
+admissionController.topologySpreadConstraints  # chart: `with .Values.admissionController.topologySpreadConstraints`
+backgroundController.extraVolumes
+backgroundController.extraVolumeMounts
+backgroundController.topologySpreadConstraints
+cleanupController.topologySpreadConstraints
+reportsController.extraVolumes
+reportsController.extraVolumeMounts
+reportsController.topologySpreadConstraints
+reportsController.rbac.clusterRole.extraResources  # chart: `range .Values.reportsController.rbac.clusterRole.extraResources`
+# Free-form label maps: the chart default is `{}` and the template `toYaml`s
+# whatever is set, so the label KEY we choose (`release`) is never in the tree.
+admissionController.serviceMonitor.additionalLabels
+backgroundController.serviceMonitor.additionalLabels
+cleanupController.serviceMonitor.additionalLabels
+reportsController.serviceMonitor.additionalLabels
+
+# ── KNOWN WRONG-KEYS — value is DROPPED at render ────────────────────────────
+# (none — admissionController.resources was fixed, not suppressed, 2026-09-14)

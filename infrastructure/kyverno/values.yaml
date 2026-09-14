@@ -45,6 +45,14 @@ webhooksCleanup:
 # ConfigMap as a DIRECTORY at .../ca-certificates.crt (file path), which Go
 # cannot read; its `data` variant would inline the whole Mozilla bundle here.
 
+# --- Prometheus scrape (2026-09-14) ---
+# All four controllers expose metrics on :8000 (`metrics-port`). The kyverno
+# NetworkPolicy has admitted monitoring -> 8000 since 2026-07-18 and the
+# Prometheus egress allowlist already carries 8000, but no ServiceMonitor
+# existed, so nothing was ever scraped: `up{namespace="kyverno"}` returned no
+# series. kube-prometheus-stack selects ServiceMonitors by
+# `release: kube-prometheus-stack` (live `serviceMonitorSelector`, re-read
+# 2026-09-14), hence `additionalLabels` on each controller's block.
 admissionController:
   replicas: 2
   extraVolumes:
@@ -55,16 +63,27 @@ admissionController:
     - name: homelab-trust-bundle
       mountPath: /etc/ssl/certs
       readOnly: true
-  resources:
-    # ADR 0036 rollout raises admission-controller headroom.
-    # Kyverno's admission path was previously 512Mi limit; with
-    # the ten `homelab-*` ClusterPolicies at Audit + the two
-    # ADR 0019 image-signature rules, sustained webhook load
-    # can hit that ceiling under Argo sync bursts. 1Gi limit
-    # + 100m/256Mi requests aligns with the ADR 0036 subagent
-    # brief's "Kyverno admission-controller can hot under load".
-    requests: {cpu: 100m, memory: 256Mi}
-    limits: {memory: 1Gi}
+  # The admission controller is the one controller whose resources live under
+  # `container:` (it also has an initContainer), so the chart reads
+  # `admissionController.container.resources` — templates/admission-controller/
+  # deployment.yaml. A block at `admissionController.resources` sat here from
+  # the ADR 0036 rollout until 2026-09-14 and RENDERED TO NOTHING: the live
+  # Deployment carried the chart defaults the whole time (384Mi limit / 128Mi
+  # request), never the "1Gi" the comment described, and the "previous 512Mi"
+  # it cited had never existed live either. The other three controllers use
+  # the top-level `<controller>.resources` key, which is why theirs applied.
+  # Sizing: 7-day peak working set 183Mi against the 384Mi default; 512Mi is
+  # headroom for Argo sync bursts, 256Mi request is what it actually needs
+  # scheduled. `.helmcheckignore` now gates this layer so a dead key blocks
+  # the commit instead of silently rendering to nothing.
+  container:
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {memory: 512Mi}
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
   topologySpreadConstraints:
     - maxSkew: 1
       topologyKey: kubernetes.io/hostname
@@ -87,6 +106,10 @@ backgroundController:
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {memory: 512Mi}
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
   topologySpreadConstraints:
     - maxSkew: 1
       topologyKey: kubernetes.io/hostname
@@ -107,6 +130,10 @@ cleanupController:
       labelSelector:
         matchLabels:
           app.kubernetes.io/component: cleanup-controller
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
 
 reportsController:
   replicas: 2
@@ -124,6 +151,10 @@ reportsController:
   resources:
     requests: {cpu: 25m, memory: 64Mi}
     limits: {memory: 256Mi}
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: kube-prometheus-stack
   # Background reports evaluate Cilium network-policy resources. Kyverno
   # deliberately does not grant arbitrary CRD reads by default, so add only
   # the two exact kinds matched by homelab-disallow-open-egress-cnp.
@@ -143,7 +174,43 @@ reportsController:
         matchLabels:
           app.kubernetes.io/component: reports-controller
 
+# --- Engine features (2026-09-14) ---
+features:
+  omitEvents:
+    # Chart default omits PolicyApplied + PolicySkipped. PolicyViolation is
+    # added because, measured 2026-09-14, Kyverno emitted 6,170 PolicyViolation
+    # events/h = 72% of every Event object in etcd (7,610 of 10,077 at the
+    # time of the change), and nothing consumed them: no policy-reporter, no
+    # alert rule, no dashboard queries `reason=PolicyViolation`. The
+    # PolicyReports / ClusterPolicyReports remain the record of violations
+    # (`kubectl get policyreport -A`, `kubectl get clusterpolicyreport`), and
+    # they are what policies/README.md's Enforce procedure reads. PolicyError
+    # is deliberately kept: it is the one event type that signals the engine
+    # itself failing (RBAC, apiCall, image pull), and it is rare.
+    eventTypes:
+      - PolicyApplied
+      - PolicySkipped
+      - PolicyViolation
+  backgroundScan:
+    # Chart default is `true`, i.e. the background scan IGNORES
+    # `config.resourceFilters` and reports on everything the policies match.
+    # Measured 2026-09-14: 573 of 1,330 PolicyReports were on ReplicaSets, 477
+    # of those on zero-replica rollout history — reports about pods that no
+    # longer exist, re-evaluated every scan. With `false` the background scan
+    # honours the same filter list admission does; the default list excludes
+    # ReplicaSet, Event, Node, Binding, TokenReview, the EphemeralReport kinds
+    # and Kyverno's own objects, none of which any policy here matches
+    # (verified against the live `kyverno` ConfigMap `resourceFilters` before
+    # the change). NB the kube-system and kyverno namespaces are NOT in the
+    # live list — `resourceFiltersExcludeNamespaces` below strips them — so
+    # they stay policed and reported.
+    skipResourceFilters: false
+
 config:
+  # Removes the chart's `[*/*,kube-system,*]` and `[*/*,kyverno,*]` entries
+  # from `resourceFilters`, so both namespaces ARE subject to policy (the
+  # helper name reads backwards: it excludes the namespace from the filter,
+  # not from Kyverno).
   resourceFiltersExcludeNamespaces:
     - kube-system
     - kyverno
