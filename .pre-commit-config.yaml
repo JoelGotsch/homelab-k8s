@@ -121,6 +121,22 @@ repos:
         pass_filenames: false
         files: '^(observability/(kube-prometheus-stack|crowdsec)/[^/]+\.ya?ml|scripts/(check-selectors-match-render|test-scrape-port-guard)\.py)$'
 
+      - id: check-hubble-redaction
+        name: no Hubble flow export without allow-list L7 redaction (credential headers, hl-0315)
+        entry: python3 scripts/check-hubble-redaction.py
+        language: python
+        additional_dependencies: [PyYAML==6.0.2]
+        pass_filenames: false
+        files: '^(infrastructure/cilium/values\.yaml|scripts/check-hubble-redaction\.py)$'
+
+      - id: test-hubble-redaction
+        name: the Hubble redaction guard rejects each unsafe shape
+        entry: python3 scripts/test-hubble-redaction.py
+        language: python
+        additional_dependencies: [PyYAML==6.0.2]
+        pass_filenames: false
+        files: '^(infrastructure/cilium/values\.yaml|scripts/(check|test)-hubble-redaction\.py)$'
+
       - id: check-openbao-snapshot-auth
         name: OpenBao snapshot auth is short-lived, scoped, and static-token-free
         entry: scripts/check-openbao-snapshot-auth.sh
