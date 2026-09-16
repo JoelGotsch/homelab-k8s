@@ -1,0 +1,123 @@
+# generic-device-plugin (squat) — advertises /dev/dri/renderD128 on every
+# worker as the extended resource `devic.es/amd-render`.
+#
+# How a consumer uses it (jellyfin-k8s/k8s/values.yaml, plan Phase 5):
+#   resources:
+#     requests: {devic.es/amd-render: 1}
+#     limits:   {devic.es/amd-render: 1}
+# The scheduler then places the pod only on a node whose kubelet advertises
+# the resource, and the kubelet injects the device node into the container.
+# A worker WITHOUT /dev/dri/renderD128 (no amdgpu extension yet) simply
+# advertises 0 — the resource request doubles as the "only on GPU nodes"
+# pin, and lifts itself as workers roll. A pod that cannot be placed stays
+# Pending with `Insufficient devic.es/amd-render` rather than starting on
+# CPU silently, which is the failure mode the plan exists to eliminate.
+#
+# count: 4 — the render node may be held by up to four containers per node
+# at once (Jellyfin today; Immich ML / Frigate later). It bounds containers,
+# not streams; VCN 2.x has one decode + one encode engine.
+#
+# Version: 0.2.0 is the release that moved the default domain from
+# `squat.ai` to `devic.es`; passed explicitly so a future default change
+# cannot rename the resource under the consumers. Digest resolved from ghcr
+# on 2026-09-16 (audit-third-party-image-digest wants digests; the
+# `latest`+`Always` the upstream chart ships is exactly the drift this repo
+# refuses).
+#
+# NOT privileged. The upstream manifest sets privileged: true for
+# convenience; the plugin only globs/stat()s the configured paths and
+# serves gRPC on a unix socket the kubelet owns, so root + no capabilities
+# + read-only rootfs is enough. If registration ever fails with EACCES on
+# the socket dir or the devices, that is the moment to widen — with the
+# error quoted in this comment, not by default.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: generic-device-plugin
+  namespace: generic-device-plugin
+  labels:
+    app.kubernetes.io/name: generic-device-plugin
+    app.kubernetes.io/part-of: generic-device-plugin
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: generic-device-plugin
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: generic-device-plugin
+        app.kubernetes.io/part-of: generic-device-plugin
+    spec:
+      # Node agent: must outlive workload pressure or every consumer loses
+      # its device on the next scheduling decision.
+      priorityClassName: system-node-critical
+      automountServiceAccountToken: false   # talks to the kubelet socket only, never the API
+      # Workers only. Control planes never carry the amdgpu schematic
+      # (homelab-infra/talos/cluster-topology.yaml), so a plugin there would
+      # advertise nothing forever.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+      containers:
+        - name: generic-device-plugin
+          image: ghcr.io/squat/generic-device-plugin:0.2.0@sha256:66c8d5c270eb2b721f1064c549b9b7898152a6d2f0163380a5d37dc7636c20ff
+          imagePullPolicy: IfNotPresent
+          args:
+            - --domain=devic.es
+            - --log-level=info
+            - --listen=:8080
+            - --device
+            - |
+              name: amd-render
+              groups:
+                - count: 4
+                  paths:
+                    - path: /dev/dri/renderD128
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsUser: 0          # the kubelet's device-plugins dir is root 0755
+            runAsGroup: 0
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: device-plugins
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: dev
+              mountPath: /dev
+              readOnly: true
+      volumes:
+        - name: device-plugins
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+            type: Directory
+        - name: dev
+          hostPath:
+            path: /dev
+            type: Directory

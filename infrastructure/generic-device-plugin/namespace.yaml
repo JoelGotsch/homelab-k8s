@@ -1,0 +1,28 @@
+# generic-device-plugin namespace — exposes host /dev nodes to pods as
+# extended resources (Kubernetes device plugin API).
+#
+# First consumer: Jellyfin VA-API on the workers' AMD Vega iGPU
+# (homelab/plans/jellyfin-gpu-transcoding.md). The `jellyfin` namespace
+# enforces Pod Security `restricted`, which forbids hostPath from `baseline`
+# up, so the render node cannot be hostPath-mounted there. A device plugin
+# injects the device through the CRI device list instead — no PSS rule
+# restricts that — and the requesting pod stays `restricted`-compliant.
+#
+# privileged PSA because THIS DaemonSet hostPath-mounts
+#   - /var/lib/kubelet/device-plugins   (the kubelet registration socket dir)
+#   - /dev                              (read-only, to discover the devices)
+# and hostPath alone fails `baseline`. The container itself is NOT privileged:
+# it only stats paths and speaks gRPC to the kubelet — see daemonset.yaml.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: generic-device-plugin
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: privileged
+    # ADR 0036 D4 — infrastructure-tier node agent; classified `internal`
+    # (it sees device paths, never media). Kyverno generates the
+    # `default-deny` NetworkPolicy for first-party namespaces
+    # (homelab-generate-default-deny-netpol); the plugin needs no network.
+    homelab.internal/first-party: "true"
+    homelab.internal/data-class: internal
