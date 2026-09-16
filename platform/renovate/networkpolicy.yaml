@@ -179,6 +179,10 @@ spec:
         # apps' deps)
         - matchName: "pypi.org"
         - matchName: "files.pythonhosted.org"
+        # npm — todo-agents' windmill-cli dep. Missing entirely until now;
+        # "Host error" / ETIMEDOUT on registry.npmjs.org confirmed in the
+        # 2026-09-16 manual full run (todo-agents never got a lookup result).
+        - matchName: "registry.npmjs.org"
         # GitHub (release notes, source archives for
         # github-tags / github-releases datasources)
         - matchName: "api.github.com"
