@@ -414,6 +414,7 @@ spec:
         - matchName: "guerzon.github.io"         # vaultwarden (pilot repo)
         - matchName: "nextcloud.github.io"       # nextcloud-k8s
         - matchName: "jellyfin.github.io"        # jellyfin-k8s
+        - matchName: "windmill-labs.github.io"   # windmill-k8s
         - matchName: "docs.altinity.com"         # altinity-clickhouse-operator
         - matchName: "cloudnative-pg.github.io"  # cloudnative-pg, plugin-barman-cloud
         - matchName: "charts.external-secrets.io"
