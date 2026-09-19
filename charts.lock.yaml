@@ -12,7 +12,7 @@
 # Maintained by scripts/mirror-chart.sh (dry-run by default).
 - layer: infrastructure/cert-manager
   name: cert-manager
-  version: v1.21.1
+  version: v1.21.2
   upstream: https://charts.jetstack.io
   mirror: oci://registry.homelab.internal/homelab/cert-manager
   content_digest: sha256:7b54afb6a3624e35d4b63e7e78fd1091a2e11bed7dc2f987046bf4e316fc2392
@@ -124,7 +124,7 @@
   mirror_artifact_sha256: sha256:bb0c44bc70e3158cc63ea49d7458ede6db5b6c932f6585a2d787eb9712fd4288
 - layer: infrastructure/trust-manager
   name: trust-manager
-  version: v0.24.0
+  version: v0.25.0
   upstream: https://charts.jetstack.io
   mirror: oci://registry.homelab.internal/homelab/trust-manager
   content_digest: sha256:9ec49a13081c75b004a966f147c1a5d1a3c83d0de2582416b97efd62278f97e9
@@ -172,7 +172,7 @@
   mirror_artifact_sha256: sha256:f0026f251da5b49cea636a24143dbbadf15b39f51fc4639c9e0d08a4bc975ee3
 - layer: observability/otel-collector
   name: opentelemetry-collector
-  version: 0.172.1
+  version: 0.173.1
   upstream: https://open-telemetry.github.io/opentelemetry-helm-charts
   mirror: oci://registry.homelab.internal/homelab/opentelemetry-collector
   content_digest: sha256:5451045d2300e3974368cc1603f1f57860d3a3f931410153174fd6bd5eacffad
@@ -196,7 +196,7 @@
   mirror_artifact_sha256: sha256:c65ab5db8c2ae58474b8192e0d0d7caab66859da833540717b78c75754695ff7
 - layer: platform/forgejo
   name: forgejo
-  version: 17.1.6
+  version: 17.1.7
   upstream: oci://code.forgejo.org/forgejo-helm
   mirror: oci://registry.homelab.internal/homelab/forgejo
   content_digest: sha256:56e2aa75a4879e4882ce99644b8c50a71715d3c750bc6e129b97c6c7a1f53d26
