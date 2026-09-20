@@ -116,6 +116,10 @@ configMapGenerator:
       # authentik's bundled recovery example + points the brand's flow_recovery
       # at it. Enables invite-onboarding + self-service password reset (2026-08-06).
       - blueprints/homelab-recovery-flow.yaml
+      # Persistent SSO (2026-09-17) — targeted override of the built-in
+      # default-authentication-flow login stage's session_duration, shared
+      # by all 14 apps below. See the file's header for scope/rationale.
+      - blueprints/sso-session-duration.yaml
     options:
       # Kustomize hash suffix would force ConfigMap rename on
       # every blueprint edit + force chart re-render. Disable

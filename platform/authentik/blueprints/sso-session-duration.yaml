@@ -1,0 +1,33 @@
+# Persistent SSO — bumps the shared login-stage session from Authentik's
+# built-in default (session_duration: seconds=0, i.e. ends when the browser
+# session ends — confirmed live via `ak shell` 2026-09-17) to 30 days.
+#
+# This stage (default-authentication-login) is bound to
+# default-authentication-flow, which EVERY app here shares for the
+# credential-entry step — confirmed 2026-09-17 that none of the 14 apps
+# (argocd, forgejo, grafana, immich, jellyfin, langfuse, nextcloud,
+# paperless, windmill, todo, librechat, chat-history, model-manager,
+# vaultwarden) reference a dedicated flow. One override here covers all of
+# them; no per-app blueprint changes needed.
+#
+# Targeted partial update against the BUILT-IN stage (ships with Authentik,
+# not defined elsewhere in this repo) — only session_duration is listed, so
+# every other field (stage type, terminate_other_sessions, etc.) stays
+# whatever Authentik's own bundled blueprint set it to.
+#
+# Deliberately NOT touched by this file: any future short-lived
+# agent-harness OIDC client (ADR 0033 D3, not yet built) must not inherit
+# long sessions via this flow — that design calls for a short-lived *token*
+# validity on its own provider, independent of this stage's session length,
+# even though it would likely reuse this same login flow for the human step.
+version: 1
+metadata:
+  name: sso-session-duration
+  labels:
+    blueprints.goauthentik.io/instantiate: "true"
+entries:
+  - model: authentik_stages_user_login.userloginstage
+    identifiers:
+      name: default-authentication-login
+    attrs:
+      session_duration: days=30
