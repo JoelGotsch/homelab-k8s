@@ -464,6 +464,14 @@ spec:
         - matchName: "pypi.org"
         - matchName: "files.pythonhosted.org"
         - matchName: "registry.npmjs.org"
+        # OSV vulnerability database — conversation-history's `dependency-scan`
+        # step POSTs its SBOM's package names and versions to the batch query
+        # API (2026-09-20). Public package coordinates only, same class as the
+        # indexes above. It had been assumed reachable because its neighbours
+        # are, and timed out in pipelines 368 and 374: reaching N named hosts is
+        # no evidence of reach to the next one. A plain step pod, so it resolves
+        # through kube-dns and needs no CIDR fallback.
+        - matchName: "api.osv.dev"
         # Terraform provider index — homelab-infra's `terraform init` step
         # (2026-09-13, TODO hl-0295; it had never run). Only the index: the
         # one provider, hetznercloud/hcloud, downloads from GitHub release
