@@ -108,6 +108,12 @@ spec:
           # backup credentials passed before registration; runtime replicas are
           # intentionally zero until Phase 5 identities exist.
           - {name: todo-agents,         owner: homelab,       repo: todo-agents, path: k8s, autoSync: "true"}
+          # Tridata is a private staging prototype.  Its manifest ships with
+          # zero replicas and placeholder image refs until signed-image and
+          # private-read authorization evidence are committed; keep Argo
+          # automation off so registration cannot turn that foundation into a
+          # deployment.
+          - {name: tridata-staging,     owner: forgejo-admin, repo: tridatanet, path: k8s, autoSync: "false"}
           - {name: vaultwarden,         owner: homelab,       repo: vaultwarden-k8s, path: k8s, autoSync: "true"}
           # Phase 3 offline render, production SSA admission, Authentik client,
           # and dedicated backup credentials passed before registration.

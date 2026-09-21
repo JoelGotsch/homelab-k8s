@@ -70,6 +70,7 @@ spec:
                 - nextcloud
                 - jellyfin
                 - argocd
+                - tridata-staging
       toPorts:
         - ports:
             - port: "9000"
