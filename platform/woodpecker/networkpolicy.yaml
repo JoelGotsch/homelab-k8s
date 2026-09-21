@@ -464,6 +464,13 @@ spec:
         - matchName: "pypi.org"
         - matchName: "files.pythonhosted.org"
         - matchName: "registry.npmjs.org"
+        # Tridata's pull-request integration runs the locked Playwright browser
+        # smoke.  `npx playwright install --dry-run chromium` on 2026-09-21
+        # resolved the primary CDN and its documented fallback below; nodejs.org
+        # serves the checksum-verified Node 24 runtime used by that same step.
+        - matchName: "nodejs.org"
+        - matchName: "cdn.playwright.dev"
+        - matchName: "playwright.download.prss.microsoft.com"
         # OSV vulnerability database — conversation-history's `dependency-scan`
         # step POSTs its SBOM's package names and versions to the batch query
         # API (2026-09-20). Public package coordinates only, same class as the
