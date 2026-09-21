@@ -15,6 +15,12 @@
 repos:
   - repo: local
     hooks:
+      - id: check-minio-offsite-policy
+        name: offsite mirror buckets match declared intent and reader policy
+        entry: bash -c 'K8S_ROOT="$PWD" python3 ../homelab-infra/scripts/check-minio-offsite-policy.py --self-test'
+        language: system
+        pass_filenames: false
+        files: '^infrastructure/backup-cronjobs/cronjob\.yaml$'
       # Note: check-placeholders.sh is intentionally NOT a
       # pre-commit hook. The <PLACEHOLDER> tokens are
       # operator-fill at cold-start.md Step 13a (deploy time),
