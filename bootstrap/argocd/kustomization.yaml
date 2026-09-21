@@ -52,6 +52,7 @@ resources:
   # forgejo-admin prefix credential was removed 2026-07-31 after a day
   # of stable org-only pulls). Reuses the read-only svc-argocd token.
   - externalsecret-repo-creds-homelab.yaml
+  - externalsecret-repo-creds-forgejo-admin.yaml
 
   # Helm chart-mirror pull credential (ADR 0052 D3). Consumed by the
   # repo-server patch below via HELM_REGISTRY_CONFIG.
@@ -167,6 +168,9 @@ replacements:
         fieldPaths: [spec.target.template.data.url]
         options: { delimiter: '/', index: 2 }
       - select: { kind: ExternalSecret, name: argocd-repo-creds-homelab }
+        fieldPaths: [spec.target.template.data.url]
+        options: { delimiter: '/', index: 2 }
+      - select: { kind: ExternalSecret, name: argocd-repo-creds-forgejo-admin }
         fieldPaths: [spec.target.template.data.url]
         options: { delimiter: '/', index: 2 }
   # argocd-cm public URL: https://argocd.FQDN_SUFFIX -> argocd.<fqdn_suffix>.
