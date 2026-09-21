@@ -1,0 +1,68 @@
+# Dedicated private Tridata client. Generated credentials and the explicitly
+# selected owner are supplied by OpenBao; no shared operator-group admission.
+version: 1
+metadata:
+  name: tridata-oidc
+  labels:
+    blueprints.goauthentik.io/instantiate: "true"
+entries:
+  - model: authentik_core.group
+    id: tridata-testers
+    identifiers:
+      name: tridata-testers
+    attrs:
+      is_superuser: false
+
+  - model: authentik_providers_oauth2.oauth2provider
+    id: tridata-provider
+    identifiers:
+      name: tridata
+    attrs:
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      client_type: confidential
+      client_id: !Env AUTHENTIK_BOOTSTRAP_TRIDATA_CLIENT_ID
+      client_secret: !Env AUTHENTIK_BOOTSTRAP_TRIDATA_CLIENT_SECRET
+      grant_types: [authorization_code, refresh_token]
+      redirect_uris:
+        - matching_mode: strict
+          url: "https://tridata-staging.lab.vyramo.com/api/v1/auth/callback"
+      signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
+      sub_mode: hashed_user_id
+      include_claims_in_id_token: true
+      property_mappings:
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
+        - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-email"]]
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, profile]]
+
+  - model: authentik_core.application
+    id: tridata-app
+    identifiers:
+      slug: tridata
+    attrs:
+      name: Tridata (private testing)
+      provider: !KeyOf tridata-provider
+      meta_launch_url: "https://tridata-staging.lab.vyramo.com/"
+      meta_description: "Private race results and athlete analysis prototype"
+      group: Personal
+      policy_engine_mode: any
+
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf tridata-app
+      group: !KeyOf tridata-testers
+    attrs:
+      order: 10
+      enabled: true
+      negate: false
+
+  # The existing owner can test before further people are explicitly invited.
+  # This binds one identity; membership of the operator group conveys no access.
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf tridata-app
+      user: !Find [authentik_core.user, [username, !Env AUTHENTIK_BOOTSTRAP_TRIDATA_OWNER]]
+    attrs:
+      order: 20
+      enabled: true
+      negate: false

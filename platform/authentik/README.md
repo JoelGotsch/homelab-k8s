@@ -46,6 +46,8 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 | `kv/shared/smtp` | `host`, `port`, `username`, `from`, `password` | Central homelab outbound SMTP (Proton submission) — shared by every mail-sending app. Seed with `homelab-infra/scripts/seed-smtp.sh`. Projected here as `AUTHENTIK_EMAIL__*` env via the `authentik-smtp` ExternalSecret. |
 | `kv/data/cnpg/authentik/s3-creds` | `access_key_id`, `secret_access_key` | MinIO svc-account scoped to `homelab-backups-cluster/cnpg/authentik/`. Standard CNPG-app pattern. |
 | `kv/data/<app>/oidc` | `client_id`, `client_secret` | One path per blueprint under `blueprints/`. AUTO-seeded by `homelab-infra/scripts/seed-openbao-paths.sh`. Authentik provider is created by the declarative blueprint reading these via `!Env`; the consumer-side ExternalSecret in the app's ns reads the same path. Currently: `grafana/oidc`. |
+| `kv/data/tridata/oidc` | `client_id`, `client_secret` | Tridata's dedicated blueprint reads these through `authentik-tridata-oidc`; seed with its app repository's `scripts/provision-identity.py`. |
+| `kv/data/tridata/staging/runtime` | `owner_username` | Explicit private-prototype owner admission, alongside the separate `tridata-testers` group. Operator-group membership grants no Tridata access. |
 
 **First-install seed:**
 

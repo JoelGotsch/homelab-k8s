@@ -24,6 +24,7 @@ resources:
   - objectstore.yaml
   - scheduled-backup.yaml
   - externalsecret.yaml
+  - externalsecret-tridata.yaml
   - httproute.yaml
   - httproute-model-manager.yaml
   - httproute-chat-history.yaml
@@ -105,6 +106,7 @@ configMapGenerator:
       # STATIC — full provider/app for the new LibreChat app (2026-07-30);
       # goes into the j2 loop when the render-template reconcile lands.
       - blueprints/librechat.yaml
+      - blueprints/tridata.yaml
       # STATIC — model-manager PROXY provider + embedded-outpost
       # assignment (first proxy-outpost app, 2026-08-05).
       - blueprints/model-manager.yaml
