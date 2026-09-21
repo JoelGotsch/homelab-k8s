@@ -163,14 +163,20 @@ steps:
    restore the explicit chart value atomically. Do not delete/recreate the PVC
    or make that immutable controller change unattended.
 
-2. **Single agent replica + 4 concurrent workflows.** The
-   heaviest workflow (conversation-history) holds ~10 step
-   Pods at its peak, so 4 concurrent workflows can mean ~40.
-   `quota.yaml` is sized as MAX_WORKFLOWS × that peak, so
-   increasing `WOODPECKER_MAX_WORKFLOWS` or agent replicas
-   **requires resizing the quota in the same commit** —
-   otherwise the extra work is rejected at admission instead
-   of waiting in Woodpecker's queue.
+2. **Single agent replica + 4 concurrent workflows, quota sized
+   for two.** The heaviest workflow (conversation-history) holds
+   ~29 step Pods at its planned 12-shard width; `quota.yaml` is
+   sized for TWO of those at once plus every other tenant's
+   measured peak, not for MAX_WORKFLOWS × that peak, which
+   stopped fitting the worker pool at 8+ shards (rule and
+   measurements in the file header, 2026-09-21). A third
+   concurrent wide run is rejected at admission — a red step,
+   not a queued one; the repo's `cancel_previous_pipeline_events`
+   makes that need a third *branch* pushing at once. Widening a
+   pipeline's fan-out, raising `WOODPECKER_MAX_WORKFLOWS`, or
+   adding agent replicas **requires re-checking the quota in the
+   same commit**. `persistentvolumeclaims` is per workflow, not
+   per step.
 
 3. **Step Pods can talk to upstream registries via the CCNP
    toFQDNs allowlist** — not unrestricted internet egress.
