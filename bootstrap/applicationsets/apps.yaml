@@ -115,6 +115,8 @@ spec:
           # deployment.
           - {name: tridata-staging,     owner: forgejo-admin, repo: tridatanet, path: k8s, autoSync: "false"}
           - {name: vaultwarden,         owner: homelab,       repo: vaultwarden-k8s, path: k8s, autoSync: "true"}
+          # Weblate Phase 3.6 review candidate; autoSync stays off until the named OIDC, Forgejo robot, OpenBao seeds, and rollout evidence are complete.
+          - {name: weblate-staging,      owner: homelab,       repo: weblate-k8s,       path: k8s, autoSync: "false"}
           # Phase 3 offline render, production SSA admission, Authentik client,
           # and dedicated backup credentials passed before registration.
           - {name: vikunja,             owner: homelab,       repo: vikunja-k8s, path: k8s, autoSync: "true"}
