@@ -57,6 +57,16 @@ spec:
               protocol: TCP
             - port: "22"
               protocol: TCP
+    # Weblate's named robot uses the Weblate-managed SSH key to read and push
+    # the private Tridata catalog repository.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: weblate-staging
+            app.kubernetes.io/name: weblate
+      toPorts:
+        - ports:
+            - port: "22"
+              protocol: TCP
     # Woodpecker CI runner pods clone repos via HTTP.
     - fromEndpoints:
         - matchLabels:
