@@ -74,6 +74,13 @@ spec:
           - {name: llm-gateway,         owner: homelab,       repo: llm-gateway, path: k8s, autoSync: "true"}
           # model-manager: thin nginx UI (no secrets/image/CI) — auth via
           # the Authentik proxy outpost. Added 2026-08-05.
+          # media-stack: the *arr / Usenet automation stack migrated off the
+          # Synology compose project (ADR 0068). autoSync STAYS "false" until
+          # media-stack-k8s/scripts/migrate-from-nas.sh has loaded the config
+          # PVCs — the apps must not start against empty volumes and generate
+          # fresh databases, because a Sonarr that has written its own
+          # sonarr.db will not accept the migrated one underneath it.
+          - {name: media-stack,         owner: homelab,       repo: media-stack-k8s, path: k8s, autoSync: "false"}
           - {name: model-manager,       owner: homelab,       repo: model-manager-k8s, path: k8s, autoSync: "true"}
           - {name: nextcloud,           owner: homelab,       repo: nextcloud-k8s, path: k8s, autoSync: "true"}
           # nextcloud-biz: business-partner Nextcloud + Collabora behind the
