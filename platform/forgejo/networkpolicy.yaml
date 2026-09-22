@@ -67,6 +67,8 @@ spec:
         - ports:
             - port: "22"
               protocol: TCP
+            - port: "2222"
+              protocol: TCP
     # Woodpecker CI runner pods clone repos via HTTP.
     - fromEndpoints:
         - matchLabels:
