@@ -15,6 +15,13 @@
 repos:
   - repo: local
     hooks:
+      - id: check-tridata-minio-ingress
+        name: MinIO admits only Tridata API and worker pods on the S3 port
+        entry: python3 scripts/check-tridata-minio-ingress.py --self-test
+        language: python
+        additional_dependencies: [PyYAML==6.0.2]
+        pass_filenames: false
+        files: '^(infrastructure/minio-on-nas/networkpolicy\.yaml|scripts/check-tridata-minio-ingress\.py)$'
       - id: check-minio-offsite-policy
         name: offsite mirror buckets match declared intent and reader policy
         entry: bash -c 'K8S_ROOT="$PWD" python3 ../homelab-infra/scripts/check-minio-offsite-policy.py --self-test'

@@ -7,7 +7,7 @@
 # it lands under infrastructure/backup-cronjobs/), and Loki
 # (chunk storage backend per ADR 0021), Langfuse web/worker
 # (event, batch-export, and media objects), and Forgejo (Packages +
-# LFS objects, ADR 0064 D4).
+# LFS objects, ADR 0064 D4), and the Tridata API/worker (encrypted originals).
 
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -79,6 +79,19 @@ spec:
           podSelector:
             matchLabels:
               app.kubernetes.io/name: forgejo
+      ports:
+        - port: 9000
+          protocol: TCP
+    # Tridata original GPX/source snapshots: namespace AND named app roles.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tridata-staging
+          podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [tridata-api, tridata-worker]
       ports:
         - port: 9000
           protocol: TCP
