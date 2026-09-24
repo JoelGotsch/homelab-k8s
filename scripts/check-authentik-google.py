@@ -31,6 +31,8 @@ HOSTS = {"accounts.google.com", "oauth2.googleapis.com", "www.googleapis.com",
 BLUEPRINTS = {"tridata-public.yaml", "tridata-google.yaml"}
 # Authentik's built-in Google adapter ignores source PKCE; use its generic OIDC adapter.
 SOURCE_CONTRACT = {
+    "promoted": True,
+    "icon": {"tag": "Format", "value": ["%s/brand/google-g.png", {"tag": "Env", "value": "AUTHENTIK_TRIDATA_PUBLIC_APP_URL"}]},
     "provider_type": "openidconnect",
     "oidc_well_known_url": "https://accounts.google.com/.well-known/openid-configuration",
     "authorization_code_auth_method": "post_body",
@@ -218,6 +220,62 @@ def check_adult_registration(base, google):
             "email preparation discarded adult attestation")
 
 
+
+def check_google_entry(base, google):
+    from urllib.parse import urlencode
+
+    entry = google.get("tridata-public-google-entry", {})
+    binding = google.get("tridata-public-google-entry-binding", {})
+    expected_target = {"tag": "Find", "value": ["authentik_flows.flowstagebinding",
+        ["target", {"tag": "Find", "value": ["authentik_flows.flow", ["slug", "tridata-public-authentication"]]}],
+        ["order", 10]]}
+    require(binding.get("identifiers") == {
+        "target": expected_target,
+        "policy": {"tag": "KeyOf", "value": "tridata-public-google-entry"}, "order": 0,
+    } and binding.get("attrs", {}).get("enabled") is True,
+        "Google entry policy must bind only to public identification")
+    stage = base.get("tridata-public-authentication-10", {}).get("attrs", {})
+    require(stage.get("evaluate_on_plan") is False and stage.get("re_evaluate_policies") is True,
+        "Google entry must evaluate at execution, not during planning")
+    ordinary_import = builtins.__import__
+    def policy_import(name, *args, **kwargs):
+        if name == "os":
+            return SimpleNamespace(environ={"AUTHENTIK_TRIDATA_PUBLIC_APP_URL": "https://tridata.vyramo.com",
+                                            "AUTHENTIK_TRIDATA_PUBLIC_AUTH_HOST": "tridata-auth.vyramo.com"})
+        if name == "authentik.flows.views.executor":
+            return SimpleNamespace(SESSION_KEY_GET="authentik/flows/get")
+        return ordinary_import(name, *args, **kwargs)
+    params = {
+        "tridata_source": "google", "client_id": "tridata-public", "response_type": "code",
+        "redirect_uri": "https://tridata.vyramo.com/api/v1/auth/callback",
+        "state": "entry-state", "code_challenge": "A" * 43, "code_challenge_method": "S256",
+    }
+    valid = "/application/o/authorize/?" + urlencode(params)
+    cases = [("public", valid, "tridata-auth.vyramo.com", True),
+             ("private host", valid, "auth.lab.vyramo.com", False),
+             ("absolute next", "https://tridata-auth.vyramo.com" + valid, "tridata-auth.vyramo.com", False),
+             ("other path", valid.replace("/authorize/", "/token/"), "tridata-auth.vyramo.com", False),
+             ("malformed URL", "http://[", "tridata-auth.vyramo.com", False)]
+    for key in params:
+        altered = dict(params)
+        altered.pop(key)
+        cases.append(("missing " + key, "/application/o/authorize/?" + urlencode(altered),
+                      "tridata-auth.vyramo.com", False))
+        cases.append(("duplicate " + key, valid + "&" + urlencode({key: params[key]}),
+                      "tridata-auth.vyramo.com", False))
+    for label, destination, host, redirect in cases:
+        redirects = []
+        request = SimpleNamespace(
+            context={"flow_plan": SimpleNamespace(redirect=redirects.append)},
+            http_request=SimpleNamespace(get_host=lambda: host,
+                session={"authentik/flows/get": {"next": destination}}))
+        namespace = {"request": request, "__builtins__": {**vars(builtins), "__import__": policy_import}}
+        exec("def evaluate():\n" + textwrap.indent(entry.get("attrs", {}).get("expression", "return True"), "    "), namespace)
+        result = namespace["evaluate"]()
+        require(result is (not redirect) and redirects == (["/source/oauth/login/tridata-google/"] if redirect else []),
+                "Google direct entry mishandled " + label)
+
+
 def check(documents):
     secret = one(documents, "ExternalSecret", SECRET)["spec"]
     require(secret.get("secretStoreRef") == {"kind": "ClusterSecretStore", "name": "openbao"},
@@ -241,6 +299,7 @@ def check(documents):
     base_entries = {e.get("id"): e for e in base.get("entries", []) if e.get("id")}
     google_entries = {e.get("id"): e for e in google.get("entries", []) if e.get("id")}
     check_adult_registration(base_entries, google_entries)
+    check_google_entry(base_entries, google_entries)
     legal = base_entries.get("tridata-public-legal-links", {}).get("attrs", {})
     require(legal.get("type") == "static" and legal.get("initial_value_expression") is False
             and legal.get("placeholder_expression") is False,
@@ -278,6 +337,10 @@ def check(documents):
         containers = [c for c in pod["spec"]["containers"] if c.get("name") == role]
         require(len(containers) == 1, f"missing rendered Authentik {role} container")
         container = containers[0]
+        values = {item["name"]: item.get("value") for item in container.get("env", [])}
+        require(values.get("AUTHENTIK_TRIDATA_PUBLIC_APP_URL") == "https://tridata.vyramo.com"
+                and values.get("AUTHENTIK_TRIDATA_PUBLIC_AUTH_HOST") == "tridata-auth.vyramo.com",
+                "Tridata public source URLs must be fully resolved in both workloads")
         require({"secretRef": {"name": SECRET}} in container.get("envFrom", []),
                 f"{role} lacks mandatory unprefixed Google secret envFrom")
         require(not any(e.get("name") in KEYS for e in container.get("env", [])),
@@ -412,6 +475,8 @@ def self_test(documents):
             config[filename] = yaml.safe_dump(blueprint)
         mutations.append(("missing legal notice " + entry_id, missing_legal))
     adult_mutations = (
+        ("tridata-google.yaml", "tridata-public-google-entry", "expression", "return True"),
+        ("tridata-google.yaml", "tridata-public-google-entry-binding", "enabled", False),
         ("tridata-public.yaml", "tridata-public-adult-attestation", "required", False),
         ("tridata-public.yaml", "tridata-public-adult-attestation", "initial_value", "true"),
         ("tridata-public.yaml", "tridata-public-register-prompt", "validation_policies", []),

@@ -21,6 +21,11 @@
 # the rendered container env on both Deployments. See that block.
 global:
   env:
+    # Public Tridata source branding/routing; resolved from site-config.domain.
+    - name: AUTHENTIK_TRIDATA_PUBLIC_APP_URL
+      value: "https://tridata.DOMAIN"
+    - name: AUTHENTIK_TRIDATA_PUBLIC_AUTH_HOST
+      value: "tridata-auth.DOMAIN"
     - name: AUTHENTIK_LOG_LEVEL
       value: info
     # Required by Authentik: canonical hostname for
