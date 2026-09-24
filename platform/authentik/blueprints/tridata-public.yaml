@@ -150,6 +150,23 @@ entries:
     order: 3
     placeholder: Repeat password
     placeholder_expression: false
+# Trusted, fixed HTML only: Authentik renders static prompt values as HTML.
+# Keep links scoped to Tridata; tenant-wide footer links affect every service.
+- model: authentik_stages_prompt.prompt
+  id: tridata-public-legal-links
+  identifiers:
+    name: tridata-public-legal-links
+  attrs:
+    field_key: tridata_legal_links
+    type: static
+    label: Tridata legal information
+    required: false
+    order: 4
+    initial_value: >-
+      Read the <a href="https://tridata.vyramo.com/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+      and <a href="https://tridata.vyramo.com/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a> (English).
+    initial_value_expression: false
+    placeholder_expression: false
 - model: authentik_stages_prompt.promptstage
   id: tridata-public-register-prompt
   identifiers:
@@ -160,6 +177,7 @@ entries:
     - !KeyOf 'tridata-public-field-email'
     - !KeyOf 'tridata-public-field-password'
     - !KeyOf 'tridata-public-field-password_repeat'
+    - !KeyOf 'tridata-public-legal-links'
     validation_policies:
     - !KeyOf 'tridata-public-prepare-email'
     - !KeyOf 'tridata-public-password-policy'
@@ -171,6 +189,7 @@ entries:
     fields:
     - !KeyOf 'tridata-public-field-password'
     - !KeyOf 'tridata-public-field-password_repeat'
+    - !KeyOf 'tridata-public-legal-links'
     validation_policies:
     - !KeyOf 'tridata-public-password-policy'
 - model: authentik_stages_user_write.userwritestage

@@ -136,6 +136,27 @@ def check(documents):
     dependencies = [e for e in google.get("entries", []) if e.get("model") == "authentik_blueprints.metaapplyblueprint"]
     require(any(e.get("attrs") == {"identifiers": {"name": "tridata-public"}, "required": True}
                 for e in dependencies), "Google blueprint lacks required public-base metaapply dependency")
+    base_entries = {e.get("id"): e for e in base.get("entries", []) if e.get("id")}
+    google_entries = {e.get("id"): e for e in google.get("entries", []) if e.get("id")}
+    legal = base_entries.get("tridata-public-legal-links", {}).get("attrs", {})
+    require(legal.get("type") == "static" and legal.get("initial_value_expression") is False
+            and legal.get("placeholder_expression") is False,
+            "Tridata legal notice must be fixed static content")
+    for path in ("privacy", "terms"):
+        require(f'href="https://tridata.vyramo.com/{path}"' in legal.get("initial_value", ""),
+                "Tridata legal notice is missing its public " + path + " URL")
+    for stage in ("tridata-public-register-prompt", "tridata-public-password-prompt"):
+        require({"tag": "KeyOf", "value": "tridata-public-legal-links"}
+                in base_entries.get(stage, {}).get("attrs", {}).get("fields", []),
+                "Tridata legal notice is missing from " + stage)
+    legal_stage = google_entries.get("tridata-public-google-legal", {}).get("attrs", {})
+    require({"tag": "Find", "value": ["authentik_stages_prompt.prompt",
+                                      ["name", "tridata-public-legal-links"]]}
+            in legal_stage.get("fields", []), "Google enrollment has no Tridata legal notice")
+    binding = google_entries.get("tridata-public-google-enrollment-5", {}).get("identifiers", {})
+    require(binding.get("target") == {"tag": "KeyOf", "value": "tridata-public-google-enrollment"}
+            and binding.get("stage") == {"tag": "KeyOf", "value": "tridata-public-google-legal"}
+            and binding.get("order") == 5, "Google legal notice must precede account creation")
     sources = [e for e in google.get("entries", []) if e.get("model") == "authentik_sources_oauth.oauthsource"]
     require(len(sources) == 1 and sources[0].get("attrs", {}).get("enabled") is True,
             "Google source is absent or disabled")
@@ -279,6 +300,14 @@ def self_test(documents):
             source["attrs"][field] = value
             config["tridata-google.yaml"] = yaml.safe_dump(blueprint)
         mutations.append(("unsafe Google source " + field, unsafe_source))
+    for filename, entry_id in (("tridata-public.yaml", "tridata-public-legal-links"),
+                               ("tridata-google.yaml", "tridata-public-google-enrollment-5")):
+        def missing_legal(docs, filename=filename, entry_id=entry_id):
+            config = one(docs, "ConfigMap", "authentik-blueprints")["data"]
+            blueprint = yaml.load(config[filename], Loader=BlueprintLoader)
+            blueprint["entries"] = [e for e in blueprint["entries"] if e.get("id") != entry_id]
+            config[filename] = yaml.safe_dump(blueprint)
+        mutations.append(("missing legal notice " + entry_id, missing_legal))
     for name, mutate in mutations:
         broken = copy.deepcopy(documents)
         mutate(broken)

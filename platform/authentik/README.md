@@ -254,3 +254,21 @@ served through its TLS edge. No public HTTPRoute or tunnel directly targets
 `authentik-server`. The deployment gate runs the Tridata app's
 `provision-public-identity.py --acceptance` with mocked mail and transaction
 rollback, including application admission, email redemption and password reset.
+
+## Tridata public legal links
+
+Tridata email enrollment/recovery and Google enrollment use a dedicated static
+prompt linking to `https://tridata.vyramo.com/privacy` and
+`https://tridata.vyramo.com/terms`. The links open in another tab to preserve
+the registration flow. Publish the final legal pages before reconciling this
+change; operator identity/contact and eligibility are still being confirmed.
+
+Only trusted constant HTML belongs in the static prompt. Authentik renders
+`initial_value` as HTML; never interpolate user input or enable expressions.
+The Google notice appears before user creation. This is access to the notices,
+not a stored record of contractual acceptance or consent. Tenant-global footer
+settings are deliberately not used for Tridata-specific notices. Google Cloud
+Branding should use the same privacy and terms URLs.
+
+Pinned implementation reference:
+<https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/web/src/flow/stages/prompt/PromptStage.ts>.

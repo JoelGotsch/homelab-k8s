@@ -45,6 +45,22 @@ entries:
           return False
       request.context["prompt_data"] = {"email": email, "name": info.get("name", email), "username": "tridata-" + uuid4().hex}
       return True
+- model: authentik_stages_prompt.promptstage
+  id: tridata-public-google-legal
+  identifiers:
+    name: tridata-public-google-legal
+  attrs:
+    fields:
+    - !Find [authentik_stages_prompt.prompt, [name, tridata-public-legal-links]]
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-google-enrollment-5
+  identifiers:
+    target: !KeyOf 'tridata-public-google-enrollment'
+    stage: !KeyOf 'tridata-public-google-legal'
+    order: 5
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
 - model: authentik_stages_user_write.userwritestage
   id: tridata-public-google-create
   identifiers:
