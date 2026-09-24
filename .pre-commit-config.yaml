@@ -60,6 +60,13 @@ repos:
         # declarations, the classes, or any PVC-bearing manifest here changes.
         files: '(infrastructure/csi-rclone/|.*pvc.*\.ya?ml$|scripts/check-nas-crypt-dataset-paths\.sh$)'
 
+      - id: test-storage-budget
+        name: storage projection models exact patches and rejects unsupported mutations
+        entry: python3 scripts/test-storage-budget.py
+        language: system
+        pass_filenames: false
+        files: '^scripts/(check-storage-budget\.sh|test-storage-budget\.py)$'
+
       - id: check-storage-budget
         name: projected Longhorn promises stay under 80 % of what Longhorn allows per worker (ADR 0067)
         entry: scripts/check-storage-budget.sh
