@@ -57,16 +57,15 @@ dnsConfig:
 # workloads. Git data is cluster-replicated; NAS is for the
 # WORM-shape LFS + Packages content.
 #
-# 2026-07-09 ADR 0036: migrate to -retain family. Git repos +
-# config are source-of-truth for the forge; PVC delete must
-# not release the underlying volume. Right-sized 100Gi → 20Gi
-# per audit — real usage stays under 10 GiB (LFS + Packages
-# are already offloaded to NAS via forgejo-lfs + forgejo-packages
-# PVCs in pvc.yaml).
+# Replacement migration: the old 100Gi claim cannot shrink in place.
+# Keep the claim name, but create this 40Gi claim only after the reviewed,
+# quiesced backup and release of the old allocation. Do not sync this size
+# change against the existing bound 100Gi claim. Recovery archives retain
+# the rollback data without promising both Longhorn volumes simultaneously.
 persistence:
   enabled: true
   storageClass: longhorn-replica3
-  size: 100Gi
+  size: 40Gi
   accessModes:
     - ReadWriteOnce
   annotations:
@@ -332,6 +331,7 @@ gitea:
         secretKeyRef:
           name: forgejo-security-keys
           key: lfs_jwt_secret
+
     # Object-store credentials for [packages] and [lfs] (ADR 0064 D4).
     # The non-secret half of those sections (STORAGE_TYPE, endpoint,
     # bucket, base path) lives under gitea.config above; only the keys
