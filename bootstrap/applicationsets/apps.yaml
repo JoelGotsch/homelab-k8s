@@ -121,8 +121,8 @@ spec:
           # automation off so registration cannot turn that foundation into a
           # deployment.
           - {name: tridata-staging,     owner: forgejo-admin, repo: tridatanet, path: k8s, autoSync: "false"}
-          # Restore the full catalog with writers held; switch to k8s-public only after readback acceptance.
-          - {name: tridata-public,      owner: forgejo-admin, repo: tridatanet, path: k8s-public-bootstrap, autoSync: "false"}
+          # Manual activation requires full catalog readback acceptance; automatic sync remains disabled.
+          - {name: tridata-public,      owner: forgejo-admin, repo: tridatanet, path: k8s-public, autoSync: "false"}
           - {name: vaultwarden,         owner: homelab,       repo: vaultwarden-k8s, path: k8s, autoSync: "true"}
           # Weblate Phase 3.6 review candidate; autoSync stays off until the named OIDC, Forgejo robot, OpenBao seeds, and rollout evidence are complete.
           - {name: weblate-staging,      owner: homelab,       repo: weblate-k8s,       path: k8s, autoSync: "false"}
