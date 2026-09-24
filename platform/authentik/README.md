@@ -254,3 +254,69 @@ served through its TLS edge. No public HTTPRoute or tunnel directly targets
 `authentik-server`. The deployment gate runs the Tridata app's
 `provision-public-identity.py --acceptance` with mocked mail and transaction
 rollback, including application admission, email redemption and password reset.
+
+## Tridata public legal links
+
+Tridata email enrollment/recovery and Google enrollment use a dedicated static
+prompt linking to `https://tridata.vyramo.com/privacy` and
+`https://tridata.vyramo.com/terms`. The links open in another tab to preserve
+the registration flow. Publish the final legal pages before reconciling this
+change; operator identity/contact still needs to be finalized.
+
+Only trusted constant HTML belongs in the static prompt. Authentik renders
+`initial_value` as HTML; never interpolate user input or enable expressions.
+The Google notice appears before user creation. This is access to the notices,
+not a stored record of contractual acceptance or consent. Tenant-global footer
+settings are deliberately not used for Tridata-specific notices. Google Cloud
+Branding should use the same privacy and terms URLs.
+
+Pinned implementation reference:
+<https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/web/src/flow/stages/prompt/PromptStage.ts>.
+
+
+## Tridata adult registration
+
+New public email and Google registrations require an initially unchecked
+“I confirm that I am at least 18 years old” checkbox. A shared Prompt validation
+policy accepts only the boolean `true` after checkbox deserialization. Missing,
+false and `"false"` submissions fail. Authentik's pinned DRF 3.17.1 serializer
+normalizes true-like values (including `"true"`) to boolean true; the policy itself
+does not apply truthiness to raw strings.
+Both account-creation bindings also enforce the check server-side. Authentik
+2026.8.2 checkbox fields force the serializer's `required` flag to false, so the
+checkbox UI alone is insufficient.
+
+The prompt wire key is `attributes_tridata_adult_attested`. User Write supports
+this underscore alias and stores the single boolean as
+`attributes.tridata_adult_attested`. Unlike a dotted field key, the alias remains
+a flat key after DRF deserialization, matching the validation policies.
+No birth date is requested. Google's verified-email policy preserves that
+validated field while rebuilding trusted identity data from Google in place
+(the stage policy receives a shallow copy of the flow context), and still
+rejects unverified emails and existing-email linking. This is self-attestation,
+not age verification, legal acceptance or privacy consent. Existing-user login,
+password recovery and private homelab flows do not require this attribute.
+
+Run `python3 scripts/check-authentik-google.py --self-test` against the cached
+chart before reconciliation. It checks the rendered prompt/create bindings,
+executes the actual server policy expressions with mocked database lookups,
+checks rejected and accepted attestations, retention, verified-email checks,
+and mutation coverage. It is offline coverage, not a live flow acceptance test.
+
+Pinned implementation references:
+- [Checkbox serializer](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/stages/prompt/models.py)
+- [Prompt validation](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/stages/prompt/stage.py)
+- [User Write attribute persistence](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/stages/user_write/stage.py)
+
+A failed creation policy skips User Write, rather than denying the entire flow.
+The pinned source enrollment manager does not create or supply a pending user;
+User Login explicitly denies missing or unsaved pending users before completing
+login. The appended PostSourceStage saves only a source connection and is reached
+after User Login. Skipping creation therefore cannot complete a new account.
+The Tridata app's rollback acceptance helpers exercise this with a skipped prompt,
+as well as normal rejected/accepted checkbox submissions through the serializer.
+
+- [Source enrollment planning](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/core/sources/flow_manager.py)
+- [Login rejects missing/unsaved users](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/stages/user_login/stage.py)
+- [Source completion saves the connection](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/core/sources/stage.py)
+- [Pinned boolean deserialization](https://github.com/encode/django-rest-framework/blob/3.17.1/rest_framework/fields.py)

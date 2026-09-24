@@ -72,6 +72,17 @@ entries:
       data["email"] = email
       data["username"] = "tridata-" + uuid4().hex
       return True
+# Checkbox required=true is a browser affordance; enforce literal true on the server.
+- model: authentik_policies_expression.expressionpolicy
+  id: tridata-public-adult-policy
+  identifiers:
+    name: tridata-public-adult-policy
+  attrs:
+    expression: |-
+      if request.context.get("prompt_data", {}).get("attributes_tridata_adult_attested") is not True:
+          ak_message("You must confirm that you are at least 18 years old to register.")
+          return False
+      return True
 - model: authentik_policies_expression.expressionpolicy
   id: tridata-public-password-policy
   identifiers:
@@ -150,17 +161,50 @@ entries:
     order: 3
     placeholder: Repeat password
     placeholder_expression: false
+# Trusted, fixed HTML only: Authentik renders static prompt values as HTML.
+# Keep links scoped to Tridata; tenant-wide footer links affect every service.
+- model: authentik_stages_prompt.prompt
+  id: tridata-public-legal-links
+  identifiers:
+    name: tridata-public-legal-links
+  attrs:
+    field_key: tridata_legal_links
+    type: static
+    label: Tridata legal information
+    required: false
+    order: 4
+    initial_value: >-
+      Read the <a href="https://tridata.vyramo.com/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+      and <a href="https://tridata.vyramo.com/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a> (English).
+    initial_value_expression: false
+    placeholder_expression: false
+- model: authentik_stages_prompt.prompt
+  id: tridata-public-adult-attestation
+  identifiers:
+    name: tridata-public-adult-attestation
+  attrs:
+    field_key: attributes_tridata_adult_attested
+    type: checkbox
+    label: I confirm that I am at least 18 years old.
+    required: true
+    order: 5
+    initial_value: ''
+    initial_value_expression: false
+    placeholder_expression: false
 - model: authentik_stages_prompt.promptstage
   id: tridata-public-register-prompt
   identifiers:
     name: tridata-public-register-prompt
   attrs:
     fields:
+    - !KeyOf 'tridata-public-adult-attestation'
     - !KeyOf 'tridata-public-field-name'
     - !KeyOf 'tridata-public-field-email'
     - !KeyOf 'tridata-public-field-password'
     - !KeyOf 'tridata-public-field-password_repeat'
+    - !KeyOf 'tridata-public-legal-links'
     validation_policies:
+    - !KeyOf 'tridata-public-adult-policy'
     - !KeyOf 'tridata-public-prepare-email'
     - !KeyOf 'tridata-public-password-policy'
 - model: authentik_stages_prompt.promptstage
@@ -171,6 +215,7 @@ entries:
     fields:
     - !KeyOf 'tridata-public-field-password'
     - !KeyOf 'tridata-public-field-password_repeat'
+    - !KeyOf 'tridata-public-legal-links'
     validation_policies:
     - !KeyOf 'tridata-public-password-policy'
 - model: authentik_stages_user_write.userwritestage
@@ -266,6 +311,15 @@ entries:
   attrs:
     evaluate_on_plan: false
     re_evaluate_policies: true
+# Recheck immediately before writing a user, even if prompt validation was bypassed.
+- model: authentik_policies.policybinding
+  id: tridata-public-enrollment-20-adult-policy
+  identifiers:
+    target: !KeyOf 'tridata-public-enrollment-20'
+    policy: !KeyOf 'tridata-public-adult-policy'
+    order: 0
+  attrs:
+    enabled: true
 - model: authentik_flows.flowstagebinding
   id: tridata-public-enrollment-30
   identifiers:
