@@ -219,3 +219,31 @@ The pattern is repetitive (same shape per app) — see
   consumers (other apps follow the same pattern).
 - [04-guides/known-caveats.md §Authentik](../../../homelab-docs/04-guides/known-caveats.md)
   — accumulated index.
+
+| `kv/data/tridata/public/oidc` | `client_id`, `client_secret`, `issuer` | Public Tridata client; seeded by the Tridata app’s `scripts/provision-public-identity.py`. Only its secret is projected into this namespace. |
+
+### Public Tridata identity facade
+
+`tridata-public.yaml` owns only its dedicated public brand, flows, provider and
+external group. The optional `optional-blueprints/tridata-google.yaml` is **not**
+mounted while Google credentials are absent. After creating the Web OAuth client
+with callback `https://tridata-auth.vyramo.com/source/oauth/callback/tridata-google/`:
+
+1. Seed `kv/tridata/public/google` fields `client_id` and `client_secret` without
+   printing values. Use an ExternalSecret to project them as
+   `AUTHENTIK_TRIDATA_GOOGLE_CLIENT_ID` and `AUTHENTIK_TRIDATA_GOOGLE_CLIENT_SECRET`.
+2. Add its Secret to `global.envFrom`, add the optional blueprint to the
+   `authentik-blueprints` file list, and allow the Authentik server and worker HTTPS egress
+   to `accounts.google.com`, `oauth2.googleapis.com` and `www.googleapis.com`.
+3. Validate both blueprints together with rollback, commit/reconcile, and verify
+   a real Google redirect before advertising the button as available.
+
+The Google source refuses automatic account linking by email. Existing password
+accounts retain their existing method. Source enrollment requires Google's
+`verified_email` signal. Base public enrollment continues to work independently.
+
+The public proxy is owned by the Tridata repository at `k8s/public-auth/` and
+served through its TLS edge. No public HTTPRoute or tunnel directly targets
+`authentik-server`. The deployment gate runs the Tridata app's
+`provision-public-identity.py --acceptance` with mocked mail and transaction
+rollback, including application admission, email redemption and password reset.

@@ -25,6 +25,7 @@ resources:
   - scheduled-backup.yaml
   - externalsecret.yaml
   - externalsecret-tridata.yaml
+  - externalsecret-tridata-public.yaml
   - httproute.yaml
   - httproute-model-manager.yaml
   - httproute-chat-history.yaml
@@ -107,6 +108,7 @@ configMapGenerator:
       # goes into the j2 loop when the render-template reconcile lands.
       - blueprints/librechat.yaml
       - blueprints/tridata.yaml
+      - blueprints/tridata-public.yaml
       # STATIC — model-manager PROXY provider + embedded-outpost
       # assignment (first proxy-outpost app, 2026-08-05).
       - blueprints/model-manager.yaml

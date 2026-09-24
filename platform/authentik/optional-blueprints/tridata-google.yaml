@@ -1,0 +1,128 @@
+# Optional: activate only after Google client + callback and ESO environment are ready.
+version: 1
+metadata:
+  name: tridata-google
+  labels:
+    blueprints.goauthentik.io/instantiate: 'true'
+entries:
+- model: authentik_flows.flow
+  id: tridata-public-google-enrollment
+  identifiers:
+    slug: tridata-public-google-enrollment
+  attrs:
+    name: tridata-public-google-enrollment
+    title: "Tridata \u2014 Enrollment"
+    designation: enrollment
+    authentication: require_unauthenticated
+- model: authentik_flows.flow
+  id: tridata-public-google-authentication
+  identifiers:
+    slug: tridata-public-google-authentication
+  attrs:
+    name: tridata-public-google-authentication
+    title: "Tridata \u2014 Authentication"
+    designation: authentication
+    authentication: none
+- model: authentik_policies_expression.expressionpolicy
+  id: tridata-public-google-verified
+  identifiers:
+    name: tridata-public-google-verified
+  attrs:
+    expression: |-
+      from authentik.core.models import User
+      from uuid import uuid4
+      info = request.context.get("oauth_userinfo", {})
+      email = info.get("email", "").strip().lower()
+      if not email or info.get("verified_email") is not True:
+          return False
+      if User.objects.filter(email__iexact=email).exists():
+          ak_message("This email already has an account. Sign in with its existing method.")
+          return False
+      request.context["prompt_data"] = {"email": email, "name": info.get("name", email), "username": "tridata-" + uuid4().hex}
+      return True
+- model: authentik_stages_user_write.userwritestage
+  id: tridata-public-google-create
+  identifiers:
+    name: tridata-public-google-create
+  attrs:
+    user_creation_mode: always_create
+    create_users_as_inactive: false
+    create_users_group: !Find [authentik_core.group, [name, tridata-public-users]]
+    user_type: external
+    user_path_template: users/tridata-public
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-google-enrollment-10
+  identifiers:
+    target: !KeyOf 'tridata-public-google-enrollment'
+    stage: !KeyOf 'tridata-public-google-create'
+    order: 10
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_policies.policybinding
+  id: tridata-public-google-enrollment-10-policy
+  identifiers:
+    target: !KeyOf 'tridata-public-google-enrollment-10'
+    policy: !KeyOf 'tridata-public-google-verified'
+    order: 0
+  attrs:
+    enabled: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-google-enrollment-100
+  identifiers:
+    target: !KeyOf 'tridata-public-google-enrollment'
+    stage: !Find [authentik_stages_user_login.userloginstage, [name, tridata-public-login]]
+    order: 100
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-google-authentication-10
+  identifiers:
+    target: !KeyOf 'tridata-public-google-authentication'
+    stage: !Find [authentik_stages_deny.denystage, [name, tridata-public-deny]]
+    order: 10
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_policies.policybinding
+  id: tridata-public-google-authentication-10-policy
+  identifiers:
+    target: !KeyOf 'tridata-public-google-authentication-10'
+    policy: !Find [authentik_policies_expression.expressionpolicy, [name, tridata-public-deny-private-user]]
+    order: 0
+  attrs:
+    enabled: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-google-authentication-100
+  identifiers:
+    target: !KeyOf 'tridata-public-google-authentication'
+    stage: !Find [authentik_stages_user_login.userloginstage, [name, tridata-public-login]]
+    order: 100
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_sources_oauth.oauthsource
+  id: tridata-google
+  identifiers:
+    slug: tridata-google
+  attrs:
+    name: Google
+    enabled: true
+    provider_type: google
+    consumer_key: !Env 'AUTHENTIK_TRIDATA_GOOGLE_CLIENT_ID'
+    consumer_secret: !Env 'AUTHENTIK_TRIDATA_GOOGLE_CLIENT_SECRET'
+    authentication_flow: !KeyOf 'tridata-public-google-authentication'
+    enrollment_flow: !KeyOf 'tridata-public-google-enrollment'
+    user_matching_mode: email_deny
+    group_matching_mode: identifier
+    user_path_template: users/tridata-public
+    additional_scopes: openid
+    pkce: S256
+- model: authentik_stages_identification.identificationstage
+  id: tridata-public-identify-google
+  identifiers:
+    name: tridata-public-identify
+  attrs:
+    sources:
+    - !KeyOf 'tridata-google'

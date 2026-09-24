@@ -33,6 +33,14 @@ spec:
       app.kubernetes.io/name: authentik
       app.kubernetes.io/component: server
   ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: tridata-public
+            app.kubernetes.io/name: tridata-auth-proxy
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
     # Cilium Gateway API traffic — carries reserved `ingress`
     # identity, NOT the ingress namespace identity.
     - fromEntities:
