@@ -286,7 +286,10 @@ Both account-creation bindings also enforce the check server-side. Authentik
 2026.8.2 checkbox fields force the serializer's `required` flag to false, so the
 checkbox UI alone is insufficient.
 
-User Write stores the single boolean as `attributes.tridata_adult_attested`.
+The prompt wire key is `attributes_tridata_adult_attested`. User Write supports
+this underscore alias and stores the single boolean as
+`attributes.tridata_adult_attested`. Unlike a dotted field key, the alias remains
+a flat key after DRF deserialization, matching the validation policies.
 No birth date is requested. Google's verified-email policy preserves that
 validated field while rebuilding trusted identity data from Google, and still
 rejects unverified emails and existing-email linking. This is self-attestation,

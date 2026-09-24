@@ -119,7 +119,7 @@ def matches(selector, labels):
     return True
 
 
-ADULT_FIELD = "attributes.tridata_adult_attested"
+ADULT_FIELD = "attributes_tridata_adult_attested"
 
 
 def run_expression(entry, context, *, existing_email=False):

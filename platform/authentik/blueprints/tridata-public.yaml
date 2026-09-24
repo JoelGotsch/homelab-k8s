@@ -79,7 +79,7 @@ entries:
     name: tridata-public-adult-policy
   attrs:
     expression: |-
-      if request.context.get("prompt_data", {}).get("attributes.tridata_adult_attested") is not True:
+      if request.context.get("prompt_data", {}).get("attributes_tridata_adult_attested") is not True:
           ak_message("You must confirm that you are at least 18 years old to register.")
           return False
       return True
@@ -183,7 +183,7 @@ entries:
   identifiers:
     name: tridata-public-adult-attestation
   attrs:
-    field_key: attributes.tridata_adult_attested
+    field_key: attributes_tridata_adult_attested
     type: checkbox
     label: I confirm that I am at least 18 years old.
     required: true
