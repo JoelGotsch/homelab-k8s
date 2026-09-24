@@ -42,6 +42,18 @@ components:
 # domain): `auth.FQDN_SUFFIX` -> `auth.<fqdn_suffix>`. Provenance: this rule
 # -> ConfigMap/site-config.data.fqdn_suffix -> components/site-config/site-config.env.
 replacements:
+  - source: { kind: ConfigMap, name: site-config, fieldPath: data.domain }
+    targets:
+      - select: { kind: Deployment, name: authentik-server }
+        fieldPaths:
+          - spec.template.spec.containers.[name=server].env.[name=AUTHENTIK_TRIDATA_PUBLIC_APP_URL].value
+          - spec.template.spec.containers.[name=server].env.[name=AUTHENTIK_TRIDATA_PUBLIC_AUTH_HOST].value
+        options: { delimiter: '.', index: 1 }
+      - select: { kind: Deployment, name: authentik-worker }
+        fieldPaths:
+          - spec.template.spec.containers.[name=worker].env.[name=AUTHENTIK_TRIDATA_PUBLIC_APP_URL].value
+          - spec.template.spec.containers.[name=worker].env.[name=AUTHENTIK_TRIDATA_PUBLIC_AUTH_HOST].value
+        options: { delimiter: '.', index: 1 }
   - source: { kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix }
     targets:
       - select: { kind: HTTPRoute, name: authentik }

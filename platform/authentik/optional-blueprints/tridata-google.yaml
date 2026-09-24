@@ -143,6 +143,8 @@ entries:
   attrs:
     name: Google
     enabled: true
+    promoted: true
+    icon: !Format ["%s/brand/google-g.png", !Env AUTHENTIK_TRIDATA_PUBLIC_APP_URL]
     # The generic OIDC adapter honors source PKCE; the built-in Google adapter
     # in Authentik 2026.8 ignores the source's pkce field.
     provider_type: openidconnect
@@ -164,3 +166,94 @@ entries:
   attrs:
     sources:
     - !KeyOf 'tridata-google'
+- model: authentik_policies_expression.expressionpolicy
+  id: tridata-public-google-entry
+  identifiers:
+    name: tridata-public-google-entry
+  attrs:
+    expression: |-
+      # Route only Tridata's fixed Google entry hint; preserve the original OIDC
+      # authorize URL in SESSION_KEY_GET for SourceFlowManager's final redirect.
+      import os
+      from urllib.parse import parse_qs, urlsplit
+      from authentik.flows.views.executor import SESSION_KEY_GET
+      http = request.http_request
+      plan = request.context.get("flow_plan")
+      if not http or not plan or http.get_host() != os.environ.get("AUTHENTIK_TRIDATA_PUBLIC_AUTH_HOST") :
+          return True
+      destination = http.session.get(SESSION_KEY_GET, {}).get("next", "")
+      if not isinstance(destination, str):
+          return True
+      try:
+          parsed = urlsplit(destination)
+      except ValueError:
+          return True
+      if parsed.scheme or parsed.netloc or parsed.fragment or parsed.path != "/application/o/authorize/":
+          return True
+      params = parse_qs(parsed.query, keep_blank_values=True)
+      expected = {
+          "tridata_source": ["google"],
+          "client_id": ["tridata-public"],
+          "redirect_uri": [os.environ.get("AUTHENTIK_TRIDATA_PUBLIC_APP_URL", "") + "/api/v1/auth/callback"],
+          "response_type": ["code"],
+          "code_challenge_method": ["S256"],
+      }
+      if any(params.get(key) != value for key, value in expected.items()):
+          return True
+      if len(params.get("state", [])) != 1 or not params["state"][0]:
+          return True
+      if len(params.get("code_challenge", [])) != 1 or not params["code_challenge"][0]:
+          return True
+      plan.redirect("/source/oauth/login/tridata-google/")
+      return False
+- model: authentik_policies.policybinding
+  id: tridata-public-google-entry-binding
+  identifiers:
+    target: !Find [authentik_flows.flowstagebinding, [target, !Find [authentik_flows.flow, [slug, tridata-public-authentication]]], [order, 10]]
+    policy: !KeyOf 'tridata-public-google-entry'
+    order: 0
+  attrs:
+    enabled: true
+
+# Brand CSS is adopted inside component shadow roots in Authentik 2026.8.
+# Keep the native accessible source action; only its public Google artwork changes.
+- model: authentik_brands.brand
+  id: tridata-public-google-branding
+  identifiers:
+    domain: !Env AUTHENTIK_TRIDATA_PUBLIC_AUTH_HOST
+  attrs:
+    branding_custom_css: !Format
+    - |
+      :host(ak-stage-identification) fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"],
+      ak-stage-identification.style-scope fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"] {
+        flex: 0 0 180px;
+        width: 180px;
+        height: 40px;
+        min-height: 40px;
+        padding: 0;
+        border: 0;
+        border-radius: 4px;
+        background: transparent url("%s/brand/google-signin.png") center / 180px 40px no-repeat;
+        box-shadow: none;
+        font-size: 0;
+        color: transparent;
+      }
+      :host(ak-stage-identification) fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"]::after,
+      ak-stage-identification.style-scope fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"]::after {
+        border: 0;
+      }
+      :host(ak-stage-identification) fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"]:focus-visible,
+      ak-stage-identification.style-scope fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"]:focus-visible {
+        outline: 3px solid #1a73e8;
+        outline-offset: 3px;
+      }
+      @media (forced-colors: active) {
+        :host(ak-stage-identification) fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"],
+        ak-stage-identification.style-scope fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"] {
+          background: ButtonFace;
+          color: ButtonText;
+          font-size: 14px;
+          border: 1px solid ButtonText;
+        }
+      }
+    - !Env AUTHENTIK_TRIDATA_PUBLIC_APP_URL
