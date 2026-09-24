@@ -36,7 +36,8 @@ entries:
     expression: |-
       from authentik.core.models import User
       from uuid import uuid4
-      adult_attested = request.context.get("prompt_data", {}).get("attributes_tridata_adult_attested")
+      data = request.context.get("prompt_data", {})
+      adult_attested = data.get("attributes_tridata_adult_attested")
       if adult_attested is not True:
           ak_message("You must confirm that you are at least 18 years old to register.")
           return False
@@ -47,7 +48,12 @@ entries:
       if User.objects.filter(email__iexact=email).exists():
           ak_message("This email already has an account. Sign in with its existing method.")
           return False
-      request.context["prompt_data"] = {"email": email, "name": info.get("name", email), "username": "tridata-" + uuid4().hex, "attributes_tridata_adult_attested": adult_attested}
+      # Stage reevaluation shallow-copies plan.context. Mutate the shared data
+      # dictionary so User Write receives the trusted identity and attestation.
+      data.clear()
+      data.update({"email": email, "name": info.get("name", email),
+                   "username": "tridata-" + uuid4().hex,
+                   "attributes_tridata_adult_attested": adult_attested})
       return True
 - model: authentik_stages_prompt.promptstage
   id: tridata-public-google-legal

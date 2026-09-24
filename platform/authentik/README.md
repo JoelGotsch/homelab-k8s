@@ -291,7 +291,8 @@ this underscore alias and stores the single boolean as
 `attributes.tridata_adult_attested`. Unlike a dotted field key, the alias remains
 a flat key after DRF deserialization, matching the validation policies.
 No birth date is requested. Google's verified-email policy preserves that
-validated field while rebuilding trusted identity data from Google, and still
+validated field while rebuilding trusted identity data from Google in place
+(the stage policy receives a shallow copy of the flow context), and still
 rejects unverified emails and existing-email linking. This is self-attestation,
 not age verification, legal acceptance or privacy consent. Existing-user login,
 password recovery and private homelab flows do not require this attribute.

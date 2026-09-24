@@ -196,7 +196,9 @@ def check_adult_registration(base, google):
     # Google identity remains authoritative; retain only the validated attestation.
     context = {"prompt_data": {ADULT_FIELD: True, "attributes.is_superuser": True,
                                "email": "untrusted@example.test"}, "oauth_userinfo": userinfo}
-    require(run_expression(verified, context) is True
+    # ReevaluateMarker copies context shallowly; only in-place prompt_data edits
+    # reach the FlowPlan consumed by User Write.
+    require(run_expression(verified, dict(context)) is True
             and context["prompt_data"]["email"] == "adult@example.test"
             and set(context["prompt_data"]) == {"email", "name", "username", ADULT_FIELD},
             "Google identity preparation must preserve only the validated attestation")
