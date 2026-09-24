@@ -278,7 +278,10 @@ Pinned implementation reference:
 
 New public email and Google registrations require an initially unchecked
 “I confirm that I am at least 18 years old” checkbox. A shared Prompt validation
-policy accepts only the boolean `true`; missing, false and string values fail.
+policy accepts only the boolean `true` after checkbox deserialization. Missing,
+false and `"false"` submissions fail. Authentik's pinned DRF 3.17.1 serializer
+normalizes true-like values (including `"true"`) to boolean true; the policy itself
+does not apply truthiness to raw strings.
 Both account-creation bindings also enforce the check server-side. Authentik
 2026.8.2 checkbox fields force the serializer's `required` flag to false, so the
 checkbox UI alone is insufficient.
@@ -300,3 +303,16 @@ Pinned implementation references:
 - [Checkbox serializer](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/stages/prompt/models.py)
 - [Prompt validation](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/stages/prompt/stage.py)
 - [User Write attribute persistence](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/stages/user_write/stage.py)
+
+A failed creation policy skips User Write, rather than denying the entire flow.
+The pinned source enrollment manager does not create or supply a pending user;
+User Login explicitly denies missing or unsaved pending users before completing
+login. The appended PostSourceStage saves only a source connection and is reached
+after User Login. Skipping creation therefore cannot complete a new account.
+The Tridata app's rollback acceptance helpers exercise this with a skipped prompt,
+as well as normal rejected/accepted checkbox submissions through the serializer.
+
+- [Source enrollment planning](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/core/sources/flow_manager.py)
+- [Login rejects missing/unsaved users](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/stages/user_login/stage.py)
+- [Source completion saves the connection](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/core/sources/stage.py)
+- [Pinned boolean deserialization](https://github.com/encode/django-rest-framework/blob/3.17.1/rest_framework/fields.py)
