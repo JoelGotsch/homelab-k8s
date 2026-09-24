@@ -214,3 +214,46 @@ entries:
     order: 0
   attrs:
     enabled: true
+
+# Brand CSS is adopted inside component shadow roots in Authentik 2026.8.
+# Keep the native accessible source action; only its public Google artwork changes.
+- model: authentik_brands.brand
+  id: tridata-public-google-branding
+  identifiers:
+    domain: !Env AUTHENTIK_TRIDATA_PUBLIC_AUTH_HOST
+  attrs:
+    branding_custom_css: !Format
+    - |
+      :host(ak-stage-identification) fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"],
+      ak-stage-identification.style-scope fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"] {
+        flex: 0 0 180px;
+        width: 180px;
+        height: 40px;
+        min-height: 40px;
+        padding: 0;
+        border: 0;
+        border-radius: 4px;
+        background: transparent url("%s/brand/google-signin.png") center / 180px 40px no-repeat;
+        box-shadow: none;
+        font-size: 0;
+        color: transparent;
+      }
+      :host(ak-stage-identification) fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"]::after,
+      ak-stage-identification.style-scope fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"]::after {
+        border: 0;
+      }
+      :host(ak-stage-identification) fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"]:focus-visible,
+      ak-stage-identification.style-scope fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"]:focus-visible {
+        outline: 3px solid #1a73e8;
+        outline-offset: 3px;
+      }
+      @media (forced-colors: active) {
+        :host(ak-stage-identification) fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"],
+        ak-stage-identification.style-scope fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"] {
+          background: ButtonFace;
+          color: ButtonText;
+          font-size: 14px;
+          border: 1px solid ButtonText;
+        }
+      }
+    - !Env AUTHENTIK_TRIDATA_PUBLIC_APP_URL

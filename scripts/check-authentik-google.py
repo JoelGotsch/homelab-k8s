@@ -300,6 +300,26 @@ def check(documents):
     google_entries = {e.get("id"): e for e in google.get("entries", []) if e.get("id")}
     check_adult_registration(base_entries, google_entries)
     check_google_entry(base_entries, google_entries)
+    brand = google_entries.get("tridata-public-google-branding", {})
+    require(brand.get("model") == "authentik_brands.brand" and brand.get("identifiers") == {
+        "domain": {"tag": "Env", "value": "AUTHENTIK_TRIDATA_PUBLIC_AUTH_HOST"}},
+        "Google artwork must modify only the exact public Brand")
+    require(set(brand.get("attrs", {})) == {"branding_custom_css"},
+        "Google artwork must not change other Brand settings")
+    css_tag = brand["attrs"]["branding_custom_css"]
+    require(isinstance(css_tag, dict) and css_tag.get("tag") == "Format" and len(css_tag.get("value", [])) == 2
+        and css_tag["value"][1] == {"tag": "Env", "value": "AUTHENTIK_TRIDATA_PUBLIC_APP_URL"},
+        "Google artwork origin must derive from the public app URL")
+    css = css_tag["value"][0]
+    require(css.count('%s') == 1 and 'url("%s/brand/google-signin.png")' in css
+        and '180px 40px' in css and ':focus-visible' in css
+        and '@media (forced-colors: active)' in css and 'color: ButtonText' in css,
+        "Google official artwork, keyboard focus or high-contrast fallback missing")
+    selectors = [line.strip() for line in css.splitlines() if 'button[' in line]
+    require(len(selectors) == 8 and all(
+        'fieldset[name="login-sources"] button[name="source-google"][part~="source-item-promoted"]' in line
+        and line.startswith((':host(ak-stage-identification)', 'ak-stage-identification.style-scope'))
+        for line in selectors), "Google artwork selector must target only the identification Google action")
     legal = base_entries.get("tridata-public-legal-links", {}).get("attrs", {})
     require(legal.get("type") == "static" and legal.get("initial_value_expression") is False
             and legal.get("placeholder_expression") is False,
@@ -474,6 +494,14 @@ def self_test(documents):
             blueprint["entries"] = [e for e in blueprint["entries"] if e.get("id") != entry_id]
             config[filename] = yaml.safe_dump(blueprint)
         mutations.append(("missing legal notice " + entry_id, missing_legal))
+    for field, value in (("identifiers", {"domain": "*"}), ("attrs", {"branding_custom_css": "button {display:none}"})):
+        def unsafe_brand(docs, field=field, value=value):
+            config = one(docs, "ConfigMap", "authentik-blueprints")["data"]
+            blueprint = yaml.load(config["tridata-google.yaml"], Loader=BlueprintLoader)
+            brand = next(e for e in blueprint["entries"] if e.get("id") == "tridata-public-google-branding")
+            brand[field] = value
+            config["tridata-google.yaml"] = yaml.safe_dump(blueprint)
+        mutations.append(("Google artwork scope " + field, unsafe_brand))
     adult_mutations = (
         ("tridata-google.yaml", "tridata-public-google-entry", "expression", "return True"),
         ("tridata-google.yaml", "tridata-public-google-entry-binding", "enabled", False),
