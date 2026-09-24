@@ -208,11 +208,14 @@ entries:
       return False
 - model: authentik_policies.policybinding
   id: tridata-public-google-entry-binding
+  # Target uses a subclass PK which the serializer translates to its inherited
+  # PolicyBindingModel PK. Keep it out of ORM identifiers so repeat imports find
+  # the existing binding rather than failing its uniqueness validator.
   identifiers:
-    target: !Find [authentik_flows.flowstagebinding, [target, !Find [authentik_flows.flow, [slug, tridata-public-authentication]]], [order, 10]]
     policy: !KeyOf 'tridata-public-google-entry'
     order: 0
   attrs:
+    target: !Find [authentik_flows.flowstagebinding, [target, !Find [authentik_flows.flow, [slug, tridata-public-authentication]]], [order, 10]]
     enabled: true
 
 # Brand CSS is adopted inside component shadow roots in Authentik 2026.8.

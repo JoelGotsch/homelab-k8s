@@ -230,9 +230,9 @@ def check_google_entry(base, google):
         ["target", {"tag": "Find", "value": ["authentik_flows.flow", ["slug", "tridata-public-authentication"]]}],
         ["order", 10]]}
     require(binding.get("identifiers") == {
-        "target": expected_target,
         "policy": {"tag": "KeyOf", "value": "tridata-public-google-entry"}, "order": 0,
-    } and binding.get("attrs", {}).get("enabled") is True,
+    } and binding.get("attrs", {}).get("target") == expected_target
+      and binding.get("attrs", {}).get("enabled") is True,
         "Google entry policy must bind only to public identification")
     stage = base.get("tridata-public-authentication-10", {}).get("attrs", {})
     require(stage.get("evaluate_on_plan") is False and stage.get("re_evaluate_policies") is True,
