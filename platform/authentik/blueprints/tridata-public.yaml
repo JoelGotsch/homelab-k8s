@@ -271,6 +271,8 @@ entries:
   identifiers:
     name: tridata-public-identify
   attrs:
+    # External sign-in must remain identifiable when using the generic OIDC icon.
+    show_source_labels: true
     user_fields:
     - email
     case_insensitive_matching: true
