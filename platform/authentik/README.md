@@ -255,6 +255,40 @@ served through its TLS edge. No public HTTPRoute or tunnel directly targets
 `provision-public-identity.py --acceptance` with mocked mail and transaction
 rollback, including application admission, email redemption and password reset.
 
+### Google blueprint repeat-import regression
+
+In Authentik 2026.8, a FlowStageBinding's own primary key differs from its
+inherited PolicyBindingModel key. The target serializer translates the former;
+the blueprint's ORM identifier lookup does not. A binding identified by that
+subclass target can create successfully once, then fail worker validation with
+`policy, target, order must make a unique set`. The dedicated Google binding
+therefore identifies by its dedicated policy and order, and puts its exact public
+identification target in attributes. `scripts/check-authentik-google.py` rejects
+the old identifier shape and any change to the public target.
+
+The worker calls `validate()` before `apply()`. Rehearse that exact sequence twice
+inside the existing Tridata Google acceptance fixture's rollback transaction,
+after its initial apply, with Google discovery/token/profile and mail mocks still
+active. The fixture supplies `GOOGLE_BLUEPRINT`, private inputs through memory,
+and these model imports; never print importer logs or source credentials:
+
+```python
+assert connection.in_atomic_block
+bindings = PolicyBinding.objects.filter(policy__name="tridata-public-google-entry")
+original_ids = list(bindings.values_list("pk", flat=True))
+for cycle in range(2):
+    importer = Importer.from_string(GOOGLE_BLUEPRINT)
+    assert importer.validate()[0]
+    assert importer.apply()
+assert bindings.count() == 1
+assert original_ids == list(bindings.values_list("pk", flat=True))
+target = FlowStageBinding.objects.get(target__slug="tridata-public-authentication", order=10)
+assert bindings.get().target_id == target.pbm_uuid
+```
+
+This checks both fresh creation and reuse of the existing binding without
+changing identities, sending mail or contacting Google's authentication endpoint.
+
 ## Tridata public legal links
 
 Tridata email enrollment/recovery and Google enrollment use a dedicated static
