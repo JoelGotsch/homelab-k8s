@@ -215,6 +215,20 @@ gitea:
       REQUIRE_SIGNIN_VIEW: "true"
       ENABLE_NOTIFY_MAIL: "false"
 
+    # Tokens Forgejo issues as an OAuth2 *provider* (Woodpecker is the
+    # client; Authentik login is the `gitea.oauth` block, unaffected).
+    # Forgejo's default access-token lifetime is 3600 s. Woodpecker
+    # (≤3.18.1) compiles the clone credential into the workflow at
+    # pipeline creation and its "refresh 30 min early" never fires —
+    # x/oauth2 reuses the token until 10 s before expiry — so any clone
+    # that starts after the hour boundary dies with `fatal: could not
+    # read Username` (2026-09-24, conversation-history 583/586/608;
+    # lessons.md "could not read Username is a 401";
+    # woodpecker-ci/woodpecker#7166). 24 h outlasts any queue wait.
+    # Revert to the default once Woodpecker ships the fix (PR #7167).
+    oauth2:
+      ACCESS_TOKEN_EXPIRATION_TIME: "86400"
+
     # OIDC via Authentik per identity.md — wired declaratively via
     # `gitea.oauth` above (2026-07-29); see that block for the
     # redirect-URI/name contract and the break-glass note.
