@@ -86,6 +86,18 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: tridata-public
+          podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [tridata-api, tridata-worker]
+      ports:
+        - port: 9000
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: tridata-staging
           podSelector:
             matchExpressions:

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Require a namespace-and-role peer for Tridata original-file clients."""
 import copy
+from itertools import product
 from pathlib import Path
 import sys
 
@@ -12,10 +13,10 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def check(documents):
+def check_namespace(documents, namespace):
     policy = next(d for d in documents if d and d.get('metadata', {}).get('name') == 'minio-allow')
     rules = [r for r in policy['spec']['ingress'] if any(
-        p.get('namespaceSelector', {}).get('matchLabels', {}).get('kubernetes.io/metadata.name') == 'tridata-staging'
+        p.get('namespaceSelector', {}).get('matchLabels', {}).get('kubernetes.io/metadata.name') == namespace
         for p in r.get('from', [])
     )]
     require(len(rules) == 1, 'Expected one Tridata MinIO ingress rule')
@@ -30,15 +31,23 @@ def check(documents):
     require(set(expression['values']) == {'tridata-api', 'tridata-worker'}, 'Unexpected object-store client role')
 
 
+def check(documents):
+    for namespace in ('tridata-staging', 'tridata-public'):
+        check_namespace(documents, namespace)
+
+
 root = Path(__file__).resolve().parents[1]
 documents = list(yaml.safe_load_all((root / 'infrastructure/minio-on-nas/networkpolicy.yaml').read_text()))
 check(documents)
 if '--self-test' in sys.argv:
-    for mode in ('namespace_only', 'split_peers', 'web_role', 'console_port'):
+    for namespace, mode in product(
+        ('tridata-staging', 'tridata-public'),
+        ('namespace_only', 'split_peers', 'web_role', 'console_port'),
+    ):
         broken = copy.deepcopy(documents)
         policy = next(d for d in broken if d and d.get('metadata', {}).get('name') == 'minio-allow')
         rule = next(r for r in policy['spec']['ingress'] if any(
-            p.get('namespaceSelector', {}).get('matchLabels', {}).get('kubernetes.io/metadata.name') == 'tridata-staging'
+            p.get('namespaceSelector', {}).get('matchLabels', {}).get('kubernetes.io/metadata.name') == namespace
             for p in r.get('from', [])
         ))
         peer = rule['from'][0]

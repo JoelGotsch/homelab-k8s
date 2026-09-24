@@ -60,8 +60,8 @@
 # WHAT IT CANNOT SEE, stated rather than implied:
 #   - a chart default that creates a claim without any values key naming it
 #     (only a render shows that; ADR 0067 records the render calibration);
-#   - kustomize patches or replacements that change storage fields — these
-#     FAIL as unmodelled rather than being silently mis-counted;
+#   - storage patches other than exact-target JSON6902 add/replace/test;
+#     unsupported selectors/operations and storage replacements FAIL closed;
 #   - volumes that exist live but not in git (restore drills, orphans,
 #     detached leftovers). The live alert still covers those.
 #
@@ -88,7 +88,7 @@ if ! python3 -c 'import yaml' >/dev/null 2>&1; then
 fi
 
 exec python3 - "$@" <<'PY'
-import os, posixpath, re, subprocess, sys
+import copy, os, posixpath, re, subprocess, sys
 import yaml
 
 LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
@@ -347,6 +347,7 @@ class Projection:
                     acc["docs"].extend((doc, f, ns) for doc in self.docs(v, f))
             return
         kz = (self.docs(v, kzp) or [{}])[0]
+        start = len(acc["docs"])  # Patches apply only inside this kustomization.
         ns = ns or kz.get("namespace")
         for r in kz.get("replicas") or []:
             if isinstance(r, dict) and "name" in r:
@@ -376,19 +377,101 @@ class Projection:
                 body = str(pt.get("patch") or "")
                 if pt.get("path"):
                     pp = posixpath.normpath(posixpath.join(d, pt["path"]))
-                    body = v.read(pp).decode(errors="replace") if v.isfile(pp) else ""
+                    if pp == ".." or pp.startswith("../") or not v.isfile(pp):
+                        self.problem(f"{v.repo}/{kzp}: {key} patch file is missing or leaves the repository")
+                        continue
+                    body = v.read(pp).decode(errors="replace")
                 target = (pt.get("target") or {}).get("kind")
                 kinds = ({target} if target else set(KIND_LINE.findall(body))) & STORAGE_KINDS
                 if kinds and STORAGE_TOKENS.search(body):
-                    self.problem(f"{v.repo}/{kzp}: a {key} entry changes storage fields on {', '.join(sorted(kinds))}",
-                                 "Patches are not applied by this check, so the patched size/class/replicas would be mis-counted.",
-                                 "Put the value in the base manifest or chart values, or extend this check to model the patch.")
+                    self.storage_patch(v, kzp, key, pt, body, acc["docs"][start:])
         for rp in kz.get("replacements") or []:
             for t in (rp.get("targets") or []) if isinstance(rp, dict) else []:
                 k = (t.get("select") or {}).get("kind")
                 if k in STORAGE_KINDS and any(STORAGE_TOKENS.search(str(fp)) for fp in t.get("fieldPaths") or []):
                     self.problem(f"{v.repo}/{kzp}: a replacement writes storage fields on {k}",
                                  "Replacements are not applied by this check; extend it or move the value.")
+
+    def storage_patch(self, v, kzp, key, patch, body, documents):
+        """Exact-target JSON6902 subset; apply atomically or fail the projection.
+
+        Namespace transforms are tracked separately by build(). No namespace or
+        regex selectors are accepted; each application's build has its own docs.
+        This covers inline/file patches without requiring Helm/network rendering.
+        """
+        def fail(reason):
+            self.problem(f"{v.repo}/{kzp}: unsupported storage {key} entry: {reason}",
+                         "No projection is trusted until the patch is modelled exactly.")
+
+        target = patch.get("target") or {}
+        if (key == "patchesStrategicMerge" or set(target) - {"group", "version", "kind", "name"}
+                or not target.get("kind") or not target.get("name")
+                or not re.fullmatch(r"[a-z0-9-]+", str(target["name"]))):
+            fail("requires an exact kind/name target without namespace, regex or label selectors")
+            return
+        try:
+            operations = yaml.load(body, Loader=LOADER)
+        except yaml.YAMLError:
+            fail("invalid JSON6902 YAML")
+            return
+        if not isinstance(operations, list) or not operations:
+            fail("requires a nonempty JSON6902 operation list")
+            return
+        matches = []
+        for doc, _, _ in documents:
+            api = str(doc.get("apiVersion", "")).split("/", 1)
+            group, version = api if len(api) == 2 else ("", api[0])
+            if (doc.get("kind") == target["kind"]
+                    and (doc.get("metadata") or {}).get("name") == target["name"]
+                    and target.get("group", group) == group and target.get("version", version) == version):
+                matches.append(doc)
+        if len(matches) != 1:
+            fail("target must match exactly one resource")
+            return
+        candidate = copy.deepcopy(matches[0])
+        try:
+            for op in operations:
+                if (not isinstance(op, dict) or set(op) != {"op", "path", "value"}
+                        or op["op"] not in {"add", "replace", "test"}
+                        or not isinstance(op["path"], str) or not op["path"].startswith("/spec/")
+                        or re.search(r"~(?![01])", op["path"])):
+                    raise ValueError("only add/replace/test of spec fields is supported")
+                parts = [p.replace("~1", "/").replace("~0", "~") for p in op["path"][1:].split("/")]
+                node = candidate
+                for part in parts[:-1]:
+                    node = node[int(part)] if isinstance(node, list) and re.fullmatch(r"0|[1-9][0-9]*", part) else node[part]
+                leaf = parts[-1]
+                if isinstance(node, list):
+                    if leaf == "-" and op["op"] == "add":
+                        node.append(copy.deepcopy(op["value"]))
+                        continue
+                    if not re.fullmatch(r"0|[1-9][0-9]*", leaf):
+                        raise ValueError("invalid array index")
+                    index = int(leaf)
+                    if op["op"] == "add":
+                        if index > len(node):
+                            raise ValueError("array index out of bounds")
+                        node.insert(index, copy.deepcopy(op["value"]))
+                    elif op["op"] == "test":
+                        if node[index] != op["value"]:
+                            raise ValueError("test operation failed")
+                    else:
+                        node[index] = copy.deepcopy(op["value"])
+                elif isinstance(node, dict):
+                    if op["op"] != "add" and leaf not in node:
+                        raise ValueError("field does not exist")
+                    if op["op"] == "test":
+                        if node[leaf] != op["value"]:
+                            raise ValueError("test operation failed")
+                    else:
+                        node[leaf] = copy.deepcopy(op["value"])
+                else:
+                    raise ValueError("parent is not an object or array")
+        except (KeyError, IndexError, TypeError, ValueError):
+            fail("operation is unsupported, has an invalid path, or failed its test")
+            return
+        matches[0].clear()
+        matches[0].update(candidate)
 
     # ── claims ──
     def claim(self, where, kind, name, klass, size, count, volume=None, origin="manifest"):

@@ -48,6 +48,8 @@ Per [cold-start.md Step 13c](../../../homelab-docs/04-guides/cold-start.md).
 | `kv/data/<app>/oidc` | `client_id`, `client_secret` | One path per blueprint under `blueprints/`. AUTO-seeded by `homelab-infra/scripts/seed-openbao-paths.sh`. Authentik provider is created by the declarative blueprint reading these via `!Env`; the consumer-side ExternalSecret in the app's ns reads the same path. Currently: `grafana/oidc`. |
 | `kv/data/tridata/oidc` | `client_id`, `client_secret` | Tridata's dedicated blueprint reads these through `authentik-tridata-oidc`; seed with its app repository's `scripts/provision-identity.py`. |
 | `kv/data/tridata/staging/runtime` | `owner_username` | Explicit private-prototype owner admission, alongside the separate `tridata-testers` group. Operator-group membership grants no Tridata access. |
+| `kv/data/tridata/public/oidc` | `client_id`, `client_secret`, `issuer` | Public Tridata client; seeded by the Tridata app’s `scripts/provision-public-identity.py`. Only its secret is projected into this namespace. |
+| `kv/data/tridata/public/google` | `client_id`, `client_secret` | Operator-created Google External Web OAuth client; projected only through `authentik-tridata-google`. |
 
 **First-install seed:**
 
@@ -219,3 +221,36 @@ The pattern is repetitive (same shape per app) — see
   consumers (other apps follow the same pattern).
 - [04-guides/known-caveats.md §Authentik](../../../homelab-docs/04-guides/known-caveats.md)
   — accumulated index.
+
+### Public Tridata identity facade
+
+`tridata-public.yaml` owns only its dedicated public brand, flows, provider and
+external group. `optional-blueprints/tridata-google.yaml` is enabled in this
+deployment after the operator provisioned the Google External Web OAuth client
+with callback `https://tridata-auth.vyramo.com/source/oauth/callback/tridata-google/`.
+Its two credential fields come from `kv/tridata/public/google` through the
+`authentik-tridata-google` ExternalSecret and `global.envFrom`; neither value is
+stored in Git. Server and worker HTTPS egress is limited to `accounts.google.com`,
+`oauth2.googleapis.com`, `openidconnect.googleapis.com` and `www.googleapis.com`,
+with DNS interception on both.
+For recovery, restore these operator-owned credentials before reconciling
+Authentik. Validate both blueprints together with rollback and verify a real
+Google redirect and callback before declaring Google registration ready.
+
+The source is named Google and uses Authentik's supported generic OpenID Connect
+adapter with Google's discovery document. This adapter honors `pkce: S256`;
+the built-in Google adapter in the installed Authentik 2026.8 ignores the source
+PKCE setting. The generic adapter supplies only `openid`, `email`, and `profile`
+scopes and authenticates the token exchange with the Web client's secret.
+
+The Google source refuses automatic account linking by email. Existing password
+accounts retain their existing method. Source enrollment requires Google's
+`email_verified` signal (or the legacy `verified_email` field when the OIDC field
+is absent), strictly requiring a boolean true. Base public enrollment continues
+to work independently.
+
+The public proxy is owned by the Tridata repository at `k8s/public-auth/` and
+served through its TLS edge. No public HTTPRoute or tunnel directly targets
+`authentik-server`. The deployment gate runs the Tridata app's
+`provision-public-identity.py --acceptance` with mocked mail and transaction
+rollback, including application admission, email redemption and password reset.

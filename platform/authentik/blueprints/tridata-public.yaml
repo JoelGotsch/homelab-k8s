@@ -1,0 +1,473 @@
+# Dedicated public Tridata brand. The exact existing owner uses private homelab login.
+version: 1
+metadata:
+  name: tridata-public
+  labels:
+    blueprints.goauthentik.io/instantiate: 'true'
+entries:
+- model: authentik_core.group
+  id: tridata-public-users
+  identifiers:
+    name: tridata-public-users
+  attrs:
+    is_superuser: false
+- model: authentik_flows.flow
+  id: tridata-public-authentication
+  identifiers:
+    slug: tridata-public-authentication
+  attrs:
+    name: tridata-public-authentication
+    title: "Tridata \u2014 Authentication"
+    designation: authentication
+    authentication: none
+- model: authentik_flows.flow
+  id: tridata-public-enrollment
+  identifiers:
+    slug: tridata-public-enrollment
+  attrs:
+    name: tridata-public-enrollment
+    title: "Tridata \u2014 Enrollment"
+    designation: enrollment
+    authentication: require_unauthenticated
+- model: authentik_flows.flow
+  id: tridata-public-recovery
+  identifiers:
+    slug: tridata-public-recovery
+  attrs:
+    name: tridata-public-recovery
+    title: "Tridata \u2014 Recovery"
+    designation: recovery
+    authentication: require_unauthenticated
+- model: authentik_flows.flow
+  id: tridata-public-authorization
+  identifiers:
+    slug: tridata-public-authorization
+  attrs:
+    name: tridata-public-authorization
+    title: "Tridata \u2014 Authorization"
+    designation: authorization
+    authentication: none
+- model: authentik_flows.flow
+  id: tridata-public-invalidation
+  identifiers:
+    slug: tridata-public-invalidation
+  attrs:
+    name: tridata-public-invalidation
+    title: "Tridata \u2014 Invalidation"
+    designation: invalidation
+    authentication: none
+- model: authentik_policies_expression.expressionpolicy
+  id: tridata-public-prepare-email
+  identifiers:
+    name: tridata-public-prepare-email
+  attrs:
+    expression: |-
+      from authentik.core.models import User
+      from uuid import uuid4
+      data = request.context.get("prompt_data", {})
+      email = data.get("email", "").strip().lower()
+      if not email or User.objects.filter(email__iexact=email).exists():
+          ak_message("This email cannot be registered. Try signing in or recovering your account.")
+          return False
+      data["email"] = email
+      data["username"] = "tridata-" + uuid4().hex
+      return True
+- model: authentik_policies_expression.expressionpolicy
+  id: tridata-public-password-policy
+  identifiers:
+    name: tridata-public-password-policy
+  attrs:
+    expression: |-
+      data = request.context.get("prompt_data", {})
+      password = data.get("password", "")
+      if len(password) < 12:
+          ak_message("Use a password with at least 12 characters.")
+          return False
+      return password == data.get("password_repeat")
+- model: authentik_policies_expression.expressionpolicy
+  id: tridata-public-deny-private-user
+  identifiers:
+    name: tridata-public-deny-private-user
+  attrs:
+    expression: |-
+      user = request.context.get("pending_user")
+      return bool(user and user.pk and not (user.path == "users/tridata-public" and user.ak_groups.filter(name="tridata-public-users").exists()))
+- model: authentik_policies_expression.expressionpolicy
+  id: tridata-public-skip-restored-identification
+  identifiers:
+    name: tridata-public-skip-restored-identification
+  attrs:
+    expression: return not bool(request.context.get("is_restored", False))
+- model: authentik_stages_deny.denystage
+  id: tridata-public-deny
+  identifiers:
+    name: tridata-public-deny
+- model: authentik_stages_prompt.prompt
+  id: tridata-public-field-name
+  identifiers:
+    name: tridata-public-field-name
+  attrs:
+    field_key: name
+    type: text
+    label: Name
+    required: true
+    order: 0
+    placeholder: Name
+    placeholder_expression: false
+- model: authentik_stages_prompt.prompt
+  id: tridata-public-field-email
+  identifiers:
+    name: tridata-public-field-email
+  attrs:
+    field_key: email
+    type: email
+    label: Email
+    required: true
+    order: 1
+    placeholder: Email
+    placeholder_expression: false
+- model: authentik_stages_prompt.prompt
+  id: tridata-public-field-password
+  identifiers:
+    name: tridata-public-field-password
+  attrs:
+    field_key: password
+    type: password
+    label: Password
+    required: true
+    order: 2
+    placeholder: Password
+    placeholder_expression: false
+- model: authentik_stages_prompt.prompt
+  id: tridata-public-field-password_repeat
+  identifiers:
+    name: tridata-public-field-password_repeat
+  attrs:
+    field_key: password_repeat
+    type: password
+    label: Repeat password
+    required: true
+    order: 3
+    placeholder: Repeat password
+    placeholder_expression: false
+- model: authentik_stages_prompt.promptstage
+  id: tridata-public-register-prompt
+  identifiers:
+    name: tridata-public-register-prompt
+  attrs:
+    fields:
+    - !KeyOf 'tridata-public-field-name'
+    - !KeyOf 'tridata-public-field-email'
+    - !KeyOf 'tridata-public-field-password'
+    - !KeyOf 'tridata-public-field-password_repeat'
+    validation_policies:
+    - !KeyOf 'tridata-public-prepare-email'
+    - !KeyOf 'tridata-public-password-policy'
+- model: authentik_stages_prompt.promptstage
+  id: tridata-public-password-prompt
+  identifiers:
+    name: tridata-public-password-prompt
+  attrs:
+    fields:
+    - !KeyOf 'tridata-public-field-password'
+    - !KeyOf 'tridata-public-field-password_repeat'
+    validation_policies:
+    - !KeyOf 'tridata-public-password-policy'
+- model: authentik_stages_user_write.userwritestage
+  id: tridata-public-create
+  identifiers:
+    name: tridata-public-create
+  attrs:
+    user_creation_mode: always_create
+    create_users_as_inactive: true
+    create_users_group: !KeyOf 'tridata-public-users'
+    user_type: external
+    user_path_template: users/tridata-public
+- model: authentik_stages_user_write.userwritestage
+  id: tridata-public-update
+  identifiers:
+    name: tridata-public-update
+  attrs:
+    user_creation_mode: never_create
+- model: authentik_stages_email.emailstage
+  id: tridata-public-verification-email
+  identifiers:
+    name: tridata-public-verification-email
+  attrs:
+    use_global_settings: true
+    template: email/account_confirmation.html
+    activate_user_on_success: true
+    subject: "Tridata \u2014 verify your email"
+    token_expiry: minutes=30
+    recovery_max_attempts: 3
+    recovery_cache_timeout: minutes=10
+- model: authentik_stages_email.emailstage
+  id: tridata-public-recovery-email
+  identifiers:
+    name: tridata-public-recovery-email
+  attrs:
+    use_global_settings: true
+    template: email/password_reset.html
+    activate_user_on_success: false
+    subject: "Tridata \u2014 reset your password"
+    token_expiry: minutes=30
+    recovery_max_attempts: 3
+    recovery_cache_timeout: minutes=10
+- model: authentik_stages_password.passwordstage
+  id: tridata-public-password
+  identifiers:
+    name: tridata-public-password
+  attrs:
+    backends:
+    - authentik.core.auth.InbuiltBackend
+    failed_attempts_before_cancel: 5
+- model: authentik_stages_identification.identificationstage
+  id: tridata-public-identify
+  identifiers:
+    name: tridata-public-identify
+  attrs:
+    user_fields:
+    - email
+    case_insensitive_matching: true
+    show_matched_user: false
+    enrollment_flow: !KeyOf 'tridata-public-enrollment'
+    recovery_flow: !KeyOf 'tridata-public-recovery'
+- model: authentik_stages_identification.identificationstage
+  id: tridata-public-recovery-identify
+  identifiers:
+    name: tridata-public-recovery-identify
+  attrs:
+    user_fields:
+    - email
+    case_insensitive_matching: true
+    show_matched_user: false
+    pretend_user_exists: true
+- model: authentik_stages_user_login.userloginstage
+  id: tridata-public-login
+  identifiers:
+    name: tridata-public-login
+  attrs:
+    session_duration: days=7
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-enrollment-10
+  identifiers:
+    target: !KeyOf 'tridata-public-enrollment'
+    stage: !KeyOf 'tridata-public-register-prompt'
+    order: 10
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-enrollment-20
+  identifiers:
+    target: !KeyOf 'tridata-public-enrollment'
+    stage: !KeyOf 'tridata-public-create'
+    order: 20
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-enrollment-30
+  identifiers:
+    target: !KeyOf 'tridata-public-enrollment'
+    stage: !KeyOf 'tridata-public-verification-email'
+    order: 30
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-enrollment-100
+  identifiers:
+    target: !KeyOf 'tridata-public-enrollment'
+    stage: !KeyOf 'tridata-public-login'
+    order: 100
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-authentication-10
+  identifiers:
+    target: !KeyOf 'tridata-public-authentication'
+    stage: !KeyOf 'tridata-public-identify'
+    order: 10
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-authentication-20
+  identifiers:
+    target: !KeyOf 'tridata-public-authentication'
+    stage: !KeyOf 'tridata-public-deny'
+    order: 20
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_policies.policybinding
+  id: tridata-public-authentication-20-policy
+  identifiers:
+    target: !KeyOf 'tridata-public-authentication-20'
+    policy: !KeyOf 'tridata-public-deny-private-user'
+    order: 0
+  attrs:
+    enabled: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-authentication-30
+  identifiers:
+    target: !KeyOf 'tridata-public-authentication'
+    stage: !KeyOf 'tridata-public-password'
+    order: 30
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-authentication-100
+  identifiers:
+    target: !KeyOf 'tridata-public-authentication'
+    stage: !KeyOf 'tridata-public-login'
+    order: 100
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-recovery-10
+  identifiers:
+    target: !KeyOf 'tridata-public-recovery'
+    stage: !KeyOf 'tridata-public-recovery-identify'
+    order: 10
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_policies.policybinding
+  id: tridata-public-recovery-10-policy
+  identifiers:
+    target: !KeyOf 'tridata-public-recovery-10'
+    policy: !KeyOf 'tridata-public-skip-restored-identification'
+    order: 0
+  attrs:
+    enabled: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-recovery-15
+  identifiers:
+    target: !KeyOf 'tridata-public-recovery'
+    stage: !KeyOf 'tridata-public-deny'
+    order: 15
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_policies.policybinding
+  id: tridata-public-recovery-15-policy
+  identifiers:
+    target: !KeyOf 'tridata-public-recovery-15'
+    policy: !KeyOf 'tridata-public-deny-private-user'
+    order: 0
+  attrs:
+    enabled: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-recovery-20
+  identifiers:
+    target: !KeyOf 'tridata-public-recovery'
+    stage: !KeyOf 'tridata-public-recovery-email'
+    order: 20
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-recovery-30
+  identifiers:
+    target: !KeyOf 'tridata-public-recovery'
+    stage: !KeyOf 'tridata-public-password-prompt'
+    order: 30
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-recovery-40
+  identifiers:
+    target: !KeyOf 'tridata-public-recovery'
+    stage: !KeyOf 'tridata-public-update'
+    order: 40
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_flows.flowstagebinding
+  id: tridata-public-recovery-100
+  identifiers:
+    target: !KeyOf 'tridata-public-recovery'
+    stage: !KeyOf 'tridata-public-login'
+    order: 100
+  attrs:
+    evaluate_on_plan: false
+    re_evaluate_policies: true
+- model: authentik_providers_oauth2.oauth2provider
+  id: tridata-public
+  identifiers:
+    name: tridata-public
+  attrs:
+    authentication_flow: null
+    authorization_flow: !KeyOf 'tridata-public-authorization'
+    invalidation_flow: !KeyOf 'tridata-public-invalidation'
+    client_type: confidential
+    client_id: tridata-public
+    client_secret: !Env 'AUTHENTIK_TRIDATA_PUBLIC_CLIENT_SECRET'
+    grant_types:
+    - authorization_code
+    - refresh_token
+    redirect_uris:
+    - matching_mode: strict
+      url: https://tridata.vyramo.com/api/v1/auth/callback
+    signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
+    sub_mode: hashed_user_id
+    include_claims_in_id_token: true
+    property_mappings:
+    - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
+    - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-email]]
+    - !Find [authentik_providers_oauth2.scopemapping, [scope_name, profile]]
+- model: authentik_core.application
+  id: tridata-public-app
+  identifiers:
+    slug: tridata-public
+  attrs:
+    name: Tridata
+    provider: !KeyOf 'tridata-public'
+    meta_launch_url: https://tridata.vyramo.com/
+    policy_engine_mode: any
+- model: authentik_policies.policybinding
+  id: tridata-public-app-group
+  identifiers:
+    target: !KeyOf 'tridata-public-app'
+    group: !KeyOf 'tridata-public-users'
+    order: 0
+  attrs:
+    enabled: true
+- model: authentik_brands.brand
+  id: tridata-public-brand
+  identifiers:
+    domain: tridata-auth.vyramo.com
+  attrs:
+    default: false
+    branding_title: Tridata
+    flow_authentication: !KeyOf 'tridata-public-authentication'
+    flow_recovery: !KeyOf 'tridata-public-recovery'
+    default_application: !KeyOf 'tridata-public-app'
+- model: authentik_policies_expression.expressionpolicy
+  id: tridata-public-private-app-isolation
+  identifiers:
+    name: tridata-public-private-app-isolation
+  attrs:
+    expression: return not (request.user.path == "users/tridata-public" or request.user.ak_groups.filter(name="tridata-public-users").exists())
+- model: authentik_policies.policybinding
+  id: tridata-public-weblate-isolation
+  identifiers:
+    target: !Find [authentik_core.application, [slug, weblate]]
+    policy: !KeyOf 'tridata-public-private-app-isolation'
+    order: 0
+  attrs:
+    enabled: true
+- model: authentik_policies.policybinding
+  id: tridata-public-owner
+  identifiers:
+    target: !KeyOf 'tridata-public-app'
+    user: !Find [authentik_core.user, [username, !Env 'AUTHENTIK_BOOTSTRAP_TRIDATA_OWNER']]
+    order: 10
+  attrs:
+    enabled: true
