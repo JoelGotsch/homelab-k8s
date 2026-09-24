@@ -8,6 +8,7 @@ Run with --self-test to reject mutations of the actual rendered resources.
 from __future__ import annotations
 
 import argparse
+import builtins
 import copy
 import os
 from pathlib import Path
@@ -15,6 +16,8 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import textwrap
+from types import SimpleNamespace
 
 import yaml
 
@@ -116,6 +119,103 @@ def matches(selector, labels):
     return True
 
 
+ADULT_FIELD = "attributes.tridata_adult_attested"
+
+
+def run_expression(entry, context, *, existing_email=False):
+    """Execute the rendered policy itself with only the database lookup mocked."""
+    users = SimpleNamespace(objects=SimpleNamespace(
+        filter=lambda **kwargs: SimpleNamespace(exists=lambda: existing_email)))
+
+    def policy_import(name, *args, **kwargs):
+        if name == "authentik.core.models":
+            return SimpleNamespace(User=users)
+        return builtins.__import__(name, *args, **kwargs)
+
+    namespace = {"request": SimpleNamespace(context=context), "ak_message": lambda message: None,
+                 "__builtins__": {**vars(builtins), "__import__": policy_import}}
+    expression = entry.get("attrs", {}).get("expression", "return False")
+    exec("def evaluate():\n" + textwrap.indent(expression, "    "), namespace)
+    return namespace["evaluate"]()
+
+
+def check_adult_registration(base, google):
+    adult_ref = {"tag": "KeyOf", "value": "tridata-public-adult-policy"}
+    field_ref = {"tag": "KeyOf", "value": "tridata-public-adult-attestation"}
+    field = base.get("tridata-public-adult-attestation", {}).get("attrs", {})
+    require(field.get("field_key") == ADULT_FIELD and field.get("type") == "checkbox"
+            and field.get("required") is True and field.get("initial_value") == ""
+            and field.get("initial_value_expression") is False,
+            "adult self-attestation must be a required, initially unchecked persisted checkbox")
+    prompt = base.get("tridata-public-register-prompt", {}).get("attrs", {})
+    require(field_ref in prompt.get("fields", []) and adult_ref in prompt.get("validation_policies", []),
+            "email enrollment lacks the adult prompt or server validation")
+    google_prompt = google.get("tridata-public-google-legal", {}).get("attrs", {})
+    require({"tag": "Find", "value": ["authentik_stages_prompt.prompt",
+                                     ["name", "tridata-public-adult-attestation"]]}
+            in google_prompt.get("fields", []) and
+            {"tag": "Find", "value": ["authentik_policies_expression.expressionpolicy",
+                                     ["name", "tridata-public-adult-policy"]]}
+            in google_prompt.get("validation_policies", []),
+            "Google enrollment lacks the adult prompt or server validation")
+    for entries, binding_id, policy_id, stage_id, order in (
+        (base, "tridata-public-enrollment-20", "tridata-public-adult-policy", "tridata-public-create", 20),
+        (google, "tridata-public-google-enrollment-10", "tridata-public-google-verified",
+         "tridata-public-google-create", 10),
+    ):
+        binding = entries.get(binding_id, {})
+        require(binding.get("attrs", {}).get("evaluate_on_plan") is False
+                and binding.get("attrs", {}).get("re_evaluate_policies") is True
+                and binding.get("identifiers", {}).get("stage") == {"tag": "KeyOf", "value": stage_id}
+                and binding.get("identifiers", {}).get("order") == order,
+                "registration must recheck policy at the account creation stage")
+        policies = [e for e in entries.values() if e.get("model") == "authentik_policies.policybinding"
+                    and e.get("identifiers", {}).get("target") == {"tag": "KeyOf", "value": binding_id}]
+        require(len(policies) == 1 and policies[0].get("attrs", {}).get("enabled") is True
+                and policies[0].get("identifiers", {}).get("policy") == {"tag": "KeyOf", "value": policy_id}
+                and not policies[0].get("attrs", {}).get("negate", False),
+                "registration create guard missing, disabled, negated or bypassed")
+    # Recovery must continue working for existing accounts without new eligibility data.
+    recovery = base.get("tridata-public-password-prompt", {}).get("attrs", {})
+    require(field_ref not in recovery.get("fields", [])
+            and adult_ref not in recovery.get("validation_policies", []),
+            "adult enrollment requirement must not gate existing-user recovery")
+    policy = base.get("tridata-public-adult-policy", {})
+    verified = google.get("tridata-public-google-verified", {})
+    userinfo = {"email": "Adult@Example.test", "email_verified": True, "name": "Adult"}
+    for label, value in (("missing", None), ("false", False), ("string false", "false"),
+                         ("zero", 0), ("one", 1), ("string true", "true"), ("true", True)):
+        data = {} if label == "missing" else {ADULT_FIELD: value}
+        for entry in (policy, verified):
+            context = {"prompt_data": copy.deepcopy(data), "oauth_userinfo": userinfo}
+            require(run_expression(entry, context) is (value is True),
+                    "adult server policy mishandled " + label)
+            if value is True:
+                require(context["prompt_data"].get(ADULT_FIELD) is True,
+                        "accepted adult attestation was discarded")
+    # Google identity remains authoritative; retain only the validated attestation.
+    context = {"prompt_data": {ADULT_FIELD: True, "attributes.is_superuser": True,
+                               "email": "untrusted@example.test"}, "oauth_userinfo": userinfo}
+    require(run_expression(verified, context) is True
+            and context["prompt_data"]["email"] == "adult@example.test"
+            and set(context["prompt_data"]) == {"email", "name", "username", ADULT_FIELD},
+            "Google identity preparation must preserve only the validated attestation")
+    for claims in ({}, {"email_verified": False}, {"email_verified": "false"},
+                   {"email_verified": False, "verified_email": True}):
+        context = {"prompt_data": {ADULT_FIELD: True},
+                   "oauth_userinfo": {"email": "adult@example.test", **claims}}
+        require(run_expression(verified, context) is False, "Google verified-email guard regressed")
+    context = {"prompt_data": {ADULT_FIELD: True},
+               "oauth_userinfo": {"email": "adult@example.test", "verified_email": True}}
+    require(run_expression(verified, context) is True, "legacy verified-email support regressed")
+    require(run_expression(verified, context, existing_email=True) is False,
+            "Google must still reject automatic linking by email")
+    context = {"prompt_data": {ADULT_FIELD: True, "email": "adult@example.test"}}
+    require(run_expression(base["tridata-public-prepare-email"], context) is True
+            and context["prompt_data"].get(ADULT_FIELD) is True,
+            "email preparation discarded adult attestation")
+
+
 def check(documents):
     secret = one(documents, "ExternalSecret", SECRET)["spec"]
     require(secret.get("secretStoreRef") == {"kind": "ClusterSecretStore", "name": "openbao"},
@@ -138,6 +238,7 @@ def check(documents):
                 for e in dependencies), "Google blueprint lacks required public-base metaapply dependency")
     base_entries = {e.get("id"): e for e in base.get("entries", []) if e.get("id")}
     google_entries = {e.get("id"): e for e in google.get("entries", []) if e.get("id")}
+    check_adult_registration(base_entries, google_entries)
     legal = base_entries.get("tridata-public-legal-links", {}).get("attrs", {})
     require(legal.get("type") == "static" and legal.get("initial_value_expression") is False
             and legal.get("placeholder_expression") is False,
@@ -308,6 +409,24 @@ def self_test(documents):
             blueprint["entries"] = [e for e in blueprint["entries"] if e.get("id") != entry_id]
             config[filename] = yaml.safe_dump(blueprint)
         mutations.append(("missing legal notice " + entry_id, missing_legal))
+    adult_mutations = (
+        ("tridata-public.yaml", "tridata-public-adult-attestation", "required", False),
+        ("tridata-public.yaml", "tridata-public-adult-attestation", "initial_value", "true"),
+        ("tridata-public.yaml", "tridata-public-register-prompt", "validation_policies", []),
+        ("tridata-google.yaml", "tridata-public-google-legal", "validation_policies", []),
+        ("tridata-public.yaml", "tridata-public-enrollment-20-adult-policy", "enabled", False),
+        ("tridata-google.yaml", "tridata-public-google-enrollment-10-policy", "enabled", False),
+        ("tridata-public.yaml", "tridata-public-adult-policy", "expression", "return True"),
+        ("tridata-google.yaml", "tridata-public-google-verified", "expression", "return True"),
+    )
+    for filename, entry_id, field, value in adult_mutations:
+        def unsafe_adult(docs, filename=filename, entry_id=entry_id, field=field, value=value):
+            config = one(docs, "ConfigMap", "authentik-blueprints")["data"]
+            blueprint = yaml.load(config[filename], Loader=BlueprintLoader)
+            entry = next(e for e in blueprint["entries"] if e.get("id") == entry_id)
+            entry["attrs"][field] = value
+            config[filename] = yaml.safe_dump(blueprint)
+        mutations.append(("adult eligibility " + entry_id + " " + field, unsafe_adult))
     for name, mutate in mutations:
         broken = copy.deepcopy(documents)
         mutate(broken)
@@ -332,7 +451,7 @@ def main():
     except (ValueError, KeyError, TypeError, OSError, subprocess.TimeoutExpired, yaml.YAMLError):
         # Suppress exception payloads: renderer/YAML diagnostics may contain secrets.
         raise SystemExit("FAIL: Google wiring/render contract failed; no manifest or credential values printed") from None
-    print(f"Google ESO, rendered env/mounts, dependency and narrow egress passed; {count} unsafe mutations rejected")
+    print(f"Google wiring, legal notices, adult server policies and retention passed; {count} unsafe mutations rejected")
 
 
 if __name__ == "__main__":

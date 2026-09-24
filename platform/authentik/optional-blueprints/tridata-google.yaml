@@ -36,6 +36,10 @@ entries:
     expression: |-
       from authentik.core.models import User
       from uuid import uuid4
+      adult_attested = request.context.get("prompt_data", {}).get("attributes.tridata_adult_attested")
+      if adult_attested is not True:
+          ak_message("You must confirm that you are at least 18 years old to register.")
+          return False
       info = request.context.get("oauth_userinfo", {})
       email = info.get("email", "").strip().lower()
       if not email or info.get("email_verified", info.get("verified_email")) is not True:
@@ -43,7 +47,7 @@ entries:
       if User.objects.filter(email__iexact=email).exists():
           ak_message("This email already has an account. Sign in with its existing method.")
           return False
-      request.context["prompt_data"] = {"email": email, "name": info.get("name", email), "username": "tridata-" + uuid4().hex}
+      request.context["prompt_data"] = {"email": email, "name": info.get("name", email), "username": "tridata-" + uuid4().hex, "attributes.tridata_adult_attested": adult_attested}
       return True
 - model: authentik_stages_prompt.promptstage
   id: tridata-public-google-legal
@@ -52,6 +56,9 @@ entries:
   attrs:
     fields:
     - !Find [authentik_stages_prompt.prompt, [name, tridata-public-legal-links]]
+    - !Find [authentik_stages_prompt.prompt, [name, tridata-public-adult-attestation]]
+    validation_policies:
+    - !Find [authentik_policies_expression.expressionpolicy, [name, tridata-public-adult-policy]]
 - model: authentik_flows.flowstagebinding
   id: tridata-public-google-enrollment-5
   identifiers:

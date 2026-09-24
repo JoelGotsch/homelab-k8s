@@ -261,7 +261,7 @@ Tridata email enrollment/recovery and Google enrollment use a dedicated static
 prompt linking to `https://tridata.vyramo.com/privacy` and
 `https://tridata.vyramo.com/terms`. The links open in another tab to preserve
 the registration flow. Publish the final legal pages before reconciling this
-change; operator identity/contact and eligibility are still being confirmed.
+change; operator identity/contact still needs to be finalized.
 
 Only trusted constant HTML belongs in the static prompt. Authentik renders
 `initial_value` as HTML; never interpolate user input or enable expressions.
@@ -272,3 +272,31 @@ Branding should use the same privacy and terms URLs.
 
 Pinned implementation reference:
 <https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/web/src/flow/stages/prompt/PromptStage.ts>.
+
+
+## Tridata adult registration
+
+New public email and Google registrations require an initially unchecked
+“I confirm that I am at least 18 years old” checkbox. A shared Prompt validation
+policy accepts only the boolean `true`; missing, false and string values fail.
+Both account-creation bindings also enforce the check server-side. Authentik
+2026.8.2 checkbox fields force the serializer's `required` flag to false, so the
+checkbox UI alone is insufficient.
+
+User Write stores the single boolean as `attributes.tridata_adult_attested`.
+No birth date is requested. Google's verified-email policy preserves that
+validated field while rebuilding trusted identity data from Google, and still
+rejects unverified emails and existing-email linking. This is self-attestation,
+not age verification, legal acceptance or privacy consent. Existing-user login,
+password recovery and private homelab flows do not require this attribute.
+
+Run `python3 scripts/check-authentik-google.py --self-test` against the cached
+chart before reconciliation. It checks the rendered prompt/create bindings,
+executes the actual server policy expressions with mocked database lookups,
+checks rejected and accepted attestations, retention, verified-email checks,
+and mutation coverage. It is offline coverage, not a live flow acceptance test.
+
+Pinned implementation references:
+- [Checkbox serializer](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/stages/prompt/models.py)
+- [Prompt validation](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/stages/prompt/stage.py)
+- [User Write attribute persistence](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/stages/user_write/stage.py)
