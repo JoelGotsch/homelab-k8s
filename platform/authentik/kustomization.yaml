@@ -26,6 +26,7 @@ resources:
   - externalsecret.yaml
   - externalsecret-tridata.yaml
   - externalsecret-tridata-public.yaml
+  - externalsecret-tridata-google.yaml
   - httproute.yaml
   - httproute-model-manager.yaml
   - httproute-chat-history.yaml
@@ -109,6 +110,7 @@ configMapGenerator:
       - blueprints/librechat.yaml
       - blueprints/tridata.yaml
       - blueprints/tridata-public.yaml
+      - optional-blueprints/tridata-google.yaml
       # STATIC — model-manager PROXY provider + embedded-outpost
       # assignment (first proxy-outpost app, 2026-08-05).
       - blueprints/model-manager.yaml

@@ -92,6 +92,8 @@ global:
         name: authentik-tridata-oidc
     - secretRef:
         name: authentik-tridata-public-oidc
+    - secretRef:
+        name: authentik-tridata-google
 
   # Custom email templates at /templates — authentik's Django TEMPLATES DIRS
   # (confirmed against the running 2026.5.4 instance, not assumed). Puts

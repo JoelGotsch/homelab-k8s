@@ -1,10 +1,15 @@
-# Optional: activate only after Google client + callback and ESO environment are ready.
+# Requires the operator-owned Google client and its ExternalSecret environment.
 version: 1
 metadata:
   name: tridata-google
   labels:
     blueprints.goauthentik.io/instantiate: 'true'
 entries:
+- model: authentik_blueprints.metaapplyblueprint
+  attrs:
+    identifiers:
+      name: tridata-public
+    required: true
 - model: authentik_flows.flow
   id: tridata-public-google-enrollment
   identifiers:
@@ -33,7 +38,7 @@ entries:
       from uuid import uuid4
       info = request.context.get("oauth_userinfo", {})
       email = info.get("email", "").strip().lower()
-      if not email or info.get("verified_email") is not True:
+      if not email or info.get("email_verified", info.get("verified_email")) is not True:
           return False
       if User.objects.filter(email__iexact=email).exists():
           ak_message("This email already has an account. Sign in with its existing method.")
@@ -109,7 +114,11 @@ entries:
   attrs:
     name: Google
     enabled: true
-    provider_type: google
+    # The generic OIDC adapter honors source PKCE; the built-in Google adapter
+    # in Authentik 2026.8 ignores the source's pkce field.
+    provider_type: openidconnect
+    oidc_well_known_url: https://accounts.google.com/.well-known/openid-configuration
+    authorization_code_auth_method: post_body
     consumer_key: !Env 'AUTHENTIK_TRIDATA_GOOGLE_CLIENT_ID'
     consumer_secret: !Env 'AUTHENTIK_TRIDATA_GOOGLE_CLIENT_SECRET'
     authentication_flow: !KeyOf 'tridata-public-google-authentication'
@@ -117,7 +126,7 @@ entries:
     user_matching_mode: email_deny
     group_matching_mode: identifier
     user_path_template: users/tridata-public
-    additional_scopes: openid
+    additional_scopes: ''
     pkce: S256
 - model: authentik_stages_identification.identificationstage
   id: tridata-public-identify-google

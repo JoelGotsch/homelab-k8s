@@ -515,6 +515,13 @@ repos:
         # python3 or (non-vendored chart) the repo is unreachable: an env/network
         # blip must never wedge a commit. Bypass: SKIP_HELM_VALUES_KEYS_CHECK=1.
 
+      - id: check-authentik-google
+        name: Google source secrets, rendered workload wiring and narrow egress reject regressions
+        entry: python3 scripts/check-authentik-google.py --self-test
+        language: system
+        pass_filenames: false
+        files: '^(platform/authentik/|components/|scripts/check-authentik-google\.py$)'
+
       - id: check-authentik-security-context
         name: Authentik security context keys survive the pinned chart render
         entry: scripts/check-authentik-security-context.sh

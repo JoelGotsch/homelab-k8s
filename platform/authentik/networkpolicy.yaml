@@ -108,7 +108,17 @@ spec:
         - ports:
             - port: "8000"
               protocol: TCP
-    # kube-DNS.
+    # Google OAuth token exchange and verified user information for Tridata.
+    - toFQDNs:
+        - matchName: "accounts.google.com"
+        - matchName: "oauth2.googleapis.com"
+        - matchName: "openidconnect.googleapis.com"
+        - matchName: "www.googleapis.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # kube-DNS; interception supplies the FQDN identities above.
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: kube-system
@@ -119,6 +129,9 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
     # CNPG Postgres (same ns).
     - toEndpoints:
         - matchLabels:
@@ -200,6 +213,16 @@ spec:
             - port: "443"
               protocol: TCP
             - port: "80"
+              protocol: TCP
+    # Google source discovery/token work uses the same narrow HTTPS allowlist.
+    - toFQDNs:
+        - matchName: "accounts.google.com"
+        - matchName: "oauth2.googleapis.com"
+        - matchName: "openidconnect.googleapis.com"
+        - matchName: "www.googleapis.com"
+      toPorts:
+        - ports:
+            - port: "443"
               protocol: TCP
     # Central outbound SMTP (kv/shared/smtp) — the worker runs the
     # dramatiq send_mail task for invite / password-reset / share
