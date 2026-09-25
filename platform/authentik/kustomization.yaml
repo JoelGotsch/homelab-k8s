@@ -24,6 +24,7 @@ resources:
   - objectstore.yaml
   - scheduled-backup.yaml
   - externalsecret.yaml
+  - externalsecret-conversation-history-v2.yaml
   - externalsecret-tridata.yaml
   - externalsecret-tridata-public.yaml
   - externalsecret-tridata-google.yaml
@@ -120,6 +121,7 @@ configMapGenerator:
       # STATIC — full provider/app for the new LibreChat app (2026-07-30);
       # goes into the j2 loop when the render-template reconcile lands.
       - blueprints/librechat.yaml
+      - blueprints/conversation-history-v2.yaml
       - blueprints/tridata.yaml
       - blueprints/tridata-public.yaml
       - optional-blueprints/tridata-google.yaml

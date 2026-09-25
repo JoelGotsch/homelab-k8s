@@ -96,6 +96,8 @@ global:
     - secretRef:
         name: authentik-tridata-oidc
     - secretRef:
+        name: authentik-conversation-history-v2-oidc
+    - secretRef:
         name: authentik-tridata-public-oidc
     - secretRef:
         name: authentik-tridata-google
