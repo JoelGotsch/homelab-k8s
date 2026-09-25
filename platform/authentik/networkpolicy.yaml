@@ -33,6 +33,14 @@ spec:
       app.kubernetes.io/name: authentik
       app.kubernetes.io/component: server
   ingress:
+    # Dedicated archive web client; worker and other namespace pods are excluded.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: conversation-history-v2
+            app.kubernetes.io/name: conversation-history-v2
+            app.kubernetes.io/component: web
+      toPorts:
+        - ports: [{port: "9000", protocol: TCP}]
     - fromEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: tridata-public
