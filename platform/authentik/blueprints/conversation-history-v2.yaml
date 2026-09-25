@@ -1,4 +1,4 @@
-# Dedicated archive owner login. No operator or tester group admission.
+# V2 staging registration. Each identity receives a private app workspace.
 version: 1
 metadata:
   name: conversation-history-v2-oidc
@@ -31,20 +31,195 @@ entries:
     identifiers:
       slug: conversation-history-v2
     attrs:
-      name: Conversation archive v2
+      name: Conversation History V2 — Staging
       provider: !KeyOf conversation-history-v2-provider
       meta_launch_url: "https://conversation-history-v2.lab.vyramo.com/"
-      meta_description: "Private conversation archive"
+      meta_description: "Staging — private workspaces; test data may be reset"
       group: Personal
       policy_engine_mode: any
 
-  # Only the explicitly selected existing archive owner is admitted.
-  # This binds one identity; membership of the operator group conveys no access.
+  # Remove the previous owner-only binding; app-side grants remain workspace-local.
   - model: authentik_policies.policybinding
+    state: absent
     identifiers:
       target: !KeyOf conversation-history-v2-app
       user: !Find [authentik_core.user, [username, !Env AUTHENTIK_CHIST_V2_OWNER]]
+  - model: authentik_policies_expression.expressionpolicy
+    id: conversation-history-v2-active
+    identifiers:
+      name: conversation-history-v2-active
+    attrs:
+      expression: return bool(request.user.pk and request.user.is_active)
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf conversation-history-v2-app
+      policy: !KeyOf conversation-history-v2-active
     attrs:
       order: 20
       enabled: true
       negate: false
+
+  - model: authentik_core.group
+    id: conversation-history-v2-users
+    identifiers:
+      name: conversation-history-v2-users
+    attrs:
+      is_superuser: false
+  - model: authentik_flows.flow
+    id: conversation-history-v2-enrollment
+    identifiers:
+      slug: conversation-history-v2-enrollment
+    attrs:
+      name: conversation-history-v2-enrollment
+      title: Create a Conversation History account
+      designation: enrollment
+      authentication: require_unauthenticated
+  - model: authentik_policies_expression.expressionpolicy
+    id: conversation-history-v2-registration-fields
+    identifiers:
+      name: conversation-history-v2-registration-fields
+    attrs:
+      expression: |-
+        import re
+        from authentik.core.models import User
+        data = request.context.get("prompt_data", {})
+        username = data.get("username", "").strip().lower()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{2,63}", username) or User.objects.filter(username__iexact=username).exists():
+            ak_message("Choose an available username with 3–64 letters, digits, dots, dashes or underscores.")
+            return False
+        password = data.get("password", "")
+        if len(password) < 12 or password != data.get("password_repeat"):
+            ak_message("Use matching passwords with at least 12 characters.")
+            return False
+        data["username"] = username
+        return True
+  - model: authentik_stages_prompt.prompt
+    id: conversation-history-v2-username
+    identifiers:
+      name: conversation-history-v2-username
+    attrs:
+      field_key: username
+      type: username
+      label: Username
+      required: true
+      order: 0
+      placeholder: Username
+      placeholder_expression: false
+  - model: authentik_stages_prompt.prompt
+    id: conversation-history-v2-name
+    identifiers:
+      name: conversation-history-v2-name
+    attrs:
+      field_key: name
+      type: text
+      label: Name
+      required: true
+      order: 1
+      placeholder: Name
+      placeholder_expression: false
+  - model: authentik_stages_prompt.prompt
+    id: conversation-history-v2-password
+    identifiers:
+      name: conversation-history-v2-password
+    attrs:
+      field_key: password
+      type: password
+      label: Password
+      required: true
+      order: 2
+      placeholder: Password
+      placeholder_expression: false
+  - model: authentik_stages_prompt.prompt
+    id: conversation-history-v2-password-repeat
+    identifiers:
+      name: conversation-history-v2-password-repeat
+    attrs:
+      field_key: password_repeat
+      type: password
+      label: Repeat password
+      required: true
+      order: 3
+      placeholder: Repeat password
+      placeholder_expression: false
+  - model: authentik_stages_prompt.prompt
+    id: conversation-history-v2-staging-notice
+    identifiers:
+      name: conversation-history-v2-staging-notice
+    attrs:
+      field_key: staging_notice
+      type: alert_warning
+      label: Staging
+      required: false
+      order: 4
+      initial_value: Your account gets its own private workspace. Test data may be reset.
+      initial_value_expression: false
+      placeholder_expression: false
+  - model: authentik_stages_prompt.promptstage
+    id: conversation-history-v2-register-prompt
+    identifiers:
+      name: conversation-history-v2-register-prompt
+    attrs:
+      fields:
+        - !KeyOf conversation-history-v2-username
+        - !KeyOf conversation-history-v2-name
+        - !KeyOf conversation-history-v2-password
+        - !KeyOf conversation-history-v2-password-repeat
+        - !KeyOf conversation-history-v2-staging-notice
+      validation_policies:
+        - !KeyOf conversation-history-v2-registration-fields
+  - model: authentik_stages_user_write.userwritestage
+    id: conversation-history-v2-create
+    identifiers:
+      name: conversation-history-v2-create
+    attrs:
+      user_creation_mode: always_create
+      create_users_as_inactive: false
+      create_users_group: !KeyOf conversation-history-v2-users
+      user_type: external
+      user_path_template: users/conversation-history-v2
+  - model: authentik_stages_user_login.userloginstage
+    id: conversation-history-v2-login
+    identifiers:
+      name: conversation-history-v2-login
+    attrs:
+      session_duration: hours=8
+  - model: authentik_stages_redirect.redirectstage
+    id: conversation-history-v2-return
+    identifiers:
+      name: conversation-history-v2-return
+    attrs:
+      mode: static
+      target_static: https://conversation-history-v2.lab.vyramo.com/api/auth/oidc/login
+      keep_context: false
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf conversation-history-v2-enrollment
+      stage: !KeyOf conversation-history-v2-register-prompt
+      order: 10
+    attrs:
+      evaluate_on_plan: true
+      re_evaluate_policies: true
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf conversation-history-v2-enrollment
+      stage: !KeyOf conversation-history-v2-create
+      order: 20
+    attrs:
+      evaluate_on_plan: true
+      re_evaluate_policies: true
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf conversation-history-v2-enrollment
+      stage: !KeyOf conversation-history-v2-login
+      order: 30
+    attrs:
+      evaluate_on_plan: true
+      re_evaluate_policies: true
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf conversation-history-v2-enrollment
+      stage: !KeyOf conversation-history-v2-return
+      order: 40
+    attrs:
+      evaluate_on_plan: true
+      re_evaluate_policies: true

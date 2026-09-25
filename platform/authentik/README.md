@@ -355,3 +355,22 @@ as well as normal rejected/accepted checkbox submissions through the serializer.
 - [Login rejects missing/unsaved users](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/stages/user_login/stage.py)
 - [Source completion saves the connection](https://raw.githubusercontent.com/goauthentik/authentik/version/2026.8.2/authentik/core/sources/stage.py)
 - [Pinned boolean deserialization](https://github.com/encode/django-rest-framework/blob/3.17.1/rest_framework/fields.py)
+
+### Conversation History V2 staging registration
+
+`blueprints/conversation-history-v2.yaml` owns V2's confidential client, active-user admission
+and dedicated username/password enrollment. Existing Authentik users can sign in directly;
+new identities are external users in `users/conversation-history-v2` with only the V2 group.
+The application creates a separate private workspace for each identity. Its configured bootstrap
+owner retains the initial staging workspace. Staging data may be reset; no V2 production exists.
+
+The shared authentication/MFA flow stays unchanged. Weblate's existing public-user exclusion in
+`tridata-public.yaml` also excludes the V2 enrollment path/group, preventing incidental Weblate
+access. Other applications retain their existing group admission.
+
+Before reconciliation, run the app repository's `scripts/homelab_identity.py --owner-from-tridata
+--k8s-repo <this-checkout> --acceptance`. This applies the two relevant blueprints in a transaction,
+exercises enrollment and PKCE exchange, verifies new-user denial for every other application and
+rolls back the synthetic account and configuration. `--verify-live` verifies committed provider
+settings after Argo reconciliation. Client inputs still use the existing V2 OpenBao path; no
+additional secret, public route or mail delivery is introduced.
