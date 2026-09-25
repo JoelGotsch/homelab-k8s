@@ -64,7 +64,7 @@ spec:
           # `chist db audit-runtime` passes against the real cluster roles.
           - {name: conversation-history-pilot, owner: homelab, repo: conversation-history-pilot-k8s, path: k8s, autoSync: "false"}
           # Separate V2 state; first rollout is deliberate and bounded.
-          - {name: conversation-history-v2, owner: forgejo-admin, repo: conversation-history-v2, path: k8s, autoSync: "false"}
+          - {name: conversation-history-v2, owner: forgejo-admin, repo: conversation-history-v2-testing-k8s, path: k8s, autoSync: "false"}
           - {name: frigate,             owner: homelab,       repo: homelab-k8s, path: apps/frigate,             autoSync: "true"}
           - {name: immich,              owner: homelab,       repo: immich-k8s, path: k8s, autoSync: "true"}
           - {name: immich-public-proxy, owner: homelab,       repo: immich-public-proxy-k8s, path: k8s, autoSync: "true"}
