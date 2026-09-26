@@ -137,8 +137,16 @@ boundary. The builder independently refuses a token at runtime.
 Woodpecker 3.18.1 otherwise leaves the service account unset, so Kubernetes selects
 `default`; declaring `ci-woodpecker-runner` alone does not use it. Globally enabling
 step-selected service accounts would broaden all workflows' authority and remains
-disabled. The six synthetic `v2-tokenless` cases cover injected tokens, ordinary
-pods and four scope exclusions. Live admission/build acceptance is still pending.
+disabled. The 14 synthetic cases cover injected tokens, ordinary pods, denied
+unmutated pods and scope exclusions. Argo is observed Synced/Healthy/Succeeded at
+`c48e311acc80ba4af804c5c0f22596c7f227dab7`. The live
+`scripts/check-chist-v2-ci-admission.py --revision FULL_SHA` rehearsal proves the
+validator webhook's failure mode and exact namespace/repository selectors, then
+four server-dry-run Pod admissions. V2 has zero token volumes and the tokenless
+account; other repository/Forgejo/namespace cases retain the default account and
+its token. It creates no workloads. Subsequent source CI step pods are also
+observed with the tokenless account. Actual artifact build acceptance remains
+separate and pending.
 
 ## Failure mode: Audit never blocks a write
 

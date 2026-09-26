@@ -7,8 +7,11 @@ D2. Forgejo Actions is the deferred phase-2 second engine
 
 Server + agent run in the `woodpecker` namespace. Step Pods
 spawn in the `ci-woodpecker` namespace, isolated by:
-- Separate ServiceAccount (`ci-woodpecker-runner`) with NO
-  kube-API permissions.
+- A separate tokenless ServiceAccount (`ci-woodpecker-runner`) with no
+  kube-API permissions is selected for V2 by app-specific admission. Other
+  step Pods currently use `default`; Woodpecker 3.18.1 does not select the
+  declared runner automatically. Globally enabling step account overrides
+  remains disabled. The V2 builder refuses a mounted token independently.
 - Restrictive NetworkPolicy: default-deny ingress; egress
   to kube-DNS + Forgejo + curated CCNP toFQDNs (registries), plus narrowly
   labeled per-repository deployment paths such as todo-agents → Windmill.
