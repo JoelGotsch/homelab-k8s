@@ -1,0 +1,26 @@
+# AnalysisRun verification for Kargo; no application Rollout conversion required.
+installCRDs: true
+clusterInstall: true
+controller:
+  replicas: 1
+  image:
+    tag: v1.10.0@sha256:187630ba722846bb8e079630364d3c29c8246a256be95785fd957b088f621c4e
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  readinessProbe:
+    httpGet: {path: /healthz, port: healthz}
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  selfServiceNotification: false
+  awsVerifyTargetGroup: false
+dashboard:
+  enabled: false
+podSecurityContext:
+  runAsNonRoot: true
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities: {drop: [ALL]}
+  readOnlyRootFilesystem: true
+  seccompProfile: {type: RuntimeDefault}

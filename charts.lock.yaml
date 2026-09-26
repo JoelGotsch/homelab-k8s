@@ -218,3 +218,11 @@
   content_digest: sha256:fa51656058b958661d0f7a7ee62b08c2e52c47af7485c3edde0cc7064a78d491
   upstream_artifact_sha256: sha256:7482b22aa4e79b4d0f6ca6686f58a5c83f4d7fcca1af3162877c0fe800c439e8
   mirror_artifact_sha256: sha256:7482b22aa4e79b4d0f6ca6686f58a5c83f4d7fcca1af3162877c0fe800c439e8
+- layer: infrastructure/argo-rollouts
+  name: argo-rollouts
+  version: 2.43.2
+  upstream: https://argoproj.github.io/argo-helm
+  mirror: oci://registry.homelab.internal/homelab/argo-rollouts
+  content_digest: sha256:8b1be9e360d9d235b440a909c05efa0a353c8d4366518bef14deda358996b48f
+  upstream_artifact_sha256: sha256:35da227813ffce73445e88cc70e30f474c316db784fe9913d2bd94fd40706679
+  mirror_artifact_sha256: sha256:35da227813ffce73445e88cc70e30f474c316db784fe9913d2bd94fd40706679
