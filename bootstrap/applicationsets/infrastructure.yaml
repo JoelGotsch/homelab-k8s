@@ -187,3 +187,10 @@ spec:
       annotations:
         argocd.argoproj.io/compare-options: ServerSideDiff=true,IncludeMutationWebhook=true
     {{- end }}
+    {{- if or (eq .path.basename "kargo") (eq .path.basename "argo-rollouts") }}
+    # First release-controller rollout is observed manually before enabling automation.
+    spec:
+      syncPolicy:
+        automated:
+          enabled: false
+    {{- end }}
