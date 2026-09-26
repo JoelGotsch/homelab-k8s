@@ -207,9 +207,9 @@
   version: 0.29.5
   upstream: https://openbao.github.io/openbao-helm
   mirror: oci://registry.homelab.internal/homelab/openbao
-  content_digest: sha256:5ba3c8645860e6ab6ac1ca8c5c07f4aeb2c91f06970f1ab428792ef1b02d1a88
-  upstream_artifact_sha256: sha256:d62654eb787b70677d76b864528977277a306ac355c67f2cd8cfc301363119fb
-  mirror_artifact_sha256: sha256:d62654eb787b70677d76b864528977277a306ac355c67f2cd8cfc301363119fb
+  content_digest: sha256:4608f36a1dcca9c40fd929e000ea13f67b451cbe7de2f4c26f0f8b5a5a8cb8fc
+  upstream_artifact_sha256: sha256:e67f5ee9603bfe85cf9923d01fbbaaed5dc57d1800f95e154af7f2154f05daae
+  mirror_artifact_sha256: sha256:e67f5ee9603bfe85cf9923d01fbbaaed5dc57d1800f95e154af7f2154f05daae
 - layer: platform/woodpecker
   name: woodpecker
   version: 3.7.3
