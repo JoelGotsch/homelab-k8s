@@ -156,7 +156,7 @@
   mirror_artifact_sha256: sha256:05eae98df0ff6c21877a26a4400780e4bbff248bc3b88694ef8d08b273ed6815
 - layer: observability/langfuse
   name: langfuse
-  version: 1.5.41
+  version: 2.1.1
   upstream: https://langfuse.github.io/langfuse-k8s
   mirror: oci://registry.homelab.internal/homelab/langfuse
   content_digest: sha256:fdaf4d758dc70deab09f95ede151519f0ccd9e1d17e5d34f883964682f26c740
