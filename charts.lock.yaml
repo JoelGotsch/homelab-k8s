@@ -12,7 +12,7 @@
 # Maintained by scripts/mirror-chart.sh (dry-run by default).
 - layer: infrastructure/cert-manager
   name: cert-manager
-  version: v1.21.1
+  version: v1.21.2
   upstream: https://charts.jetstack.io
   mirror: oci://registry.homelab.internal/homelab/cert-manager
   content_digest: sha256:7b54afb6a3624e35d4b63e7e78fd1091a2e11bed7dc2f987046bf4e316fc2392
@@ -20,7 +20,7 @@
   mirror_artifact_sha256: sha256:c27101f3f3e2349fb4a9e704316105bf7b52ad73b8c8257d3498ef7f2f6a4adc
 - layer: infrastructure/cilium
   name: cilium
-  version: 1.20.1
+  version: 1.20.2
   upstream: https://helm.cilium.io
   mirror: oci://registry.homelab.internal/homelab/cilium
   content_digest: sha256:358362256b46fbc5d6858e2d033bc1661426c426c217626d9b1a780b469d3340
@@ -108,7 +108,7 @@
   mirror_artifact_sha256: sha256:de701886ed2eaaa0fb85d7cac5d960b06a82fa4c9d4e00310bebeb253f198a55
 - layer: infrastructure/tailscale-operator
   name: tailscale-operator
-  version: 1.102.3
+  version: 1.102.4
   upstream: https://pkgs.tailscale.com/helmcharts
   mirror: oci://registry.homelab.internal/homelab/tailscale-operator
   content_digest: sha256:022d32573d0a55f88277b1418ae158f2b99514eb75331660dd9fea4426f230b0
@@ -124,7 +124,7 @@
   mirror_artifact_sha256: sha256:bb0c44bc70e3158cc63ea49d7458ede6db5b6c932f6585a2d787eb9712fd4288
 - layer: infrastructure/trust-manager
   name: trust-manager
-  version: v0.24.0
+  version: v0.25.0
   upstream: https://charts.jetstack.io
   mirror: oci://registry.homelab.internal/homelab/trust-manager
   content_digest: sha256:9ec49a13081c75b004a966f147c1a5d1a3c83d0de2582416b97efd62278f97e9
@@ -172,7 +172,7 @@
   mirror_artifact_sha256: sha256:f0026f251da5b49cea636a24143dbbadf15b39f51fc4639c9e0d08a4bc975ee3
 - layer: observability/otel-collector
   name: opentelemetry-collector
-  version: 0.172.1
+  version: 0.173.1
   upstream: https://open-telemetry.github.io/opentelemetry-helm-charts
   mirror: oci://registry.homelab.internal/homelab/opentelemetry-collector
   content_digest: sha256:5451045d2300e3974368cc1603f1f57860d3a3f931410153174fd6bd5eacffad
@@ -188,7 +188,7 @@
   mirror_artifact_sha256: sha256:f1f6e318d5bca3b5097cb676077796cdf8135beb2c1f71c4d14614ccf9b0081b
 - layer: platform/authentik
   name: authentik
-  version: 2026.8.2
+  version: 2026.8.3
   upstream: https://charts.goauthentik.io
   mirror: oci://registry.homelab.internal/homelab/authentik
   content_digest: sha256:c4d240943a7f1f0027497edddf53667061ffbfef636d127c1bc9582843b869a5
@@ -196,7 +196,7 @@
   mirror_artifact_sha256: sha256:c65ab5db8c2ae58474b8192e0d0d7caab66859da833540717b78c75754695ff7
 - layer: platform/forgejo
   name: forgejo
-  version: 17.1.6
+  version: 17.1.7
   upstream: oci://code.forgejo.org/forgejo-helm
   mirror: oci://registry.homelab.internal/homelab/forgejo
   content_digest: sha256:56e2aa75a4879e4882ce99644b8c50a71715d3c750bc6e129b97c6c7a1f53d26
