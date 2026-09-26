@@ -38,8 +38,18 @@ def main():
             or op.get("operation", {}).get("sync", {}).get("dryRun") or app.get("operation")):
         raise RuntimeError("Expected exact-revision successful actual Kyverno reconciliation")
     policy = json.loads(run(["kubectl", "get", "mutatingpolicy", "chist-v2-ci-tokenless", "-o", "json"]))
-    if not any(c.get("type") == "Ready" and c.get("status") == "True" for c in policy.get("status", {}).get("conditions", [])):
+    if policy.get("status", {}).get("conditionStatus", {}).get("ready") is not True:
         raise RuntimeError("V2 admission policy is not Ready")
+    validator = json.loads(run(["kubectl", "get", "validatingpolicy", "chist-v2-ci-require-tokenless", "-o", "json"]))
+    if validator.get("status", {}).get("conditionStatus", {}).get("ready") is not True:
+        raise RuntimeError("V2 admission validator is not Ready")
+    configs = json.loads(run(["kubectl", "get", "validatingwebhookconfigurations", "-o", "json"]))
+    hooks = [w for cfg in configs["items"] for w in cfg["webhooks"]
+             if w.get("clientConfig", {}).get("service", {}).get("path") == "/vpol/chist-v2-ci-require-tokenless"]
+    if (len(hooks) != 1 or hooks[0].get("failurePolicy") != "Fail"
+            or hooks[0].get("namespaceSelector", {}).get("matchLabels") != {"kubernetes.io/metadata.name": "ci-woodpecker"}
+            or hooks[0].get("objectSelector") != {"matchLabels": {"woodpecker-ci.org/repo-id": "35", "woodpecker-ci.org/repo-forge-id": "141"}}):
+        raise RuntimeError("Fail-closed webhook scope differs from V2 only")
     runner = json.loads(run(["kubectl", "-n", "ci-woodpecker", "get", "serviceaccount", "ci-woodpecker-runner", "-o", "json"]))
     if runner.get("automountServiceAccountToken") is not False:
         raise RuntimeError("Runner service account is not tokenless")
