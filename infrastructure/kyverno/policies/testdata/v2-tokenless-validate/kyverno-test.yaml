@@ -1,0 +1,33 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: chist-v2-ci-require-tokenless
+policies:
+- ../../cel/chist-v2-ci-require-tokenless.yaml
+resources:
+- ../v2-tokenless/resources.yaml
+variables: ../v2-tokenless/values.yaml
+results:
+- isValidatingPolicy: true
+  kind: Pod
+  policy: chist-v2-ci-require-tokenless
+  resources:
+  - ci-woodpecker/tokenless
+  result: pass
+- isValidatingPolicy: true
+  kind: Pod
+  policy: chist-v2-ci-require-tokenless
+  resources:
+  - ci-woodpecker/plain
+  - ci-woodpecker/injected
+  - ci-woodpecker/token-injected
+  result: fail
+- isValidatingPolicy: true
+  kind: Pod
+  policy: chist-v2-ci-require-tokenless
+  resources:
+  - ci-woodpecker/other-repo
+  - ci-woodpecker/other-forge
+  - default/other-namespace
+  - ci-woodpecker/unlabelled
+  result: skip

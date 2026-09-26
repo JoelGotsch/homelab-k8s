@@ -121,6 +121,25 @@ Offline, `scripts/check-kyverno-policy-tests.sh` runs the suites under
 `testdata/` with the CLI pinned to the chart's appVersion; see
 `testdata/README.md` for what the CLI can and cannot represent.
 
+## V2 credential-free CI admission
+
+`chist-v2-ci-tokenless` matches only Woodpecker repository 35 / Forgejo repository
+141 pods in `ci-woodpecker`. It selects the existing unprivileged runner account,
+sets `automountServiceAccountToken: false` and removes any projected token volume
+and its regular/init-container mounts already inserted by ServiceAccount admission.
+Workspace volumes and other repository/namespace pods are preserved. It runs only
+at creation and has no mutate-existing behavior. Its paired
+`chist-v2-ci-require-tokenless` validator denies a pod retaining token authority
+and fails closed for these V2 pods if validation cannot run. The mutation itself
+uses Ignore, following the shared policy contract; the validator is the enforcement
+boundary. The builder independently refuses a token at runtime.
+
+Woodpecker 3.18.1 otherwise leaves the service account unset, so Kubernetes selects
+`default`; declaring `ci-woodpecker-runner` alone does not use it. Globally enabling
+step-selected service accounts would broaden all workflows' authority and remains
+disabled. The six synthetic `v2-tokenless` cases cover injected tokens, ordinary
+pods and four scope exclusions. Live admission/build acceptance is still pending.
+
 ## Failure mode: Audit never blocks a write
 
 Two independent knobs decide what a policy does to an admission request,

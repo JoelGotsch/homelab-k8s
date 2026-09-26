@@ -1,0 +1,27 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: chist-v2-ci-tokenless
+policies:
+- ../../cel/chist-v2-ci-tokenless.yaml
+resources:
+- resources.yaml
+variables: values.yaml
+results:
+- isMutatingPolicy: true
+  kind: Pod
+  policy: chist-v2-ci-tokenless
+  resources:
+  - ci-woodpecker/plain
+  - ci-woodpecker/injected
+  patchedResources: patched.yaml
+  result: pass
+- isMutatingPolicy: true
+  kind: Pod
+  policy: chist-v2-ci-tokenless
+  resources:
+  - ci-woodpecker/other-repo
+  - ci-woodpecker/other-forge
+  - default/other-namespace
+  - ci-woodpecker/unlabelled
+  result: skip

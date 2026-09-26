@@ -1,0 +1,11 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Value
+metadata:
+  name: values
+namespaceSelector:
+- name: ci-woodpecker
+  labels:
+    kubernetes.io/metadata.name: ci-woodpecker
+- name: default
+  labels:
+    kubernetes.io/metadata.name: default

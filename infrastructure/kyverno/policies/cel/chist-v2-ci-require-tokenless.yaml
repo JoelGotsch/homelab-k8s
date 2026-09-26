@@ -1,0 +1,35 @@
+# Fail-closed authority boundary for V2 only. If token-removal mutation cannot
+# run, reject the pod; a missing webhook must never admit a credentialed builder.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: chist-v2-ci-require-tokenless
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  autogen:
+    podControllers:
+      controllers: []
+  evaluation:
+    admission: {enabled: true}
+    background: {enabled: false}
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: ci-woodpecker
+    objectSelector:
+      matchLabels:
+        woodpecker-ci.org/repo-id: "35"
+        woodpecker-ci.org/repo-forge-id: "141"
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  validations:
+    - expression: >-
+        has(object.spec.serviceAccountName) && object.spec.serviceAccountName == 'ci-woodpecker-runner'
+        && has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false
+        && (!has(object.spec.volumes) || object.spec.volumes.all(v,
+          !has(v.projected) || v.projected.sources.all(s, !has(s.serviceAccountToken))))
+      message: V2 CI pods require the tokenless runner and cannot mount Kubernetes service-account tokens.

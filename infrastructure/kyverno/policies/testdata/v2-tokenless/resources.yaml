@@ -1,0 +1,161 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: plain
+  namespace: ci-woodpecker
+  labels:
+    woodpecker-ci.org/repo-id: '35'
+    woodpecker-ci.org/repo-forge-id: '141'
+spec:
+  containers:
+  - name: step
+    image: example.invalid/synthetic:only
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: injected
+  namespace: ci-woodpecker
+  labels:
+    woodpecker-ci.org/repo-id: '35'
+    woodpecker-ci.org/repo-forge-id: '141'
+spec:
+  containers:
+  - name: step
+    image: example.invalid/synthetic:only
+    volumeMounts:
+    - name: workspace
+      mountPath: /woodpecker
+    - name: kube-api-access-proof
+      mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      readOnly: true
+  serviceAccountName: default
+  automountServiceAccountToken: true
+  volumes:
+  - name: workspace
+    emptyDir: {}
+  - name: kube-api-access-proof
+    projected:
+      sources:
+      - serviceAccountToken:
+          path: token
+          expirationSeconds: 3600
+      - configMap:
+          name: kube-root-ca.crt
+  initContainers:
+  - name: init
+    image: example.invalid/synthetic:only
+    volumeMounts:
+    - name: workspace
+      mountPath: /woodpecker
+    - name: kube-api-access-proof
+      mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      readOnly: true
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: other-repo
+  namespace: ci-woodpecker
+  labels:
+    woodpecker-ci.org/repo-id: '36'
+    woodpecker-ci.org/repo-forge-id: '141'
+spec:
+  containers:
+  - name: step
+    image: example.invalid/synthetic:only
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: other-forge
+  namespace: ci-woodpecker
+  labels:
+    woodpecker-ci.org/repo-id: '35'
+    woodpecker-ci.org/repo-forge-id: '142'
+spec:
+  containers:
+  - name: step
+    image: example.invalid/synthetic:only
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: other-namespace
+  namespace: default
+  labels:
+    woodpecker-ci.org/repo-id: '35'
+    woodpecker-ci.org/repo-forge-id: '141'
+spec:
+  containers:
+  - name: step
+    image: example.invalid/synthetic:only
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: unlabelled
+  namespace: ci-woodpecker
+spec:
+  containers:
+  - name: step
+    image: example.invalid/synthetic:only
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tokenless
+  namespace: ci-woodpecker
+  labels:
+    woodpecker-ci.org/repo-id: '35'
+    woodpecker-ci.org/repo-forge-id: '141'
+spec:
+  containers:
+  - name: step
+    image: example.invalid/synthetic:only
+    volumeMounts:
+    - name: workspace
+      mountPath: /woodpecker
+  serviceAccountName: ci-woodpecker-runner
+  automountServiceAccountToken: false
+  volumes:
+  - name: workspace
+    emptyDir: {}
+  initContainers:
+  - name: init
+    image: example.invalid/synthetic:only
+    volumeMounts:
+    - name: workspace
+      mountPath: /woodpecker
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: token-injected
+  namespace: ci-woodpecker
+  labels:
+    woodpecker-ci.org/repo-id: '35'
+    woodpecker-ci.org/repo-forge-id: '141'
+spec:
+  containers:
+  - name: step
+    image: example.invalid/synthetic:only
+    volumeMounts:
+    - name: workspace
+      mountPath: /woodpecker
+  serviceAccountName: ci-woodpecker-runner
+  automountServiceAccountToken: false
+  volumes:
+  - name: workspace
+    emptyDir: {}
+  - name: explicit-token
+    projected:
+      sources:
+      - serviceAccountToken:
+          path: token
+  initContainers:
+  - name: init
+    image: example.invalid/synthetic:only
+    volumeMounts:
+    - name: workspace
+      mountPath: /woodpecker

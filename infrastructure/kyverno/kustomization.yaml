@@ -104,6 +104,9 @@ resources:
   # so it is one renewal from changing. Retire this only when D2 makes the
   # resolver declared rather than leased.
   - policies/cel/ci-woodpecker-dns-ndots.yaml
+  # V2-only credential-free CI; does not alter another repository's step pods.
+  - policies/cel/chist-v2-ci-tokenless.yaml
+  - policies/cel/chist-v2-ci-require-tokenless.yaml
 
 # site-config: build-only ConfigMap for the imageReferences replacement below
 # (ADR 0045). Marked local-config, so it is used for substitution and never

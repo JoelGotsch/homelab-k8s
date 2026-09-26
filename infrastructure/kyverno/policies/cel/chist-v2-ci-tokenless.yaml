@@ -1,0 +1,55 @@
+# Woodpecker 3.18.1 does not select ci-woodpecker-runner unless step-selected
+# service accounts are globally enabled. Keep that switch off. Scope this
+# admission rule to V2 (Forgejo repository 141 / Woodpecker repository 35).
+# Kubernetes' built-in ServiceAccount admission may already have injected a
+# projected token before this webhook runs: remove its volume AND mounts.
+apiVersion: policies.kyverno.io/v1
+kind: MutatingPolicy
+metadata:
+  name: chist-v2-ci-tokenless
+spec:
+  # Mutation is optional; the paired Deny validator enforces the resulting state.
+  failurePolicy: Ignore
+  autogen:
+    podControllers:
+      controllers: []
+  evaluation:
+    admission: {enabled: true}
+    background: {enabled: false}
+    mutateExisting: {enabled: false}
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: ci-woodpecker
+    objectSelector:
+      matchLabels:
+        woodpecker-ci.org/repo-id: "35"
+        woodpecker-ci.org/repo-forge-id: "141"
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE]
+        resources: [pods]
+  variables:
+    - name: tokenVolumes
+      expression: >-
+        has(object.spec.volumes)
+          ? object.spec.volumes.filter(v, has(v.projected) && v.projected.sources.exists(s, has(s.serviceAccountToken))).map(v, v.name)
+          : []
+  mutations:
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: >-
+          [JSONPatch{op: "add", path: "/spec/automountServiceAccountToken", value: false},
+           JSONPatch{op: "add", path: "/spec/serviceAccountName", value: "ci-woodpecker-runner"}]
+          + (has(object.spec.volumes)
+              ? [JSONPatch{op: "replace", path: "/spec/volumes", value: object.spec.volumes.filter(v, !(v.name in variables.tokenVolumes))}]
+              : [])
+          + object.spec.containers.filter(c, has(c.volumeMounts)).map(c,
+              JSONPatch{op: "replace", path: "/spec/containers/" + string(object.spec.containers.indexOf(c)) + "/volumeMounts",
+                value: c.volumeMounts.filter(m, !(m.name in variables.tokenVolumes))})
+          + (has(object.spec.initContainers)
+              ? object.spec.initContainers.filter(c, has(c.volumeMounts)).map(c,
+                  JSONPatch{op: "replace", path: "/spec/initContainers/" + string(object.spec.initContainers.indexOf(c)) + "/volumeMounts",
+                    value: c.volumeMounts.filter(m, !(m.name in variables.tokenVolumes))})
+              : [])

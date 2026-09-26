@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: plain
+  namespace: ci-woodpecker
+  labels:
+    woodpecker-ci.org/repo-id: '35'
+    woodpecker-ci.org/repo-forge-id: '141'
+spec:
+  containers:
+  - name: step
+    image: example.invalid/synthetic:only
+  automountServiceAccountToken: false
+  serviceAccountName: ci-woodpecker-runner
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: injected
+  namespace: ci-woodpecker
+  labels:
+    woodpecker-ci.org/repo-id: '35'
+    woodpecker-ci.org/repo-forge-id: '141'
+spec:
+  containers:
+  - name: step
+    image: example.invalid/synthetic:only
+    volumeMounts:
+    - name: workspace
+      mountPath: /woodpecker
+  serviceAccountName: ci-woodpecker-runner
+  automountServiceAccountToken: false
+  volumes:
+  - name: workspace
+    emptyDir: {}
+  initContainers:
+  - name: init
+    image: example.invalid/synthetic:only
+    volumeMounts:
+    - name: workspace
+      mountPath: /woodpecker
