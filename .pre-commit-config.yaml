@@ -15,6 +15,13 @@
 repos:
   - repo: local
     hooks:
+      - id: check-release-controllers
+        name: release controller renders preserve isolation and reject unsafe authority changes
+        entry: python3 scripts/check-release-controllers.py
+        language: python
+        additional_dependencies: [PyYAML==6.0.2]
+        pass_filenames: false
+        files: '^(infrastructure/(kargo|argo-rollouts)/|scripts/check-release-controllers\.py$)'
       - id: check-tridata-minio-ingress
         name: MinIO admits only Tridata API and worker pods on the S3 port
         entry: python3 scripts/check-tridata-minio-ingress.py --self-test

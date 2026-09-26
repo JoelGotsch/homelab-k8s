@@ -226,3 +226,11 @@
   content_digest: sha256:8b1be9e360d9d235b440a909c05efa0a353c8d4366518bef14deda358996b48f
   upstream_artifact_sha256: sha256:35da227813ffce73445e88cc70e30f474c316db784fe9913d2bd94fd40706679
   mirror_artifact_sha256: sha256:35da227813ffce73445e88cc70e30f474c316db784fe9913d2bd94fd40706679
+- layer: infrastructure/kargo
+  name: kargo
+  version: 1.11.4
+  upstream: oci://ghcr.io/akuity/kargo-charts
+  mirror: oci://registry.homelab.internal/homelab/kargo
+  content_digest: sha256:88494da12c8bae98d7d57e3679e22d1cf4958b229d080a91974ee58f44fe42b7
+  upstream_artifact_sha256: sha256:d655415d53a115101676e93f0489f7786f444155069fd3c199dccda1c77edf06
+  mirror_artifact_sha256: sha256:d655415d53a115101676e93f0489f7786f444155069fd3c199dccda1c77edf06

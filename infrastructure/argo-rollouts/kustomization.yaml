@@ -6,6 +6,7 @@ components:
 resources:
   - namespace.yaml
   - networkpolicy.yaml
+  - verification.yaml
 helmCharts:
   - name: argo-rollouts
     repo: oci://registry.homelab.internal/homelab

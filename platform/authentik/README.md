@@ -374,3 +374,16 @@ exercises enrollment and PKCE exchange, verifies new-user denial for every other
 rolls back the synthetic account and configuration. `--verify-live` verifies committed provider
 settings after Argo reconciliation. Client inputs still use the existing V2 OpenBao path; no
 additional secret, public route or mail delivery is introduced.
+
+## Kargo release access
+
+The generated `kargo` client is public (authorization code with PKCE), using the
+literal public identifier `homelab-kargo` and a strict `/login` callback on the
+internal Kargo origin. It needs no OpenBao client secret. Only `operator` is
+admitted; archive self-registration does not admit users here. Kargo assigns
+project promotion permissions separately in its GitOps configuration.
+
+The shared blueprint template defaults to confidential clients and supports this
+explicit public override. The inventory and narrow rendering playbook live in
+`homelab-infra`; all ten predecessor template renders remain unchanged. The API's
+network ingress allowance selects only the Kargo API pod on Authentik port 9000.

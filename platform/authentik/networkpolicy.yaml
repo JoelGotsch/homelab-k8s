@@ -33,6 +33,13 @@ spec:
       app.kubernetes.io/name: authentik
       app.kubernetes.io/component: server
   ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kargo
+            app.kubernetes.io/name: kargo
+            app.kubernetes.io/component: api
+      toPorts:
+        - ports: [{port: "9000", protocol: TCP}]
     # Dedicated archive web client; worker and other namespace pods are excluded.
     - fromEndpoints:
         - matchLabels:

@@ -1,0 +1,102 @@
+# Pinned release control plane; no application promotion credentials or Argo writes.
+image:
+  tag: v1.11.4@sha256:1413bdb63b1ad409c0a38a0ae5d6f4080e1fd3226aaf8344dfe0e5552921f533
+global:
+  clusterSecretsNamespace: ''
+  createClusterSecretsNamespace: false
+  createClusterSecretsRBAC: false
+  systemResources:
+    createNamespace: false
+  sharedResources:
+    createNamespace: false
+  securityContext:
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+      - ALL
+    seccompProfile:
+      type: RuntimeDefault
+argocd:
+  dataPlane:
+    install: false
+api:
+  host: kargo.FQDN_SUFFIX
+  adminAccount:
+    enabled: false
+  secretManagementEnabled: false
+  tls:
+    enabled: false
+    selfSignedCert: false
+    terminatedUpstream: true
+  oidc:
+    enabled: true
+    issuerURL: https://AUTH_FQDN/application/o/kargo/
+    clientID: homelab-kargo
+    additionalScopes:
+    - email
+    - profile
+    users:
+      claims:
+        groups:
+        - operator
+    admins:
+      claims: {}
+    projectCreators:
+      claims: {}
+    viewers:
+      claims: {}
+    dex:
+      enabled: false
+  rollouts:
+    integrationEnabled: true
+    logs:
+      enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: '1'
+      memory: 512Mi
+controller:
+  argocd:
+    integrationEnabled: false
+    watchArgocdNamespaceOnly: true
+  rollouts:
+    integrationEnabled: true
+  serviceAccount:
+    clusterWideSecretReadingEnabled: false
+  images:
+    cache:
+      maxEntries: 1000
+  reconcilers:
+    maxConcurrentReconciles: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: '1'
+      memory: 512Mi
+externalWebhooksServer:
+  enabled: false
+garbageCollector:
+  enabled: false
+managementController:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: '1'
+      memory: 512Mi
+webhooksServer:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: '1'
+      memory: 512Mi

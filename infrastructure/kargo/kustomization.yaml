@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespaces/kargo
+  - namespaces/kargo-system-resources
+  - namespaces/kargo-shared-resources
+  - networkpolicy.yaml
+  - httproute.yaml
+components:
+  - ../../components/site-config
+helmCharts:
+  - name: kargo
+    repo: oci://registry.homelab.internal/homelab
+    version: 1.11.4
+    releaseName: kargo
+    namespace: kargo
+    valuesFile: values.yaml
+    includeCRDs: true
+replacements:
+  - source: {kind: ConfigMap, name: site-config, fieldPath: data.fqdn_suffix}
+    targets:
+      - select: {kind: HTTPRoute, name: kargo}
+        fieldPaths: [spec.hostnames.0]
+        options: {delimiter: '.', index: 1}
+  - source: {kind: ConfigMap, name: site-config, fieldPath: data.auth_fqdn}
+    targets:
+      - select: {kind: ConfigMap, name: kargo-api}
+        fieldPaths: [data.OIDC_ISSUER_URL]
+        options: {delimiter: '/', index: 2}

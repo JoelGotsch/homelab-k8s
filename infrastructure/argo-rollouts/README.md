@@ -7,7 +7,12 @@ verified through `charts.lock.yaml`; the controller image is digest pinned.
 The first installation is held at manual sync by the infrastructure ApplicationSet.
 One restricted controller has bounded resources and only DNS/API egress. No
 public dashboard, provider credential or application verification Job is installed
-by this layer. Kubernetes RBAC comes from the pinned upstream controller chart;
+by this layer. The retained `controller-bootstrap-v1` AnalysisRun executes one
+synthetic, tokenless Python Job with 64 MiB/100m limits and a 180-second deadline.
+Its separate service account has no RBAC bindings, volumes or egress grants.
+This proves the AnalysisRun-to-Job path only; it does not qualify an app candidate.
+
+Kubernetes RBAC comes from the pinned upstream controller chart;
 AnalysisRun Jobs receive their own explicit, narrower service account and policy.
 
 Install and verify this layer before enabling application promotion. Observe the

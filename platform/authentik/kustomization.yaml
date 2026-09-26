@@ -112,6 +112,7 @@ configMapGenerator:
       - blueprints/immich.yaml
       - blueprints/paperless.yaml
       - blueprints/argocd.yaml
+      - blueprints/kargo.yaml
       - blueprints/windmill.yaml
       - blueprints/todo.yaml
       # STATIC (not rendered from _blueprint.yaml.j2) — access binding +
