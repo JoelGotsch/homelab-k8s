@@ -30,3 +30,10 @@ observation/actual sync for `--phase crds`, then `--phase all`. Each sync refuse
 an active operation, source drift, an absent manual hold or an unobserved dry-run.
 The script checks both production contexts and uses a private temporary kubeconfig.
 It neither prunes resources nor terminates active operations.
+
+The retained AnalysisRun is observed Successful at
+`cbfa1a6726765f43f013dcdeccf76ad7d6dcc1c3`; its one Job exited zero at the pinned
+Python digest. The pod has no token, volumes, credentials or namespaced egress
+grants. `python3 scripts/verify-release-controller-bootstrap.py --revision
+FULL_COMMIT_SHA` checks its owner chain, exit, image and live policies alongside
+both control planes. This is infrastructure acceptance, not candidate qualification.

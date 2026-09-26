@@ -43,7 +43,18 @@ References: [Kargo installation](https://docs.kargo.io/operator-guide/basic-inst
 [OIDC](https://docs.kargo.io/operator-guide/security/openid-connect),
 [access controls](https://docs.kargo.io/user-guide/security/access-controls).
 
-The pre-deployment Authentik transaction rehearsal passes 13 protocol/admission
-checks and rolls back its users, sessions and tokens. It uses an injected synthetic
-session; live reconciliation, browser login and Kargo RBAC remain separate rollout
-acceptance. Existing confidential blueprint renders are byte-for-byte unchanged.
+The initial installation is accepted at `cbfa1a6726765f43f013dcdeccf76ad7d6dcc1c3`:
+Argo is Synced/Healthy with an actual successful operation; nine CRDs are Established,
+four pods are Ready at the pinned image, and certificate/route checks pass. The live
+Authentik/HTTPS helper passes 18 protocol, admission and API checks with rolled-back
+synthetic users. Six Kubernetes authorization reviews confirm read access and deny
+project creation, promotion, staging secrets, cluster-wide Secret listing and Argo
+writes for the relevant mapped user/controller. Existing confidential blueprint
+renders are byte-for-byte unchanged. The injected session is distinct from real
+browser login, which remains pending. No application promotion is enabled.
+
+Run `python3 scripts/verify-release-controller-bootstrap.py --revision FULL_COMMIT_SHA`
+to verify exact-revision operations, CRDs, images, readiness, webhook certificate,
+route, the retained synthetic AnalysisRun/Job and effective Kubernetes permissions.
+It is a read-only bootstrap check, expected to require revision as app promotion
+rights are deliberately introduced later. It prints only safe evidence fields.
